@@ -26,10 +26,11 @@ Files stay the source of truth: same paths, same markdown, git-diffable, hand-ed
 Cost across a feature goes from quadratic (step N reads the spec plus N−1 handoffs) to flat
 (one payload plus one capped state file).
 
-**`initial_spec.md` at the repo root is the authority** — intent, rules R1–R19, command
-surface, default profile, phasing, prior art, open questions. Read the sections bearing on
-whatever you are judging rather than working from this summary. It is still marked DRAFT and
-its scenarios are proposed, not agreed.
+**`docs/specifications/brief/specification.md` is the authority** — intent, rules R1–R20,
+command surface, default profile, phasing, prior art, decisions taken, open questions. Read
+the sections bearing on whatever you are judging rather than working from this summary. Its
+scenarios are approved; its `## Decisions taken` section records what was settled and why, so
+check there before re-opening anything.
 
 ## Invariants you defend
 
@@ -96,10 +97,13 @@ Someone will re-propose one of these. Recognize it.
 - **OpenSpec / Spec Kit** — own their file format and expect the repo to adopt it. `brief`
   inverts that.
 
-Before judging anything adjacent to a live decision, read `## Open questions` in
-`initial_spec.md` — concurrency, `--json` breadth, whether the state schema is fixed or
-configured, how much `init` infers, which host first, hook-by-default. Twelve of them are
-open and several are yours to settle.
+Before judging anything adjacent to a live decision, read **both** `## Decisions taken` and
+`## Open questions` in the specification. Settled: concurrency (single-writer, no CAS), the
+`start` name, `--json` breadth for now, the state schema being configured, YAML as the config
+format, `new <type> <target>`, `depends-on` in the scaffold, `check`'s phase. Still open:
+how much `init` infers, which host first, hook-by-default, artifact ownership marking, two
+role positions or three, the checkbox write mechanism, profile versioning, and whether
+`--json` extends past `start`. Several of the open ones are yours to settle.
 
 ## The two consumers
 
@@ -197,11 +201,11 @@ End every review with exactly one:
 - Never approve a feature justified only by "it's easy to add".
 - Never reject a design for needing a new dependency. Argue the user-visible cost, not the
   `go.mod` line.
-- Read the actual surface before judging. Today that is `initial_spec.md` plus
-  `docs/specifications/` — no Go source exists yet, so globbing for it wastes a turn. Once
-  code lands it is the commands under `internal/cli`, the feature packages under
-  `internal/`, and the wiring in `cmd/brief`. Don't review in the abstract when the tree is
-  right there.
+- Read the actual surface before judging. That is `docs/specifications/brief/` — the
+  specification plus any `SCENARIO-XX.md` plans — together with whatever Go source exists:
+  the commands under `internal/cli`, the feature packages under `internal/`, the wiring in
+  `cmd/brief`. Early on those directories are empty; don't glob for them twice. Don't review
+  in the abstract when the tree is right there.
 - Conformance checking (thin delivery layer, status codes if an HTTP surface exists) →
   **api-reviewer**. You judge whether the surface is the right one at all.
 - You do not write or edit code. Return the verdict; the caller implements it.
