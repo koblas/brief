@@ -1,0 +1,24 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "frontend",
+      "port": 5173
+    },
+    {
+      "name": "tilt",
+      "runtimeExecutable": "tilt",
+      "runtimeArgs": ["up"],
+      "port": 1234
+    },
+    {
+      "name": "docker-compose",
+      "runtimeExecutable": "docker-compose",
+      "runtimeArgs": ["up"],
+      "port": 1234
+    }
+  ]
+}
