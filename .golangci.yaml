@@ -1,0 +1,109 @@
+version: "2"
+linters:
+  default: all
+  disable:
+    - cyclop
+    - depguard
+    - dupl
+    - exhaustruct
+    # 2.13 renamed this linter, same as wsl -> wsl_v5 below. `default: all`
+    # auto-enables the new name, so both have to be listed.
+    - exhaustruct_v5
+    - funlen
+    - gochecknoglobals
+    - gochecknoinits
+    - gocognit
+    - gocyclo
+    - godox
+    - ireturn # this is pretty clean now, but disabling since it's not a priority
+    - mnd
+    - nestif
+    - nlreturn
+    - paralleltest
+    - protogetter
+    - tagliatelle
+    - varnamelen
+    - wsl
+    - wsl_v5
+    - godoclint
+    - gomodguard # deprecated
+    - noinlineerr # I link inline error handling
+    - goconst # this is over agressive
+  settings:
+    gocritic:
+      disabled-checks:
+        - commentFormatting
+    lll:
+      line-length: 200
+    nestif:
+      min-complexity: 12
+    funcorder:
+      struct-method: false
+    ireturn:
+      allow:
+        - stdlib
+        - error
+        - generic
+        - empty
+    wrapcheck:
+      # Every entry here is a pass-through that returns the error from a
+      # caller-supplied fn verbatim, and that fn already wraps. Re-wrapping at
+      # the call site would double-wrap.
+      #   - fxsync.Once.Do        -> fn's error (e.g. checkCreateTable)
+      #   - singleflight.Group.Do -> fn's error
+      #   - refreshcache caches   -> their refresh fn's error, itself the fn
+      #                              the cache was constructed with
+      extra-ignore-sigs:
+        - fxsync.Once).Do(
+        - singleflight.Group).Do(
+        - refreshcache.SFCache
+        - refreshcache.SFLazyCache
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - wrapcheck
+        path: _test.go
+      # The oidcas service tests are white-box by design: they construct
+      # *Server with unexported fields and exercise unexported doXxx
+      # decision methods. They were package-internal (package main) before
+      # the service extraction and must stay in-package (package oidcas).
+      - linters:
+          - testpackage
+        path: services/publicapi/oidcas/.+_test\.go
+      - linters:
+          - lll
+        source: "^//go:generate "
+      - path: (.+)\.go$
+        text: "ineffectual assignment to ctx"
+      - path: (.+)\.go$
+        text: "SA4006: this value of ctx is never used"
+      - path: (.+)\.go$
+        text: "assigned to ctx, but never used afterwards"
+      - linters:
+          - unparam
+        text: "always receives"
+    paths:
+      - gen
+      - third_party$
+      - builtin$
+      - examples$
+      - tmp
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - gen
+      - third_party$
+      - builtin$
+      - examples$
