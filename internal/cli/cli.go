@@ -20,9 +20,10 @@ const usage = `brief manages feature specifications as files in your repository.
 Usage:
   brief new feature <name>     scaffold a new feature's specification and state file
   brief new step <feature>     scaffold the next step file and its progress entry
+  brief start <feature>        print the next step's brief
 
-Run 'brief new feature --help' or 'brief new step --help' for details on
-those commands.
+Run 'brief new feature --help', 'brief new step --help' or 'brief start
+--help' for details on those commands.
 `
 
 // Run parses args, dispatches to the named command, and renders every
@@ -31,7 +32,7 @@ those commands.
 // never calls os.Getwd.
 func Run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return usageError(stderr, "brief: no command given; expected one of: new")
+		return usageError(stderr, "brief: no command given; expected one of: new, start")
 	}
 
 	switch args[0] {
@@ -43,8 +44,10 @@ func Run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 	switch args[0] {
 	case "new":
 		return runNew(ctx, wd, args[1:], stdout, stderr)
+	case "start":
+		return runStart(ctx, wd, args[1:], stdout, stderr)
 	default:
-		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new", args[0]))
+		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new, start", args[0]))
 	}
 }
 

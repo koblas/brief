@@ -12,7 +12,7 @@ import (
 // "some usage error" and "some other error" — their text is not asserted
 // anywhere, only their classification.
 var (
-	errFixtureUsage = errors.New("brief: no command given; expected one of: new")
+	errFixtureUsage = errors.New("brief: no command given; expected one of: new, start")
 	errFixtureOther = errors.New("boom")
 )
 
