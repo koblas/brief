@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/scaffold"
 )
 
 // flattenOneLine collapses s to a single line: embedded newlines and runs
@@ -26,6 +27,11 @@ func flattenOneLine(s string) string {
 //
 //	brief <command>: <path>: <problem>; fix it or remove it to fall back to the shipped defaults (no files changed)
 //
+// A *scaffold.RefusalError renders the same "nothing changed" promise
+// around its own path, problem and fix:
+//
+//	brief <command>: <path>: <problem>; <fix> (no files changed)
+//
 // Every other error renders as one flattened line:
 //
 //	brief <command>: <cause>
@@ -33,6 +39,13 @@ func renderRefusal(stderr io.Writer, cmd string, err error) error {
 	if invalidCfg, ok := errors.AsType[*config.InvalidConfigError](err); ok {
 		fmt.Fprintf(stderr, "brief %s: %s: %s; fix it or remove it to fall back to the shipped defaults (no files changed)\n",
 			cmd, invalidCfg.Path, flattenOneLine(invalidCfg.Err.Error()))
+
+		return err
+	}
+
+	if refusal, ok := errors.AsType[*scaffold.RefusalError](err); ok {
+		fmt.Fprintf(stderr, "brief %s: %s: %s; %s (no files changed)\n",
+			cmd, refusal.Path, flattenOneLine(refusal.Problem), flattenOneLine(refusal.Fix))
 
 		return err
 	}

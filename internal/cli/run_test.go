@@ -77,18 +77,18 @@ func Test_returns_a_usage_error_when_no_type_is_given(t *testing.T) {
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief new: no type given; expected one of: feature", oneLine(t, &stderr))
+	assert.Equal(t, "brief new: no type given; expected one of: feature, step", oneLine(t, &stderr))
 }
 
 func Test_returns_a_usage_error_when_the_type_is_unknown(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "step", "x"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "widget", "x"}, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief new: unknown type "step"; expected one of: feature`, oneLine(t, &stderr))
+	assert.Equal(t, `brief new: unknown type "widget"; expected one of: feature, step`, oneLine(t, &stderr))
 }
 
 func Test_returns_a_usage_error_when_a_flag_is_not_defined(t *testing.T) {

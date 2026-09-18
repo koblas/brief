@@ -19,8 +19,11 @@ func fixtureConfig() config.Config {
 	cfg := config.Default()
 	cfg.FeatureDirectory = "specs"
 	cfg.ProgressHeading = "## Progress"
+	cfg.ChecklistHeading = "## Fixture Checklist"
+	cfg.HandoffHeading = "## Fixture Handoff"
 	cfg.SpecificationFile = "SPEC.md"
 	cfg.StateFile = "NOTES.md"
+	cfg.StepFilePattern = "STEP-%02d.md"
 	cfg.StateHeadings = config.StateHeadings{
 		BindingDecisions: "## Decisions Fixture",
 		LeftUnbuilt:      "## Left Fixture",

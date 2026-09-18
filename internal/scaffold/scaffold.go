@@ -3,10 +3,13 @@ package scaffold
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
+	"github.com/koblas/brief/internal/platform/atomicfile"
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/stepfile"
 )
 
 // Server creates feature scaffolds under a project root, using cfg to name
@@ -61,6 +64,118 @@ func (s *Server) NewFeature(_ context.Context, name string) (string, error) {
 	}
 
 	return filepath.Join(featureRoot, name), nil
+}
+
+// NewStep creates the next step file for feature and appends its progress
+// entry, returning the created step file's path.
+//
+// Validation runs in the order a refusal must name the first thing wrong
+// (R14a): the configured step-file-pattern compiles, the feature directory
+// opens (also the traversal guard: a feature name that escapes the
+// feature directory is reported as ErrNoSuchFeature rather than as a
+// traversal error, since Root.OpenRoot cannot distinguish the two),
+// the specification is read, and the specification carries the configured
+// progress heading. Nothing is created until all four pass; only then is
+// the next step number computed and written.
+//
+// The step file is written before the specification: if the specification
+// write then fails, the result is an orphan step file with no progress
+// entry — visible and repairable — rather than a progress entry pointing
+// at a step file that was never created.
+func (s *Server) NewStep(_ context.Context, feature string) (string, error) {
+	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
+	featurePath := filepath.Join(featureDirPath, feature)
+
+	pattern, err := stepfile.Compile(s.cfg.StepFilePattern)
+	if err != nil {
+		return "", &RefusalError{
+			Path:    featurePath,
+			Problem: fmt.Sprintf("step-file-pattern %q is invalid: %v", s.cfg.StepFilePattern, err),
+			Fix:     "fix step-file-pattern in .brief.yaml",
+			Err:     stepfile.ErrInvalidPattern,
+		}
+	}
+
+	topRoot, err := os.OpenRoot(featureDirPath)
+	if err != nil {
+		return "", noSuchFeatureRefusal(featurePath, feature)
+	}
+	defer func() { _ = topRoot.Close() }()
+
+	root, err := topRoot.OpenRoot(feature)
+	if err != nil {
+		return "", noSuchFeatureRefusal(featurePath, feature)
+	}
+	defer func() { _ = root.Close() }()
+
+	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
+
+	specBytes, err := root.ReadFile(s.cfg.SpecificationFile)
+	if err != nil {
+		return "", &RefusalError{
+			Path:    specPath,
+			Problem: "specification file is missing",
+			Fix:     "scaffold the feature again to restore it",
+			Err:     ErrMalformedFeature,
+		}
+	}
+
+	spec := string(specBytes)
+
+	if _, err := insertProgressEntry(spec, s.cfg.ProgressHeading, ""); err != nil {
+		return "", &RefusalError{
+			Path:    specPath,
+			Problem: fmt.Sprintf("no %q heading found", s.cfg.ProgressHeading),
+			Fix:     fmt.Sprintf("add a %q heading to the specification", s.cfg.ProgressHeading),
+			Err:     ErrNoProgressHeading,
+		}
+	}
+
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return "", fmt.Errorf("scaffold: %w", err)
+	}
+
+	next := 1
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+
+		if n, ok := pattern.Number(e.Name()); ok && n >= next {
+			next = n + 1
+		}
+	}
+
+	id := pattern.ID(next)
+	stepName := pattern.Name(next)
+
+	if err := writeExclusive(root, stepName, stepSkeleton(s.cfg, id)); err != nil {
+		return "", err
+	}
+
+	newSpec, err := insertProgressEntry(spec, s.cfg.ProgressHeading, progressEntry(id))
+	if err != nil {
+		return "", fmt.Errorf("scaffold: %w", err)
+	}
+
+	if err := atomicfile.WriteFile(root, s.cfg.SpecificationFile, []byte(newSpec), 0o644); err != nil {
+		return "", fmt.Errorf("scaffold: %w", err)
+	}
+
+	return filepath.Join(featurePath, stepName), nil
+}
+
+// noSuchFeatureRefusal reports that feature has no directory at path,
+// naming the command that creates one.
+func noSuchFeatureRefusal(path, feature string) error {
+	return &RefusalError{
+		Path:    path,
+		Problem: "no such feature",
+		Fix:     fmt.Sprintf("run 'brief new feature %s' to create it", feature),
+		Err:     ErrNoSuchFeature,
+	}
 }
 
 // writeExclusive creates name under root and writes contents to it,

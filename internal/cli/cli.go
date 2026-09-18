@@ -18,9 +18,11 @@ var ErrUsage = errors.New("usage error")
 const usage = `brief manages feature specifications as files in your repository.
 
 Usage:
-  brief new feature <name>   scaffold a new feature's specification and state file
+  brief new feature <name>     scaffold a new feature's specification and state file
+  brief new step <feature>     scaffold the next step file and its progress entry
 
-Run 'brief new feature --help' for details on that command.
+Run 'brief new feature --help' or 'brief new step --help' for details on
+those commands.
 `
 
 // Run parses args, dispatches to the named command, and renders every

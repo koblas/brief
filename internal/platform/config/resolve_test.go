@@ -103,6 +103,18 @@ func Test_Resolve_keeps_shipped_defaults_for_keys_the_config_omits(t *testing.T)
 	assert.Equal(t, want, cfg)
 }
 
+func Test_a_config_file_overrides_the_checklist_heading_and_keeps_other_headings_default(t *testing.T) {
+	root := t.TempDir()
+	writeConfig(t, root, "checklist-heading: \"## Fixture Checklist\"\n")
+
+	cfg, _, err := config.Resolve(root)
+
+	require.NoError(t, err)
+	assert.Equal(t, "## Fixture Checklist", cfg.ChecklistHeading)
+	assert.Equal(t, config.Default().ProgressHeading, cfg.ProgressHeading)
+	assert.Equal(t, config.Default().HandoffHeading, cfg.HandoffHeading)
+}
+
 func Test_a_config_file_overrides_the_state_file_name(t *testing.T) {
 	root := t.TempDir()
 	writeConfig(t, root, "state-file: NOTES.md\n")

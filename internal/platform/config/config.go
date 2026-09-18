@@ -36,17 +36,19 @@ type RoleBindings struct {
 
 // Config is brief's resolved configuration: where feature directories live,
 // how step files are named, the specification and state filenames within a
-// feature directory, the heading text for the progress list, the handoff
-// block and the state file's four required sections, the caps enforced at
-// the write path, which optional conventions a repository opts into, and
-// the role bindings. Every field has a shipped default (Default); a
-// repository's ".brief.yaml" overrides only the keys it sets.
+// feature directory, the heading text for the progress list, the
+// per-step checklist, the handoff block and the state file's four required
+// sections, the caps enforced at the write path, which optional
+// conventions a repository opts into, and the role bindings. Every field
+// has a shipped default (Default); a repository's ".brief.yaml" overrides
+// only the keys it sets.
 type Config struct {
 	FeatureDirectory         string        `yaml:"feature-directory"`
 	StepFilePattern          string        `yaml:"step-file-pattern"`
 	SpecificationFile        string        `yaml:"specification-file"`
 	StateFile                string        `yaml:"state-file"`
 	ProgressHeading          string        `yaml:"progress-heading"`
+	ChecklistHeading         string        `yaml:"checklist-heading"`
 	HandoffHeading           string        `yaml:"handoff-heading"`
 	StateHeadings            StateHeadings `yaml:"state-headings"`
 	HandoffCapLines          int           `yaml:"handoff-cap-lines"`
@@ -66,6 +68,7 @@ func Default() Config {
 		SpecificationFile: "specification.md",
 		StateFile:         "STATE.md",
 		ProgressHeading:   "## BDD Acceptance Progress",
+		ChecklistHeading:  "## Implementation Plan",
 		HandoffHeading:    "## Handoff",
 		StateHeadings: StateHeadings{
 			BindingDecisions: "## Binding decisions",

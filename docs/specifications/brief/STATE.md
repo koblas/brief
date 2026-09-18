@@ -1,38 +1,86 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01, SCENARIO-02. Last updated by SCENARIO-02.
+Scenarios complete: SCENARIO-01, SCENARIO-02, SCENARIO-03. Last updated by SCENARIO-03.
 
 ## Binding decisions
 
-- Config lives at `internal/platform/config` — every feature package consumes it; a feature package may not import another feature package. (SCENARIO-01)
-- **Consumers take a `Config` as a parameter. Nothing outside `config.Resolve`/`config.decodeConfig` calls `config.Default()`.** `cli` threads the resolved `Config` and project root into `scaffold.NewServer` on every call — verified by mutation (swapping in `config.Default()` reddens `cli`'s ancestor-config test). (SCENARIO-01, SCENARIO-02)
-- Config filename is exactly `.brief.yaml`; upward walk, nearest wins, no merging; missing config anywhere is `config.Default()`, not an error. Found file decoded onto `Default()` with `yaml.Decoder.KnownFields(true)`. `Config` now also carries `SpecificationFile` (`specification.md`) and `StateFile` (`STATE.md`). (SCENARIO-01, SCENARIO-02)
-- `Resolve(startDir) (Config, string, error)` — error is `errors.Is`-comparable to `ErrInvalidConfig`, and `errors.As`/`errors.AsType[*config.InvalidConfigError]` reaches a typed error carrying `Path` and `Err` (`Unwrap() []error{ErrInvalidConfig, Err}`) — needed because `fmt.Errorf("%w: %w")` gives `errors.Unwrap` nothing to return, and `cli` must render `Err` alone into R14a's one-line refusal. (SCENARIO-01, SCENARIO-02)
-- `internal/scaffold` owns feature scaffolding (`new feature`) and will own `new step` (SCENARIO-03) — same feature-directory layout, same progress-list touch. **No `Store` port**: writes go through the real filesystem (`os.MkdirAll` then every write through an `*os.Root` rooted at the feature directory) because the contracts here (mtime identity, temp-file absence, byte-identity after refusal) are filesystem properties no in-memory adapter models. `NewServer(cfg config.Config, root string) *Server` (both required positionally — no `Option` yet, add one only for a real optional dependency); `(*Server).NewFeature(ctx, name) (string, error)` creates `<root>/<cfg.FeatureDirectory>/<name>/{cfg.SpecificationFile, cfg.StateFile}` and returns that path. The pure seam is `render.go`'s unexported `specificationSkeleton(cfg, name)` (`# <name>\n\n<cfg.ProgressHeading>\n`) and `stateSkeleton(cfg)` (the four `cfg.StateHeadings.Ordered()` headings, blank-line separated, **no title** — SCENARIO-05 replaces the whole state body and a title would be dropped), exercised only through `NewFeature`, never called directly by tests. (SCENARIO-02)
-- Safety property: `Root.Mkdir(name, 0o755)` refuses a name that escapes the root and refuses an existing feature outright — that refusal alone is what stops `brief new feature brief` from truncating this repo's own approved `specification.md`. Each file is additionally opened `O_WRONLY|O_CREATE|O_EXCL` (perm `0o600`, not `0o644`, to keep gosec quiet). (SCENARIO-02)
-- `internal/cli`: `Run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error` — `wd` is a parameter, never `os.Getwd`. Hand-rolled two-level dispatch over `flag.FlagSet` (`flag.ContinueOnError`, `SetOutput(io.Discard)`), no cobra, no new `go.mod` line. Help is stdout + exit 0 at exactly two levels today: `brief --help`/`-h`/`help` (handled before the unknown-command branch) and `brief new feature --help` (`flag.ErrHelp`) — there is deliberately no third `brief new --help` level (an unused-constant lint finding surfaced this; removed rather than invented). *Missing*-argument copy is distinct from *unknown*-argument copy at both the command and the type level. `Run` renders every user-facing line itself and returns the error only for classification; `ExitCode(err) int` maps nil→0, `errors.Is(err, ErrUsage)`→2, everything else→1. `main` calls `os.Getwd`, `cli.Run`, `os.Exit(cli.ExitCode(err))` and prints nothing else — it holds the only `os.Exit`. (SCENARIO-02)
-- R14a refusal rendering lives in `cli/refusal.go`: `renderRefusal` branches on `errors.AsType[*config.InvalidConfigError]` for the templated refusal (`brief <cmd>: <path>: <problem>; fix it or remove it to fall back to the shipped defaults (no files changed)`) and flattens every other error to one line via `flattenOneLine` (collapses embedded newlines/whitespace — needed because yaml.v3's unknown-key error is genuinely multiline). `scaffold` wraps external errors once, close to their source (`fmt.Errorf("scaffold: %w", err)` for `MkdirAll`/`OpenRoot`/`Mkdir`; `fmt.Errorf("write %s: %w", name, err)` inside `writeExclusive` for file errors) rather than re-wrapping at every call site — a prefix distinct from `cli`'s own `"brief new feature: "`, chosen specifically so the two don't stack into a duplicated `"new feature: new feature: ..."` line (an actual bug caught and fixed this scenario). (SCENARIO-02)
-- Go 1.27's `errors.AsType[T](err) (T, bool)` is available and preferred over `errors.As` + `var target T` — `golangci-lint`'s `modernize` flags the older form.
+- Config (`internal/platform/config`): filename exactly `.brief.yaml`, upward walk, nearest wins,
+  no merging, missing anywhere = `config.Default()`. Consumers take `Config` as a parameter; only
+  `Resolve`/`decodeConfig` call `Default()`. Now carries `ChecklistHeading` (default `"##
+  Implementation Plan"`) too. `Resolve(startDir) (Config, string, error)`; error is
+  `errors.Is`-comparable to `ErrInvalidConfig`; `errors.AsType[*config.InvalidConfigError]` reaches
+  `Path`/`Err`. (01/02/03)
+- **`internal/platform/stepfile` is the sole naming/matching authority** every reader
+  (`start`/`status`/`next`/`check`/`finish`) must use — never re-derive a looser parse. `Compile`
+  refuses (`ErrInvalidPattern`): zero or 2+ integer verbs, any other `%`, empty/`.`/`..`, or a path
+  separator. `Pattern.Name(n)`, `ID(n)` (name minus extension), `Number(filename) (int, bool)`
+  **matches strictly by round trip** — `Sprintf(pattern, n) == filename` exactly;
+  `SCENARIO-7.md` under `%02d` is not a step file (near-miss → future `check`/22 finding). (03)
+- **`atomicfile.WriteFile(root *os.Root, name, data, perm)`** — pulled forward from SCENARIO-05
+  (`## Phasing` authorized it pre-crossover; 05 *uses* this, doesn't reinvent it). Deterministic
+  `.<name>.brief-tmp` sibling, `O_TRUNC` not `O_EXCL`, target's mode preserved via
+  `Lstat`+`IsRegular` (load-bearing — without it a directory target fails at temp creation, not at
+  `Rename`), temp removed on failure, **no fsync**. (03)
+- **`status:` in step frontmatter is the sole authoritative doneness field** — never the
+  progress-list checkbox (a projection `finish`/05 keeps in sync) or handoff content. (03)
+- **Next step number = `max(existing numbers) + 1`**, scanned via `stepfile.Number`, never from
+  the progress list (mutation-verified against count+1). Numbers are never reused — 05's progress
+  marking and 21's `depends-on` depend on ids surviving a deleted step file. (03)
+- **Handoff anchor = the bare `cfg.HandoffHeading` line, nothing under it.** 13's trichotomy:
+  *absent* = no matching line; *present-and-empty* = line exists, no non-blank line before
+  EOF/next-heading; *present-and-filled* = otherwise. `finish` (05) replaces the body wholesale.
+- `internal/scaffold`: `NewServer(cfg, root) *Server`; `NewFeature`/`NewStep(ctx, feature)
+  (string, error)` — no `Store` port, every write real-filesystem (mtime identity, temp-file
+  absence, byte-identity-after-refusal are filesystem properties no in-memory adapter models).
+  **`NewStep` validation order (R14a):** pattern compiles → feature dir opens
+  (`topRoot.OpenRoot(feature)` is both traversal guard and existence check — `../escaped` →
+  `ErrNoSuchFeature`) → spec reads → progress heading found (checked via a throwaway
+  `insertProgressEntry(spec, heading, "")` before anything writes) → number computed → written.
+  **Write order: step file before spec** — a spec-write failure after leaves a visible orphan step
+  file, not a dangling progress entry. (02/03)
+- **`scaffold.RefusalError{Path, Problem, Fix, Err}`**: `Error()` = `<path>: <problem>; <fix>`,
+  `Unwrap()` → `Err`. `cli/refusal.go`'s `renderRefusal` adds an
+  `errors.AsType[*scaffold.RefusalError]` branch (before the flatten fallback) rendering `brief
+  <cmd>: <path>: <problem>; <fix> (no files changed)`. Sentinels: `ErrNoSuchFeature`,
+  `ErrMalformedFeature`, `ErrNoProgressHeading`, `stepfile.ErrInvalidPattern`. (03)
+- `internal/cli`: `brief new step <feature>` added beside `brief new feature <name>`; usage copy
+  reads `expected one of: feature, step`; `brief new step --help` is a third help level. Go 1.27's
+  `errors.AsType[T]` is preferred over `errors.As` + `var target T` (`modernize` lint). (03)
 
 ## Left unbuilt
 
-- `brief new step` — SCENARIO-03. Today `brief new step x` is a usage error (`unknown type "step"`, exit 2).
-- `scaffold.ErrFeatureExists` and its R14a refusal copy — SCENARIO-08. Today an existing feature refuses via `Root.Mkdir`'s bare `EEXIST`, rendered as one plain line (`brief new feature: scaffold: mkdirat <name>: file exists`), exit 1 — acceptable today, not the final copy.
-- Feature-name validation — SCENARIO-07. **Must cover path separators and `..`, not only whitespace**: `os.Root` already turns `brief new feature ../x` into a refusal (verified: no directory appears beside the feature root), but that refusal's message is a bare `mkdirat` error, not a validation message, and its exit code is 1, not 2 (a usage error). SCENARIO-07 decides whether that reclassifies to exit 2.
-- Atomic writes (R12) — SCENARIO-05's platform primitive; nothing here writes through a temp file.
-- Global config, `--config <path>` override, heading/cap **value** validation — unowned since SCENARIO-01, still unowned.
+- Reading a step file back — no frontmatter/checklist/handoff-block parser yet. `stepfile` only
+  names files; SCENARIO-04/05 own opening and parsing one.
+- `scaffold.ErrFeatureExists`/duplicate-feature refusal — SCENARIO-08. Feature-name validation
+  (path separators, `..`) — SCENARIO-07; `os.Root` already refuses traversal for both commands,
+  exit 1 either way, not yet exit 2.
+- `RefusalError.Line` (R14a's `:<line>`) — SCENARIO-20. Known-feature enumeration in the
+  unknown-feature refusal (R14) — SCENARIO-09.
+- Heading/cap/`checklist-heading` **value** validation, global config, `--config` override,
+  `feature-directory: ""` — unowned since SCENARIO-01.
 
 ## Traps
 
-- **`filepath.EvalSymlinks` breaks fixtures on macOS; avoid `t.Chdir`/`os.Getwd` in tests** — compute paths via `filepath.Join`/`filepath.Rel` on strings the test already holds. (SCENARIO-01, reconfirmed SCENARIO-02 — `cli` tests never call `os.Getwd` or chdir)
-- **`yaml.Decoder.Decode` on a zero-byte file returns `io.EOF`**, not nil — `decodeConfig`'s guard must stay. (SCENARIO-01)
-- **Do not add rollback-on-failure cleanup** (`os.RemoveAll` of the feature directory) **before SCENARIO-08's existence check lands** — a failed run against a pre-existing feature would delete a real one.
-- **`writeExclusive`'s `O_EXCL` cannot fire while `Root.Mkdir` refuses an existing leaf first** — mutation-verified: dropping `O_EXCL` alone does not redden any test, because `Mkdir` already guarantees the leaf is brand-new before either file is opened. Proven not dead (a control with `Mkdir` tolerant of `EEXIST` and `O_EXCL` intact still refuses), just currently unreachable. If SCENARIO-08 or any later scenario relaxes `Mkdir`'s exclusivity for a retry/resume path, `O_EXCL` becomes the live guard — keep it, and add a test that reaches it at that point. (SCENARIO-02)
-- Adding `fmt.Fprintln(os.Stderr, err)` to `main` double-prints every refusal — `cli.Run` already rendered it.
-- A config fixture value equal to a shipped default makes a threading test vacuous — every scaffold/cli fixture config must differ from `config.Default()` in every field the test reads.
+- **Avoid `t.Chdir`/`os.Getwd` in tests** (`EvalSymlinks` breaks macOS fixtures) — build paths via
+  `filepath.Join`/`Rel` on strings the test already holds.
+- **`yaml.Decoder.Decode` on a zero-byte file returns `io.EOF`**, not nil — `decodeConfig`'s guard
+  must stay.
+- **No rollback-on-failure cleanup** before SCENARIO-08's existence check lands — would delete a
+  real pre-existing feature/step on a failed retry.
+- **`writeExclusive`'s `O_EXCL` is unreachable by construction** in `NewFeature`/`NewStep` (their
+  guarantees make the target name always free) — keep it, don't test it until 08 relaxes that.
+- **`atomicfile.WriteFile` replaces a `0o400` target** (rename ignores target mode) — a sanity
+  fact, not a contract; don't pin it as a test.
+- A fixture config field equal to `config.Default()` makes its threading test vacuous.
+  `scaffold_test.go`'s `fixtureConfig()` pins `StepFilePattern = "STEP-%02d.md"` — seed step
+  filenames in terms of *that*, not the shipped `SCENARIO-*`, or numbering tests prove nothing.
+- **No `.brief.yaml` in this repo**, so `root = wd`: both commands work from the repo root only.
 
 ## Open debts
 
-- Heading/cap value validation (empty heading, non-positive cap, two headings set to the same text) — unowned until SCENARIO-19.
-- `feature-directory: ""` puts feature directories at the project root — same unowned validation debt as above, not a separate one.
-- A mid-write I/O failure leaves a half-scaffolded directory, possibly with a partially-written file inside it (`writeExclusive` does not truncate back to zero on a failed `WriteString`); nothing removes either, and once SCENARIO-08 lands a retry is refused outright by `Mkdir`. SCENARIO-05 should note it may encounter a truncated `STATE.md` on the "finish" path. Unowned — dies unless re-opened.
+- Heading/cap value validation — unowned until SCENARIO-19.
+- Half-scaffolded feature dir or orphan step file on a mid-write I/O failure; nothing removes
+  either. `check` (SCENARIO-22) is the natural detector for an orphan step. Unowned.
+- Invalid-`step-file-pattern` refusal names the feature directory, not the `.brief.yaml` carrying
+  the bad value — `scaffold` isn't given the config source path. Unowned.
+- `insertProgressEntry` inserts an LF line into a CRLF file unmodified elsewhere. Unowned.

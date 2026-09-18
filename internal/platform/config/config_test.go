@@ -29,3 +29,9 @@ func Test_the_default_profile_names_the_state_file(t *testing.T) {
 
 	assert.Equal(t, "STATE.md", cfg.StateFile)
 }
+
+func Test_the_default_profile_names_the_checklist_heading(t *testing.T) {
+	cfg := config.Default()
+
+	assert.Equal(t, "## Implementation Plan", cfg.ChecklistHeading)
+}
