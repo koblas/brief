@@ -32,7 +32,7 @@ func Resolve(startDir string) (Config, string, error) {
 	}
 
 	if _, statErr := os.Stat(abs); statErr != nil {
-		return Config{}, "", fmt.Errorf("resolve config: %s: %w: %w", abs, ErrInvalidConfig, statErr)
+		return Config{}, "", fmt.Errorf("resolve config: %w", &InvalidConfigError{Path: abs, Err: statErr})
 	}
 
 	for dir := abs; ; {
@@ -82,7 +82,7 @@ func decodeConfig(path string) (Config, error) {
 			return cfg, nil
 		}
 
-		return Config{}, fmt.Errorf("resolve config: %s: %w: %w", path, ErrInvalidConfig, err)
+		return Config{}, fmt.Errorf("resolve config: %w", &InvalidConfigError{Path: path, Err: err})
 	}
 
 	return cfg, nil

@@ -758,7 +758,7 @@ by a rename. See *Decisions taken* 2.
 Pre-crossover — built by hand:
 
 - [x] SCENARIO-01: Configuration resolves from the working directory upward
-- [ ] SCENARIO-02: New feature scaffolds a conforming feature
+- [x] SCENARIO-02: New feature scaffolds a conforming feature
 - [ ] SCENARIO-03: New step scaffolds the next step file and its progress entry
 - [ ] SCENARIO-04: A start brief carries everything a step needs
 - [ ] SCENARIO-05: Finishing writes the handoff and replaces the state, then marks done

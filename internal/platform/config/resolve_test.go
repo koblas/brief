@@ -103,6 +103,17 @@ func Test_Resolve_keeps_shipped_defaults_for_keys_the_config_omits(t *testing.T)
 	assert.Equal(t, want, cfg)
 }
 
+func Test_a_config_file_overrides_the_state_file_name(t *testing.T) {
+	root := t.TempDir()
+	writeConfig(t, root, "state-file: NOTES.md\n")
+
+	cfg, _, err := config.Resolve(root)
+
+	require.NoError(t, err)
+	assert.Equal(t, "NOTES.md", cfg.StateFile)
+	assert.Equal(t, config.Default().SpecificationFile, cfg.SpecificationFile)
+}
+
 func Test_Resolve_refuses_a_config_with_malformed_yaml(t *testing.T) {
 	root := t.TempDir()
 	configPath := writeConfig(t, root, "progress-heading: [this is not a scalar\n")
@@ -132,6 +143,19 @@ func Test_Resolve_treats_an_empty_config_file_as_the_shipped_profile(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, config.Default(), cfg)
 	assert.Equal(t, configPath, source)
+}
+
+func Test_names_the_offending_file_when_the_config_is_invalid(t *testing.T) {
+	root := t.TempDir()
+	configPath := writeConfig(t, root, "not-a-real-key: true\n")
+
+	_, _, err := config.Resolve(root)
+
+	require.ErrorIs(t, err, config.ErrInvalidConfig)
+
+	var target *config.InvalidConfigError
+	require.ErrorAs(t, err, &target)
+	assert.Equal(t, configPath, target.Path)
 }
 
 func Test_Resolve_refuses_a_start_directory_that_does_not_exist(t *testing.T) {
