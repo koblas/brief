@@ -17,7 +17,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = cli.Run(context.Background(), wd, os.Args[1:], os.Stdout, os.Stderr)
+	err = cli.Run(context.Background(), wd, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 
 	os.Exit(cli.ExitCode(err))
 }

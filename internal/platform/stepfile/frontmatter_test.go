@@ -63,3 +63,31 @@ func Test_Frontmatter_Done_is_false_for_empty_status(t *testing.T) {
 
 	assert.False(t, fm.Done())
 }
+
+func Test_SetStatus_replaces_the_status_line_and_leaves_every_other_byte_identical(t *testing.T) {
+	body := []byte("---\nid: STEP-02\nstatus: open\ndepends-on: [STEP-01]\nowner: planner\n---\n\n# STEP-02\n")
+
+	got, err := stepfile.SetStatus(body, "done")
+
+	require.NoError(t, err)
+	want := []byte("---\nid: STEP-02\nstatus: done\ndepends-on: [STEP-01]\nowner: planner\n---\n\n# STEP-02\n")
+	assert.Equal(t, want, got)
+}
+
+func Test_SetStatus_does_not_touch_a_status_line_after_the_closing_delimiter(t *testing.T) {
+	body := []byte("---\nid: STEP-02\nstatus: open\n---\n\nstatus: not-yaml\n")
+
+	got, err := stepfile.SetStatus(body, "done")
+
+	require.NoError(t, err)
+	want := []byte("---\nid: STEP-02\nstatus: done\n---\n\nstatus: not-yaml\n")
+	assert.Equal(t, want, got)
+}
+
+func Test_SetStatus_returns_an_error_when_the_frontmatter_has_no_status_key(t *testing.T) {
+	body := []byte("---\nid: STEP-02\ndepends-on: []\n---\n\n# STEP-02\n")
+
+	_, err := stepfile.SetStatus(body, "done")
+
+	require.ErrorIs(t, err, stepfile.ErrNoStatusField)
+}

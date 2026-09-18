@@ -6,7 +6,13 @@ import (
 	"strings"
 
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/markdown"
 )
+
+// identRune is the set of runes id-boundary matching treats as part of an
+// identifier: a rune outside this set (including end of line) ends an id,
+// so "STEP-10" is never mistaken for a match on "STEP-1".
+const identRune = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 
 // checklistItemRe matches a checklist item line: "- [ ]" or "- [x]",
 // allowing leading whitespace.
@@ -21,8 +27,8 @@ func specificationSkeleton(cfg config.Config, name string) string {
 
 // stateSkeleton renders a new feature's state file: the four configured
 // state headings, blank-line separated, with no title line. A title is
-// deliberately omitted — SCENARIO-05 replaces the whole state body on
-// "finish", and a title line would be silently dropped by that replacement.
+// deliberately omitted — Finish replaces the whole state body, and a
+// title line would be silently dropped by that replacement.
 func stateSkeleton(cfg config.Config) string {
 	return strings.Join(cfg.StateHeadings.Ordered(), "\n\n") + "\n"
 }
@@ -115,4 +121,120 @@ func insertProgressEntry(body, heading, entry string) (string, error) {
 	}
 
 	return result, nil
+}
+
+// spliceHandoff replaces the section under heading in body — the
+// frontmatter-stripped step body — with handoff's trimmed text, leaving
+// every other byte, including the terminating heading's own indentation,
+// identical. It uses markdown.SectionRange for both the anchor search and
+// the end scan, so a fenced example inside body containing a bare heading
+// line is never mistaken for the real anchor. The replacement is
+// "\n" + trimmed handoff + "\n", plus one further "\n" when a heading
+// follows the anchor, so splicing a body that already holds this exact
+// shape reproduces it byte for byte. spliceHandoff reports ok == false,
+// body unchanged, when heading is not found.
+func spliceHandoff(body []byte, heading string, handoff []byte) ([]byte, bool) {
+	start, end, ok := markdown.SectionRange(string(body), heading)
+	if !ok {
+		return body, false
+	}
+
+	replacement := "\n" + strings.Trim(string(handoff), "\n") + "\n"
+	if end < len(body) {
+		replacement += "\n"
+	}
+
+	result := make([]byte, 0, len(body)-(end-start)+len(replacement))
+	result = append(result, body[:start]...)
+	result = append(result, []byte(replacement)...)
+	result = append(result, body[end:]...)
+
+	return result, true
+}
+
+// tickProgressEntry flips to "[x]" the first checklist item under heading
+// in body whose text names id, leaving every other byte unchanged. It
+// reuses insertProgressEntry's section scan — heading matched by exact
+// right-trimmed equality, the section ending at the next line starting
+// with "#" — deliberately: new step and finish must agree about where the
+// progress section ends in the same file. A line already "[x]" is left
+// unchanged. An item's text, taken after "- [ ] " or "- [x] ", names id
+// when it begins with id followed by end of line or a rune outside
+// identRune, so "STEP-10" is never matched when id is "STEP-1".
+//
+// tickProgressEntry returns ErrNoProgressHeading when no line in body
+// equals heading, and ErrNoProgressEntry when the section has no item
+// naming id.
+func tickProgressEntry(body, heading, id string) (string, error) {
+	hadTrailingNewline := strings.HasSuffix(body, "\n")
+	lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
+
+	headingIdx := -1
+
+	for i, line := range lines {
+		if strings.TrimRight(line, " \t") == heading {
+			headingIdx = i
+
+			break
+		}
+	}
+
+	if headingIdx == -1 {
+		return "", ErrNoProgressHeading
+	}
+
+	sectionEnd := len(lines)
+
+	for i := headingIdx + 1; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimLeft(lines[i], " \t"), "#") {
+			sectionEnd = i
+			break
+		}
+	}
+
+	matchIdx := -1
+
+	for i := headingIdx + 1; i < sectionEnd; i++ {
+		if checklistItemRe.MatchString(lines[i]) && progressItemNames(lines[i], id) {
+			matchIdx = i
+
+			break
+		}
+	}
+
+	if matchIdx == -1 {
+		return "", ErrNoProgressEntry
+	}
+
+	lines[matchIdx] = strings.Replace(lines[matchIdx], "[ ]", "[x]", 1)
+
+	result := strings.Join(lines, "\n")
+	if hadTrailingNewline {
+		result += "\n"
+	}
+
+	return result, nil
+}
+
+// progressItemNames reports whether line — already matched by
+// checklistItemRe — names id: the text after its "- [ ] " or "- [x] "
+// marker begins with id, followed by end of line or a rune outside
+// identRune.
+func progressItemNames(line, id string) bool {
+	_, after, found := strings.Cut(line, "]")
+	if !found {
+		return false
+	}
+
+	text := strings.TrimLeft(after, " \t")
+	if !strings.HasPrefix(text, id) {
+		return false
+	}
+
+	rest := text[len(id):]
+	if rest == "" {
+		return true
+	}
+
+	return !strings.ContainsRune(identRune, rune(rest[0]))
 }

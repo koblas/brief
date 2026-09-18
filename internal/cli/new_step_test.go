@@ -18,9 +18,9 @@ func Test_creates_the_step_and_prints_its_path(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	require.NoError(t, cli.Run(t.Context(), wd, []string{"new", "feature", "payments"}, &bytes.Buffer{}, &bytes.Buffer{}))
+	require.NoError(t, cli.Run(t.Context(), wd, []string{"new", "feature", "payments"}, nil, &bytes.Buffer{}, &bytes.Buffer{}))
 
-	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
@@ -31,7 +31,7 @@ func Test_returns_a_usage_error_when_no_feature_is_given_for_step(t *testing.T) 
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "step"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "step"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -42,7 +42,7 @@ func Test_returns_a_usage_error_when_there_are_too_many_arguments_for_step(t *te
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "step", "a", "b"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "step", "a", "b"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -53,7 +53,7 @@ func Test_returns_a_usage_error_when_a_flag_is_not_defined_for_step(t *testing.T
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "step", "-x", "p"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "step", "-x", "p"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -64,7 +64,7 @@ func Test_prints_usage_to_stdout_when_help_is_requested_for_new_step(t *testing.
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "step", "--help"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "step", "--help"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
@@ -75,7 +75,7 @@ func Test_refuses_on_one_line_for_an_unknown_feature_for_step(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, scaffold.ErrNoSuchFeature)
 	assert.Empty(t, stdout.String())
@@ -95,7 +95,7 @@ func Test_refuses_on_one_line_when_the_specification_has_no_progress_heading(t *
 
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, scaffold.ErrNoProgressHeading)
 	assert.Empty(t, stdout.String())
@@ -112,14 +112,14 @@ func Test_refuses_on_one_line_for_an_invalid_step_file_pattern_from_an_ancestor_
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".brief.yaml"), []byte("step-file-pattern: \"SCENARIO-%s.md\"\n"), 0o600))
 
 	var setupStdout, setupStderr bytes.Buffer
-	require.NoError(t, cli.Run(t.Context(), root, []string{"new", "feature", "payments"}, &setupStdout, &setupStderr))
+	require.NoError(t, cli.Run(t.Context(), root, []string{"new", "feature", "payments"}, nil, &setupStdout, &setupStderr))
 
 	wd := filepath.Join(root, "a", "b")
 	require.NoError(t, os.MkdirAll(wd, 0o755))
 
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
 	assert.Empty(t, stdout.String())

@@ -17,6 +17,14 @@ var ErrMalformedFeature = errors.New("malformed feature")
 // line matching the configured progress heading.
 var ErrNoProgressHeading = errors.New("no progress heading found")
 
+// ErrNoSuchStep is returned when a feature directory exists but has no
+// step file whose id equals the one Finish was asked to close.
+var ErrNoSuchStep = errors.New("no such step")
+
+// ErrNoProgressEntry is returned when a feature's progress list has no
+// entry for a step whose file does exist.
+var ErrNoProgressEntry = errors.New("no progress entry found")
+
 // RefusalError reports a refusal that changed nothing on disk: the path
 // it concerns, what was wrong with it, and how to fix it. cli renders
 // these three fields into R14a's one-line refusal template.

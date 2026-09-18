@@ -29,7 +29,7 @@ func Test_creates_the_feature_and_prints_its_path(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "feature", "payments"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "feature", "payments"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
@@ -40,7 +40,7 @@ func Test_returns_a_usage_error_when_no_name_is_given(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "feature"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "feature"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -51,29 +51,29 @@ func Test_returns_a_usage_error_when_no_command_is_given(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief: no command given; expected one of: new, start", oneLine(t, &stderr))
+	assert.Equal(t, "brief: no command given; expected one of: new, start, finish", oneLine(t, &stderr))
 }
 
 func Test_returns_a_usage_error_when_the_command_is_unknown(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"bogus"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"bogus"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief: unknown command "bogus"; expected one of: new, start`, oneLine(t, &stderr))
+	assert.Equal(t, `brief: unknown command "bogus"; expected one of: new, start, finish`, oneLine(t, &stderr))
 }
 
 func Test_returns_a_usage_error_when_no_type_is_given(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -84,7 +84,7 @@ func Test_returns_a_usage_error_when_the_type_is_unknown(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "widget", "x"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "widget", "x"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -95,7 +95,7 @@ func Test_returns_a_usage_error_when_a_flag_is_not_defined(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "feature", "-x", "p"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "feature", "-x", "p"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -106,7 +106,7 @@ func Test_returns_a_usage_error_when_there_are_too_many_arguments(t *testing.T) 
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "feature", "a", "b"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "feature", "a", "b"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -122,7 +122,7 @@ func Test_creates_the_feature_where_an_ancestor_config_directs(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "feature", "payments"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "feature", "payments"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
@@ -136,7 +136,7 @@ func Test_refuses_on_one_line_when_the_config_file_is_invalid(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), root, []string{"new", "feature", "payments"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), root, []string{"new", "feature", "payments"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, config.ErrInvalidConfig)
 	assert.Empty(t, stdout.String())
@@ -153,7 +153,7 @@ func Test_prints_usage_to_stdout_when_help_is_requested_for_the_binary(t *testin
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"--help"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"--help"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
@@ -164,7 +164,7 @@ func Test_prints_usage_to_stdout_when_help_is_requested_for_the_subcommand(t *te
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "feature", "--help"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"new", "feature", "--help"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())

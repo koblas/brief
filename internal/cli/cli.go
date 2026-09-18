@@ -20,19 +20,24 @@ const usage = `brief manages feature specifications as files in your repository.
 Usage:
   brief new feature <name>     scaffold a new feature's specification and state file
   brief new step <feature>     scaffold the next step file and its progress entry
-  brief start <feature>        print the next step's brief
+  brief start <feature>        print the next open step's context
 
-Run 'brief new feature --help', 'brief new step --help' or 'brief start
---help' for details on those commands.
+  brief finish <feature> <step> --handoff <path> --state <path>
+                                close a step: handoff, state, then done
+
+Run 'brief new feature --help', 'brief new step --help', 'brief start
+--help' or 'brief finish --help' for details on those commands.
 `
 
 // Run parses args, dispatches to the named command, and renders every
 // user-facing line to stdout or stderr itself. wd is the working directory
 // used to resolve configuration and to relativize any printed path — Run
-// never calls os.Getwd.
-func Run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error {
+// never calls os.Getwd. stdin backs "-" arguments on commands that read one
+// (finish's --handoff/--state); commands that take no such argument never
+// read it.
+func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return usageError(stderr, "brief: no command given; expected one of: new, start")
+		return usageError(stderr, "brief: no command given; expected one of: new, start, finish")
 	}
 
 	switch args[0] {
@@ -46,8 +51,10 @@ func Run(ctx context.Context, wd string, args []string, stdout, stderr io.Writer
 		return runNew(ctx, wd, args[1:], stdout, stderr)
 	case "start":
 		return runStart(ctx, wd, args[1:], stdout, stderr)
+	case "finish":
+		return runFinish(ctx, wd, args[1:], stdin, stdout, stderr)
 	default:
-		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new, start", args[0]))
+		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new, start, finish", args[0]))
 	}
 }
 

@@ -47,7 +47,7 @@ func Test_prints_the_brief_and_writes_nothing_to_stderr(t *testing.T) {
 	wd := newStartFixture(t)
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
@@ -60,7 +60,7 @@ func Test_returns_a_usage_error_when_no_feature_is_given_to_start(t *testing.T) 
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"start"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"start"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -71,7 +71,7 @@ func Test_returns_a_usage_error_when_start_is_given_too_many_arguments(t *testin
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"start", "a", "b"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"start", "a", "b"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -82,7 +82,7 @@ func Test_returns_a_usage_error_for_an_unknown_start_flag(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"start", "--bogus", "demo"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"start", "--bogus", "demo"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
@@ -93,7 +93,7 @@ func Test_prints_the_start_usage_for_help(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"start", "--help"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"start", "--help"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
@@ -104,7 +104,7 @@ func Test_returns_an_error_for_an_unknown_feature_on_start(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"start", "ghost"}, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"start", "ghost"}, nil, &stdout, &stderr)
 
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())

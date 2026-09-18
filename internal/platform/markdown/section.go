@@ -23,14 +23,37 @@ var fenceRe = regexp.MustCompile("^(`{3,}|~{3,})")
 // heading that would end the section. Section returns ("", false) when no
 // line equals heading.
 func Section(body, heading string) (string, bool) {
-	lines := strings.Split(body, "\n")
-
-	headingIdx, headingLevel := findHeading(lines, heading)
-	if headingIdx == -1 {
+	start, end, ok := SectionRange(body, heading)
+	if !ok {
 		return "", false
 	}
 
-	end := len(lines)
+	return trimBlankLines(body[start:end]), true
+}
+
+// SectionRange returns the byte offsets of the section body under the
+// first line in body that equals heading after right-trimming: start is
+// the byte just past the heading line's own newline (or len(body) when the
+// heading is the last line and carries no trailing newline), and end is
+// the byte offset of the start of the next heading line of the same or
+// higher level — including that line's leading whitespace, so
+// body[start:end] never truncates the terminating line's indentation — or
+// len(body) when no such heading follows. The anchor search and the end
+// scan are both fence-aware: a line inside a fenced code block (``` or
+// ~~~) is never treated as a heading in either role. Section is
+// implemented on top of SectionRange so the two can never disagree about
+// where a section ends. SectionRange returns (0, 0, false) when no line
+// equals heading.
+func SectionRange(body, heading string) (int, int, bool) {
+	lines := strings.Split(body, "\n")
+	offsets := lineOffsets(lines)
+
+	headingIdx, headingLevel := findHeading(lines, heading)
+	if headingIdx == -1 {
+		return 0, 0, false
+	}
+
+	sectionEnd := len(lines)
 	inFence := false
 
 	for i := headingIdx + 1; i < len(lines); i++ {
@@ -46,12 +69,33 @@ func Section(body, heading string) (string, bool) {
 		}
 
 		if lvl := headingLevelOf(line); lvl > 0 && lvl <= headingLevel {
-			end = i
+			sectionEnd = i
 			break
 		}
 	}
 
-	return trimBlankLines(strings.Join(lines[headingIdx+1:end], "\n")), true
+	return offsets[headingIdx+1], offsets[sectionEnd], true
+}
+
+// lineOffsets returns, for each index i in 0..len(lines), the byte offset
+// at which lines[i] begins within the body it was split from
+// (offsets[len(lines)] is that body's length). lines must be
+// strings.Split(body, "\n"): every line except the last is followed by one
+// "\n" byte that lineOffsets accounts for; the last is not, since
+// strings.Split never manufactures a trailing separator.
+func lineOffsets(lines []string) []int {
+	offsets := make([]int, len(lines)+1)
+
+	for i, line := range lines {
+		if i == len(lines)-1 {
+			offsets[i+1] = offsets[i] + len(line)
+			continue
+		}
+
+		offsets[i+1] = offsets[i] + len(line) + 1
+	}
+
+	return offsets
 }
 
 // Title returns the text of the first level-1 ("# ") heading in body, with

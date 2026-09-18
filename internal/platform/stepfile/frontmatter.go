@@ -12,6 +12,14 @@ import (
 // with a "---" YAML frontmatter delimiter.
 var ErrNoFrontmatter = errors.New("no frontmatter found")
 
+// ErrNoStatusField is returned by SetStatus when body's frontmatter has no
+// "status:" line to replace.
+var ErrNoStatusField = errors.New("no status field found in frontmatter")
+
+// statusFieldPrefix is the literal text that opens a frontmatter "status:"
+// line, matched without decoding the surrounding YAML.
+const statusFieldPrefix = "status:"
+
 // frontmatterDelim is the line that opens and closes a step file's YAML
 // frontmatter block.
 const frontmatterDelim = "---"
@@ -61,4 +69,51 @@ func ParseFrontmatter(body []byte) (Frontmatter, []byte, error) {
 	}
 
 	return fm, []byte(rest), nil
+}
+
+// SetStatus replaces the first "status:" line inside body's YAML
+// frontmatter delimiters with "status: <status>", leaving every other
+// byte — including keys Frontmatter does not decode — identical. A
+// "status:" line outside the frontmatter, after the closing delimiter, is
+// never touched. SetStatus edits the text directly rather than decoding
+// and re-marshaling the frontmatter, because Frontmatter has no
+// KnownFields and a round trip would silently drop an unrecognized key.
+// It returns ErrNoStatusField, body unchanged, when the frontmatter has no
+// "status:" line to replace — a missing key is refused rather than
+// inserted, since where to insert one is a guess.
+func SetStatus(body []byte, status string) ([]byte, error) {
+	s := string(body)
+
+	if !strings.HasPrefix(s, frontmatterDelim+"\n") {
+		return nil, ErrNoStatusField
+	}
+
+	afterOpen := s[len(frontmatterDelim)+1:]
+
+	yamlPart, afterClose, found := strings.Cut(afterOpen, "\n"+frontmatterDelim)
+	if !found {
+		return nil, ErrNoStatusField
+	}
+
+	lines := strings.Split(yamlPart, "\n")
+
+	statusIdx := -1
+
+	for i, line := range lines {
+		if strings.HasPrefix(line, statusFieldPrefix) {
+			statusIdx = i
+
+			break
+		}
+	}
+
+	if statusIdx == -1 {
+		return nil, ErrNoStatusField
+	}
+
+	lines[statusIdx] = statusFieldPrefix + " " + status
+
+	result := frontmatterDelim + "\n" + strings.Join(lines, "\n") + "\n" + frontmatterDelim + afterClose
+
+	return []byte(result), nil
 }
