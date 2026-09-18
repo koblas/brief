@@ -5,13 +5,17 @@
   },
   "permissions": {
     "allow": [
-      "Bash(npm run *)",
       "Bash(git status)",
       "Bash(git diff *)",
       "Bash(golangci-lint run *)",
-      "Bash(go test *)",
       "Bash(go build *)",
+      "Bash(go test *)",
       "Bash(go vet *)",
+      "Bash(go doc *)",
+      "Bash(go run *)",
+      "Bash(go mod *)",
+      "Bash(go version)",
+      "Bash(gofmt *)",
       "Read",
       "Glob",
       "Grep",
@@ -23,24 +27,8 @@
   "enabledPlugins": {
     "gopls-lsp@claude-plugins-official": true
   },
-  "hooks": {
-    "PreToolUse": [],
-    "PostToolUse": [
-      {
-        "matcher": "EnterWorktree",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/hooks/warm-worktree-deps.sh",
-            "timeout": 15,
-            "statusMessage": "Warming worktree deps in background..."
-          }
-        ]
-      }
-    ]
-  },
   "statusLine": {
     "type": "command",
-    "command": "bash $HOME/.claude/statusline-command.sh"
+    "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/statusline-command.sh\""
   }
 }

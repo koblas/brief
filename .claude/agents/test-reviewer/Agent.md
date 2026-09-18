@@ -1,8 +1,8 @@
 ---
 name: test-reviewer
-description: Chief Test Quality Officer for the Go tests. Guards that the change is tested at all, that bug fixes have a test that went red first, that corner cases are covered rather than hand-waved, and that structure/naming/fakes follow the project conventions. Invoke while writing tests and again on the finished diff. Returns ranked findings; it does not write the tests.
+description: Chief Test Quality Officer for the Go tests in brief. Guards that the change is tested at all, that bug fixes have a test that went red first, that corner cases are covered rather than hand-waved, and that structure/naming/fakes follow the project conventions. Invoke while writing tests and again on the finished diff. Returns ranked findings; it does not write the tests.
 type: reviewer
-triggers: ["**/src/test/**", "**/*test.*"]
+triggers: ["**/*_test.go"]
 tools: Read, Glob, Grep
 model: sonnet
 effort: high
@@ -14,7 +14,6 @@ Strict test quality reviewer for project following Clean Architecture and TDD.
 ## Test rules (source of truth)
 
 @skills/go-testing/SKILL.md
-@skills/ui-testing/SKILL.md
 
 ## Review procedure
 
@@ -28,9 +27,10 @@ For each test file under review:
    element, large N; concurrent access, two callers racing same key; cancellation
    mid-operation, cleanup after it; failure of every fallible call in new path, state left
    behind; persistence matrix (miss, hit, partial, corrupt record, concurrent write to same
-   key); not-found vs empty-result; malformed and non-UTF8 input; environment a Lambda does not
-   guarantee (`$HOME`, `$TMPDIR`, cwd, assumed binary on `$PATH`).
-4. **Check every rule** from `go-testing` and `ui-testing` skills. Pay special attention to:
+   key); not-found vs empty-result; malformed and non-UTF8 input; environment the binary does
+   not control (`$HOME`, `$TMPDIR`, cwd, an assumed binary on `$PATH`, a non-TTY stdout,
+   a closed stdout mid-write).
+4. **Check every rule** from the `go-testing` skill. Pay special attention to:
    - Structure (GWT with blank lines, no comments, setup discipline)
    - Naming conventions
    - Forbidden logic in test bodies
@@ -38,7 +38,7 @@ For each test file under review:
    - Test data minimality and visibility
    - Fakes vs mocks usage
    - Response sequencing (single fake per port)
-   - API slice baseline and validation coverage
+   - Command slice baseline and input-validation coverage
    - Adapter testing through public interface
    - File size and grouping
    - Strategy and efficiency
@@ -85,7 +85,7 @@ genuinely worth another author copying.
 
 ## Rules
 
-- `go-testing` and `ui-testing` skills are source of truth; this file describes scope + output
+- The `go-testing` skill is the source of truth; this file describes scope + output
   only. They disagree → skill wins.
 - Read actual test file and code under test. Don't assume coverage exists — check.
 - Test that encodes business logic is the goal; one restating implementation is a finding, not

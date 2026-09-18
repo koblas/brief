@@ -1,8 +1,3 @@
----
-paths:
-  - "**"
----
-
 # Standing brief for pipeline agents
 
 Everything here used to be retyped into each `architect`/`developer`/reviewer prompt, at
@@ -11,36 +6,39 @@ that scenario. Read this once; do not ask for it to be repeated.
 
 ## Verification
 
-**Go — from `**/\*`:** `go build ./...`, `go test ./...`, `go test -race`on touched
-packages,`golangci-lint run` on touched packages.
+`brief` is one Go module at the repo root. There is no build-graph tool, no codegen step
+and no second workspace. Run, from the repo root:
 
-**Gates:** `heph run //frontend:test`, `//frontend:lint`, `//go:test-all`.
+```bash
+go build ./...
+go test ./...
+go test -race ./<touched package>/...
+golangci-lint run ./...
+```
 
 Rules:
 
 - **Never pipe a verification command through `head`/`tail`.** It hides failures below the
-  cut. Compress vitest with
-  `grep -E "RUN +v|Tests +[0-9]|Test Files +[0-9]|failed|FAIL"` instead.
-- **Report the exact test count and the delta**, per workspace — "green" is not a result.
-  A count that moved without explanation is a finding, not a rounding error.
-- `fxpubsub/jetstream`'s container-readiness flake is **fixed**. Do not wave a failure
-  there through as "the known flake" — it is either real or a new race.
-- A Bash call failing with `operation not permitted`, or heph reporting
-  `driver not found: scratch`, means the shell was **sandboxed**. Re-run with
-  `dangerouslyDisableSandbox: true`.
-- Proto changes regenerate with **`heph run codegen //...` from the repo root** — never
-  `codegen //go`, which leaves `papi/openapi_*.yaml` and the TS client stale while the
-  build stays green. Then **grep both artifacts** to confirm the change landed.
+  cut, and `$?` becomes the pipe's status — `go build ./nonexistent 2>&1 | tail -2` reports
+  **exit 0** for a failed build. If you must pipe, prefix with `set -o pipefail`.
+- **Report the exact test count and the delta** — "green" is not a result. A count that
+  moved without explanation is a finding, not a rounding error.
+- A green summary does not mean everything ran. Count skips before leaning on a package:
+  `go test -v ./<pkg>/... 2>&1 | grep -c -- "--- SKIP"`.
+- A Bash call failing with `operation not permitted` means the shell was **sandboxed**.
+  Re-run with `dangerouslyDisableSandbox: true`.
+- Before declaring a scenario done, run `go test ./...` from the repo root once, unpiped.
+  The exit code of an unpiped command is the evidence.
 
 ## IDE diagnostics are advisory
 
 The IDE indexes mid-edit, and during mutation windows. It routinely reports compile errors
-that `tsc`/`go build` do not, and it indexes files that were deleted. Across one 20-scenario
+that `go build` does not, and it indexes files that were deleted. Across one 20-scenario
 feature it was wrong every single time.
 
-Do not chase them. Do not re-verify on their account. The authority is `go build` / `npx
-tsc`. The one exception: a diagnostic that **contradicts a claim you just made** is worth a
-single targeted check — that is how a live mutation left by a crashed run was caught.
+Do not chase them. Do not re-verify on their account. The authority is `go build`. The one
+exception: a diagnostic that **contradicts a claim you just made** is worth a single
+targeted check — that is how a live mutation left by a crashed run was caught.
 
 ## Mutation verification
 
@@ -83,8 +81,8 @@ recurring shapes:
   would have seen it.
 - Comments overclaiming what the test below them covers.
 
-When a refactor removes a call site, **every existing `.not.toHaveBeenCalled()` on that
-symbol becomes unfalsifiable.** Repoint them at the new reachable observable, or they pass
+When a refactor removes a call site, **every existing "was never called" assertion on that
+fake becomes unfalsifiable.** Repoint them at the new reachable observable, or they pass
 with the guard deleted.
 
 ## Reporting

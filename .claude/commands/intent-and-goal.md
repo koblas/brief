@@ -17,7 +17,7 @@ Do not stop for confirmation here — the approval gate is at end of Phase 2.
 
 ## Phase 0: Triage (before asking the user anything)
 
-Run **`triage`** on the request. Read-only. Returns affected services/protos/screens, prior art
+Run **`triage`** on the request. Read-only. Returns affected commands/packages, prior art
 already in the repo, a reproduction if this is a bug, what already exists, what must be built,
 and the genuine open questions.
 

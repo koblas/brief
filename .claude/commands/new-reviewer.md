@@ -15,13 +15,13 @@ Ask the user these (skip any already answered via the argument):
 2. **Purpose**: what does it check? (e.g. "ensures API response DTOs don't leak domain
    internals")
 3. **Scope**: which files trigger it? Ask for one or more glob patterns. Offer examples:
-   - Production code: `**/src/main/**`
-   - Test code: `**/src/test/**`, `**/*Test.*`, `**/*IT.*`, `**/*AT.*`
-   - API layer: `**/api/**`, `**/controller/**`, `**/dto/**`
-   - Domain layer: `**/domain/**`
-   - Infrastructure: `**/infrastructure/**`
-   - Config files: `**/*.yml`, `**/*.yaml`, `**/*.properties`
-   - Frontend: `**/*.tsx`, `**/*.vue`, `**/*.svelte`
+   - Production code: `cmd/**/*.go`, `internal/**/*.go`
+   - Test code: `**/*_test.go`
+   - Delivery layer: `internal/cli/**`
+   - Feature packages: `internal/<feature>/**`
+   - Shared infrastructure: `internal/platform/**`
+   - Config files: `**/*.yml`, `**/*.yaml`, `**/*.toml`, `**/*.json`
+   - Build/toolchain: `devenv.nix`, `go.mod`
 4. **Placement**: global (`~/.claude/agents/`) or project-specific (`.claude/agents/`)? Default
    project-specific.
 5. **Checklist**: what specific things does it check? Have the user describe the rules,
@@ -63,7 +63,7 @@ Your mandate: <one sentence on what must be true when you pass it>.
 
 <What this reviewer owns — and explicitly what belongs to the other reviewers
 (arch-reviewer: structure; correctness-reviewer: wrong behavior; refactor-advisor:
-quality; test-reviewer / ui-test-reviewer: tests; api-reviewer: HTTP conformance;
+quality; test-reviewer: tests; api-reviewer: HTTP conformance;
 product-vision: whether the surface should exist at all).>
 
 ## What to check
@@ -98,14 +98,13 @@ you could not. A plausible-sounding finding that cannot fail is noise.
 - Ranked by severity, always.
 - Distinguish "this is wrong" from "I'd write it differently". Only the first blocks.
 - A new dependency is not a defect.
-- `go/gen/**` is generated — findings there belong against the `.proto`.
 - Match the file's existing idiom rather than imposing a different one.
 - You do not rewrite the code. Name the defect precisely enough to fix in one pass.
 ```
 
 ## Step 4: Project trigger overrides
 
-If the reviewer is **global** but the user mentions it will be used in projects with different file conventions (e.g., TypeScript uses `*.spec.ts` instead of `*Test.*`), inform them they can override triggers per project by adding an entry to `.claude/review-triggers.json`:
+If the reviewer is **global** but the user mentions it will be used in projects with different file conventions (e.g. a project whose tests are `*.spec.ts` rather than `*_test.go`), inform them they can override triggers per project by adding an entry to `.claude/review-triggers.json`:
 
 ```json
 {

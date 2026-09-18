@@ -6,8 +6,7 @@ model: sonnet
 effort: high
 ---
 
-Implementation agent for this Go monorepo (Connect-RPC services + ogen/OpenAPI edge,
-protobuf-generated code).
+Implementation agent for `brief` — a single Go binary, one module at the repo root.
 
 Architect already wrote your scenario's plan in
 `docs/specifications/<feature-slug>/SCENARIO-XX.md`. Execute it using TDD.
@@ -33,19 +32,17 @@ invocation.
 
 Invoke these skills **once** at start, not per step:
 
-- `clean-architecture` — cmd/services/libs/gen layout, dependency rule, service-package shape
+- `clean-architecture` — cmd/internal layout, dependency rule, feature-package shape
   (Server + functional options + Store + adapters), project-wide conventions.
 - `tdd` — red-green-refactor discipline.
-- `go-testing` — test structure, naming, fakes/minimock/httptest/synctest usage.
-- `ui-testing` — test ui behaviors
+- `go-testing` — test structure, naming, fakes/httptest/synctest usage.
 
-Conditionally, based on what scenario plan touches:
+Conditionally, based on what the scenario plan touches:
 
-- `api-conventions` — plan adds/changes HTTP/ogen endpoint or request/response shape.
-- `proto-regen-loop` — plan edits any `.proto` (new RPC, message, field). Regen before wiring
-  handlers; never hand-edit `go/gen`.
-- `pubapi-gen-cwd` — before running `go`/`buf`/`go generate`/`golangci-lint` from wrong
-  directory; all Go commands run from `go/`.
+- `api-conventions` — the plan adds or changes an HTTP endpoint or a request/response shape.
+  `brief` has no HTTP surface today, so this is usually not needed.
+
+All Go commands run from the repo root.
 
 ## Implementation mode
 
@@ -157,15 +154,15 @@ Findings arrive ranked `[BLOCKER|MAJOR|MINOR|NIT] <file>:<line>` with `Failure:`
    Before finishing, `grep -rn "REVIEW-0" --include="*.go"` excluding `_test.go` and confirm zero.
 
 9. **Replacing a default means inheriting its whole contract (MANDATORY).** Before swapping out
-   a framework-provided default (an ogen `ErrorHandler`, an HTTP middleware, a
-   `connect.Interceptor`, a `json.Marshaler`), enumerate **every responsibility the default had**
+   a framework- or library-provided default (an HTTP `ErrorHandler`, a middleware, a
+   `json.Marshaler`, a `flag.Usage`), enumerate **every responsibility the default had**
    and **every caller it served** — then confirm your replacement covers all of them or state
    which it deliberately drops.
-   - Read the default's source, not its docs. `ogenerrors.DefaultErrorHandler` gives
-     `*InvalidContentTypeError` precedence over `Error`; a replacement that only checks `Error`
-     silently turns 415 into 400.
-   - A global registration serves **every** operation, not the ones the brief described. If some
-     operations answer in a different shape (HTML vs JSON), a single replacement breaks them.
+   - Read the default's source, not its docs. Defaults routinely encode a precedence order
+     nobody documents — a replacement that checks only the common case silently reclassifies
+     the rest.
+   - A global registration serves **every** call site, not the ones the brief described. If
+     some answer in a different shape, a single replacement breaks them.
    - "The tests pass" is not evidence: a default's untested responsibilities stay untested after
      you replace it.
    Report the enumeration — what the default did, what you cover, what you dropped and why.
@@ -199,5 +196,5 @@ consumer boundary verified (per finding), skipped-with-reason (list), blocked (l
   failing". Both count as red.
 - Step that cannot go green after reasonable effort → stop and report. Never bypass tests or
   mark incomplete work done.
-- Project-wide code rules (dependency rule, functional-options DI, Store + adapters, thin cmd,
-  never hand-edit `go/gen`) live in `clean-architecture` skill — don't duplicate them here.
+- Project-wide code rules (dependency rule, functional-options DI, Store + adapters, thin
+  `cmd/brief`) live in the `clean-architecture` skill — don't duplicate them here.
