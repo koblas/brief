@@ -194,23 +194,64 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		return nil
 	}
 
-	if err := atomicfile.WriteFile(root, handoffName, handoff, 0o644); err != nil {
+	// The four writes below are ordered, and the order is load-bearing:
+	// "status: done" must not land before the handoff file exists, or the
+	// divergence refusal would refuse the very retry that repairs a crash.
+	// Every earlier prefix leaves status: open, the sole doneness authority,
+	// so a retry converges.
+	//
+	// Each write is a Create, a write, and a Close. The write's own error is
+	// not checked, because Close reports it along with any failure to remove
+	// the temp sibling; Close is also the only call that performs the rename,
+	// so it is the only error worth checking at each step.
+	if err := replaceBytes(root, handoffName, handoff); err != nil {
 		return writeFailure(err, feature, step)
 	}
 
-	if err := atomicfile.WriteFile(root, s.cfg.StateFile, state, 0o644); err != nil {
+	if err := replaceBytes(root, s.cfg.StateFile, state); err != nil {
 		return writeFailure(err, feature, step)
 	}
 
-	if err := atomicfile.WriteFile(root, stepFileName, newStepBody, 0o644); err != nil {
+	if err := replaceBytes(root, stepFileName, newStepBody); err != nil {
 		return writeFailure(err, feature, step)
 	}
 
-	if err := atomicfile.WriteFile(root, s.cfg.SpecificationFile, []byte(newSpec), 0o644); err != nil {
+	if err := replaceString(root, s.cfg.SpecificationFile, newSpec); err != nil {
 		return writeFailure(err, feature, step)
 	}
 
 	return nil
+}
+
+// replaceBytes atomically replaces name under root with data.
+//
+// Both helpers return atomicfile's error unwrapped on purpose: every caller
+// passes it to writeFailure, which wraps it once for this boundary and adds
+// the retry hint. Wrapping here as well would put "scaffold:" in the message
+// twice.
+func replaceBytes(root *os.Root, name string, data []byte) error {
+	w, err := atomicfile.Create(root, name, 0o644)
+	if err != nil {
+		return err //nolint:wrapcheck // writeFailure wraps this boundary
+	}
+
+	_, _ = w.Write(data)
+
+	return w.Close() //nolint:wrapcheck // writeFailure wraps this boundary
+}
+
+// replaceString atomically replaces name under root with data, writing it
+// through io.StringWriter so the caller's string is not copied into a []byte
+// first.
+func replaceString(root *os.Root, name, data string) error {
+	w, err := atomicfile.Create(root, name, 0o644)
+	if err != nil {
+		return err //nolint:wrapcheck // writeFailure wraps this boundary
+	}
+
+	_, _ = w.WriteString(data)
+
+	return w.Close() //nolint:wrapcheck // writeFailure wraps this boundary
 }
 
 // checkArgumentFence refuses when body — Finish's state argument, named

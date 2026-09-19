@@ -469,6 +469,45 @@ func Test_finish_leaves_no_temp_file_in_the_feature_directory(t *testing.T) {
 	assert.ElementsMatch(t, fixtureFileNames(fx), namesOf(entries))
 }
 
+// Test_reports_a_handoff_write_that_cannot_be_committed guards the contract
+// each write site now carries by hand: the rename happens in Close, so a site
+// that checks only the write and not Close reports success on a write that
+// never landed. A directory at the handoff's path makes the rename fail with
+// nothing else disturbed.
+//
+// It also pins convergence: the step file must still say status: open, since
+// that is the sole doneness authority and a retry has to be able to repair
+// the half-finished state.
+func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
+	fx := newFinishFixture(t)
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+	blocked := filepath.Join(fx.featureDir(), "STEP-02"+fx.cfg.HandoffFileSuffix)
+	require.NoError(t, os.Mkdir(blocked, 0o755))
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+
+	require.Error(t, err)
+
+	stepBody, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(stepBody), "status: open",
+		"a write that could not be committed must leave the step retryable")
+}
+
+// Test_reports_a_specification_write_that_cannot_be_committed covers the
+// io.StringWriter path the same way, at the last write in the sequence: a
+// directory planted at the specification's temp sibling blocks it.
+func Test_reports_a_specification_write_that_cannot_be_committed(t *testing.T) {
+	fx := newFinishFixture(t)
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+	blocked := filepath.Join(fx.featureDir(), "."+fx.cfg.SpecificationFile+".brief-tmp")
+	require.NoError(t, os.Mkdir(blocked, 0o755))
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+
+	require.Error(t, err)
+}
+
 func Test_the_temp_file_sweep_sees_a_temp_file(t *testing.T) {
 	fx := newFinishFixture(t)
 	decoy := "." + fx.cfg.StateFile + ".brief-tmp"

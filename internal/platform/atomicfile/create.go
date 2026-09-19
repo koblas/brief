@@ -9,15 +9,18 @@ import (
 	"path/filepath"
 )
 
-// compile-time proof that the documented io.WriteCloser contract holds.
-var _ io.WriteCloser = (*PendingFile)(nil)
+// compile-time proof that the documented interface contracts hold.
+var (
+	_ io.WriteCloser  = (*PendingFile)(nil)
+	_ io.StringWriter = (*PendingFile)(nil)
+)
 
 // Create opens name for atomic replacement under root and returns a
-// PendingFile — an io.WriteCloser whose Write goes straight to a temporary
-// sibling of name and whose Close renames that sibling over name. A
-// concurrent reader therefore observes either name's previous content or its
-// complete new content, never a partial write, no matter how many Writes the
-// caller makes or how far apart they are.
+// PendingFile — an io.WriteCloser and io.StringWriter whose writes go
+// straight to a temporary sibling of name and whose Close renames that
+// sibling over name. A concurrent reader therefore observes either name's
+// previous content or its complete new content, never a partial write, no
+// matter how many writes the caller makes or how far apart they are.
 //
 // Close is the commit, and it returns an error because the rename it
 // performs can fail — a failure that no earlier call can report, since until
@@ -29,16 +32,16 @@ var _ io.WriteCloser = (*PendingFile)(nil)
 // rather than half-committed, and the next Create for the same name
 // overwrites the stale sibling. Because Close commits rather than aborts, a
 // bare "defer w.Close()" is not a rollback — on an early return it publishes
-// whatever was written so far. Callers that hold the whole payload already
-// should prefer WriteFile, which has no such window.
+// whatever was written so far. A caller holding the whole payload should
+// write it and then check Close, which is the shape every caller in this
+// repository uses.
 //
-// Once a Write has failed, Close does not commit: it removes the temp
+// Once a write has failed, Close does not commit: it removes the temp
 // sibling and reports that name was not replaced, wrapping that first write
-// error as the cause, so a caller that ignores Write's return still cannot
-// publish a truncated file and still learns the target is untouched. A
-// second Close
-// returns nil and changes nothing, so the deferred-Close safety net can sit
-// alongside an explicit Close whose error is checked.
+// error as the cause, so a caller that ignores a write's return still cannot
+// publish a truncated file and still learns the target is untouched. A second
+// Close returns nil and changes nothing, so the deferred-Close safety net can
+// sit alongside an explicit Close whose error is checked.
 //
 // The temp sibling is opened O_CREATE|O_TRUNC, not O_EXCL: one left behind
 // by a crashed write must be overwritten by the next attempt rather than
@@ -100,18 +103,31 @@ type PendingFile struct {
 // since one would be unfalsifiable — no test can distinguish it from the
 // descriptor's own refusal.
 func (p *PendingFile) Write(b []byte) (int, error) {
-	n, err := p.file.Write(b)
-	if err != nil {
-		wrapped := fmt.Errorf("atomicfile: write %s: %w", p.name, err)
+	return p.record(p.file.Write(b))
+}
 
-		if p.writeErr == nil {
-			p.writeErr = wrapped
-		}
+// WriteString writes s to the temp sibling, satisfying io.StringWriter so a
+// caller that already holds a string does not have to copy it into a []byte
+// to write it. It is otherwise identical to Write, including how a failure
+// stops Close from committing.
+func (p *PendingFile) WriteString(s string) (int, error) {
+	return p.record(p.file.WriteString(s))
+}
 
-		return n, wrapped
+// record annotates a failed underlying write and remembers the first one, so
+// that Close can refuse to commit no matter which write method produced it.
+func (p *PendingFile) record(n int, err error) (int, error) {
+	if err == nil {
+		return n, nil
 	}
 
-	return n, nil
+	wrapped := fmt.Errorf("atomicfile: write %s: %w", p.name, err)
+
+	if p.writeErr == nil {
+		p.writeErr = wrapped
+	}
+
+	return n, wrapped
 }
 
 // Close commits the replacement by renaming the temp sibling over the
@@ -126,11 +142,11 @@ func (p *PendingFile) Write(b []byte) (int, error) {
 // and tar.Writer, which replay a sticky write error verbatim, Close returns
 // a joined error and not the identical value.
 //
-// A Close that will not commit because an earlier Write failed reports that
+// A Close that will not commit because an earlier write failed reports that
 // as "<name> not replaced", wrapping the write error as the cause. Replaying
-// the write error verbatim, as the stdlib writers do, would leave the only
-// error WriteFile surfaces saying nothing about whether the target was
-// touched.
+// the write error verbatim, as the stdlib writers do, would say nothing about
+// whether the target was touched — and since callers check Close and not the
+// write, that is the only error most of them see.
 //
 // A second Close returns nil without touching anything.
 func (p *PendingFile) Close() error {

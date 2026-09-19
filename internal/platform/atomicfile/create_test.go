@@ -11,6 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// openRoot returns an *os.Root rooted at a fresh temporary directory.
+func openRoot(t *testing.T) (*os.Root, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+
+	return root, dir
+}
+
 // Test_Create_makes_the_content_visible_only_when_close_commits_it is the
 // whole point of the type: the bytes sit in the temp sibling, and the
 // target does not exist at all, until Close renames.
@@ -32,9 +44,9 @@ func Test_Create_makes_the_content_visible_only_when_close_commits_it(t *testing
 	assert.Equal(t, "hello", string(got))
 }
 
-// Test_Create_concatenates_incremental_writes covers the reason an
-// io.WriteCloser exists rather than only WriteFile: the caller streams
-// without holding the whole payload.
+// Test_Create_concatenates_incremental_writes covers writing a payload in
+// pieces: successive writes append to the temp sibling and the commit sees
+// all of them.
 func Test_Create_concatenates_incremental_writes(t *testing.T) {
 	root, dir := openRoot(t)
 
@@ -50,6 +62,29 @@ func Test_Create_concatenates_incremental_writes(t *testing.T) {
 	got, readErr := os.ReadFile(filepath.Join(dir, "target.txt"))
 	require.NoError(t, readErr)
 	assert.Equal(t, "first second", string(got))
+}
+
+// Test_Create_interleaves_WriteString_and_Write covers io.StringWriter
+// alongside io.Writer: both must append to the same temp sibling, in call
+// order, so a caller holding a mix of strings and byte slices does not have
+// to convert either.
+func Test_Create_interleaves_WriteString_and_Write(t *testing.T) {
+	root, dir := openRoot(t)
+
+	w, err := atomicfile.Create(root, "target.txt", 0o644)
+	require.NoError(t, err)
+
+	_, stringErr := w.WriteString("from a string, ")
+	require.NoError(t, stringErr)
+	_, bytesErr := w.Write([]byte("from bytes, "))
+	require.NoError(t, bytesErr)
+	_, lastErr := w.WriteString("and a string again")
+	require.NoError(t, lastErr)
+	require.NoError(t, w.Close())
+
+	got, readErr := os.ReadFile(filepath.Join(dir, "target.txt"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "from a string, from bytes, and a string again", string(got))
 }
 
 func Test_Create_replaces_an_existing_files_content_on_close(t *testing.T) {

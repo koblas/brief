@@ -160,7 +160,17 @@ func (s *Server) NewStep(_ context.Context, feature string) (string, error) {
 		return "", fmt.Errorf("scaffold: %w", err)
 	}
 
-	if err := atomicfile.WriteFile(root, s.cfg.SpecificationFile, []byte(newSpec), 0o644); err != nil {
+	w, err := atomicfile.Create(root, s.cfg.SpecificationFile, 0o644)
+	if err != nil {
+		return "", fmt.Errorf("scaffold: %w", err)
+	}
+
+	// The write error is not checked here because Close reports it, together
+	// with any failure to clean up the temp sibling afterwards. Close is the
+	// only call that can report the rename, so it is the only error path.
+	_, _ = w.WriteString(newSpec)
+
+	if err := w.Close(); err != nil {
 		return "", fmt.Errorf("scaffold: %w", err)
 	}
 

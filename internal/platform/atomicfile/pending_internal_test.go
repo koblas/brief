@@ -19,8 +19,8 @@ import (
 // This is white-box by necessity — there is no portable way to make a write
 // to an open, valid descriptor fail from outside the package — and it is the
 // control for the claim in Create's doc comment that an ignored Write error
-// still cannot publish a truncated file. WriteFile depends on that claim: it
-// returns only Close's error.
+// still cannot publish a truncated file. Every call site depends on that
+// claim: each checks only Close.
 func Test_close_reports_a_failed_write_and_refuses_to_commit(t *testing.T) {
 	dir := t.TempDir()
 	root, err := os.OpenRoot(dir)
@@ -49,6 +49,38 @@ func Test_close_reports_a_failed_write_and_refuses_to_commit(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, "old", string(got), "a failed write must not be committed over the target")
 	assert.NoFileExists(t, filepath.Join(dir, ".target.txt.brief-tmp"))
+}
+
+// Test_close_reports_a_failed_WriteString_and_refuses_to_commit is the
+// control that WriteString shares Write's sticky-failure path rather than
+// bypassing it. Without it, WriteString could fail silently and Close would
+// still commit — and every caller that writes a string would be exposed.
+func Test_close_reports_a_failed_WriteString_and_refuses_to_commit(t *testing.T) {
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = root.Close() })
+
+	target := filepath.Join(dir, "target.txt")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o600))
+
+	w, createErr := Create(root, "target.txt", 0o644)
+	require.NoError(t, createErr)
+	require.NoError(t, w.file.Close())
+
+	_, writeErr := w.WriteString("new")
+	require.Error(t, writeErr)
+
+	closeErr := w.Close()
+
+	require.Error(t, closeErr)
+	require.ErrorIs(t, closeErr, writeErr)
+	assert.Contains(t, closeErr.Error(), "target.txt not replaced")
+
+	got, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, "old", string(got))
 }
 
 // Test_close_reports_a_leftover_temp_file_it_could_not_remove proves the
