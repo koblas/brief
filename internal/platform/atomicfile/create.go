@@ -33,8 +33,10 @@ var _ io.WriteCloser = (*PendingFile)(nil)
 // should prefer WriteFile, which has no such window.
 //
 // Once a Write has failed, Close does not commit: it removes the temp
-// sibling and reports that first write error, so a caller that ignores
-// Write's return still cannot publish a truncated file. A second Close
+// sibling and reports that name was not replaced, wrapping that first write
+// error as the cause, so a caller that ignores Write's return still cannot
+// publish a truncated file and still learns the target is untouched. A
+// second Close
 // returns nil and changes nothing, so the deferred-Close safety net can sit
 // alongside an explicit Close whose error is checked.
 //
@@ -120,7 +122,15 @@ func (p *PendingFile) Write(b []byte) (int, error) {
 // fail too; the returned error joins all of them, because a temp sibling
 // that could not be removed contradicts this package's claim to leave none
 // behind and must not be hidden. Test the result with errors.Is against an
-// individual cause rather than comparing it directly.
+// individual cause rather than comparing it directly — unlike gzip.Writer
+// and tar.Writer, which replay a sticky write error verbatim, Close returns
+// a joined error and not the identical value.
+//
+// A Close that will not commit because an earlier Write failed reports that
+// as "<name> not replaced", wrapping the write error as the cause. Replaying
+// the write error verbatim, as the stdlib writers do, would leave the only
+// error WriteFile surfaces saying nothing about whether the target was
+// touched.
 //
 // A second Close returns nil without touching anything.
 func (p *PendingFile) Close() error {
@@ -133,7 +143,9 @@ func (p *PendingFile) Close() error {
 	closeErr := p.wrap(p.file.Close())
 
 	if p.writeErr != nil {
-		return errors.Join(p.writeErr, closeErr, p.removeTmp())
+		notReplaced := fmt.Errorf("atomicfile: %s not replaced: %w", p.name, p.writeErr)
+
+		return errors.Join(notReplaced, closeErr, p.removeTmp())
 	}
 
 	if closeErr != nil {

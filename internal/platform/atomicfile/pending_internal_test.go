@@ -42,6 +42,8 @@ func Test_close_reports_a_failed_write_and_refuses_to_commit(t *testing.T) {
 
 	require.Error(t, closeErr)
 	require.ErrorIs(t, closeErr, writeErr, "Close must report the first write failure")
+	assert.Contains(t, closeErr.Error(), "target.txt not replaced",
+		"Close must say it refused to commit, not merely echo the write error")
 
 	got, readErr := os.ReadFile(target)
 	require.NoError(t, readErr)
