@@ -56,6 +56,96 @@ func Test_prints_the_brief_and_writes_nothing_to_stderr(t *testing.T) {
 	assert.Contains(t, stdout.String(), "some decision")
 }
 
+// Test_prints_the_full_checklist_when_it_contains_a_nested_fence
+// reproduces the reviewer's read-path finding: markdown.Section's old
+// boolean fence toggle let a ``` line close an open ~~~ block, so the
+// "## Not a heading" line inside it was read as the real terminating
+// heading and everything after it — here "- [ ] real task" — was silently
+// dropped from brief start's output, with exit 0 and nothing on stderr.
+func Test_prints_the_full_checklist_when_it_contains_a_nested_fence(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Scenario\n\n" +
+		"the acceptance criteria\n\n" +
+		"## Implementation Plan\n\n" +
+		"~~~\n```\n## Not a heading\n~~~\n\n" +
+		"- [ ] real task\n\n" +
+		"## Handoff\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
+
+	state := "## Binding decisions\n\nsome decision\n\n" +
+		"## Left unbuilt\n\nsomething left\n\n" +
+		"## Traps\n\na trap\n\n" +
+		"## Open debts\n\na debt\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.Contains(t, stdout.String(), "real task")
+}
+
+// Test_prints_the_brief_from_a_CRLF_step_file reproduces the reviewer's
+// R10 finding: under core.autocrlf=true, strings.Split(body, "\n") leaves
+// a trailing "\r" on every heading line, and the old equality check
+// right-trimmed only " \t", so no heading — not the title, not the
+// acceptance criteria, not the checklist, not one of the four state
+// sections — was ever found. brief start used to print only the bare
+// "<id> — <done> done, <open> open" line: 47 bytes, exit 0, nothing on
+// stderr, none of R10's required sections. The frontmatter delimiter
+// itself stays LF here — YAML frontmatter's own CRLF tolerance is
+// stepfile.ParseFrontmatter's contract, not named by this finding, and
+// stepSkeleton always writes it with a literal "\n".
+func Test_prints_the_brief_from_a_CRLF_step_file(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\r\n\r\n" +
+		"## Scenario\r\n\r\n" +
+		"the acceptance criteria\r\n\r\n" +
+		"## Implementation Plan\r\n\r\n" +
+		"- [ ] do the thing\r\n\r\n" +
+		"## Handoff\r\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
+
+	state := "## Binding decisions\r\n\r\nsome decision\r\n\r\n" +
+		"## Left unbuilt\r\n\r\nsomething left\r\n\r\n" +
+		"## Traps\r\n\r\na trap\r\n\r\n" +
+		"## Open debts\r\n\r\na debt\r\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.Contains(t, stdout.String(), "SCENARIO-01 Demo step")
+	assert.Contains(t, stdout.String(), "the acceptance criteria")
+	assert.Contains(t, stdout.String(), "do the thing")
+	assert.Contains(t, stdout.String(), "some decision")
+	assert.Contains(t, stdout.String(), "something left")
+	assert.Contains(t, stdout.String(), "a trap")
+	assert.Contains(t, stdout.String(), "a debt")
+}
+
 func Test_returns_a_usage_error_when_no_feature_is_given_to_start(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -97,7 +187,7 @@ func Test_prints_the_start_usage_for_help(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
-	assert.NotEmpty(t, stdout.String())
+	assert.Contains(t, stdout.String(), "brief start reads; it never writes.")
 }
 
 func Test_returns_an_error_for_an_unknown_feature_on_start(t *testing.T) {

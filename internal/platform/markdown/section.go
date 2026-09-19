@@ -10,8 +10,70 @@ import (
 var headingRe = regexp.MustCompile(`^(#{1,6})(\s|$)`)
 
 // fenceRe matches a fenced-code-block delimiter: a run of three or more
-// backticks or tildes at the start of the line.
+// backticks or tildes, once up to three leading spaces have been stripped
+// per CommonMark.
 var fenceRe = regexp.MustCompile("^(`{3,}|~{3,})")
+
+// trimEOL trims trailing spaces, tabs and a carriage return from s, so a
+// heading or fence delimiter line matches correctly even when body was
+// split on "\n" alone and a CRLF line ending left a trailing "\r"
+// attached to it.
+func trimEOL(s string) string {
+	return strings.TrimRight(s, " \t\r")
+}
+
+// fenceDelim reports the fence character and run length line opens or
+// closes, tolerating up to three leading spaces per CommonMark — the same
+// tolerance headingLevelOf applies, so an indented fence and an indented
+// heading are never treated inconsistently. The third return is false
+// when line is not a fence delimiter.
+func fenceDelim(line string) (byte, int, bool) {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > 3 {
+		return 0, 0, false
+	}
+
+	m := fenceRe.FindString(trimEOL(trimmed))
+	if m == "" {
+		return 0, 0, false
+	}
+
+	return m[0], len(m), true
+}
+
+// fenceState tracks whether a markdown scanner is inside a fenced code
+// block, together with the opening delimiter's character and run length.
+// Per CommonMark §4.5, a fence is closed only by a line whose delimiter
+// uses the same character and is at least as long as the one that opened
+// it — a ``` line never closes a ~~~ block, and a shorter run of the same
+// character never closes a longer one.
+type fenceState struct {
+	open bool
+	ch   byte
+	run  int
+}
+
+// step updates state for line and reports whether line is itself a fence
+// delimiter — a line the caller must never test as a heading, whether it
+// opens a fence, closes one, or is fence-shaped content that does not
+// close the currently open fence.
+func (f *fenceState) step(line string) bool {
+	ch, run, ok := fenceDelim(line)
+	if !ok {
+		return false
+	}
+
+	if !f.open {
+		f.open, f.ch, f.run = true, ch, run
+		return true
+	}
+
+	if ch == f.ch && run >= f.run {
+		f.open = false
+	}
+
+	return true
+}
 
 // Section returns the body under the first line in body that equals
 // heading after right-trimming, excluding the heading line itself. The
@@ -54,17 +116,17 @@ func SectionRange(body, heading string) (int, int, bool) {
 	}
 
 	sectionEnd := len(lines)
-	inFence := false
+
+	var fence fenceState
 
 	for i := headingIdx + 1; i < len(lines); i++ {
 		line := lines[i]
 
-		if fenceRe.MatchString(strings.TrimRight(line, " \t")) {
-			inFence = !inFence
+		if fence.step(line) {
 			continue
 		}
 
-		if inFence {
+		if fence.open {
 			continue
 		}
 
@@ -105,7 +167,7 @@ func lineOffsets(lines []string) []int {
 func Title(body string) (string, bool) {
 	for _, line := range lines(body) {
 		if headingLevelOf(line) == 1 {
-			return strings.TrimSpace(strings.TrimPrefix(strings.TrimRight(line, " \t"), "#")), true
+			return strings.TrimSpace(strings.TrimPrefix(trimEOL(line), "#")), true
 		}
 	}
 
@@ -118,15 +180,14 @@ func Title(body string) (string, bool) {
 func lines(body string) []string {
 	var out []string
 
-	inFence := false
+	var fence fenceState
 
 	for line := range strings.SplitSeq(body, "\n") {
-		if fenceRe.MatchString(strings.TrimRight(line, " \t")) {
-			inFence = !inFence
+		if fence.step(line) {
 			continue
 		}
 
-		if inFence {
+		if fence.open {
 			continue
 		}
 
@@ -138,21 +199,20 @@ func lines(body string) []string {
 
 // findHeading returns the index and heading level of the first line in
 // lines, outside any fenced code block, that equals heading after
-// right-trimming. It returns (-1, 0) when no such line exists.
+// trimming trailing " \t\r". It returns (-1, 0) when no such line exists.
 func findHeading(lines []string, heading string) (int, int) {
-	inFence := false
+	var fence fenceState
 
 	for i, line := range lines {
-		if fenceRe.MatchString(strings.TrimRight(line, " \t")) {
-			inFence = !inFence
+		if fence.step(line) {
 			continue
 		}
 
-		if inFence {
+		if fence.open {
 			continue
 		}
 
-		if strings.TrimRight(line, " \t") == heading {
+		if trimEOL(line) == heading {
 			return i, headingLevelOf(line)
 		}
 	}
@@ -170,7 +230,7 @@ func headingLevelOf(line string) int {
 		return 0
 	}
 
-	m := headingRe.FindStringSubmatch(trimmed)
+	m := headingRe.FindStringSubmatch(trimEOL(trimmed))
 	if m == nil {
 		return 0
 	}

@@ -146,14 +146,14 @@ func stepFromEntry(e stepEntry, cfg config.Config) *Step {
 	body := string(e.rest)
 
 	title, _ := markdown.Title(body)
-	acceptance, _ := markdown.Section(body, cfg.AcceptanceHeading)
-	checklist, _ := markdown.Section(body, cfg.ChecklistHeading)
+	acceptance, acceptanceFound := markdown.Section(body, cfg.AcceptanceHeading)
+	checklist, checklistFound := markdown.Section(body, cfg.ChecklistHeading)
 
 	return &Step{
 		ID:         e.fm.ID,
 		Title:      title,
-		Acceptance: Section{Heading: cfg.AcceptanceHeading, Body: acceptance},
-		Checklist:  Section{Heading: cfg.ChecklistHeading, Body: checklist},
+		Acceptance: Section{Heading: cfg.AcceptanceHeading, Body: acceptance, Found: acceptanceFound},
+		Checklist:  Section{Heading: cfg.ChecklistHeading, Body: checklist, Found: checklistFound},
 	}
 }
 
@@ -165,8 +165,8 @@ func stateSections(body string, cfg config.Config) []Section {
 	sections := make([]Section, 0, len(headings))
 
 	for _, heading := range headings {
-		text, _ := markdown.Section(body, heading)
-		sections = append(sections, Section{Heading: heading, Body: text})
+		text, found := markdown.Section(body, heading)
+		sections = append(sections, Section{Heading: heading, Body: text, Found: found})
 	}
 
 	return sections

@@ -163,9 +163,50 @@ func Test_returns_the_next_step_s_acceptance_criteria_and_checklist(t *testing.T
 	assert.Equal(t, cfg.AcceptanceHeading, brief.Step.Acceptance.Heading)
 	assert.Contains(t, brief.Step.Acceptance.Body, "ACCEPTANCE-03")
 	assert.Contains(t, brief.Step.Acceptance.Body, "# ACCEPTANCE-03 comment")
+	assert.True(t, brief.Step.Acceptance.Found)
 	assert.Equal(t, cfg.ChecklistHeading, brief.Step.Checklist.Heading)
 	assert.Contains(t, brief.Step.Checklist.Body, "CHECKLIST-03-A")
 	assert.Contains(t, brief.Step.Checklist.Body, "CHECKLIST-03-B")
+	assert.True(t, brief.Step.Checklist.Found)
+}
+
+// Test_a_section_distinguishes_present_but_empty_from_not_found_at_all
+// closes the reviewer's finding: stepFromEntry and stateSections used to
+// discard markdown.Section's ok, so a state file missing a configured
+// heading entirely rendered the same empty Body as a heading present with
+// nothing under it. Section.Found now carries that distinction, which the
+// CRLF fix depends on being observable rather than silently collapsed.
+func Test_a_section_distinguishes_present_but_empty_from_not_found_at_all(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"),
+		[]byte(fixtureStep(cfg, "STEP-01", "open", "STEP-01", "ACCEPTANCE-01", nil, "")), 0o600))
+
+	notes := cfg.StateHeadings.BindingDecisions + "\n\n" +
+		cfg.StateHeadings.LeftUnbuilt + "\n\n" +
+		cfg.StateHeadings.Traps + "\n\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(notes), 0o600))
+
+	spec := "# demo\n\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	brief, err := srv.Start(t.Context(), "demo")
+
+	require.NoError(t, err)
+	require.Len(t, brief.Inherited, 4)
+
+	// BindingDecisions' heading is present with nothing under it.
+	assert.True(t, brief.Inherited[0].Found)
+	assert.Empty(t, brief.Inherited[0].Body)
+
+	// OpenDebts' heading is absent from notes entirely.
+	assert.False(t, brief.Inherited[3].Found)
+	assert.Empty(t, brief.Inherited[3].Body)
 }
 
 func Test_carries_every_state_file_section_as_inherited_context(t *testing.T) {

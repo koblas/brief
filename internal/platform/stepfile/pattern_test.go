@@ -43,6 +43,37 @@ func Test_Compile_refuses_a_pattern_with_a_path_separator(t *testing.T) {
 	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
 }
 
+// Test_Compile_refuses_an_unpadded_width_verb reproduces the reviewer's
+// finding: "%3d" renders Name(1) as "SCENARIO-  1.md" (space-padded), but
+// Number can never read a space back out of the verb's place, since it
+// only accepts digits there. A pattern Compile accepts but Number can
+// never recognize its own Name output for makes a feature's second step
+// unaddressable.
+func Test_Compile_refuses_an_unpadded_width_verb(t *testing.T) {
+	_, err := stepfile.Compile("SCENARIO-%3d.md")
+
+	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
+}
+
+// Test_Compile_refuses_a_left_justified_verb is the "%-4d" half of the
+// same finding: the "-" flag left-justifies with spaces on the right,
+// which Number's digits-only scan can never read back either.
+func Test_Compile_refuses_a_left_justified_verb(t *testing.T) {
+	_, err := stepfile.Compile("SCENARIO-%-4d.md")
+
+	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
+}
+
+// Test_Compile_accepts_a_zero_padded_width_verb is the positive control
+// for the two refusals above: "%02d" pads with zeros, which Number reads
+// back as ordinary digits, so Compile must keep accepting it.
+func Test_Compile_accepts_a_zero_padded_width_verb(t *testing.T) {
+	p, err := stepfile.Compile("SCENARIO-%02d.md")
+
+	require.NoError(t, err)
+	require.Equal(t, "SCENARIO-03.md", p.Name(3))
+}
+
 func Test_Name_renders_the_step_number_through_the_pattern(t *testing.T) {
 	p, err := stepfile.Compile("SCENARIO-%02d.md")
 	require.NoError(t, err)

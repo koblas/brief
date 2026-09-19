@@ -156,9 +156,7 @@ func Test_refuses_a_feature_with_a_missing_specification(t *testing.T) {
 	entries, readErr := os.ReadDir(featureDir)
 	require.NoError(t, readErr)
 
-	for _, e := range entries {
-		assert.NotContains(t, e.Name(), "STEP-")
-	}
+	assert.ElementsMatch(t, []string{cfg.StateFile}, namesOf(entries))
 }
 
 func Test_refuses_a_specification_with_no_progress_heading_and_writes_nothing(t *testing.T) {
@@ -185,9 +183,7 @@ func Test_refuses_a_specification_with_no_progress_heading_and_writes_nothing(t 
 	entries, readErr := os.ReadDir(featureDir)
 	require.NoError(t, readErr)
 
-	for _, e := range entries {
-		assert.NotContains(t, e.Name(), "STEP-")
-	}
+	assert.ElementsMatch(t, []string{cfg.SpecificationFile, cfg.StateFile}, namesOf(entries))
 }
 
 func Test_refuses_an_invalid_step_file_pattern_and_writes_nothing(t *testing.T) {

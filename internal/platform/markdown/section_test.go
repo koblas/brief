@@ -152,6 +152,64 @@ func Test_SectionRange_does_not_treat_a_fenced_heading_line_as_the_anchor(t *tes
 	assert.Equal(t, "\nreal body\n", body[start:end])
 }
 
+// Test_SectionRange_a_backtick_fence_does_not_close_an_open_tilde_fence
+// reproduces the reviewer's finding directly: a boolean inFence toggle
+// closes a ~~~ block on any ``` run, so the "## Not a heading" line inside
+// it is read as the real terminating heading and the section is truncated
+// before "## Next".
+func Test_SectionRange_a_backtick_fence_does_not_close_an_open_tilde_fence(t *testing.T) {
+	body := "## Handoff\n\nTraps:\n\n~~~\n```\n## Not a heading\n~~~\n\n## Next\n\nafter\n"
+
+	start, end, ok := markdown.SectionRange(body, "## Handoff")
+
+	assert.True(t, ok)
+	assert.Equal(t, "\nTraps:\n\n~~~\n```\n## Not a heading\n~~~\n\n", body[start:end])
+	assert.True(t, strings.HasPrefix(body[end:], "## Next"))
+}
+
+// Test_SectionRange_a_shorter_fence_run_does_not_close_a_longer_opening_fence
+// mirrors SCENARIO-06's spliceHandoff decoy: a four-backtick fence
+// containing a three-backtick line must stay open across the shorter run,
+// per CommonMark's rule that only a run at least as long as the opener,
+// of the same character, closes a fence.
+func Test_SectionRange_a_shorter_fence_run_does_not_close_a_longer_opening_fence(t *testing.T) {
+	body := "## Handoff\n\n````\n```\nstill fenced\n````\n\n## Next\n\nafter\n"
+
+	start, end, ok := markdown.SectionRange(body, "## Handoff")
+
+	assert.True(t, ok)
+	assert.Equal(t, "\n````\n```\nstill fenced\n````\n\n", body[start:end])
+	assert.True(t, strings.HasPrefix(body[end:], "## Next"))
+}
+
+// Test_SectionRange_recognizes_a_fence_delimiter_indented_up_to_three_spaces
+// reproduces the reviewer's second defect: fenceRe anchored at column 0
+// treats an indented fence as ordinary content, so the "## not a heading"
+// line inside it — which headingLevelOf already tolerates up to three
+// leading spaces on — is read as the terminating heading.
+func Test_SectionRange_recognizes_a_fence_delimiter_indented_up_to_three_spaces(t *testing.T) {
+	body := "## Scenario\n\n  ```\n  ## not a heading\n  ```\n\n## Implementation Plan\n\nafter\n"
+
+	start, end, ok := markdown.SectionRange(body, "## Scenario")
+
+	assert.True(t, ok)
+	assert.Equal(t, "\n  ```\n  ## not a heading\n  ```\n\n", body[start:end])
+	assert.True(t, strings.HasPrefix(body[end:], "## Implementation Plan"))
+}
+
+// Test_SectionRange_finds_a_heading_line_that_ends_in_a_carriage_return
+// reproduces the CRLF finding: strings.Split(body, "\n") on a CRLF file
+// leaves a trailing "\r" on every line, and findHeading's equality check
+// right-trimmed only " \t" so it never matched the configured heading.
+func Test_SectionRange_finds_a_heading_line_that_ends_in_a_carriage_return(t *testing.T) {
+	body := "## Scenario\r\n\r\nfirst\r\n\r\n## Implementation Plan\r\n"
+
+	start, end, ok := markdown.SectionRange(body, "## Scenario")
+
+	assert.True(t, ok)
+	assert.Contains(t, body[start:end], "first")
+}
+
 func Test_SectionRange_returns_false_for_a_heading_not_present(t *testing.T) {
 	body := "## Scenario\n\nbody\n"
 

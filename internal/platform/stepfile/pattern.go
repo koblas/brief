@@ -13,8 +13,13 @@ import (
 // configuration value cannot be used to name or recognize step files.
 var ErrInvalidPattern = errors.New("invalid step-file pattern")
 
-// verbRe matches a single-integer fmt verb: %d, %02d, %3d, %-4d.
-var verbRe = regexp.MustCompile(`%[0-9-]*d`)
+// verbRe matches a single-integer fmt verb, restricted to the forms
+// Number can read back: %d and a zero-padded width, %0Nd. %3d pads with
+// spaces and %-4d left-justifies with spaces on the right — Number's
+// digits-only scan of the verb's place can never recognize either
+// rendering, so a pattern using them would create a filename Compile
+// accepts but no round trip can ever find again.
+var verbRe = regexp.MustCompile(`%(0[0-9]+)?d`)
 
 // Pattern is a compiled step-file-pattern: a single-integer fmt pattern
 // split around its one integer verb, so a filename can be checked against
@@ -32,7 +37,11 @@ type Pattern struct {
 //   - is empty, or is "." or "..";
 //   - contains a path separator ("/" or "\"), which would name a
 //     subdirectory instead of a flat file in the feature directory;
-//   - does not contain exactly one integer verb matching %[0-9-]*d;
+//   - does not contain exactly one integer verb matching %d or %0Nd —
+//     %3d and %-4d are rejected even though fmt accepts them, because
+//     they pad with spaces (respectively on the left and the right),
+//     and Number's digits-only scan can never read a space back out of
+//     the verb's place;
 //   - contains any other "%", including %s, %v or the escape %%, which
 //     would make the literal prefix and suffix ambiguous.
 func Compile(pattern string) (Pattern, error) {

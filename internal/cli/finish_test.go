@@ -249,6 +249,46 @@ func Test_returns_an_error_when_the_handoff_path_is_unreadable(t *testing.T) {
 	assert.False(t, strings.HasSuffix(line, "(no files changed)"), "line %q must not carry the write-refusal tail", line)
 }
 
+// Test_finishes_a_step_whose_handoff_heading_ends_in_a_carriage_return
+// reproduces the R14a half of the reviewer's CRLF finding: a step file
+// whose "## Handoff" line carries a trailing "\r" visibly has the anchor,
+// but the old right-trim (" \t" only) never matched it, so finish refused
+// with "no \"## Handoff\" heading found" against a file that plainly has
+// one. The frontmatter delimiter stays LF — stepfile.ParseFrontmatter's
+// own CRLF tolerance is not this finding's scope.
+func Test_finishes_a_step_whose_handoff_heading_ends_in_a_carriage_return(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\r\n\r\n" +
+		"## Implementation Plan\r\n\r\n" +
+		"- [x] do the thing\r\n\r\n" +
+		"## Handoff\r\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
+
+	state := "## Binding decisions\n\nsome decision\n\n## Left unbuilt\n\nsomething left\n\n## Traps\n\na trap\n\n## Open debts\n\na debt\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", state)
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", stderr.String())
+}
+
 func Test_returns_an_error_for_an_unknown_feature_on_finish(t *testing.T) {
 	wd := t.TempDir()
 	handoffPath := writeInput(t, "handoff.md", "h")

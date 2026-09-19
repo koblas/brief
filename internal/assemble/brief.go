@@ -11,14 +11,17 @@ type Step struct {
 	Checklist  Section
 }
 
-// Section is one section of the feature's state file: the heading text
-// configured for it, and its body. Body is empty when the state file has
-// no matching heading; the section is still present so a caller — the
-// text renderer or a JSON encoder — gets a stable set of keys regardless
-// of what the state file happens to carry.
+// Section is one section of a step or state file: the heading text
+// configured for it, its body, and whether that heading was found at all.
+// Body is empty both when the heading is present with nothing under it
+// and when the heading is missing entirely — Found is what distinguishes
+// the two; a caller that only renders non-empty bodies (SCENARIO-12's
+// text renderer) can ignore it, but a caller checking for a required
+// heading (SCENARIO-14's) cannot.
 type Section struct {
 	Heading string
 	Body    string
+	Found   bool
 }
 
 // Brief is everything Start assembles for one feature: the done/open

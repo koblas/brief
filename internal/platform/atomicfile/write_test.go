@@ -76,6 +76,25 @@ func Test_keeps_the_existing_files_permissions_when_it_replaces_it(t *testing.T)
 	assert.Equal(t, os.FileMode(0o400), info.Mode().Perm())
 }
 
+// Test_overwrites_a_stale_temp_file_left_by_a_crashed_write proves the
+// contract write.go documents: a temp sibling left behind by a crashed
+// write must be overwritten by the next attempt rather than wedging every
+// future write, which is why WriteFile opens the temp O_CREATE|O_TRUNC
+// rather than O_EXCL. Without this test the contract was documented but
+// never exercised — flipping to O_EXCL left all other tests green.
+func Test_overwrites_a_stale_temp_file_left_by_a_crashed_write(t *testing.T) {
+	root, dir := openRoot(t)
+	stale := filepath.Join(dir, ".target.txt.brief-tmp")
+	require.NoError(t, os.WriteFile(stale, []byte("garbage left by a crashed write"), 0o600))
+
+	err := atomicfile.WriteFile(root, "target.txt", []byte("new"), 0o644)
+
+	require.NoError(t, err)
+	got, readErr := os.ReadFile(filepath.Join(dir, "target.txt"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "new", string(got))
+}
+
 func Test_leaves_the_target_unchanged_and_no_temp_file_when_the_rename_cannot_land(t *testing.T) {
 	root, dir := openRoot(t)
 	targetDir := filepath.Join(dir, "target.txt")

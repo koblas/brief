@@ -346,6 +346,53 @@ func Test_finishing_with_a_trailing_section_after_the_handoff_reproduces_the_fil
 	assert.Contains(t, string(secondWrite), "## Notes\n\nsome notes")
 }
 
+// Test_finishing_twice_with_a_nested_fenced_handoff_preserves_a_trailing_section
+// reproduces the reviewer's finding directly: a handoff whose fenced block
+// (four backticks) contains a shorter fenced-looking line (three
+// backticks) used to make markdown.SectionRange's boolean fence toggle
+// think the outer fence stayed open past end of file, so re-finishing with
+// the same handoff and state silently dropped every section after
+// "## Handoff", including "## Appendix" here. Finish #1 splices against a
+// step file that does not yet hold that nested-fence shape; only Finish #2,
+// re-parsing what Finish #1 just wrote, exercises the bug.
+func Test_finishing_twice_with_a_nested_fenced_handoff_preserves_a_trailing_section(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "widgets")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	step := "---\nid: STEP-02\nstatus: open\ndepends-on: []\n---\n\n" +
+		"# STEP-02\n\n" + cfg.ChecklistHeading + "\n\n- [x] done\n\n" +
+		cfg.HandoffHeading + "\n\n## Appendix\n\nDO NOT LOSE ME\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-02.md"), []byte(step), 0o600))
+
+	spec := "# widgets\n\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-02\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
+
+	state := "## Decisions Fixture\n\n## Left Fixture\n\n## Gotchas\n\n## Debts Fixture\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(state), 0o600))
+
+	srv := scaffold.NewServer(cfg, root)
+	handoff := []byte("````\n```\n````")
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", handoff, []byte(state))
+	require.NoError(t, err)
+
+	firstWrite, readErr := os.ReadFile(filepath.Join(featureDir, "STEP-02.md"))
+	require.NoError(t, readErr)
+	require.Contains(t, string(firstWrite), "## Appendix\n\nDO NOT LOSE ME",
+		"finish #1 must not itself drop the trailing section")
+
+	err = srv.Finish(context.Background(), "widgets", "STEP-02", handoff, []byte(state))
+	require.NoError(t, err)
+
+	secondWrite, readErr := os.ReadFile(filepath.Join(featureDir, "STEP-02.md"))
+	require.NoError(t, readErr)
+
+	assert.Equal(t, string(firstWrite), string(secondWrite))
+	assert.Contains(t, string(secondWrite), "## Appendix\n\nDO NOT LOSE ME")
+}
+
 func Test_ticks_the_progress_entry_for_the_finished_step(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
@@ -419,9 +466,10 @@ func Test_finish_leaves_no_temp_file_in_the_feature_directory(t *testing.T) {
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
-	extra := unexpectedFiles(t, fx.featureDir(), fixtureFileNames(fx.cfg))
+	entries, readErr := os.ReadDir(fx.featureDir())
+	require.NoError(t, readErr)
 
-	assert.Empty(t, extra)
+	assert.ElementsMatch(t, fixtureFileNames(fx.cfg), namesOf(entries))
 }
 
 func Test_the_temp_file_sweep_sees_a_temp_file(t *testing.T) {
