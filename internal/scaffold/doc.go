@@ -19,7 +19,9 @@
 // a crash between them always converges on a retry; see the doc comment on
 // Finish for why the reverse order does not. A write failure after
 // validation is returned as-is, never as a *RefusalError, since nothing
-// changed on disk is not true past that point.
+// changed on disk is not true past that point. Finishing an
+// already-finished step with the same handoff and state is a true no-op:
+// nothing is written and every file's modification time is preserved.
 //
 // A caller-facing refusal is a *RefusalError: a path, what was wrong with
 // it, and how to fix it, wrapping one of ErrNoSuchFeature,

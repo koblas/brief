@@ -762,7 +762,7 @@ Pre-crossover — built by hand:
 - [x] SCENARIO-03: New step scaffolds the next step file and its progress entry
 - [x] SCENARIO-04: A start brief carries everything a step needs
 - [x] SCENARIO-05: Finishing writes the handoff and replaces the state, then marks done
-- [ ] SCENARIO-06: Finishing a finished step with the same inputs changes nothing
+- [x] SCENARIO-06: Finishing a finished step with the same inputs changes nothing
 
 Crossover — this document becomes `brief`'s own feature directory.
 

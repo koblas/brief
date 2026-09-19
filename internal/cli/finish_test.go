@@ -72,6 +72,33 @@ func Test_finishes_the_step_and_prints_nothing_to_stdout(t *testing.T) {
 	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", stderr.String())
 }
 
+// Test_finishing_an_already_finished_step_a_second_time_prints_the_same_line_and_succeeds
+// pins the user-visible contract of a no-op re-finish: exit 0, nothing on
+// stdout (reserved for R9 findings), the same state-describing stderr
+// line printed by a writing run. That indistinguishability is deliberate —
+// before the scaffold package's identity check existed, an overwriting
+// second finish also returned nil and printed this exact line, so this
+// test cannot redden under any of the identity check's conjuncts; it is
+// not the test that proves the no-op, only the one that proves the
+// no-op is invisible at the command surface.
+func Test_finishing_an_already_finished_step_a_second_time_prints_the_same_line_and_succeeds(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
+	argv := []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}
+	var firstStdout, firstStderr bytes.Buffer
+
+	firstErr := cli.Run(t.Context(), wd, argv, nil, &firstStdout, &firstStderr)
+	require.NoError(t, firstErr)
+
+	var secondStdout, secondStderr bytes.Buffer
+	secondErr := cli.Run(t.Context(), wd, argv, nil, &secondStdout, &secondStderr)
+
+	require.NoError(t, secondErr)
+	assert.Empty(t, secondStdout.String())
+	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", secondStderr.String())
+}
+
 func Test_replaces_the_state_file_on_disk_when_finishing(t *testing.T) {
 	wd := newFinishCLIFixture(t)
 	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")

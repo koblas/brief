@@ -47,6 +47,20 @@ import (
 // after validation is returned as-is, never wrapped in *RefusalError —
 // the template's "(no files changed)" tail would misreport a
 // half-applied write.
+//
+// A re-finish of a step whose frontmatter already says done is a true
+// no-op — Finish writes nothing and mtime on all three files is
+// preserved — when the spliced step body, the state bytes and the
+// spec-with-tick all already equal what is on disk; any single
+// divergence writes as normal. The step-body half of that comparison is
+// taken before "status:" is set to "done", excluding the status line
+// itself: a comparison taken after would only ever hold on an
+// already-done step, making the frontmatter gate unreachable. The spec
+// half is required even though the frontmatter gate alone looks
+// sufficient: after a crash between the step-file write and the
+// specification write, frontmatter already says done and the handoff
+// and state both match, so without the spec conjunct the progress
+// checkbox would stay stale forever.
 func (s *Server) Finish(_ context.Context, feature, step string, handoff, state []byte) error {
 	pattern, err := stepfile.Compile(s.cfg.StepFilePattern)
 	if err != nil {
@@ -90,7 +104,7 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		return fmt.Errorf("scaffold: %w", err)
 	}
 
-	_, rest, err := stepfile.ParseFrontmatter(stepBody)
+	fm, rest, err := stepfile.ParseFrontmatter(stepBody)
 	if err != nil {
 		return &RefusalError{
 			Path:    stepPath,
@@ -140,16 +154,28 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		}
 	}
 
+	stateBytes, err := root.ReadFile(s.cfg.StateFile)
+	if err != nil {
+		return fmt.Errorf("scaffold: %w", err)
+	}
+
 	splicedRest, ok := spliceHandoff(rest, s.cfg.HandoffHeading, handoff)
 	if !ok {
 		return fmt.Errorf("scaffold: %w", ErrMalformedFeature)
 	}
 
-	newStepBody := make([]byte, 0, frontLen+len(splicedRest))
-	newStepBody = append(newStepBody, stepBody[:frontLen]...)
-	newStepBody = append(newStepBody, splicedRest...)
+	splicedStepBody := make([]byte, 0, frontLen+len(splicedRest))
+	splicedStepBody = append(splicedStepBody, stepBody[:frontLen]...)
+	splicedStepBody = append(splicedStepBody, splicedRest...)
 
-	newStepBody, err = stepfile.SetStatus(newStepBody, "done")
+	// Taken before SetStatus, so the status: line never enters the
+	// comparison — otherwise a done step would be the only state in which
+	// identity could hold, and the fm.Done() gate below would be dead code.
+	identical := string(splicedStepBody) == string(stepBody) &&
+		string(state) == string(stateBytes) &&
+		newSpec == string(specBytes)
+
+	newStepBody, err := stepfile.SetStatus(splicedStepBody, "done")
 	if err != nil {
 		return &RefusalError{
 			Path:    stepPath,
@@ -157,6 +183,10 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 			Fix:     `add a "status:" key to the step file's frontmatter`,
 			Err:     err,
 		}
+	}
+
+	if fm.Done() && identical {
+		return nil
 	}
 
 	if err := atomicfile.WriteFile(root, s.cfg.StateFile, state, 0o644); err != nil {
