@@ -746,8 +746,14 @@ testify — not a candidate to evaluate.
 **The constraint that rules out a library.** SCENARIO-06's byte-identity on re-finish and
 SCENARIO-17/18/19's byte-identity on refusal disqualify any markdown library that parses to an
 AST and re-renders the document — re-rendering is not lossless for spacing, list markers or
-line endings. The write path is a surgical text splice on known section boundaries. This is
-derivable from the spec, not an architect's preference.
+line endings. That much still holds.
+
+**Superseded.** This brief originally concluded "the write path is a surgical text splice on
+known section boundaries", and called that derivable from the spec rather than a preference.
+`## Decisions taken` item 0 reverses it: the handoff is a whole-file write and nothing is
+spliced. The splice was the derivation that cost five review rounds, which is worth leaving
+visible rather than editing out — a conclusion can be sound about libraries and wrong about
+the write path in the same paragraph. The rest of this brief is still binding.
 
 **New dependencies, named because there are none today.** `gopkg.in/yaml.v3` for frontmatter
 (R3) and for the config file. Markdown body handling is hand-rolled heading scanning, per the
