@@ -40,9 +40,11 @@ conventions of the repository it is pointed at.
 
 - A **feature** is a directory holding one specification, an ordered set of steps, and a state
   file.
-- A **step** is a file with an id, a checklist, and a handoff block recording what it leaves
-  behind.
-- **Progress** is a list in the specification. A step is done when its handoff is recorded.
+- A **step** is a file with an id and a checklist, paired with a **handoff file** recording
+  what it leaves behind.
+- **Progress** is a list in the specification. A step is done when its handoff is recorded —
+  and because the handoff is its own file, "recorded" means *that file exists*. Doneness and
+  handoff-presence cannot disagree, and there is no "present but empty" state to disambiguate.
 
 Names are configured; existence is not. A repository whose work does not decompose this way —
 no per-step files, no carried state — is out of scope rather than degraded into.
@@ -73,8 +75,8 @@ no per-step files, no carried state — is out of scope rather than degraded int
 - **R2 — Names are configuration; structure is not.** Heading text, file patterns, caps and
   the state schema come from config with shipped defaults, so pointing `brief` at an existing
   repository requires no edits to it. The model above is required: a feature missing its
-  progress list, step files, checklist, handoff anchor or state file is malformed, not
-  degraded. Conventions marked optional degrade instead — the command succeeds and names the
+  progress list, step files, checklist or state file is malformed, not degraded. A missing
+  handoff file is not malformed — it is how an unfinished step looks. Conventions marked optional degrade instead — the command succeeds and names the
   shortfall.
 - **R3 — Machine fields live in frontmatter; prose stays prose.** Step id, dependencies and
   status are parsed from YAML, never inferred from English. Heading drift can break a prose
@@ -89,9 +91,9 @@ no per-step files, no carried state — is out of scope rather than degraded int
 - **R5 — `start` is the interface.** One command returns everything needed to begin a step.
   Other read commands serve narrower questions and debugging.
 - **R6 — Fallback lives in the tool, not in prompt prose.** With no state file, `state get`
-  synthesizes from upstream steps' handoff blocks in dependency order, within the R13 budget.
-  Its first line says the result is synthesized and from which files. A step file with no
-  handoff anchor is named as skipped — never silently read whole, never treated as "nothing to
+  synthesizes from upstream steps' handoff files in dependency order, within the R13 budget.
+  Its first line says the result is synthesized and from which files. A step with no handoff
+  file is named as skipped — never silently read whole, never treated as "nothing to
   inherit".
 
 ### Writing
@@ -103,9 +105,11 @@ no per-step files, no carried state — is out of scope rather than degraded int
   requiring that judgment are out of reach by construction, and this specification says so
   rather than pretending otherwise.
 - **R8 — A step closes by recording what it leaves behind, and the state file is rewritten
-  rather than grown.** `finish` takes two inputs: the step's handoff block, and the complete
+  rather than grown.** `finish` takes two inputs: the step's handoff, and the complete
   replacement body for the state file. It validates both, writes both atomically, and only
-  then marks the step done. The tool never concatenates a handoff onto the state file — an
+  then marks the step done. **Both are whole-file writes.** Neither is spliced into an
+  existing document, because a boundary inferred from prose is a boundary that can be wrong,
+  and a wrong boundary on a destructive write loses data. See R21. The tool never concatenates a handoff onto the state file — an
   append-only state file is the handoffs again with extra steps, which is the cost this tool
   exists to remove.
 - **R9 — Deletion is accounted for, not prevented.** `finish` diffs the outgoing state body
@@ -132,6 +136,14 @@ no per-step files, no carried state — is out of scope rather than degraded int
   temp file in the same directory, then rename — same directory because `os.Rename` is atomic
   only within one filesystem. A refusal names the first thing wrong. A completed write leaves
   no temp file behind.
+- **R21 — Machine-critical boundaries are never inferred from prose, and no write is
+  destructive on an inferred boundary.** R3 already forbids inferring machine *fields* from
+  English; this extends it to machine *boundaries*. The handoff therefore lives in its own
+  file rather than as a section spliced into the step file: a whole-file write has no boundary
+  to compute and so no boundary to get wrong. Where an in-file write is unavoidable — the
+  progress checkbox, the frontmatter `status:` line — it must preserve everything outside the
+  span it edits, so that a mistaken span duplicates or misplaces content rather than deleting
+  it. Duplication is visible and recoverable; deletion is neither.
 - **R20 — One step per feature is open at a time; there is no concurrency machinery.**
   Settles open question 1. `finish` is a plain read-modify-write against the state file, and
   atomicity comes from R12's temp-file-plus-rename alone. No compare-and-swap, no lock file,
@@ -188,15 +200,15 @@ no per-step files, no carried state — is out of scope rather than degraded int
 | Command | Returns |
 | --- | --- |
 | `brief start <feature>` | Everything needed to begin the next step: id, title, acceptance criteria, checklist, inherited decisions, upstream constraints, known traps. `--json` for structured callers |
-| `brief finish <feature> <step> --handoff <path> --state <path>` | Takes the handoff block and the **complete** replacement state body as two required path flags (`-` reads stdin, permitted on at most one), validates both, writes both, reports dropped entries, marks the step done |
+| `brief finish <feature> <step> --handoff <path> --state <path>` | Takes the handoff body and the **complete** replacement state body as two required path flags (`-` reads stdin, permitted on at most one), validates both, writes both, reports dropped entries, marks the step done |
 | `brief new feature <name>` | Scaffolds a conforming feature: specification skeleton, empty progress list, state file. Structure only |
-| `brief new step <feature>` | Scaffolds the next step file with id, frontmatter, empty checklist and handoff anchor, and its progress entry |
+| `brief new step <feature>` | Scaffolds the next step file with id, frontmatter and an empty checklist, and its progress entry. It writes no handoff file — only `finish` does |
 | `brief status` | One line per feature: name, done/open, next step, blocked count |
 | `brief next <feature>` | The next step id and counts |
 | `brief show <feature> <heading>` | One section of the specification. `--list` gives headings with byte sizes |
 | `brief state get <feature>` | The state file, or the R6 synthesis |
 | `brief state set <feature>` | Replaces the state file. Escape hatch; `finish` is the normal path |
-| `brief handoff <feature> <step>` | The handoff block of one step file |
+| `brief handoff <feature> <step>` | The handoff file of one step |
 | `brief check [feature]` | Findings, one per line as `path:line: message` |
 | `brief roles` | Each position, the agent bound to it, whether that agent exists |
 | `brief init` / `brief uninstall` | Install or remove config and host integration |
@@ -220,9 +232,11 @@ in full.
 Cap ~80 lines. The *unowned debt* wording is load-bearing: it is the entry R9 must never let
 disappear unremarked.
 
-**Handoff block** — last section of every step file; three labelled groups (binding decisions,
-left unbuilt, traps); cap ~60 lines. It is the audit trail. The state file supersedes it for
-reading, not for the record.
+**Handoff file** — one per step, named by a configured pattern beside its step file; three
+labelled groups (binding decisions, left unbuilt, traps); cap ~60 lines. It is the audit
+trail. The state file supersedes it for reading, not for the record. It is written only by
+`finish`, so its absence is exactly "this step is not done" — there is no anchor to scaffold
+and no empty-versus-absent distinction to make.
 
 **Progress** — a checklist in the specification under one stable heading. Per-step checkboxes
 live in the step file.
@@ -236,8 +250,8 @@ The profile deliberately carries no instruction for *how* to distil. That is R7'
 
 One file at the repository root, resolved upward from the working directory:
 
-- Where feature directories live, and how step files are named.
-- Heading text for the progress list, the handoff block and each required state section.
+- Where feature directories live, and how step files and handoff files are named.
+- Heading text for the progress list and each required state section.
 - Caps: handoff length, state length, default output budget.
 - Which optional conventions this repository uses. The structural requirements above are not
   among them and cannot be switched off.
@@ -355,8 +369,9 @@ Feature: brief
   Scenario: SCENARIO-03 New step scaffolds the next step file and its progress entry  [orig: 03b]
     Given a conforming feature
     When I create a new step
-    Then the step file has an id, frontmatter, an empty checklist and a handoff anchor
+    Then the step file has an id, frontmatter and an empty checklist
     And its frontmatter carries an empty depends-on key
+    And no handoff file exists yet, because only finish writes one
     And a matching entry appears in the progress list
 
   Scenario: SCENARIO-04 A start brief carries everything a step needs  [orig: 01]
@@ -376,8 +391,9 @@ Feature: brief
   Scenario: SCENARIO-05 Finishing writes the handoff and replaces the state, then marks done  [orig: 04a]
     Given an open step whose checklist is complete
     And an existing state file carrying entries from earlier steps
-    When I finish it with a valid handoff block and a valid replacement state body
-    Then the handoff block of that step file holds what I supplied
+    When I finish it with a valid handoff and a valid replacement state body
+    Then the step's handoff file holds exactly what I supplied
+    And the step file itself is byte-identical apart from its status field
     And the state file holds exactly the replacement body, not the old body plus the handoff
     And the step is marked done in the progress list
     And no temp file remains in the feature directory
@@ -439,10 +455,12 @@ Feature: brief
     And one line on stderr says the feature is complete
 
   Scenario: SCENARIO-13 Start refuses a malformed feature rather than assembling half a brief  [orig: 03c]
-    Given a feature directory whose steps were created by hand without a handoff anchor
+    Given a feature directory whose specification is missing its progress list
     When I start that feature
-    Then the command refuses, names the missing anchor and the command that fixes it
+    Then the command refuses, names what is missing and the command that fixes it
     And no partial brief is returned
+    # A missing handoff file is deliberately NOT this scenario: under the model it means
+    # "not done", which is an ordinary state, not a malformed feature.
 
   Scenario: SCENARIO-14 Start degrades on a missing optional convention and says so  [orig: 03d]
     Given a feature missing only an optional convention
@@ -468,7 +486,7 @@ Feature: brief
 
   Scenario: SCENARIO-17 An over-cap handoff is refused and nothing lands  [orig: 06a]
     Given an open step whose checklist is complete
-    When I finish it with a handoff block over the configured cap
+    When I finish it with a handoff over the configured cap
     Then the refusal names the measured line count and the cap
     And both files are byte-identical
 
@@ -575,6 +593,34 @@ that figure goes into the decision.
 ## Decisions taken
 
 Settled at the scoping gate. Recorded with the reason so they are not re-litigated at review.
+
+0. **The handoff lives in its own file; nothing is spliced into the step file.** Decided after
+   implementation, against five rounds of evidence, and it reverses what SCENARIO-03, 05 and 06
+   originally shipped. It is recorded first because it is the most expensive lesson here.
+
+   The original design replaced a `## Handoff` section inside the step file. That required
+   computing where the section started and ended, and the end was inferred by scanning prose.
+   Seven distinct inputs moved that boundary and each produced a wrong write: mismatched fence
+   delimiters, an indented fence, an unterminated fence in the input, an unterminated fence
+   already on disk, an ordinary `##` heading inside handoff prose, CRLF line endings, and a
+   doneness gate that switched a guard off exactly where the tool itself had set the flag.
+   Four fix passes closed six of them; the seventh was introduced *by* the third fix.
+
+   Two things made this expensive rather than merely buggy. First, the boundary was inferred
+   from prose while its failure mode was data loss — R3's own logic, applied to boundaries
+   instead of fields, forbids that; it is now written down as **R21**. Second, one fix made the
+   splice destructive (replace to EOF) to cure an unbounded-growth bug, which converted every
+   remaining boundary error from recoverable duplication into unrecoverable deletion and made
+   the guards load-bearing for data safety.
+
+   The decisive evidence: the state file has always been a whole-file write, has no boundary to
+   compute, and produced **zero** boundary defects across all five rounds. The handoff now
+   works the same way.
+
+   Consequences: `spliceHandoff` and the scanning helpers that existed only to serve it are
+   deleted; `new step` writes no handoff file; a missing handoff file means "not done" rather
+   than "malformed"; and SCENARIO-13's absent-versus-present-but-empty trichotomy dissolves,
+   because a file either exists or it does not.
 
 1. **Concurrency — one step per feature is open at a time.** Was open question 1. `finish` is
    a plain read-modify-write; atomicity comes from R12 alone. No CAS, no locking. The escape,
