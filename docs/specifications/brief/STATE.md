@@ -1,8 +1,10 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..06. Last updated by a third post-06 fix pass (2 BLOCKER,
-2 MAJOR); the first two passes guarded individual inputs instead of the shared mechanism, this
-one replaced the mechanism. The crossover reads this file next.
+Scenarios complete: SCENARIO-01..06. Last updated by a fourth post-06 fix pass (1 targeted
+BLOCKER): the third pass's `spliceHandoff`-to-EOF contract made `ErrHandoffNotLast` fence-aware
+but never validated that the on-disk region it protects was itself fence-balanced, so an
+unterminated fence there hid a trailing `## Notes` from the anchor-is-last scan and the splice
+silently deleted it. The crossover reads this file next.
 
 ## Binding decisions
 
@@ -21,23 +23,28 @@ one replaced the mechanism. The crossover reads this file next.
   "replace wholesale"), so nothing after the anchor is ever a real terminator — the fixed point
   is structural, not luck. `markdown.HeadingStart` replaces `SectionRange` on this one write path;
   `SectionRange` is unchanged and still owns every other section. (fix ×3)
-- **The cost of that contract is enforced, not assumed, and gated on `!fm.Done()`:** `Finish`
-  refuses (`ErrHandoffNotLast`) when a step file not yet done already has a heading after the
-  anchor. Once done, everything after the anchor is `Finish`'s own prior output and may
-  legitimately contain a heading as ordinary handoff prose (R11 requires an identical re-finish
-  to succeed regardless) — deleting the gate passes every test but one
-  (`Test_finish_does_not_refuse_a_re_finish_...`), which exists to catch exactly that deletion.
-  (fix ×3)
+- **`validateHandoffAnchor`'s order: anchor present (fence-fallback) → on-disk section
+  fence-balanced (new, fix ×4) → anchor-is-last (gated on `!fm.Done()`).** The fence-balance step
+  runs `markdown.UnterminatedFence` over `restStr[HeadingStart:]` — the exact region
+  `spliceHandoff` is about to replace wholesale — and is **not** gated on doneness, unlike the
+  step after it: `TrailingHeading` walks fresh fence state from that same point, so an
+  unterminated fence there hides any heading past it from that scan, which is exactly how a
+  trailing `## Notes` got silently spliced away. A legitimate re-finish's section is always
+  `Finish`'s own prior output, already balanced by `checkArgumentFence` at the write that produced
+  it, so this never fires there — only on a hand-edited file (already an R10 violation), unsafe
+  regardless of doneness. Disjoint from the pre-anchor fence check (that one fires only when the
+  heading itself is swallowed). Once done, everything past the anchor is ordinary handoff prose
+  that may legitimately contain a heading (R11); deleting the anchor-is-last gate passes every test
+  but one (`Test_finish_does_not_refuse_a_re_finish_...`).
 - `RefusalError` carries `Line int` (0 = whole-path refusal); `cli/refusal.go` renders
   `<path>:<line>`. `scaffold.HandoffSource`/`StateSource` are placeholder `Path` values for a
   refusal about an argument's bytes rather than a file `Finish` opened — `cli/finish.go` upgrades
   them to the real `--handoff`/`--state` source (or `"<stdin>"`) before rendering. (fix ×3)
 - `Finish`'s check order: pattern → feature dir → step found → frontmatter → handoff anchor
-  present (fence-fallback via `validateHandoffAnchor`) → anchor last (gated) → handoff's fence →
-  state's fence → spec readable → progress entry → state file present → splice (now infallible)
-  → identity → write. State's fence is checked twice: write (`Finish`, the argument) and read
-  (`assemble.Start`, the on-disk file) — a hand-written `STATE.md` never passes through `Finish`.
-  (fix ×3)
+  (see above) → handoff's fence → state's fence → spec readable → progress entry → state file
+  present → splice (now infallible, and fence-checked first) → identity → write. State's fence is
+  checked twice: write (`Finish`, the argument) and read (`assemble.Start`, the on-disk file) — a
+  hand-written `STATE.md` never passes through `Finish`. (fix ×3, ×4)
 - **Identity/no-op (R11):** re-finishing a done step with identical inputs writes nothing, mtime
   preserved. Gate: `fm.Done() && identical`, taken **before `SetStatus`**. SCENARIO-16 inverts
   this into a refusal over the same three conjuncts and gate. (06)
@@ -57,10 +64,10 @@ one replaced the mechanism. The crossover reads this file next.
 
 - `scaffold` is named for `new feature`/`new step` while also owning `finish` — unowned rename
   debt; `RefusalError`'s eventual platform move (SCENARIO-13) touches every site here.
-- **A hand-set `status: done` plus a hand-added trailing section escapes `ErrHandoffNotLast`**
-  (the gate only runs while `!fm.Done()`) and gets silently clobbered on the next finish. Already
-  an R10 protocol violation before `Finish` runs (hand-setting `status:` bypasses the tool
-  entirely); unowned — flag for final review rather than solve.
+- **A hand-set `status: done` plus a hand-added, well-formed trailing section still escapes
+  `ErrHandoffNotLast`** and gets silently clobbered on the next finish; fix ×4's ungated
+  fence-balance check narrows this to only the fence-broken variant, not the well-formed-heading
+  one. Already an R10 protocol violation before `Finish` runs; unowned — flag for final review.
 - `tickProgressEntry` mutates a whole line on `[ ]`→`[x]`: an already-ticked title containing
   `[ ]` gets mutated too. Pre-existing, unowned.
 - `root = wd` unless `.brief.yaml` found — avoid `t.Chdir`/`os.Getwd` in tests. gosec's `G703`

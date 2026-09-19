@@ -239,10 +239,23 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 // body — when it is not fit for spliceHandoff to run unconditionally to
 // end of body: the anchor named by heading is missing (naming the
 // fence instead, when an earlier one never closes and swallows the
-// heading line rather than the untrue "no heading found"), or, only while
-// done is false, the anchor is not the last heading in restStr. frontLines
-// converts a line number relative to restStr into stepPath's own absolute
-// line number. It returns nil when restStr is fit to splice.
+// heading line rather than the untrue "no heading found"); the on-disk
+// section under the anchor — the exact region spliceHandoff is about to
+// replace — itself opens a fence it never closes; or, only while done is
+// false, the anchor is not the last heading in restStr. The fence check
+// runs before the anchor-is-last check, and is not gated on done: an
+// unterminated fence there hides any heading that follows from
+// markdown.TrailingHeading's own fence-aware scan (the same failure mode
+// this function exists to catch), so the anchor-is-last check can only
+// trust what it sees once the section it walks is known to be
+// fence-balanced. A legitimate re-finish's on-disk section is always
+// Finish's own prior output, already balanced by checkArgumentFence at
+// the write that produced it, so this never fires on one; it fires only
+// on a hand-edited file that broke the fence directly (already an R10
+// protocol violation before Finish runs), which is unsafe regardless of
+// doneness. frontLines converts a line number relative to restStr into
+// stepPath's own absolute line number. It returns nil when restStr is fit
+// to splice.
 func validateHandoffAnchor(restStr, heading string, frontLines int, stepPath string, done bool) *RefusalError {
 	if _, ok := markdown.Section(restStr, heading); !ok {
 		if line, delim, unterminated := markdown.UnterminatedFence(restStr); unterminated {
@@ -260,6 +273,22 @@ func validateHandoffAnchor(restStr, heading string, frontLines int, stepPath str
 			Problem: fmt.Sprintf("no %q heading found", heading),
 			Fix:     fmt.Sprintf("add a %q heading to the step file", heading),
 			Err:     ErrMalformedFeature,
+		}
+	}
+
+	// markdown.Section above already proved heading is present, so
+	// HeadingStart always succeeds here.
+	start, _ := markdown.HeadingStart(restStr, heading)
+
+	if line, delim, unterminated := markdown.UnterminatedFence(restStr[start:]); unterminated {
+		absLine := strings.Count(restStr[:start], "\n") + line
+
+		return &RefusalError{
+			Path:    stepPath,
+			Line:    frontLines + absLine,
+			Problem: fmt.Sprintf("step file has an unclosed %s fence", delim),
+			Fix:     "close the fence, or remove the unmatched delimiter, and retry",
+			Err:     ErrUnterminatedFence,
 		}
 	}
 
