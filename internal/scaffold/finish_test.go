@@ -497,6 +497,14 @@ func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 // Test_reports_a_specification_write_that_cannot_be_committed covers the
 // io.StringWriter path the same way, at the last write in the sequence: a
 // directory planted at the specification's temp sibling blocks it.
+//
+// It also carries the only proof in this suite that Finish's crash-
+// convergence claim holds past the first write: the handoff, state and step
+// writes ahead of the blocked one have already landed, so it asserts each
+// of those three lands correctly and the specification does not, then
+// clears the obstruction and calls Finish again with the same arguments —
+// the retry a crash at this exact point would need — and asserts that
+// second call both succeeds and finishes the tick the first one left undone.
 func Test_reports_a_specification_write_that_cannot_be_committed(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
@@ -504,8 +512,34 @@ func Test_reports_a_specification_write_that_cannot_be_committed(t *testing.T) {
 	require.NoError(t, os.Mkdir(blocked, 0o755))
 
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
-
 	require.Error(t, err)
+
+	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
+	require.NoError(t, readErr)
+	assert.Equal(t, string(fx.newHandoff), string(gotHandoff), "the handoff write ahead of the blocked one must have landed")
+
+	gotState, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
+	require.NoError(t, readErr)
+	assert.Equal(t, string(fx.newState), string(gotState), "the state write ahead of the blocked one must have landed")
+
+	gotStep, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotStep), "status: done", "the step-file write ahead of the blocked one must have landed")
+
+	gotSpec, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotSpec), "- [ ] STEP-02: Assemble the thing",
+		"the specification write itself was blocked, so the progress entry must still be unticked")
+
+	require.NoError(t, os.RemoveAll(blocked))
+
+	retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.NoError(t, retryErr, "a retry once the obstruction is cleared must converge")
+
+	gotSpecAfterRetry, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotSpecAfterRetry), "- [x] STEP-02: Assemble the thing",
+		"the retry must finish the tick the blocked write left undone")
 }
 
 func Test_the_temp_file_sweep_sees_a_temp_file(t *testing.T) {

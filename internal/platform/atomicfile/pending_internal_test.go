@@ -83,6 +83,37 @@ func Test_close_reports_a_failed_WriteString_and_refuses_to_commit(t *testing.T)
 	assert.Equal(t, "old", string(got))
 }
 
+// Test_close_reports_a_closed_descriptor_with_no_write_at_all reaches the
+// branch neither of the two tests above can: closeErr != nil with writeErr
+// == nil. Those close the descriptor and then write, which sets writeErr
+// and routes through the "not replaced" branch instead. Here nothing is
+// written, so the file.Close() failure inside Close itself is the only
+// error, and no rename is ever attempted.
+func Test_close_reports_a_closed_descriptor_with_no_write_at_all(t *testing.T) {
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = root.Close() })
+
+	target := filepath.Join(dir, "target.txt")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o600))
+
+	w, createErr := Create(root, "target.txt", 0o644)
+	require.NoError(t, createErr)
+	require.NoError(t, w.file.Close())
+
+	closeErr := w.Close()
+
+	require.Error(t, closeErr)
+	require.ErrorIs(t, closeErr, os.ErrClosed)
+
+	got, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, "old", string(got), "no rename must be attempted when Close's own descriptor-close fails")
+	assert.NoFileExists(t, filepath.Join(dir, ".target.txt.brief-tmp"))
+}
+
 // Test_close_reports_a_leftover_temp_file_it_could_not_remove proves the
 // cleanup failure is surfaced rather than swallowed. Making the directory
 // read-only after the temp sibling is open fails both the rename and the
@@ -113,6 +144,6 @@ func Test_close_reports_a_leftover_temp_file_it_could_not_remove(t *testing.T) {
 	require.Error(t, closeErr)
 	require.ErrorIs(t, closeErr, os.ErrPermission, "the failed removal must reach the caller")
 	assert.Contains(t, closeErr.Error(), "remove temp file for target.txt")
-	assert.Contains(t, closeErr.Error(), "write target.txt")
+	assert.Contains(t, closeErr.Error(), "rename target.txt")
 	assert.FileExists(t, filepath.Join(dir, ".target.txt.brief-tmp"), "the sibling the error reports must really be there")
 }

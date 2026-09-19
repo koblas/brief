@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/koblas/brief/internal/platform/atomicfile"
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/markdown"
 	"github.com/koblas/brief/internal/platform/stepfile"
@@ -197,13 +196,14 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	// The four writes below are ordered, and the order is load-bearing:
 	// "status: done" must not land before the handoff file exists, or the
 	// divergence refusal would refuse the very retry that repairs a crash.
-	// Every earlier prefix leaves status: open, the sole doneness authority,
-	// so a retry converges.
-	//
-	// Each write is a Create, a write, and a Close. The write's own error is
-	// not checked, because Close reports it along with any failure to remove
-	// the temp sibling; Close is also the only call that performs the rename,
-	// so it is the only error worth checking at each step.
+	// Every prefix up to and including the state write leaves the step's
+	// frontmatter status "open", the sole doneness authority a reader
+	// trusts, so a retry from one of those takes the full path again. The
+	// remaining prefix — handoff, state, and the step file itself — already
+	// leaves status "done"; a retry from there still converges, but because
+	// newSpec differs from what is on disk (identical stays false) and
+	// tickProgressEntry and SetStatus are idempotent, not because status is
+	// open.
 	if err := replaceBytes(root, handoffName, handoff); err != nil {
 		return writeFailure(err, feature, step)
 	}
@@ -221,37 +221,6 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	}
 
 	return nil
-}
-
-// replaceBytes atomically replaces name under root with data.
-//
-// Both helpers return atomicfile's error unwrapped on purpose: every caller
-// passes it to writeFailure, which wraps it once for this boundary and adds
-// the retry hint. Wrapping here as well would put "scaffold:" in the message
-// twice.
-func replaceBytes(root *os.Root, name string, data []byte) error {
-	w, err := atomicfile.Create(root, name, 0o644)
-	if err != nil {
-		return err //nolint:wrapcheck // writeFailure wraps this boundary
-	}
-
-	_, _ = w.Write(data)
-
-	return w.Close() //nolint:wrapcheck // writeFailure wraps this boundary
-}
-
-// replaceString atomically replaces name under root with data, writing it
-// through io.StringWriter so the caller's string is not copied into a []byte
-// first.
-func replaceString(root *os.Root, name, data string) error {
-	w, err := atomicfile.Create(root, name, 0o644)
-	if err != nil {
-		return err //nolint:wrapcheck // writeFailure wraps this boundary
-	}
-
-	_, _ = w.WriteString(data)
-
-	return w.Close() //nolint:wrapcheck // writeFailure wraps this boundary
 }
 
 // checkArgumentFence refuses when body — Finish's state argument, named

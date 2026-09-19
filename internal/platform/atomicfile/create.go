@@ -32,29 +32,39 @@ var (
 // rather than half-committed, and the next Create for the same name
 // overwrites the stale sibling. Because Close commits rather than aborts, a
 // bare "defer w.Close()" is not a rollback — on an early return it publishes
-// whatever was written so far. A caller holding the whole payload should
-// write it and then check Close, which is the shape every caller in this
-// repository uses.
+// whatever was written so far.
 //
-// Once a write has failed, Close does not commit: it removes the temp
-// sibling and reports that name was not replaced, wrapping that first write
-// error as the cause, so a caller that ignores a write's return still cannot
-// publish a truncated file and still learns the target is untouched. A second
-// Close returns nil and changes nothing, so the deferred-Close safety net can
-// sit alongside an explicit Close whose error is checked.
+// The temp sibling's mode is applied with Chmod once it is open, rather than
+// left to OpenFile's mode argument: that argument is masked by the process
+// umask, and is ignored outright when the sibling already exists from a
+// crashed write. Chmod holds regardless of either, so the mode Create ends
+// up with — perm when name does not exist, or name's own bits when
+// replaceMode takes them instead — is applied exactly, umask notwithstanding,
+// and a reused stale sibling's mode never survives onto name.
 //
 // The temp sibling is opened O_CREATE|O_TRUNC, not O_EXCL: one left behind
 // by a crashed write must be overwritten by the next attempt rather than
-// wedging every future write, and R20's single-writer guarantee makes a
-// genuine collision a non-concern.
+// wedging every future write, and brief runs at most one step per feature at
+// a time with no concurrency machinery, so a genuine collision between two
+// writers for the same name is not a concern this package has to handle.
 //
 // Create performs no fsync. It claims atomicity, not durability.
 func Create(root *os.Root, name string, perm fs.FileMode) (*PendingFile, error) {
 	tmp := tempName(name)
+	mode := replaceMode(root, name, perm)
 
-	f, err := root.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, replaceMode(root, name, perm))
+	f, err := root.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return nil, fmt.Errorf("atomicfile: write %s: %w", name, err)
+	}
+
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+
+		return nil, errors.Join(
+			fmt.Errorf("atomicfile: write %s: %w", name, err),
+			removeTmpFile(root, tmp, name),
+		)
 	}
 
 	return &PendingFile{root: root, file: f, tmp: tmp, name: name}, nil
@@ -66,10 +76,9 @@ func Create(root *os.Root, name string, perm fs.FileMode) (*PendingFile, error) 
 // narrow or widen the file's mode; perm applies when name does not exist or
 // is not a regular file.
 //
-// Gating on Mode().IsRegular() is load-bearing: a target that is a
-// directory must not have that directory's mode handed to the temp file's
-// creation, or the write would fail at temp creation instead of at the
-// rename that is supposed to report the failure.
+// Gating on Mode().IsRegular() is load-bearing: without it, a target that is
+// a directory would hand that directory's mode — typically carrying the
+// execute bit on every class — to a plain file, instead of perm.
 func replaceMode(root *os.Root, name string, perm fs.FileMode) fs.FileMode {
 	if info, err := root.Lstat(name); err == nil && info.Mode().IsRegular() {
 		return info.Mode().Perm()
@@ -93,6 +102,9 @@ type PendingFile struct {
 	writeErr error
 
 	closed bool
+	// closeErr holds the first Close's result, so a second Close replays it
+	// instead of returning nil regardless of how the first one went.
+	closeErr error
 }
 
 // Write writes b to the temp sibling. It records the first error it hits so
@@ -103,7 +115,7 @@ type PendingFile struct {
 // since one would be unfalsifiable — no test can distinguish it from the
 // descriptor's own refusal.
 func (p *PendingFile) Write(b []byte) (int, error) {
-	return p.record(p.file.Write(b))
+	return p.noteWriteErr(p.file.Write(b))
 }
 
 // WriteString writes s to the temp sibling, satisfying io.StringWriter so a
@@ -111,12 +123,13 @@ func (p *PendingFile) Write(b []byte) (int, error) {
 // to write it. It is otherwise identical to Write, including how a failure
 // stops Close from committing.
 func (p *PendingFile) WriteString(s string) (int, error) {
-	return p.record(p.file.WriteString(s))
+	return p.noteWriteErr(p.file.WriteString(s))
 }
 
-// record annotates a failed underlying write and remembers the first one, so
-// that Close can refuse to commit no matter which write method produced it.
-func (p *PendingFile) record(n int, err error) (int, error) {
+// noteWriteErr annotates a failed underlying write and remembers the first
+// one, so that Close can refuse to commit no matter which write method
+// produced it.
+func (p *PendingFile) noteWriteErr(n int, err error) (int, error) {
 	if err == nil {
 		return n, nil
 	}
@@ -138,51 +151,50 @@ func (p *PendingFile) record(n int, err error) (int, error) {
 // fail too; the returned error joins all of them, because a temp sibling
 // that could not be removed contradicts this package's claim to leave none
 // behind and must not be hidden. Test the result with errors.Is against an
-// individual cause rather than comparing it directly — unlike gzip.Writer
-// and tar.Writer, which replay a sticky write error verbatim, Close returns
-// a joined error and not the identical value.
+// individual cause rather than comparing it directly.
 //
 // A Close that will not commit because an earlier write failed reports that
 // as "<name> not replaced", wrapping the write error as the cause. Replaying
-// the write error verbatim, as the stdlib writers do, would say nothing about
-// whether the target was touched — and since callers check Close and not the
-// write, that is the only error most of them see.
+// the write error verbatim would say nothing about whether the target was
+// touched — and since callers check Close and not the write, that is the
+// only error most of them see.
 //
-// A second Close returns nil without touching anything.
+// A second Close replays the first Close's result without touching anything
+// again, so a deferred "defer w.Close()" safety net can sit alongside an
+// explicit Close whose error is checked, and a caller that checks only the
+// second one still sees whatever the first one found.
 func (p *PendingFile) Close() error {
 	if p.closed {
-		return nil
+		return p.closeErr
 	}
 
 	p.closed = true
 
-	closeErr := p.wrap(p.file.Close())
+	closeErr := p.wrap("close", p.file.Close())
 
-	if p.writeErr != nil {
+	switch {
+	case p.writeErr != nil:
 		notReplaced := fmt.Errorf("atomicfile: %s not replaced: %w", p.name, p.writeErr)
-
-		return errors.Join(notReplaced, closeErr, p.removeTmp())
+		p.closeErr = errors.Join(notReplaced, closeErr, p.removeTmp())
+	case closeErr != nil:
+		p.closeErr = errors.Join(closeErr, p.removeTmp())
+	default:
+		if err := p.root.Rename(p.tmp, p.name); err != nil {
+			p.closeErr = errors.Join(p.wrap("rename", err), p.removeTmp())
+		}
 	}
 
-	if closeErr != nil {
-		return errors.Join(closeErr, p.removeTmp())
-	}
-
-	if err := p.root.Rename(p.tmp, p.name); err != nil {
-		return errors.Join(p.wrap(err), p.removeTmp())
-	}
-
-	return nil
+	return p.closeErr
 }
 
-// wrap annotates err with the target's name, passing nil through so callers
-// can join unconditionally.
-func (p *PendingFile) wrap(err error) error {
+// wrap annotates err with verb and the target's name, passing nil through
+// so callers can join unconditionally.
+func (p *PendingFile) wrap(verb string, err error) error {
 	if err == nil {
 		return nil
 	}
 
-	return fmt.Errorf("atomicfile: write %s: %w", p.name, err)
+	return fmt.Errorf("atomicfile: %s %s: %w", verb, p.name, err)
 }
 
 // removeTmp deletes the temp sibling of an abandoned replacement, reporting
@@ -190,8 +202,20 @@ func (p *PendingFile) wrap(err error) error {
 // the same name truncates it — but it is a broken promise, so it is reported
 // rather than swallowed.
 func (p *PendingFile) removeTmp() error {
-	if err := p.root.Remove(p.tmp); err != nil {
-		return fmt.Errorf("atomicfile: remove temp file for %s: %w", p.name, err)
+	return removeTmpFile(p.root, p.tmp, p.name)
+}
+
+// removeTmpFile deletes tmp, the temp sibling of name, under root. It
+// reports fs.ErrNotExist as nil: a sibling that was never left behind (or
+// was already removed) is not a broken promise, so a caller must not report
+// "remove temp file for <name>" when there was never one to remove.
+func removeTmpFile(root *os.Root, tmp, name string) error {
+	if err := root.Remove(tmp); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+
+		return fmt.Errorf("atomicfile: remove temp file for %s: %w", name, err)
 	}
 
 	return nil

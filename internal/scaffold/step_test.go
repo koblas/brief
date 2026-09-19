@@ -223,6 +223,31 @@ func Test_ignores_files_that_do_not_match_the_step_file_pattern_when_numbering(t
 	assert.Equal(t, filepath.Join(featureDir, "STEP-02.md"), path)
 }
 
+// Test_reports_a_specification_write_that_cannot_be_committed_on_new_step
+// covers NewStep's own specification write, now that it shares
+// replaceString with Finish rather than inlining Create/WriteString/Close:
+// a directory planted at the specification's temp sibling blocks the
+// rename. The step file is written before the specification (scaffold.go's
+// NewStep doc), so the failure this induces is expected to leave an orphan
+// step file behind — visible and repairable — rather than losing it.
+func Test_reports_a_specification_write_that_cannot_be_committed_on_new_step(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+	_, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "widgets")
+	blocked := filepath.Join(featureDir, "."+cfg.SpecificationFile+".brief-tmp")
+	require.NoError(t, os.Mkdir(blocked, 0o755))
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+
+	require.Error(t, err)
+	assert.FileExists(t, filepath.Join(featureDir, "STEP-01.md"),
+		"the step file lands before the specification write, so it must survive the specification write's failure")
+}
+
 func Test_refuses_an_unknown_feature(t *testing.T) {
 	root := t.TempDir()
 	cfg := fixtureConfig()

@@ -124,6 +124,31 @@ func Test_Create_keeps_the_existing_files_permissions_when_it_replaces_it(t *tes
 	assert.Equal(t, os.FileMode(0o400), info.Mode().Perm())
 }
 
+// Test_Create_preserves_a_mode_the_process_umask_would_otherwise_narrow is
+// the discriminating arm the test above cannot be: 0o400 has no group or
+// other write bit for a typical 022 umask to strip, so it stays correct even
+// if the mode were merely handed to OpenFile's masked mode argument instead
+// of applied with Chmod. 0o666 does have those bits, so replacing a target
+// at exactly 0o666 must still come back 0o666 — not silently narrowed to
+// whatever the umask allows a freshly created file to have.
+func Test_Create_preserves_a_mode_the_process_umask_would_otherwise_narrow(t *testing.T) {
+	root, dir := openRoot(t)
+	target := filepath.Join(dir, "target.txt")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o666)) //nolint:gosec // the wide mode is the fixture under test, not a real file
+	require.NoError(t, os.Chmod(target, 0o666), "WriteFile's own mode argument is umask-masked too")
+
+	w, err := atomicfile.Create(root, "target.txt", 0o600)
+	require.NoError(t, err)
+	_, writeErr := io.WriteString(w, "new")
+	require.NoError(t, writeErr)
+	require.NoError(t, w.Close())
+
+	info, statErr := os.Stat(target)
+	require.NoError(t, statErr)
+	assert.Equal(t, os.FileMode(0o666), info.Mode().Perm(),
+		"the target's own mode must survive the replace regardless of umask")
+}
+
 // Test_Create_abandoned_without_close_leaves_the_target_untouched pins the
 // safe direction of the failure: dropping the writer on the floor loses the
 // new content and keeps the old file, rather than committing a partial one.
@@ -140,6 +165,9 @@ func Test_Create_abandoned_without_close_leaves_the_target_untouched(t *testing.
 	got, readErr := os.ReadFile(target)
 	require.NoError(t, readErr)
 	assert.Equal(t, "old", string(got))
+
+	assert.FileExists(t, filepath.Join(dir, ".target.txt.brief-tmp"),
+		"the abandoned write's temp sibling must still be on disk, not silently dropped")
 }
 
 func Test_Create_reports_the_failure_and_keeps_the_target_when_the_rename_cannot_land(t *testing.T) {
@@ -153,6 +181,16 @@ func Test_Create_reports_the_failure_and_keeps_the_target_when_the_rename_cannot
 	require.NoError(t, err)
 	_, writeErr := io.WriteString(w, "new")
 	require.NoError(t, writeErr)
+
+	// replaceMode's IsRegular gate is what discriminates here: target.txt is
+	// a directory, at 0o755, so the temp sibling must still get perm's mode
+	// rather than the directory's — without the gate, the rename below would
+	// still fail (a file can never rename over a directory either way) and
+	// this test would stay green with the gate deleted.
+	tmpInfo, tmpErr := os.Lstat(filepath.Join(dir, ".target.txt.brief-tmp"))
+	require.NoError(t, tmpErr)
+	assert.Equal(t, os.FileMode(0o644), tmpInfo.Mode().Perm(),
+		"a directory target must not hand its own mode to the temp sibling")
 
 	require.Error(t, w.Close())
 	assert.FileExists(t, sentinel)
@@ -208,6 +246,11 @@ func Test_Create_overwrites_a_stale_temp_file_left_by_a_crashed_write(t *testing
 	got, readErr := os.ReadFile(filepath.Join(dir, "target.txt"))
 	require.NoError(t, readErr)
 	assert.Equal(t, "new", string(got))
+
+	info, statErr := os.Stat(filepath.Join(dir, "target.txt"))
+	require.NoError(t, statErr)
+	assert.Equal(t, os.FileMode(0o644), info.Mode().Perm(),
+		"the stale sibling's own mode must not survive onto the target it never named")
 }
 
 // Test_Create_a_second_close_neither_errors_nor_undoes_the_commit lets the
@@ -230,11 +273,34 @@ func Test_Create_a_second_close_neither_errors_nor_undoes_the_commit(t *testing.
 	assert.Equal(t, "committed", string(got))
 }
 
-// Test_Create_refuses_a_write_after_close pins the observable, not a guard
-// in this package: every Close path closes the descriptor first, so the
-// refusal comes from the descriptor itself. An explicit p.closed check in
-// Write was removed after a mutation showed no test could tell it apart from
-// this behaviour.
+// Test_Create_a_second_close_replays_the_first_failure covers the other
+// half of the second-Close contract: when the first Close failed, a second
+// one must report the same failure rather than reporting nil just because
+// nothing is retried.
+func Test_Create_a_second_close_replays_the_first_failure(t *testing.T) {
+	root, dir := openRoot(t)
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "target.txt"), 0o755))
+
+	w, err := atomicfile.Create(root, "target.txt", 0o644)
+	require.NoError(t, err)
+	_, writeErr := io.WriteString(w, "new")
+	require.NoError(t, writeErr)
+
+	first := w.Close()
+	require.Error(t, first)
+
+	second := w.Close()
+
+	require.Error(t, second)
+	assert.Equal(t, first.Error(), second.Error(),
+		"a second Close must replay the first failure, not report nil")
+}
+
+// Test_Create_refuses_a_write_after_close pins that every Close path closes
+// the underlying descriptor before it returns, not merely that Write refuses
+// after Close: mutate Close to skip p.file.Close() before the rename and
+// this test reddens, because the descriptor stays open and the write it
+// probes no longer fails at all.
 func Test_Create_refuses_a_write_after_close(t *testing.T) {
 	root, _ := openRoot(t)
 
@@ -246,6 +312,30 @@ func Test_Create_refuses_a_write_after_close(t *testing.T) {
 
 	require.Error(t, writeErr)
 	assert.ErrorIs(t, writeErr, os.ErrClosed)
+}
+
+// Test_Create_does_not_report_a_missing_sibling_it_never_left_behind covers
+// removeTmp's ErrNotExist passthrough: the temp sibling is removed out from
+// under Close by something other than this package before Close runs, so
+// the rename fails (the target is a directory) and the cleanup that follows
+// finds nothing to remove. The reported error must still name the rename
+// failure without also claiming a removal failed that never happened.
+func Test_Create_does_not_report_a_missing_sibling_it_never_left_behind(t *testing.T) {
+	root, dir := openRoot(t)
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "target.txt"), 0o755))
+
+	w, err := atomicfile.Create(root, "target.txt", 0o644)
+	require.NoError(t, err)
+	_, writeErr := io.WriteString(w, "new")
+	require.NoError(t, writeErr)
+
+	require.NoError(t, os.Remove(filepath.Join(dir, ".target.txt.brief-tmp")))
+
+	closeErr := w.Close()
+
+	require.Error(t, closeErr)
+	assert.NotContains(t, closeErr.Error(), "remove temp file for",
+		"there was no sibling left behind for Close to fail to remove")
 }
 
 // Test_Create_fails_when_the_temp_sibling_cannot_be_opened reaches the only
