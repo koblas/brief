@@ -15,9 +15,8 @@ type Step struct {
 // configured for it, its body, and whether that heading was found at all.
 // Body is empty both when the heading is present with nothing under it
 // and when the heading is missing entirely — Found is what distinguishes
-// the two; a caller that only renders non-empty bodies (SCENARIO-12's
-// text renderer) can ignore it, but a caller checking for a required
-// heading (SCENARIO-14's) cannot.
+// the two; a caller that only renders non-empty bodies can ignore it, but
+// a caller checking for a required heading cannot.
 type Section struct {
 	Heading string
 	Body    string

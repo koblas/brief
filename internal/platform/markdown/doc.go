@@ -10,8 +10,9 @@
 // Section is the only exported way to read a section's body; there is no
 // exported way to recover its byte offsets, because offsets exist only to
 // splice content into an existing document, and every write in brief is a
-// whole-file write instead (R21). UnterminatedFence is the sole fence-open
-// detector, used both to validate a write argument before it lands and to
-// refuse an on-disk file whose configured headings a terminator scan could
-// not read past the open fence.
+// whole-file write instead (R21). Title returns the text of a body's first
+// level-1 heading, fence-aware like Section. UnterminatedFence is the sole
+// fence-open detector, used both to validate a write argument before it
+// lands and to refuse an on-disk file whose configured headings a
+// terminator scan could not read past the open fence.
 package markdown

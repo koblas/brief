@@ -33,18 +33,34 @@ default profile names `SCENARIO-01.md`'s handoff `SCENARIO-01-HANDOFF.md`.
 An independent `handoff-file-pattern` is rejected because it admits
 `handoff-file-pattern == step-file-pattern`, in which case `finish` writes the handoff body
 over the step file. That is data loss from one config typo, in the exact class R21 exists to
-prevent. Derivation makes it unrepresentable: the two names cannot coincide unless the suffix
-is exactly the step file's extension, which is one comparison to refuse. It also cannot drift
-in number formatting (`SCENARIO-01.md` beside `HANDOFF-1.md`).
+prevent. Derivation makes it unrepresentable: the two names can coincide only when the
+*rendered* handoff name equals the *rendered* step name at some step number, which the
+comparison below refuses directly rather than by comparing suffix strings. It also cannot
+drift in number formatting (`SCENARIO-01.md` beside `HANDOFF-1.md`).
 
 Derivation inherits `stepfile.Compile`'s round-trip discipline through a new
-`stepfile.CompileHandoff(step Pattern, suffix string) (HandoffPattern, error)`, refusing with
-`stepfile.ErrInvalidHandoffSuffix` a suffix that is empty, contains a path separator, contains
-`%`, **contains a digit**, or equals the step filename's extension. The digit rule is
+`stepfile.CompileHandoff(step Pattern, suffix, stateFile, specificationFile string)
+(HandoffPattern, error)`, refusing with `stepfile.ErrInvalidHandoffSuffix` a suffix that is
+empty, contains a path separator, contains `%`, or **contains a digit**. The digit rule is
 load-bearing and not decorative: suffix `1.md` against `STEP-%d.md` renders `STEP-1` + `1.md`
 = `STEP-11.md`, which `Pattern.Number` recognizes as step 11 — a handoff file that a
-directory scan would read as a step. With no digit in the suffix and the extension case
-refused, the rendered handoff name can never round-trip through `Pattern.Number`.
+directory scan would read as a step.
+
+The remaining refusals compare *rendered names*, case-folded, rather than literal suffix
+strings — a step pattern with more than one literal dot (`SCENARIO-%02d.step.md`) makes
+`Pattern.ID`'s stripped extension (`.md`, via `filepath.Ext`) narrower than the pattern's
+whole literal suffix (`.step.md`), so a suffix-string comparison misses a rendered collision a
+name comparison catches. `CompileHandoff` refuses when: `step.ID` does not vary with the step
+number (a step-file-pattern such as `.%d`, whose literal suffix carries no dot while its
+literal prefix does, makes `filepath.Ext` consume the entire rendered name at every step
+number, so every step's `ID` is the same constant string and every step's handoff would alias
+onto one file) — checked once, since `step.ID(1) == step.ID(2)` already exposes the constant
+case; or the rendered handoff name, compared with `strings.EqualFold`, equals the step's own
+rendered name, the configured state filename, or the configured specification filename, at any
+of several representative step numbers. Case-folding matters because this repository's own
+dev platform (macOS/APFS) is case-insensitive by default. With no digit in the suffix and the
+rendered-name collisions refused, the rendered handoff name can never round-trip through
+`Pattern.Number`.
 
 ### 2. Naming in `internal/platform/stepfile`; the read stays in `scaffold`
 
@@ -87,11 +103,8 @@ other three replace or edit), and the least destructive write belongs at the fro
 progress checkbox goes last because it is a pure projection of `status:`, making a stale
 checkbox the mildest of the four inconsistencies.
 
-The order is documented on `Finish` and is **not** test-verified: there is no seam that makes
-a write fail after validation without the earlier validation refusing first (`atomicfile`
-renames over a read-only file successfully, and a non-regular state file is refused up
-front). The one observable consequence — that a crash prefix leaves the step open and a retry
-finishes it — is verified by
+The order is documented on `Finish`. The one observable consequence — that a crash prefix
+leaves the step open and a retry finishes it — is verified by
 `Test_a_step_whose_frontmatter_is_still_open_is_marked_done_even_when_every_input_matches_what_is_on_disk`.
 STATE.md's existing open debt ("a mid-write I/O failure leaves a half-applied result; `check`
 is the detector") already owns the rest.

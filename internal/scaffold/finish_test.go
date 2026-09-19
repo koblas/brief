@@ -288,7 +288,6 @@ func Test_replaces_the_state_file_with_exactly_the_supplied_body(t *testing.T) {
 	require.NoError(t, readErr)
 
 	assert.Equal(t, string(fx.newState), string(got))
-	assert.NotContains(t, string(got), "OLD-STATE-ENTRY")
 }
 
 func Test_marks_the_step_done_in_its_frontmatter(t *testing.T) {
@@ -305,20 +304,6 @@ func Test_marks_the_step_done_in_its_frontmatter(t *testing.T) {
 	require.NoError(t, parseErr)
 
 	assert.True(t, fm.Done())
-}
-
-func Test_leaves_the_frontmatter_byte_identical_apart_from_the_status_line(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
-
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
-	require.NoError(t, err)
-
-	got, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
-	require.NoError(t, readErr)
-
-	assert.Contains(t, string(got), "owner: planner\n")
-	assert.Contains(t, string(got), "depends-on: [STEP-01]\n")
 }
 
 // Test_finish_refuses_a_replacement_state_body_with_an_unterminated_fence

@@ -52,22 +52,16 @@ func progressEntry(id string) string {
 	return "- [ ] " + id
 }
 
-// insertProgressEntry splices entry into body under the first line that
-// equals heading exactly (right-trimmed), inserting after the last
-// existing checklist item ("- [ ]" or "- [x]", leading whitespace
-// allowed) in that section. A section with no checklist item yet gets
-// entry on a fresh line immediately after the heading, preceded by a
-// blank line — the shape of a freshly scaffolded feature. The section
-// ends at the next line starting with "#", or at end of file. Every other
-// byte of body, including whether it ends with a trailing newline, is
-// preserved.
+// progressSection locates heading within lines — matched by exact
+// right-trimmed equality — and the end of the section it introduces: the
+// index of the next line starting with "#" (leading whitespace allowed),
+// or len(lines) if none. insertProgressEntry and tickProgressEntry both
+// call this, so new step and finish agree about where a progress section
+// ends in the same file.
 //
-// insertProgressEntry returns ErrNoProgressHeading, with body untouched,
-// when no line in body equals heading.
-func insertProgressEntry(body, heading, entry string) (string, error) {
-	hadTrailingNewline := strings.HasSuffix(body, "\n")
-	lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
-
+// progressSection reports ok == false when no line in lines equals
+// heading; headingIdx and sectionEnd carry no meaning in that case.
+func progressSection(lines []string, heading string) (int, int, bool) {
 	headingIdx := -1
 
 	for i, line := range lines {
@@ -79,7 +73,7 @@ func insertProgressEntry(body, heading, entry string) (string, error) {
 	}
 
 	if headingIdx == -1 {
-		return "", ErrNoProgressHeading
+		return 0, 0, false
 	}
 
 	sectionEnd := len(lines)
@@ -90,6 +84,29 @@ func insertProgressEntry(body, heading, entry string) (string, error) {
 
 			break
 		}
+	}
+
+	return headingIdx, sectionEnd, true
+}
+
+// insertProgressEntry splices entry into body under the first line that
+// equals heading exactly (right-trimmed), inserting after the last
+// existing checklist item ("- [ ]" or "- [x]", leading whitespace
+// allowed) in that section (progressSection). A section with no checklist
+// item yet gets entry on a fresh line immediately after the heading,
+// preceded by a blank line — the shape of a freshly scaffolded feature.
+// Every other byte of body, including whether it ends with a trailing
+// newline, is preserved.
+//
+// insertProgressEntry returns ErrNoProgressHeading, with body untouched,
+// when no line in body equals heading.
+func insertProgressEntry(body, heading, entry string) (string, error) {
+	hadTrailingNewline := strings.HasSuffix(body, "\n")
+	lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
+
+	headingIdx, sectionEnd, ok := progressSection(lines, heading)
+	if !ok {
+		return "", ErrNoProgressHeading
 	}
 
 	lastItem := -1
@@ -122,10 +139,9 @@ func insertProgressEntry(body, heading, entry string) (string, error) {
 }
 
 // tickProgressEntry flips to "[x]" the first checklist item under heading
-// in body whose text names id, leaving every other byte unchanged. It
-// reuses insertProgressEntry's section scan — heading matched by exact
-// right-trimmed equality, the section ending at the next line starting
-// with "#" — deliberately: new step and finish must agree about where the
+// in body whose text names id, leaving every other byte unchanged. The
+// section is located by progressSection, the same helper
+// insertProgressEntry uses, so new step and finish agree about where the
 // progress section ends in the same file. A line already "[x]" is left
 // unchanged. An item's text, taken after "- [ ] " or "- [x] ", names id
 // when it begins with id followed by end of line or a rune outside
@@ -138,27 +154,9 @@ func tickProgressEntry(body, heading, id string) (string, error) {
 	hadTrailingNewline := strings.HasSuffix(body, "\n")
 	lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
 
-	headingIdx := -1
-
-	for i, line := range lines {
-		if strings.TrimRight(line, " \t\r") == heading {
-			headingIdx = i
-
-			break
-		}
-	}
-
-	if headingIdx == -1 {
+	headingIdx, sectionEnd, ok := progressSection(lines, heading)
+	if !ok {
 		return "", ErrNoProgressHeading
-	}
-
-	sectionEnd := len(lines)
-
-	for i := headingIdx + 1; i < len(lines); i++ {
-		if strings.HasPrefix(strings.TrimLeft(lines[i], " \t"), "#") {
-			sectionEnd = i
-			break
-		}
 	}
 
 	matchIdx := -1

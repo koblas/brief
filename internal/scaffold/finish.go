@@ -82,7 +82,7 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		}
 	}
 
-	handoffPattern, err := stepfile.CompileHandoff(pattern, s.cfg.HandoffFileSuffix)
+	handoffPattern, err := stepfile.CompileHandoff(pattern, s.cfg.HandoffFileSuffix, s.cfg.StateFile, s.cfg.SpecificationFile)
 	if err != nil {
 		return &RefusalError{
 			Path:    featurePath,

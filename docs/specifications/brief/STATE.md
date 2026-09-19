@@ -13,10 +13,17 @@ replaced by the whole-file contract below. The crossover reads this file next.
   clause (preserve everything outside the edited span) covers it and `tickProgressEntry` alone.
   No `status:` key → `ErrNoStatusField`. (03-05, HANDOFF-FILE)
 - **The handoff lives in its own file, never spliced into the step file (R21).** Named
-  `stepPattern.ID(n) + cfg.HandoffFileSuffix` (`stepfile.CompileHandoff`), default suffix
-  `-HANDOFF.md`. `handoff-file-suffix` refuses a digit (`STEP-1`+`1.md` = `STEP-11.md` reads as
-  step 11 to `Pattern.Number`) or a value equal to the step file's extension (would name the
-  step file itself). (HANDOFF-FILE)
+  `stepPattern.ID(n) + cfg.HandoffFileSuffix`
+  (`stepfile.CompileHandoff(step, suffix, stateFile, specificationFile)`), default suffix
+  `-HANDOFF.md`. Refuses a digit in the suffix; refuses a step Pattern whose `ID` does not vary
+  with the step number (`.%d` — `filepath.Ext` eats the whole rendered name at every step,
+  aliasing every step's handoff onto one file); and refuses **case-folded rendered-name**
+  collisions, at several representative step numbers, against the step's own name,
+  `cfg.StateFile`, or `cfg.SpecificationFile` — comparing rendered names rather than suffix
+  strings is load-bearing because a multi-dot step pattern (`SCENARIO-%02d.step.md`) makes
+  `Pattern.ID`'s stripped extension narrower than the pattern's whole literal suffix; case
+  folding is load-bearing because this repo's dev platform (macOS/APFS) is case-insensitive.
+  (HANDOFF-FILE, fix)
 - `markdown.Section` is the one exported section reader, fence-aware both ends via a **state
   machine** (CommonMark §4.5: same character, ≥ opener length, no info string, ≤3 leading
   spaces; `findHeading` is first-occurrence-wins). `UnterminatedFence` shares that machine and

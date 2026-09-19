@@ -245,22 +245,11 @@ func Test_carries_every_state_file_section_as_inherited_context(t *testing.T) {
 	assert.Contains(t, bodies.String(), "STATE-DEBT-A")
 }
 
+// Test_reports_two_done_and_three_open also proves the naming discipline
+// from the read side: newFixture writes a handoff file for both done
+// steps, so a count of 2 done and 3 open already rules out a handoff file
+// being folded in as a sixth step file.
 func Test_reports_two_done_and_three_open(t *testing.T) {
-	root, cfg := newFixture(t)
-	srv := assemble.NewServer(cfg, root)
-
-	brief, err := srv.Start(t.Context(), "demo")
-
-	require.NoError(t, err)
-	assert.Equal(t, 2, brief.Done)
-	assert.Equal(t, 3, brief.Open)
-}
-
-// Test_a_handoff_file_is_not_counted_as_a_step proves the naming
-// discipline from the read side: newFixture already writes two handoff
-// files (STEP-01 and STEP-02's), and the counts must stay 2 done, 3 open
-// rather than folding those in as two more step files.
-func Test_a_handoff_file_is_not_counted_as_a_step(t *testing.T) {
 	root, cfg := newFixture(t)
 	srv := assemble.NewServer(cfg, root)
 
