@@ -34,57 +34,118 @@ var (
 // bare "defer w.Close()" is not a rollback — on an early return it publishes
 // whatever was written so far.
 //
-// The temp sibling's mode is applied with Chmod once it is open, rather than
-// left to OpenFile's mode argument: that argument is masked by the process
-// umask, and is ignored outright when the sibling already exists from a
-// crashed write. Chmod holds regardless of either, so the mode Create ends
-// up with — perm when name does not exist, or name's own bits when
-// replaceMode takes them instead — is applied exactly, umask notwithstanding,
-// and a reused stale sibling's mode never survives onto name.
+// The temp sibling's mode is applied with Chmod once it is open, but only
+// when name already existed as a regular file: OpenFile's mode argument is
+// masked by the process umask, which is correct for perm on a fresh create,
+// and is ignored outright when the sibling already exists from a crashed
+// write, which Chmod must still correct. When name existed, replaceMode
+// takes its bits instead of perm, and those must survive exactly —
+// umask notwithstanding — so a replace does not silently narrow or widen a
+// mode the caller never chose; Chmod is what makes that hold regardless of
+// a reused stale sibling's own mode. When name did not exist, perm is
+// exactly what OpenFile's masked mode argument already produced, and
+// Chmod must not run — running it would defeat the umask on every fresh
+// create.
 //
 // The temp sibling is opened O_CREATE|O_TRUNC, not O_EXCL: one left behind
-// by a crashed write must be overwritten by the next attempt rather than
-// wedging every future write, and brief runs at most one step per feature at
-// a time with no concurrency machinery, so a genuine collision between two
-// writers for the same name is not a concern this package has to handle.
+// by a crashed write is overwritten by the next attempt rather than wedging
+// every future write — except when name already exists and its mode carries
+// no owner-write bit: replaceMode then takes that mode for the sibling too,
+// and the following OpenFile fails with permission denied on every retry
+// until the sibling is removed by hand. brief runs at most one step per
+// feature at a time with no concurrency machinery, so a genuine collision
+// between two writers for the same name is not a concern this package has
+// to handle.
+//
+// When name itself does not exist, a regular-file sibling left behind this
+// way is removed before OpenFile runs, rather than reused: reusing it would
+// make OpenFile skip its own mode argument (the kernel only applies that
+// argument to an inode it actually creates), so a fresh create would inherit
+// whatever mode an earlier, unrelated write happened to leave rather than
+// perm masked by the current umask. That removal is why the owner-write
+// exception above only applies when name exists — the delete goes through
+// regardless of the sibling's own mode. A sibling that is a directory (or
+// anything else OpenFile cannot reuse) is left alone; OpenFile fails on its
+// own and that failure is a seam some callers use to inject one.
 //
 // Create performs no fsync. It claims atomicity, not durability.
 func Create(root *os.Root, name string, perm fs.FileMode) (*PendingFile, error) {
 	tmp := tempName(name)
-	mode := replaceMode(root, name, perm)
+	mode, existed := replaceMode(root, name, perm)
+
+	if !existed {
+		if err := removeStaleRegularSibling(root, tmp); err != nil {
+			return nil, fmt.Errorf("atomicfile: write %s: %w", name, err)
+		}
+	}
 
 	f, err := root.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return nil, fmt.Errorf("atomicfile: write %s: %w", name, err)
 	}
 
-	if err := f.Chmod(mode); err != nil {
-		_ = f.Close()
+	// Chmod runs only when mode came from an existing regular file: perm on
+	// a fresh create is already umask-masked by OpenFile itself, and
+	// re-applying it exactly with Chmod would defeat that umask.
+	if existed {
+		if err := f.Chmod(mode); err != nil {
+			_ = f.Close()
 
-		return nil, errors.Join(
-			fmt.Errorf("atomicfile: write %s: %w", name, err),
-			removeTmpFile(root, tmp, name),
-		)
+			return nil, errors.Join(
+				fmt.Errorf("atomicfile: chmod %s: %w", name, err),
+				removeTmpFile(root, tmp, name),
+			)
+		}
 	}
 
 	return &PendingFile{root: root, file: f, tmp: tmp, name: name}, nil
 }
 
 // replaceMode returns the permission bits the temp sibling for name should
-// be created with. When name already exists and is a regular file it takes
-// name's existing bits instead of perm, so a replace does not silently
-// narrow or widen the file's mode; perm applies when name does not exist or
-// is not a regular file.
+// be created with, and whether name already exists as a regular file. When
+// it does, replaceMode returns name's existing bits instead of perm, so a
+// replace does not silently narrow or widen the file's mode; perm applies,
+// with existed false, when name does not exist or is not a regular file —
+// callers use existed to decide whether that mode still needs Chmod to
+// survive OpenFile's umask-masked mode argument, or is already correct as
+// OpenFile produced it.
 //
 // Gating on Mode().IsRegular() is load-bearing: without it, a target that is
 // a directory would hand that directory's mode — typically carrying the
 // execute bit on every class — to a plain file, instead of perm.
-func replaceMode(root *os.Root, name string, perm fs.FileMode) fs.FileMode {
+func replaceMode(root *os.Root, name string, perm fs.FileMode) (fs.FileMode, bool) {
 	if info, err := root.Lstat(name); err == nil && info.Mode().IsRegular() {
-		return info.Mode().Perm()
+		return info.Mode().Perm(), true
 	}
 
-	return perm
+	return perm, false
+}
+
+// removeStaleRegularSibling deletes tmp when it already exists as a regular
+// file, so the OpenFile that follows creates a brand-new inode rather than
+// reusing one whose mode reflects an earlier, unrelated call. It leaves tmp
+// alone when it does not exist, or exists as something other than a regular
+// file — a directory at tmp is a seam some callers plant on purpose to make
+// the following OpenFile fail, and this must not clear that seam.
+func removeStaleRegularSibling(root *os.Root, tmp string) error {
+	info, err := root.Lstat(tmp)
+	if err != nil {
+		// Nothing at tmp (including a fresh ErrNotExist) leaves nothing to
+		// remove, and any other Lstat failure is not this function's to
+		// report: the OpenFile that follows reaches the same path and
+		// reports for itself.
+		return nil //nolint:nilerr // see comment above
+	}
+
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+
+	if err := root.Remove(tmp); err != nil {
+		return fmt.Errorf("remove stale temp sibling: %w", err)
+	}
+
+	return nil
 }
 
 // PendingFile is an in-progress atomic replacement of a file: writes land in

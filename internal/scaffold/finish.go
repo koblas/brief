@@ -200,10 +200,15 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	// frontmatter status "open", the sole doneness authority a reader
 	// trusts, so a retry from one of those takes the full path again. The
 	// remaining prefix — handoff, state, and the step file itself — already
-	// leaves status "done"; a retry from there still converges, but because
-	// newSpec differs from what is on disk (identical stays false) and
-	// tickProgressEntry and SetStatus are idempotent, not because status is
-	// open.
+	// leaves status "done"; a retry from there still converges by one of two
+	// mechanisms. Ordinarily newSpec differs from what is on disk (identical
+	// stays false), so the retry falls through and re-runs tickProgressEntry
+	// and SetStatus, both idempotent, rewriting each file with the same
+	// bytes it already holds. But if the progress entry was ticked by some
+	// other means between the crash and the retry, newSpec already equals
+	// what is on disk, identical stays true, and fm.Done() is already true —
+	// so the retry instead converges by hitting the no-op gate above and
+	// returning before touching any file at all.
 	if err := replaceBytes(root, handoffName, handoff); err != nil {
 		return writeFailure(err, feature, step)
 	}

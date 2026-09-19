@@ -37,9 +37,12 @@ replaced by the whole-file contract below. The crossover reads this file next.
   specification: every prefix short of the last write leaves `status:` "open", so a crash-retry
   takes the full path again and converges. `status: done` must never land before the handoff
   file exists, or SCENARIO-16's (unbuilt) divergence refusal would refuse the retry that repairs
-  the crash. Not test-verified — no seam injects a mid-sequence failure;
-  `Test_a_step_whose_frontmatter_is_still_open_is_marked_done_…` is the closest proxy.
-  (HANDOFF-FILE)
+  the crash. **Test-verified at all four positions**: a directory planted at each write's own
+  temp sibling (or, for the handoff, at its final name) forces that write to fail without
+  disturbing any other file, and each test also clears the obstruction and retries, proving
+  actual convergence rather than just the open-status precondition
+  (`Test_reports_a_handoff_write_that_cannot_be_committed`,
+  `_a_state_write_…`, `_a_step_file_write_…`, `_a_specification_write_…`). (HANDOFF-FILE, fix)
 - **Identity/no-op (R11):** re-finishing a done step with identical inputs writes nothing, mtime
   preserved on all four files. Gate: `fm.Done() && handoff file exists and matches && state
   matches && ticked spec matches`, taken **before `SetStatus`**. Absent/unreadable handoff is
@@ -82,11 +85,21 @@ replaced by the whole-file contract below. The crossover reads this file next.
   helper function-call boundary.
 - The `-HANDOFF.md` suffix sorts *before* its step file (`-` < `.`). Cosmetic; do not change the
   default without migrating the tree again.
+- `atomicfile.Create`'s temp-sibling mode carries an owner-write exception: when name exists and
+  its own mode has no owner-write bit, an abandoned write's sibling inherits that mode too, and
+  every later attempt for the same name fails `permission denied` until the sibling is removed by
+  hand. Pre-existing, unowned; do not add an open-EACCES-remove-retry without its own scenario.
+- `atomicfile.Create`'s `Mode().Perm()` masks setuid/setgid/sticky, so a replace silently drops
+  them. `Lstat`→`Chmod` is an inherent read-then-write window. `PendingFile` is not documented or
+  guarded as safe for concurrent `Close`. All three pre-existing, no constructible failure —
+  `brief` has one writer — unowned.
 
 ## Open debts
 
 - Heading/cap value validation — unowned until SCENARIO-19.
-- A mid-write I/O failure leaves a half-applied result. Unowned; `check` (22) is the detector.
+- A mid-write I/O failure leaves a half-applied result on disk that a same-argument retry
+  repairs (test-verified at all four `finish` write positions, see Binding decisions); nothing
+  yet detects a half-applied result proactively. Unowned; `check` (22) is the detector.
 - Invalid-`step-file-pattern` refusal names the feature dir, not the config — unowned.
 - `insertProgressEntry`/`tickProgressEntry` insert an LF line into a CRLF file (mixed endings);
   `ParseFrontmatter`'s `rest` keeps a leading `"\r"` after a CRLF close when a blank line follows;
@@ -97,6 +110,13 @@ replaced by the whole-file contract below. The crossover reads this file next.
   `*RefusalError`) — SCENARIO-13 closes this.
 - `check` (22) must report a `## Handoff` section surviving in a step file as a finding; until
   then the leftover is silently ignored. Unowned — dies unless re-opened.
+- **Data loss:** a symlinked specification or step file is silently replaced by a regular file.
+  `finish` reads through the symlink (`root.ReadFile` follows in-root symlinks), computes the
+  tick against the link's target content, then `replaceBytes`'s rename destroys the link and the
+  real target file never receives the tick. The state file already refuses a non-regular target
+  (`finish.go`'s `IsRegular()` check before its read); the specification and step-file reads carry
+  no such refusal. Pre-existing, real, unowned — needs its own scenario (a refusal, not a silent
+  fix) — dies unless re-opened.
 
 ## Crossover note
 

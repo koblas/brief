@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/atomicfile"
@@ -149,6 +150,37 @@ func Test_Create_preserves_a_mode_the_process_umask_would_otherwise_narrow(t *te
 		"the target's own mode must survive the replace regardless of umask")
 }
 
+// Test_Create_honours_the_process_umask_on_a_fresh_create is the
+// discriminating arm the replace-path tests above cannot be: name does not
+// exist yet, so replaceMode falls through to perm, and OpenFile's own mode
+// argument — not Chmod — must produce the result. perm is 0o644, a mode
+// with the group- and other-write bits a 0o077 umask strips; a build that
+// still Chmods perm exactly regardless of whether name existed defeats the
+// umask and lands 0o644 instead of 0o600.
+//
+// syscall.Umask is process-global, so this test sets it and restores the
+// prior value with t.Cleanup. That makes the test order-sensitive with
+// respect to any other test in this package that also touches the umask —
+// acceptable here because no test in this package (or file) calls
+// t.Parallel, so nothing else observes the mutated umask mid-test.
+func Test_Create_honours_the_process_umask_on_a_fresh_create(t *testing.T) {
+	old := syscall.Umask(0o077)
+	t.Cleanup(func() { syscall.Umask(old) })
+
+	root, dir := openRoot(t)
+
+	w, err := atomicfile.Create(root, "fresh.txt", 0o644)
+	require.NoError(t, err)
+	_, writeErr := io.WriteString(w, "new")
+	require.NoError(t, writeErr)
+	require.NoError(t, w.Close())
+
+	info, statErr := os.Stat(filepath.Join(dir, "fresh.txt"))
+	require.NoError(t, statErr)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+		"a fresh create must let the umask narrow perm, not apply perm exactly via Chmod")
+}
+
 // Test_Create_abandoned_without_close_leaves_the_target_untouched pins the
 // safe direction of the failure: dropping the writer on the floor loses the
 // new content and keeps the old file, rather than committing a partial one.
@@ -251,6 +283,35 @@ func Test_Create_overwrites_a_stale_temp_file_left_by_a_crashed_write(t *testing
 	require.NoError(t, statErr)
 	assert.Equal(t, os.FileMode(0o644), info.Mode().Perm(),
 		"the stale sibling's own mode must not survive onto the target it never named")
+}
+
+// Test_Create_removes_a_stale_temp_sibling_so_a_fresh_create_still_honours_the_umask
+// is the test above's discriminating twin: the stale sibling here is left
+// at 0o666, a mode neither perm (0o644) nor perm masked by a 0o077 umask
+// (0o600) coincides with, so a mutation that stops removing the stale
+// sibling (leaving its 0o666 to survive untouched, since a fresh create
+// never Chmods) is distinguishable from the intended result on either
+// axis — unlike a stale mode of 0o600, which would equal the umask-masked
+// answer by coincidence and pass even with the removal deleted.
+func Test_Create_removes_a_stale_temp_sibling_so_a_fresh_create_still_honours_the_umask(t *testing.T) {
+	old := syscall.Umask(0o077)
+	t.Cleanup(func() { syscall.Umask(old) })
+
+	root, dir := openRoot(t)
+	stale := filepath.Join(dir, ".target.txt.brief-tmp")
+	require.NoError(t, os.WriteFile(stale, []byte("garbage left by a crashed write"), 0o666)) //nolint:gosec // the wide mode is the fixture under test, not a real file
+	require.NoError(t, os.Chmod(stale, 0o666), "WriteFile's own mode argument is umask-masked too")
+
+	w, err := atomicfile.Create(root, "target.txt", 0o644)
+	require.NoError(t, err)
+	_, writeErr := io.WriteString(w, "new")
+	require.NoError(t, writeErr)
+	require.NoError(t, w.Close())
+
+	info, statErr := os.Stat(filepath.Join(dir, "target.txt"))
+	require.NoError(t, statErr)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+		"a stale sibling must not exempt a fresh create from the umask")
 }
 
 // Test_Create_a_second_close_neither_errors_nor_undoes_the_commit lets the

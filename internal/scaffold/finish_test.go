@@ -14,32 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// unexpectedFiles returns the names present in dir but not in want, so a
-// "leaves no temp file" test can assert this is empty and its control arm
-// can assert it is not — the same probe, used both ways, so neither
-// assertion can pass vacuously.
-func unexpectedFiles(t *testing.T, dir string, want []string) []string {
-	t.Helper()
-
-	entries, err := os.ReadDir(dir)
-	require.NoError(t, err)
-
-	wantSet := make(map[string]bool, len(want))
-	for _, w := range want {
-		wantSet[w] = true
-	}
-
-	var extra []string
-
-	for _, e := range entries {
-		if !wantSet[e.Name()] {
-			extra = append(extra, e.Name())
-		}
-	}
-
-	return extra
-}
-
 // snapshotTree returns the contents of every regular file directly under
 // dir, keyed by name, so a test can prove a refusal left the directory
 // byte-identical by comparing two snapshots.
@@ -477,7 +451,9 @@ func Test_finish_leaves_no_temp_file_in_the_feature_directory(t *testing.T) {
 //
 // It also pins convergence: the step file must still say status: open, since
 // that is the sole doneness authority and a retry has to be able to repair
-// the half-finished state.
+// the half-finished state — and then, clearing the obstruction and retrying
+// with the same arguments, that the retry actually lands the handoff and
+// marks the step done, not merely that the precondition for a retry holds.
 func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
@@ -492,6 +468,123 @@ func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Contains(t, string(stepBody), "status: open",
 		"a write that could not be committed must leave the step retryable")
+
+	require.NoError(t, os.RemoveAll(blocked))
+
+	retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.NoError(t, retryErr, "a retry once the obstruction is cleared must converge")
+
+	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
+	require.NoError(t, readErr)
+	assert.Equal(t, string(fx.newHandoff), string(gotHandoff), "the retry must finish the write the blocked attempt left undone")
+
+	gotStepAfterRetry, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotStepAfterRetry), "status: done")
+}
+
+// Test_reports_a_state_write_that_cannot_be_committed covers the second of
+// Finish's four writes: a directory planted at the state file's own temp
+// sibling — the same seam Test_the_temp_file_sweep_sees_a_temp_file uses as
+// a decoy — blocks Create's OpenFile outright, before Close is ever reached.
+//
+// It carries the same convergence proof as the specification and step-file
+// siblings below it: the handoff write ahead of the blocked one has landed,
+// the state write itself has not (the old state is still on disk), and the
+// step file and specification — both after the blocked write in the fixed
+// order — are untouched. Clearing the obstruction and retrying with the same
+// arguments must then finish the whole sequence.
+func Test_reports_a_state_write_that_cannot_be_committed(t *testing.T) {
+	fx := newFinishFixture(t)
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+	blocked := filepath.Join(fx.featureDir(), "."+fx.cfg.StateFile+".brief-tmp")
+	require.NoError(t, os.Mkdir(blocked, 0o755))
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.Error(t, err)
+
+	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
+	require.NoError(t, readErr)
+	assert.Equal(t, string(fx.newHandoff), string(gotHandoff), "the handoff write ahead of the blocked one must have landed")
+
+	gotState, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
+	require.NoError(t, readErr)
+	assert.Equal(t, oldStateBody(fx.cfg), string(gotState), "the state write itself was blocked, so the old state must still be on disk")
+
+	gotStep, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotStep), "status: open",
+		"a write that could not be committed must leave the step retryable")
+
+	gotSpec, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotSpec), "- [ ] STEP-02: Assemble the thing",
+		"the specification write must not have run past the blocked state write")
+
+	require.NoError(t, os.RemoveAll(blocked))
+
+	retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.NoError(t, retryErr, "a retry once the obstruction is cleared must converge")
+
+	gotStateAfterRetry, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
+	require.NoError(t, readErr)
+	assert.Equal(t, string(fx.newState), string(gotStateAfterRetry))
+
+	gotSpecAfterRetry, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotSpecAfterRetry), "- [x] STEP-02: Assemble the thing")
+}
+
+// Test_reports_a_step_file_write_that_cannot_be_committed covers the third
+// of Finish's four writes: a directory planted at the step file's own temp
+// sibling blocks it. This is the doc's own load-bearing boundary — the last
+// write whose failure still leaves the step's frontmatter status "open", the
+// sole doneness authority a retry relies on; a failure one write later (the
+// specification) would leave status already "done".
+//
+// It asserts the same convergence shape as its siblings: the handoff and
+// state writes ahead of the blocked one have landed, the step file itself
+// still says status: open, the specification is still unticked, and clearing
+// the obstruction and retrying finishes the sequence.
+func Test_reports_a_step_file_write_that_cannot_be_committed(t *testing.T) {
+	fx := newFinishFixture(t)
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+	blocked := filepath.Join(fx.featureDir(), "."+"STEP-02.md"+".brief-tmp")
+	require.NoError(t, os.Mkdir(blocked, 0o755))
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.Error(t, err)
+
+	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
+	require.NoError(t, readErr)
+	assert.Equal(t, string(fx.newHandoff), string(gotHandoff), "the handoff write ahead of the blocked one must have landed")
+
+	gotState, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
+	require.NoError(t, readErr)
+	assert.Equal(t, string(fx.newState), string(gotState), "the state write ahead of the blocked one must have landed")
+
+	gotStep, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotStep), "status: open",
+		"the step-file write itself was blocked, so status must still be open — the last prefix that leaves it that way")
+
+	gotSpec, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotSpec), "- [ ] STEP-02: Assemble the thing",
+		"the specification write must not have run past the blocked step-file write")
+
+	require.NoError(t, os.RemoveAll(blocked))
+
+	retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.NoError(t, retryErr, "a retry once the obstruction is cleared must converge")
+
+	gotStepAfterRetry, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotStepAfterRetry), "status: done")
+
+	gotSpecAfterRetry, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotSpecAfterRetry), "- [x] STEP-02: Assemble the thing")
 }
 
 // Test_reports_a_specification_write_that_cannot_be_committed covers the
@@ -542,14 +635,23 @@ func Test_reports_a_specification_write_that_cannot_be_committed(t *testing.T) {
 		"the retry must finish the tick the blocked write left undone")
 }
 
+// Test_the_temp_file_sweep_sees_a_temp_file is the control for
+// Test_finish_leaves_no_temp_file_in_the_feature_directory's claim, and uses
+// the exact probe that test does — namesOf(entries) compared against
+// fixtureFileNames(fx) — rather than a separate helper: a decoy leftover
+// temp file shows up in the directory listing but not in the fixture's
+// expected set, which is exactly what would fail the real test's
+// assert.ElementsMatch if finish ever left one behind.
 func Test_the_temp_file_sweep_sees_a_temp_file(t *testing.T) {
 	fx := newFinishFixture(t)
 	decoy := "." + fx.cfg.StateFile + ".brief-tmp"
 	require.NoError(t, os.WriteFile(filepath.Join(fx.featureDir(), decoy), []byte("leftover"), 0o600))
 
-	extra := unexpectedFiles(t, fx.featureDir(), fixtureFileNames(fx))
+	entries, err := os.ReadDir(fx.featureDir())
+	require.NoError(t, err)
 
-	assert.Contains(t, extra, decoy)
+	assert.Contains(t, namesOf(entries), decoy, "the probe must see the decoy")
+	assert.NotContains(t, fixtureFileNames(fx), decoy, "the fixture's expected set must not already include it")
 }
 
 func Test_refuses_an_unknown_feature_on_finish(t *testing.T) {
