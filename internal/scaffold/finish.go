@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/koblas/brief/internal/platform/atomicfile"
 	"github.com/koblas/brief/internal/platform/config"
@@ -21,18 +22,36 @@ import (
 // depends-on and the step's own checklist are read but not enforced:
 // Finish writes regardless of either.
 //
+// The handoff anchor's section runs from the end of its own heading line
+// to end of the step body, unconditionally — never by scanning for a
+// terminating heading, per the default profile's "## Handoff is the last
+// section of every step file". That contract, not a scan, is what makes
+// re-splicing a fixed point: no scan means no fence state a nested fence
+// could leave wrongly open, and no heading anywhere in handoff's own text
+// — however handoff distills its content — can be misread as an early
+// terminator. See spliceHandoff.
+//
 // Every check runs, and every write body is computed, before the first
 // byte reaches disk — in the order a refusal must name the first thing
 // wrong (R14a): the step-file pattern compiles; the feature directory
 // opens; a step file exists whose id equals step; its frontmatter parses;
-// its handoff anchor is present; handoff itself closes every fence it
-// opens (ErrUnterminatedFence) — spliced in as-is, an open fence would
-// make the next Finish's section scan run to end of file and silently
-// drop everything after the anchor; the specification is readable; the
-// specification carries the configured progress heading and an entry for
-// step; the state file exists as a regular file. Computing the spliced
-// step body and the frontmatter's "status: done" line during this phase,
-// rather than at write time, means a step file with no "status:" field
+// its handoff anchor is present — or, when absent because a fence opened
+// earlier in the body never closed before the anchor's own line would
+// have been reached, ErrUnterminatedFence names that instead of the
+// otherwise-untrue "no heading found"; the anchor is the last heading in
+// the step file, checked only while the step is not yet done, since once
+// done everything after the anchor is Finish's own prior output and R11
+// requires it to survive an identical re-finish untouched
+// (ErrHandoffNotLast); handoff itself closes every fence it opens
+// (ErrUnterminatedFence, named against HandoffSource); state closes every
+// fence it opens (ErrUnterminatedFence, named against StateSource) —
+// state's configured headings are read by a terminator scan on every
+// later Start, so an open fence there is not merely untidy, it is
+// unreadable; the specification is readable; the specification carries
+// the configured progress heading and an entry for step; the state file
+// exists as a regular file. Computing the spliced step body and the
+// frontmatter's "status: done" line during this phase, rather than at
+// write time, means a step file with no "status:" field
 // (stepfile.ErrNoStatusField) is refused before any write lands, not
 // discovered half way through the sequence.
 //
@@ -118,28 +137,23 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	}
 
 	frontLen := len(stepBody) - len(rest)
+	// frontLines converts a line number relative to rest (what findHeading
+	// and UnterminatedFence report) into the step file's own absolute line
+	// number, so a refusal naming stepPath always points at the line a
+	// reader opening that file would need.
+	frontLines := strings.Count(string(stepBody[:frontLen]), "\n")
+	restStr := string(rest)
 
-	if _, ok := markdown.Section(string(rest), s.cfg.HandoffHeading); !ok {
-		return &RefusalError{
-			Path:    stepPath,
-			Problem: fmt.Sprintf("no %q heading found", s.cfg.HandoffHeading),
-			Fix:     fmt.Sprintf("add a %q heading to the step file", s.cfg.HandoffHeading),
-			Err:     ErrMalformedFeature,
-		}
+	if refusal := validateHandoffAnchor(restStr, s.cfg.HandoffHeading, frontLines, stepPath, fm.Done()); refusal != nil {
+		return refusal
 	}
 
-	// Checked before any write: an unterminated fence spliced into the
-	// step file as-is would make the next Finish's SectionRange scan past
-	// every section following the handoff anchor, silently dropping them
-	// (R11 violation). Refusing here means a malformed handoff is never
-	// written in the first place.
-	if line, delim, unterminated := markdown.UnterminatedFence(string(handoff)); unterminated {
-		return &RefusalError{
-			Path:    stepPath,
-			Problem: fmt.Sprintf("handoff has an unclosed %s fence opened at line %d", delim, line),
-			Fix:     "close the fence, or remove the unmatched delimiter, and retry",
-			Err:     ErrUnterminatedFence,
-		}
+	if refusal := checkArgumentFence(handoff, HandoffSource, "handoff"); refusal != nil {
+		return refusal
+	}
+
+	if refusal := checkArgumentFence(state, StateSource, "state"); refusal != nil {
+		return refusal
 	}
 
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
@@ -219,6 +233,80 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	}
 
 	return nil
+}
+
+// validateHandoffAnchor refuses restStr — the frontmatter-stripped step
+// body — when it is not fit for spliceHandoff to run unconditionally to
+// end of body: the anchor named by heading is missing (naming the
+// fence instead, when an earlier one never closes and swallows the
+// heading line rather than the untrue "no heading found"), or, only while
+// done is false, the anchor is not the last heading in restStr. frontLines
+// converts a line number relative to restStr into stepPath's own absolute
+// line number. It returns nil when restStr is fit to splice.
+func validateHandoffAnchor(restStr, heading string, frontLines int, stepPath string, done bool) *RefusalError {
+	if _, ok := markdown.Section(restStr, heading); !ok {
+		if line, delim, unterminated := markdown.UnterminatedFence(restStr); unterminated {
+			return &RefusalError{
+				Path:    stepPath,
+				Line:    frontLines + line,
+				Problem: fmt.Sprintf("step file has an unclosed %s fence", delim),
+				Fix:     "close the fence, or remove the unmatched delimiter, and retry",
+				Err:     ErrUnterminatedFence,
+			}
+		}
+
+		return &RefusalError{
+			Path:    stepPath,
+			Problem: fmt.Sprintf("no %q heading found", heading),
+			Fix:     fmt.Sprintf("add a %q heading to the step file", heading),
+			Err:     ErrMalformedFeature,
+		}
+	}
+
+	// Checked only while the step is still open: once done, everything
+	// after the anchor is Finish's own prior output — legitimately
+	// containing a heading as ordinary handoff prose — and R11 requires an
+	// identical re-finish to leave it untouched rather than refuse it.
+	// Before the step is ever finished, anything after the anchor can only
+	// have arrived by a hand edit bypassing the tool (R10), and
+	// spliceHandoff's unconditional end-of-body contract would otherwise
+	// silently overwrite it.
+	if done {
+		return nil
+	}
+
+	if trailing, line, found := markdown.TrailingHeading(restStr, heading); found {
+		return &RefusalError{
+			Path:    stepPath,
+			Line:    frontLines + line,
+			Problem: fmt.Sprintf("%q is not the last heading in the step file; found %q after it", heading, trailing),
+			Fix:     fmt.Sprintf("move %q out of the step file, or fold its content into the handoff, before finishing", trailing),
+			Err:     ErrHandoffNotLast,
+		}
+	}
+
+	return nil
+}
+
+// checkArgumentFence refuses when body — Finish's handoff or state
+// argument, named for the error message by label — opens a fenced code
+// block it never closes. It names source (HandoffSource or StateSource)
+// rather than any file, since Finish never learns which file, or whether
+// there was one at all, body's bytes came from. It returns nil when every
+// fence body opens is closed.
+func checkArgumentFence(body []byte, source, label string) *RefusalError {
+	line, delim, unterminated := markdown.UnterminatedFence(string(body))
+	if !unterminated {
+		return nil
+	}
+
+	return &RefusalError{
+		Path:    source,
+		Line:    line,
+		Problem: fmt.Sprintf("%s has an unclosed %s fence", label, delim),
+		Fix:     "close the fence, or remove the unmatched delimiter, and retry",
+		Err:     ErrUnterminatedFence,
+	}
 }
 
 // writeFailure wraps a write-path error with the same invocation that

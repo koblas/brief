@@ -4,11 +4,12 @@
 // constraints inherited from the feature's state file.
 //
 // Start is the only entry point. It refuses a feature that does not exist
-// (ErrNoSuchFeature) or that has no state file (ErrMalformedFeature)
-// rather than assembling a brief that silently omits inherited context —
-// R10's rule that a malformed feature is refused, not degraded into. A
-// step's frontmatter is parsed before any markdown extraction runs, so a
-// "#" character inside a YAML value is never mistaken for a heading.
+// (ErrNoSuchFeature) or whose state file is missing, unreadable, or has an
+// unterminated fenced code block (ErrMalformedFeature) rather than
+// assembling a brief that silently omits inherited context — R10's rule
+// that a malformed feature is refused, not degraded into. A step's
+// frontmatter is parsed before any markdown extraction runs, so a "#"
+// character inside a YAML value is never mistaken for a heading.
 //
 // assemble imports internal/platform/config, internal/platform/stepfile
 // and internal/platform/markdown, and the standard library only. It never

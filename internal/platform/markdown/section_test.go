@@ -358,6 +358,86 @@ func Test_UnterminatedFence_reports_the_line_and_delimiter_of_an_open_fence(t *t
 	assert.Equal(t, "```", delim)
 }
 
+func Test_HeadingStart_returns_the_offset_just_past_the_heading_line(t *testing.T) {
+	body := "## Handoff\n\nbody\n"
+
+	start, ok := markdown.HeadingStart(body, "## Handoff")
+
+	assert.True(t, ok)
+	assert.Equal(t, "\nbody\n", body[start:])
+}
+
+func Test_HeadingStart_returns_false_when_the_heading_is_absent(t *testing.T) {
+	body := "## Scenario\n\nbody\n"
+
+	_, ok := markdown.HeadingStart(body, "## Handoff")
+
+	assert.False(t, ok)
+}
+
+// Test_HeadingStart_never_anchors_on_a_fenced_decoy pins the same
+// fence-aware anchor search SectionRange uses: a heading-shaped line
+// inside a fenced code block is never the anchor.
+func Test_HeadingStart_never_anchors_on_a_fenced_decoy(t *testing.T) {
+	body := "```\n## Handoff\n```\n\n## Handoff\n\nreal body\n"
+
+	start, ok := markdown.HeadingStart(body, "## Handoff")
+
+	assert.True(t, ok)
+	assert.Equal(t, "\nreal body\n", body[start:])
+}
+
+func Test_TrailingHeading_returns_false_when_the_heading_is_last(t *testing.T) {
+	body := "## Scenario\n\nfirst\n\n## Handoff\n\nlast section, nothing follows\n"
+
+	_, _, found := markdown.TrailingHeading(body, "## Handoff")
+
+	assert.False(t, found)
+}
+
+func Test_TrailingHeading_returns_the_first_heading_that_follows(t *testing.T) {
+	body := "## Handoff\n\nbody\n\n## Notes\n\nkeep this\n"
+
+	line, lineNo, found := markdown.TrailingHeading(body, "## Handoff")
+
+	assert.True(t, found)
+	assert.Equal(t, "## Notes", line)
+	assert.Equal(t, 5, lineNo)
+}
+
+// Test_TrailingHeading_reports_a_trailing_heading_of_a_different_level
+// pins the "any level" contract: content under a "### " subheading after
+// the anchor is just as much at risk as content under a "## " one, so a
+// level-restricted check would miss it.
+func Test_TrailingHeading_reports_a_trailing_heading_of_a_different_level(t *testing.T) {
+	body := "## Handoff\n\nbody\n\n### Deeper\n\nstill at risk\n"
+
+	line, _, found := markdown.TrailingHeading(body, "## Handoff")
+
+	assert.True(t, found)
+	assert.Equal(t, "### Deeper", line)
+}
+
+// Test_TrailingHeading_never_reports_a_fenced_decoy_as_the_successor pins
+// the same fence-aware scan SectionRange's terminator search uses: a
+// heading-shaped line inside a fenced code block after the anchor is not a
+// trailing heading.
+func Test_TrailingHeading_never_reports_a_fenced_decoy_as_the_successor(t *testing.T) {
+	body := "## Handoff\n\n```\n## Not a heading\n```\n"
+
+	_, _, found := markdown.TrailingHeading(body, "## Handoff")
+
+	assert.False(t, found)
+}
+
+func Test_TrailingHeading_returns_false_when_the_heading_itself_is_absent(t *testing.T) {
+	body := "## Scenario\n\nbody\n"
+
+	_, _, found := markdown.TrailingHeading(body, "## Handoff")
+
+	assert.False(t, found)
+}
+
 // Test_UnterminatedFence_treats_a_closing_delimiter_indented_four_spaces_as_unterminated
 // reproduces the reviewer's second repro shape: a closing fence indented
 // four spaces is not a fence delimiter at all per CommonMark's three-space

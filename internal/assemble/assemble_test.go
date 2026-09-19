@@ -409,6 +409,40 @@ func Test_returns_an_error_when_the_state_file_is_missing(t *testing.T) {
 	assert.Empty(t, brief.Inherited)
 }
 
+// Test_refuses_a_state_file_whose_fence_is_unterminated reproduces the
+// reviewer's BLOCKER directly: stateSections finds each configured
+// heading by scanning forward for a terminator, the same as every other
+// caller of markdown.Section, so a fence opened before the first heading
+// and never closed puts every one of them inside it — the control arm
+// (Test_carries_every_state_file_section_as_inherited_context) already
+// proves the same four headings are readable from a balanced state file,
+// so this is a single-variable change from that fixture, not a
+// freestanding claim. Without this check Start would return a Brief with
+// every Inherited section empty at exit 0 — R10's "the worst this tool
+// could produce" — rather than refuse.
+func Test_refuses_a_state_file_whose_fence_is_unterminated(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"),
+		[]byte(fixtureStep(cfg, "STEP-01", "open", "STEP-01", "ACCEPTANCE-01", nil, "")), 0o600))
+
+	state := "```\nunterminated\n" + cfg.StateHeadings.BindingDecisions + "\n\nsome decision\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(state), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	brief, err := srv.Start(t.Context(), "demo")
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, assemble.ErrMalformedFeature)
+	assert.Contains(t, err.Error(), "unclosed")
+	assert.Nil(t, brief.Step)
+	assert.Zero(t, brief.Done)
+	assert.Empty(t, brief.Inherited)
+}
+
 func Test_returns_an_error_when_a_step_file_has_no_frontmatter(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()

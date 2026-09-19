@@ -123,31 +123,35 @@ func insertProgressEntry(body, heading, entry string) (string, error) {
 	return result, nil
 }
 
-// spliceHandoff replaces the section under heading in body — the
-// frontmatter-stripped step body — with handoff's trimmed text, leaving
-// every other byte, including the terminating heading's own indentation,
-// identical. It uses markdown.SectionRange for both the anchor search and
-// the end scan, so a fenced example inside body containing a bare heading
-// line is never mistaken for the real anchor. The replacement is
-// "\n" + trimmed handoff + "\n", plus one further "\n" when a heading
-// follows the anchor, so splicing a body that already holds this exact
-// shape reproduces it byte for byte. spliceHandoff reports ok == false,
-// body unchanged, when heading is not found.
+// spliceHandoff replaces everything in body — the frontmatter-stripped
+// step body — from the end of heading's own line to end of body with
+// handoff's trimmed text, leaving every byte before that point identical.
+// It takes body's end unconditionally as the section's end, by contract
+// rather than by scanning for a terminator: heading is the handoff anchor,
+// the default profile's "last section of every step file", so nothing
+// after it is ever a real terminating heading for Finish's callers to
+// find — a caller for whom that contract might not hold (an anchor with
+// content after it, from a hand edit) is expected to have already refused
+// before calling spliceHandoff, via markdown.TrailingHeading. Taking the
+// end unconditionally is what makes splicing a fixed point: no scan means
+// no fence state, and no heading anywhere in handoff's own text, for a
+// scan to misread as an early terminator. It uses markdown.HeadingStart
+// for the anchor search, so a fenced example inside body containing a bare
+// heading line is never mistaken for the real anchor. The replacement is
+// "\n" + trimmed handoff + "\n", so splicing a body that already holds
+// this exact shape reproduces it byte for byte. spliceHandoff reports
+// ok == false, body unchanged, when heading is not found.
 func spliceHandoff(body []byte, heading string, handoff []byte) ([]byte, bool) {
-	start, end, ok := markdown.SectionRange(string(body), heading)
+	start, ok := markdown.HeadingStart(string(body), heading)
 	if !ok {
 		return body, false
 	}
 
 	replacement := "\n" + strings.Trim(string(handoff), "\n") + "\n"
-	if end < len(body) {
-		replacement += "\n"
-	}
 
-	result := make([]byte, 0, len(body)-(end-start)+len(replacement))
+	result := make([]byte, 0, start+len(replacement))
 	result = append(result, body[:start]...)
 	result = append(result, []byte(replacement)...)
-	result = append(result, body[end:]...)
 
 	return result, true
 }

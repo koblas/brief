@@ -23,13 +23,18 @@
 // already-finished step with the same handoff and state is a true no-op:
 // nothing is written and every file's modification time is preserved.
 //
-// A caller-facing refusal is a *RefusalError: a path, what was wrong with
-// it, and how to fix it, wrapping one of ErrNoSuchFeature,
-// ErrMalformedFeature, ErrNoProgressHeading, ErrNoSuchStep or
-// ErrNoProgressEntry (or, from internal/platform/stepfile,
+// A caller-facing refusal is a *RefusalError: a path, an optional line
+// within it, what was wrong, and how to fix it, wrapping one of
+// ErrNoSuchFeature, ErrMalformedFeature, ErrNoProgressHeading,
+// ErrNoSuchStep, ErrNoProgressEntry, ErrUnterminatedFence or
+// ErrHandoffNotLast (or, from internal/platform/stepfile,
 // ErrInvalidPattern or ErrNoStatusField) so callers can branch on the
 // specific cause with errors.Is while still rendering the same "nothing
-// changed on disk" line.
+// changed on disk" line. A refusal about the handoff or state argument's
+// own bytes, rather than about a file Finish opened, carries Path ==
+// HandoffSource or StateSource — a placeholder cli replaces with the real
+// --handoff/--state source before rendering, since Finish itself never
+// learns it.
 //
 // scaffold writes through the real filesystem; there is no Store port. The
 // contracts this package ships — no temp file left behind, byte-identity

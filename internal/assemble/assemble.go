@@ -66,6 +66,17 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 		return Brief{}, ErrMalformedFeature
 	}
 
+	// stateSections below finds each configured heading's section by
+	// scanning forward for a terminator, the same way Section always has.
+	// An open fence makes that scan run to end of file, so every heading
+	// after the fence opens sits inside it and reads as absent — R10's
+	// "the worst this tool could produce": a brief that looks complete
+	// while silently omitting every inherited section. Refusing here means
+	// Start never returns that shape.
+	if line, delim, unterminated := markdown.UnterminatedFence(string(stateBytes)); unterminated {
+		return Brief{}, fmt.Errorf("assemble: %w: state file has an unclosed %s fence opened at line %d", ErrMalformedFeature, delim, line)
+	}
+
 	pattern, err := stepfile.Compile(s.cfg.StepFilePattern)
 	if err != nil {
 		return Brief{}, fmt.Errorf("assemble: %w", err)

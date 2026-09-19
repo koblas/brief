@@ -222,6 +222,65 @@ func Test_returns_a_usage_error_for_an_unknown_finish_flag(t *testing.T) {
 	assert.Equal(t, "brief finish: flag provided but not defined: -bogus; run 'brief finish <feature> <step> --handoff <path> --state <path>'", oneLine(t, &stderr))
 }
 
+// Test_names_the_handoff_path_when_its_fence_is_unterminated reproduces
+// the reviewer's MAJOR directly: scaffold.Finish has no path for the
+// handoff argument's own bytes, only a placeholder, so cli must replace
+// it with the real --handoff path before the refusal reaches the user —
+// otherwise the reported "<path>:<line>" points at the step file, which
+// both names the wrong file and, at that line, holds ordinary frontmatter
+// rather than anything fence-shaped.
+func Test_names_the_handoff_path_when_its_fence_is_unterminated(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "Repro:\n\n```bash\ngo test ./...\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	line := oneLine(t, &stderr)
+	assert.Contains(t, line, handoffPath+":3", "the refusal must name the handoff path, at the line its fence opened on")
+	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
+}
+
+// Test_names_stdin_when_the_piped_handoff_s_fence_is_unterminated is the
+// stdin half of the same locator upgrade: --handoff - has no path at all
+// to fall back to, so the refusal must name "<stdin>" rather than an
+// empty string.
+func Test_names_stdin_when_the_piped_handoff_s_fence_is_unterminated(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	stdin := strings.NewReader("Repro:\n\n```bash\ngo test ./...\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", "-", "--state", statePath}, stdin, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	line := oneLine(t, &stderr)
+	assert.Contains(t, line, "<stdin>:3")
+}
+
+// Test_names_the_state_path_when_its_fence_is_unterminated is the state
+// half of the same locator upgrade.
+func Test_names_the_state_path_when_its_fence_is_unterminated(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\n```\nunterminated\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	line := oneLine(t, &stderr)
+	assert.Contains(t, line, statePath+":3")
+}
+
 func Test_prints_the_finish_usage_for_help(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer

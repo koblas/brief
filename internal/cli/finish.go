@@ -96,6 +96,15 @@ func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, s
 	srv := scaffold.NewServer(cfg, root)
 
 	if err := srv.Finish(ctx, feature, step, handoff, state); err != nil {
+		if refusal, ok := errors.AsType[*scaffold.RefusalError](err); ok {
+			switch refusal.Path {
+			case scaffold.HandoffSource:
+				refusal.Path = sourceLocator(*handoffPath)
+			case scaffold.StateSource:
+				refusal.Path = sourceLocator(*statePath)
+			}
+		}
+
 		return renderRefusal(stderr, "finish", err)
 	}
 
@@ -120,6 +129,17 @@ func splitLeadingPositionals(args []string) ([]string, []string) {
 	}
 
 	return args, nil
+}
+
+// sourceLocator returns the R14a locator for one of finish's --handoff or
+// --state arguments: path unchanged, or "<stdin>" when path is "-", so a
+// refusal about piped input never names an empty or misleading path.
+func sourceLocator(path string) string {
+	if path == "-" {
+		return "<stdin>"
+	}
+
+	return path
 }
 
 // readSource returns the bytes at path, or stdin's contents when path is

@@ -145,6 +145,64 @@ func SectionRange(body, heading string) (int, int, bool) {
 	return offsets[headingIdx+1], offsets[sectionEnd], true
 }
 
+// HeadingStart returns the byte offset just past heading's own line — the
+// start of the section under it, using the same fence-aware anchor search
+// SectionRange uses. Unlike SectionRange, it reports no end: it exists for
+// a caller that already knows, by a separate contract, that heading is the
+// last heading in body, so there is nothing to scan for and no fence state
+// that a terminator search could get wrong. HeadingStart returns
+// (0, false) when no line in body equals heading.
+func HeadingStart(body, heading string) (int, bool) {
+	lines := strings.Split(body, "\n")
+	offsets := lineOffsets(lines)
+
+	headingIdx, _ := findHeading(lines, heading)
+	if headingIdx == -1 {
+		return 0, false
+	}
+
+	return offsets[headingIdx+1], true
+}
+
+// TrailingHeading returns the first heading line, and its 1-based line
+// number, found anywhere after heading's own line in body — fence-aware,
+// at any level, not only heading's own level, since content under any
+// heading that follows is equally at risk of being silently overwritten
+// by a caller that treats heading's section as running to end of body.
+// found is false when heading has no such successor. TrailingHeading does
+// not distinguish that case from "heading itself is not in body": a
+// caller that needs to tell them apart must check presence separately —
+// this package's own callers always do, via Section or SectionRange,
+// before calling TrailingHeading.
+func TrailingHeading(body, heading string) (string, int, bool) {
+	lines := strings.Split(body, "\n")
+
+	headingIdx, _ := findHeading(lines, heading)
+	if headingIdx == -1 {
+		return "", 0, false
+	}
+
+	var fence fenceState
+
+	for i := headingIdx + 1; i < len(lines); i++ {
+		line := lines[i]
+
+		if fence.step(line) {
+			continue
+		}
+
+		if fence.open {
+			continue
+		}
+
+		if headingLevelOf(line) > 0 {
+			return trimEOL(line), i + 1, true
+		}
+	}
+
+	return "", 0, false
+}
+
 // lineOffsets returns, for each index i in 0..len(lines), the byte offset
 // at which lines[i] begins within the body it was split from
 // (offsets[len(lines)] is that body's length). lines must be

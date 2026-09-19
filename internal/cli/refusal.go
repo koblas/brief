@@ -28,9 +28,10 @@ func flattenOneLine(s string) string {
 //	brief <command>: <path>: <problem>; fix it or remove it to fall back to the shipped defaults (no files changed)
 //
 // A *scaffold.RefusalError renders the same "nothing changed" promise
-// around its own path, problem and fix:
+// around its own path, problem and fix, naming a line within the path
+// when the refusal has one (R14a's "<path>[:<line>]"):
 //
-//	brief <command>: <path>: <problem>; <fix> (no files changed)
+//	brief <command>: <path>[:<line>]: <problem>; <fix> (no files changed)
 //
 // Every other error renders as one flattened line:
 //
@@ -44,8 +45,13 @@ func renderRefusal(stderr io.Writer, cmd string, err error) error {
 	}
 
 	if refusal, ok := errors.AsType[*scaffold.RefusalError](err); ok {
+		path := refusal.Path
+		if refusal.Line > 0 {
+			path = fmt.Sprintf("%s:%d", refusal.Path, refusal.Line)
+		}
+
 		fmt.Fprintf(stderr, "brief %s: %s: %s; %s (no files changed)\n",
-			cmd, refusal.Path, flattenOneLine(refusal.Problem), flattenOneLine(refusal.Fix))
+			cmd, path, flattenOneLine(refusal.Problem), flattenOneLine(refusal.Fix))
 
 		return err
 	}
