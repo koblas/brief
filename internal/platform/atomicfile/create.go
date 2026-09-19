@@ -1,6 +1,7 @@
 package atomicfile
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -8,31 +9,34 @@ import (
 	"path/filepath"
 )
 
-// Create opens name for atomic replacement under root and returns an
-// io.WriteCloser whose Write goes straight to a temporary sibling of name
-// and whose Close renames that sibling over name. A concurrent reader
-// therefore observes either name's previous content or its complete new
-// content, never a partial write, no matter how many Writes the caller
-// makes or how far apart they are.
+// compile-time proof that the documented io.WriteCloser contract holds.
+var _ io.WriteCloser = (*PendingFile)(nil)
+
+// Create opens name for atomic replacement under root and returns a
+// PendingFile — an io.WriteCloser whose Write goes straight to a temporary
+// sibling of name and whose Close renames that sibling over name. A
+// concurrent reader therefore observes either name's previous content or its
+// complete new content, never a partial write, no matter how many Writes the
+// caller makes or how far apart they are.
 //
 // Close is the commit, and it returns an error because the rename it
-// performs can fail — a failure that no earlier call can report, since
-// until Close runs nothing has touched name. A caller that checks only
-// Write's error has checked nothing that matters.
+// performs can fail — a failure that no earlier call can report, since until
+// Close runs nothing has touched name. A caller that checks only Write's
+// error has checked nothing that matters.
 //
-// Abandoning the writer without calling Close leaves name untouched and
-// the temp sibling on disk, which is the safe direction: the new content
-// is lost rather than half-committed, and the next Create for the same
-// name overwrites the stale sibling. Because Close commits rather than
-// aborts, a bare "defer w.Close()" is not a rollback — on an early return
-// it publishes whatever was written so far. Callers that hold the whole
-// payload already should prefer WriteFile, which has no such window.
+// Abandoning the writer without calling Close leaves name untouched and the
+// temp sibling on disk, which is the safe direction: the new content is lost
+// rather than half-committed, and the next Create for the same name
+// overwrites the stale sibling. Because Close commits rather than aborts, a
+// bare "defer w.Close()" is not a rollback — on an early return it publishes
+// whatever was written so far. Callers that hold the whole payload already
+// should prefer WriteFile, which has no such window.
 //
 // Once a Write has failed, Close does not commit: it removes the temp
-// sibling and returns that first write error, so a caller that ignores
+// sibling and reports that first write error, so a caller that ignores
 // Write's return still cannot publish a truncated file. A second Close
-// after the first returns nil and changes nothing, so the deferred-Close
-// safety net can sit alongside an explicit Close whose error is checked.
+// returns nil and changes nothing, so the deferred-Close safety net can sit
+// alongside an explicit Close whose error is checked.
 //
 // The temp sibling is opened O_CREATE|O_TRUNC, not O_EXCL: one left behind
 // by a crashed write must be overwritten by the next attempt rather than
@@ -40,20 +44,7 @@ import (
 // genuine collision a non-concern.
 //
 // Create performs no fsync. It claims atomicity, not durability.
-func Create(root *os.Root, name string, perm fs.FileMode) (io.WriteCloser, error) {
-	p, err := newPendingFile(root, name, perm)
-	if err != nil {
-		return nil, err
-	}
-
-	return p, nil
-}
-
-// newPendingFile opens the temp sibling and returns the concrete pending
-// file. Create hands it out as an io.WriteCloser; WriteFile keeps the
-// concrete type so that the errors it propagates are visibly the ones
-// pendingFile already wrapped rather than opaque interface-method returns.
-func newPendingFile(root *os.Root, name string, perm fs.FileMode) (*pendingFile, error) {
+func Create(root *os.Root, name string, perm fs.FileMode) (*PendingFile, error) {
 	tmp := tempName(name)
 
 	f, err := root.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, replaceMode(root, name, perm))
@@ -61,7 +52,7 @@ func newPendingFile(root *os.Root, name string, perm fs.FileMode) (*pendingFile,
 		return nil, fmt.Errorf("atomicfile: write %s: %w", name, err)
 	}
 
-	return &pendingFile{root: root, file: f, tmp: tmp, name: name}, nil
+	return &PendingFile{root: root, file: f, tmp: tmp, name: name}, nil
 }
 
 // replaceMode returns the permission bits the temp sibling for name should
@@ -82,9 +73,10 @@ func replaceMode(root *os.Root, name string, perm fs.FileMode) fs.FileMode {
 	return perm
 }
 
-// pendingFile is an in-progress atomic replacement of name: writes land in
-// the temp sibling tmp, and Close renames tmp over name.
-type pendingFile struct {
+// PendingFile is an in-progress atomic replacement of a file: writes land in
+// a temporary sibling, and Close renames that sibling over the target. It
+// implements io.WriteCloser.
+type PendingFile struct {
 	root *os.Root
 	file *os.File
 	tmp  string
@@ -105,7 +97,7 @@ type pendingFile struct {
 // closes the underlying descriptor first; there is no separate guard here,
 // since one would be unfalsifiable — no test can distinguish it from the
 // descriptor's own refusal.
-func (p *pendingFile) Write(b []byte) (int, error) {
+func (p *PendingFile) Write(b []byte) (int, error) {
 	n, err := p.file.Write(b)
 	if err != nil {
 		wrapped := fmt.Errorf("atomicfile: write %s: %w", p.name, err)
@@ -120,33 +112,58 @@ func (p *pendingFile) Write(b []byte) (int, error) {
 	return n, nil
 }
 
-// Close commits the replacement by renaming the temp sibling over name, or
-// removes the sibling and reports why it could not. A second Close returns
-// nil without touching anything.
-func (p *pendingFile) Close() error {
+// Close commits the replacement by renaming the temp sibling over the
+// target, or abandons it and reports every reason it could not commit.
+//
+// Close discards no error. When it abandons the replacement it still has to
+// close the descriptor and remove the temp sibling, and either of those can
+// fail too; the returned error joins all of them, because a temp sibling
+// that could not be removed contradicts this package's claim to leave none
+// behind and must not be hidden. Test the result with errors.Is against an
+// individual cause rather than comparing it directly.
+//
+// A second Close returns nil without touching anything.
+func (p *PendingFile) Close() error {
 	if p.closed {
 		return nil
 	}
 
 	p.closed = true
 
-	if p.writeErr != nil {
-		_ = p.file.Close()
-		_ = p.root.Remove(p.tmp)
+	closeErr := p.wrap(p.file.Close())
 
-		return p.writeErr
+	if p.writeErr != nil {
+		return errors.Join(p.writeErr, closeErr, p.removeTmp())
 	}
 
-	if err := p.file.Close(); err != nil {
-		_ = p.root.Remove(p.tmp)
-
-		return fmt.Errorf("atomicfile: write %s: %w", p.name, err)
+	if closeErr != nil {
+		return errors.Join(closeErr, p.removeTmp())
 	}
 
 	if err := p.root.Rename(p.tmp, p.name); err != nil {
-		_ = p.root.Remove(p.tmp)
+		return errors.Join(p.wrap(err), p.removeTmp())
+	}
 
-		return fmt.Errorf("atomicfile: write %s: %w", p.name, err)
+	return nil
+}
+
+// wrap annotates err with the target's name, passing nil through so callers
+// can join unconditionally.
+func (p *PendingFile) wrap(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return fmt.Errorf("atomicfile: write %s: %w", p.name, err)
+}
+
+// removeTmp deletes the temp sibling of an abandoned replacement, reporting
+// a failure to do so. A leftover sibling is not fatal — the next Create for
+// the same name truncates it — but it is a broken promise, so it is reported
+// rather than swallowed.
+func (p *PendingFile) removeTmp() error {
+	if err := p.root.Remove(p.tmp); err != nil {
+		return fmt.Errorf("atomicfile: remove temp file for %s: %w", p.name, err)
 	}
 
 	return nil

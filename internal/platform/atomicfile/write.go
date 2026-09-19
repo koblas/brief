@@ -13,27 +13,23 @@ import (
 // It is Create plus a single Write plus Close, and it is the right choice
 // whenever the caller already holds the complete contents: there is no
 // window in which a forgotten or early Close could publish a truncated
-// file, and no error path that leaves the temp sibling behind. Reach for
-// Create only to stream contents the caller does not have in one piece.
+// file. Reach for Create only to stream contents the caller does not have
+// in one piece.
 //
 // Create documents the shared details: the existing file's permission bits
 // win over perm on a replace, a stale temp sibling is overwritten rather
 // than treated as a collision, and there is no fsync — this claims
 // atomicity, not durability.
 func WriteFile(root *os.Root, name string, data []byte, perm fs.FileMode) error {
-	w, err := newPendingFile(root, name, perm)
+	w, err := Create(root, name, perm)
 	if err != nil {
 		return err
 	}
 
-	if _, writeErr := w.Write(data); writeErr != nil {
-		// Close removes the temp sibling and returns this same error;
-		// returning it directly keeps the failure the caller sees identical
-		// to the one Write reported.
-		_ = w.Close()
-
-		return writeErr
-	}
+	// Write's error is not returned here because Close reports it — along
+	// with any failure to clean up after it — and returning it separately
+	// would drop that cleanup failure. Close is the single error path.
+	_, _ = w.Write(data)
 
 	return w.Close()
 }
