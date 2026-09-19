@@ -12,29 +12,31 @@
 // step is done — the progress-list checkbox NewStep appends, and Finish
 // ticks, is a projection, not a second source of truth.
 //
-// Finish replaces a step's handoff block and a feature's state file, then
-// marks the step's frontmatter done, validating everything and computing
-// every write body before the first byte reaches disk. Its three writes
-// land in a fixed order — state file, step file, specification — chosen so
-// a crash between them always converges on a retry; see the doc comment on
-// Finish for why the reverse order does not. A write failure after
-// validation is returned as-is, never as a *RefusalError, since nothing
-// changed on disk is not true past that point. Finishing an
-// already-finished step with the same handoff and state is a true no-op:
-// nothing is written and every file's modification time is preserved.
+// Finish writes a step's handoff to its own file (named
+// internal/platform/stepfile.CompileHandoff beside the step file) and
+// replaces a feature's state file, then marks the step's frontmatter
+// done, validating everything and computing every write body before the
+// first byte reaches disk. Its four writes land in a fixed order — handoff
+// file, state file, step file, specification — chosen so a crash between
+// them always converges on a retry; see the doc comment on Finish for why
+// the reverse order does not. A write failure after validation is
+// returned as-is, never as a *RefusalError, since nothing changed on disk
+// is not true past that point. Finishing an already-finished step with
+// the same handoff and state is a true no-op: nothing is written and
+// every file's modification time is preserved.
 //
 // A caller-facing refusal is a *RefusalError: a path, an optional line
 // within it, what was wrong, and how to fix it, wrapping one of
 // ErrNoSuchFeature, ErrMalformedFeature, ErrNoProgressHeading,
-// ErrNoSuchStep, ErrNoProgressEntry, ErrUnterminatedFence or
-// ErrHandoffNotLast (or, from internal/platform/stepfile,
-// ErrInvalidPattern or ErrNoStatusField) so callers can branch on the
-// specific cause with errors.Is while still rendering the same "nothing
-// changed on disk" line. A refusal about the handoff or state argument's
-// own bytes, rather than about a file Finish opened, carries Path ==
-// HandoffSource or StateSource — a placeholder cli replaces with the real
-// --handoff/--state source before rendering, since Finish itself never
-// learns it.
+// ErrNoSuchStep, ErrNoProgressEntry or ErrUnterminatedFence (or, from
+// internal/platform/stepfile, ErrInvalidPattern, ErrInvalidHandoffSuffix
+// or ErrNoStatusField) so callers can branch on the specific cause with
+// errors.Is while still rendering the same "nothing changed on disk"
+// line. A refusal about the state argument's own bytes, rather than about
+// a file Finish opened, carries Path == StateSource — a placeholder cli
+// replaces with the real --state source before rendering, since Finish
+// itself never learns it. A "## Handoff" section left behind in a step
+// file by an unmigrated tree is ordinary prose Finish never reads.
 //
 // scaffold writes through the real filesystem; there is no Store port. The
 // contracts this package ships — no temp file left behind, byte-identity

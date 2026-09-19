@@ -2,17 +2,22 @@ package scaffold_test
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/stepfile"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func Test_writes_the_step_file_with_frontmatter_a_title_an_empty_checklist_and_a_handoff_anchor(t *testing.T) {
+// Test_writes_the_step_file_with_frontmatter_a_title_and_an_empty_checklist
+// renamed from …_and_a_handoff_anchor: the tool writes no handoff file and
+// no handoff heading, so a fresh step file ends with an empty checklist.
+func Test_writes_the_step_file_with_frontmatter_a_title_and_an_empty_checklist(t *testing.T) {
 	root := t.TempDir()
 	cfg := fixtureConfig()
 	srv := scaffold.NewServer(cfg, root)
@@ -33,10 +38,79 @@ func Test_writes_the_step_file_with_frontmatter_a_title_an_empty_checklist_and_a
 		"\n" +
 		"# STEP-01\n" +
 		"\n" +
-		cfg.ChecklistHeading + "\n" +
-		"\n" +
-		cfg.HandoffHeading + "\n"
+		cfg.ChecklistHeading + "\n"
 	assert.Equal(t, want, string(got))
+}
+
+// stepHandoffPath returns the path of feature's step "STEP-01"'s handoff
+// file under root, using cfg's configured feature directory, step-file
+// pattern id and handoff-file suffix, deriving the name by literal string
+// concatenation rather than through stepfile.CompileHandoff, so a
+// production naming bug cannot hide behind the helper's own derivation.
+func stepHandoffPath(root string, cfg config.Config, feature string) string {
+	return filepath.Join(root, cfg.FeatureDirectory, feature, "STEP-01"+cfg.HandoffFileSuffix)
+}
+
+// Test_writes_no_handoff_file pins the amended SCENARIO-03 contract: only
+// finish writes a handoff file. Its non-vacuity is
+// Test_the_handoff_probe_sees_a_handoff_file_after_a_finish's job.
+func Test_writes_no_handoff_file(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+	_, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, statErr := os.Stat(stepHandoffPath(root, cfg, "widgets"))
+	assert.ErrorIs(t, statErr, fs.ErrNotExist)
+}
+
+// Test_the_handoff_probe_sees_a_handoff_file_after_a_finish is the control
+// arm for Test_writes_no_handoff_file: the same probe, against the same
+// feature, after a Finish call, must see the file — proving the probe
+// above tests the right path rather than passing vacuously.
+func Test_the_handoff_probe_sees_a_handoff_file_after_a_finish(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+	_, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	state := "## Decisions Fixture\n\n## Left Fixture\n\n## Gotchas\n\n## Debts Fixture\n"
+	err = srv.Finish(context.Background(), "widgets", "STEP-01", []byte("HANDOFF"), []byte(state))
+	require.NoError(t, err)
+
+	_, statErr := os.Stat(stepHandoffPath(root, cfg, "widgets"))
+	assert.NoError(t, statErr)
+}
+
+// Test_a_handoff_file_does_not_advance_the_next_step_number pins
+// Pattern.Number's digits-only scan: a handoff file beside STEP-01 must
+// never be counted as a step file when NewStep numbers the next one.
+func Test_a_handoff_file_does_not_advance_the_next_step_number(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	featureDir := filepath.Join(root, "specs", "widgets")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	seed := "# widgets\n\n## Progress\n\n- [ ] STEP-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(seed), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"), []byte(""), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01"+cfg.HandoffFileSuffix), []byte(""), 0o600))
+
+	srv := scaffold.NewServer(cfg, root)
+
+	path, err := srv.NewStep(context.Background(), "widgets")
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-02.md"), path)
 }
 
 func Test_appends_the_progress_entry_under_the_progress_heading_when_the_list_is_empty(t *testing.T) {

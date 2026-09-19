@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/koblas/brief/internal/platform/config"
-	"github.com/koblas/brief/internal/platform/markdown"
 )
 
 // identRune is the set of runes id-boundary matching treats as part of an
@@ -34,16 +33,15 @@ func stateSkeleton(cfg config.Config) string {
 }
 
 // stepSkeleton renders a new step file: YAML frontmatter (id, status:
-// open, an empty depends-on list), a title heading equal to id, the
-// configured checklist heading and the configured handoff heading — each
-// heading written bare, with nothing under it, since the tool writes no
-// prose. The handoff heading, present with nothing under it, is what makes
-// a step's handoff anchor "present and empty" from the moment it is
-// scaffolded.
+// open, an empty depends-on list), a title heading equal to id, and the
+// configured checklist heading, written bare with nothing under it, since
+// the tool writes no prose. NewStep writes no handoff file — only Finish
+// does, naming it beside the step file (stepfile.CompileHandoff) — so a
+// freshly scaffolded step file carries no handoff heading at all.
 func stepSkeleton(cfg config.Config, id string) string {
 	return fmt.Sprintf(
-		"---\nid: %s\nstatus: open\ndepends-on: []\n---\n\n# %s\n\n%s\n\n%s\n",
-		id, id, cfg.ChecklistHeading, cfg.HandoffHeading,
+		"---\nid: %s\nstatus: open\ndepends-on: []\n---\n\n# %s\n\n%s\n",
+		id, id, cfg.ChecklistHeading,
 	)
 }
 
@@ -121,39 +119,6 @@ func insertProgressEntry(body, heading, entry string) (string, error) {
 	}
 
 	return result, nil
-}
-
-// spliceHandoff replaces everything in body — the frontmatter-stripped
-// step body — from the end of heading's own line to end of body with
-// handoff's trimmed text, leaving every byte before that point identical.
-// It takes body's end unconditionally as the section's end, by contract
-// rather than by scanning for a terminator: heading is the handoff anchor,
-// the default profile's "last section of every step file", so nothing
-// after it is ever a real terminating heading for Finish's callers to
-// find — a caller for whom that contract might not hold (an anchor with
-// content after it, from a hand edit) is expected to have already refused
-// before calling spliceHandoff, via markdown.TrailingHeading. Taking the
-// end unconditionally is what makes splicing a fixed point: no scan means
-// no fence state, and no heading anywhere in handoff's own text, for a
-// scan to misread as an early terminator. It uses markdown.HeadingStart
-// for the anchor search, so a fenced example inside body containing a bare
-// heading line is never mistaken for the real anchor. The replacement is
-// "\n" + trimmed handoff + "\n", so splicing a body that already holds
-// this exact shape reproduces it byte for byte. spliceHandoff reports
-// ok == false, body unchanged, when heading is not found.
-func spliceHandoff(body []byte, heading string, handoff []byte) ([]byte, bool) {
-	start, ok := markdown.HeadingStart(string(body), heading)
-	if !ok {
-		return body, false
-	}
-
-	replacement := "\n" + strings.Trim(string(handoff), "\n") + "\n"
-
-	result := make([]byte, 0, start+len(replacement))
-	result = append(result, body[:start]...)
-	result = append(result, []byte(replacement)...)
-
-	return result, true
 }
 
 // tickProgressEntry flips to "[x]" the first checklist item under heading

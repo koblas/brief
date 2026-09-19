@@ -28,8 +28,8 @@ func fixtureConfig() config.Config {
 	cfg.StepFilePattern = "STEP-%02d.md"
 	cfg.ProgressHeading = "## Progress"
 	cfg.ChecklistHeading = "## Fixture Checklist"
-	cfg.HandoffHeading = "## Fixture Handoff"
 	cfg.AcceptanceHeading = "## Fixture Scenario"
+	cfg.HandoffFileSuffix = ".fixture-handoff.md"
 	cfg.StateHeadings = config.StateHeadings{
 		BindingDecisions: "## Decisions Fixture",
 		LeftUnbuilt:      "## Left Fixture",
@@ -42,10 +42,10 @@ func fixtureConfig() config.Config {
 
 // fixtureStep renders a step file's body byte-for-byte as
 // scaffold.stepSkeleton emits its frontmatter, with an acceptance section
-// (fenced gherkin carrying a "#" comment line and acceptanceMarker), a
-// checklist section listing checklistItems, and a handoff section holding
-// handoffBody.
-func fixtureStep(cfg config.Config, id, status, title, acceptanceMarker string, checklistItems []string, handoffBody string) string {
+// (fenced gherkin carrying a "#" comment line and acceptanceMarker) and a
+// checklist section listing checklistItems. It carries no handoff section:
+// the handoff moved to its own file, written separately by newFixture.
+func fixtureStep(cfg config.Config, id, status, title, acceptanceMarker string, checklistItems []string) string {
 	var sb strings.Builder
 
 	sb.WriteString("---\n")
@@ -66,13 +66,16 @@ func fixtureStep(cfg config.Config, id, status, title, acceptanceMarker string, 
 		sb.WriteString("- [ ] " + item + "\n")
 	}
 
-	sb.WriteString("\n" + cfg.HandoffHeading + "\n\n")
-
-	if handoffBody != "" {
-		sb.WriteString(handoffBody + "\n")
-	}
-
 	return sb.String()
+}
+
+// handoffFilePath returns the path of feature's step id's handoff file
+// under featureDir, using cfg's configured handoff-file suffix, deriving
+// the name by literal string concatenation rather than through
+// stepfile.CompileHandoff, so a production naming bug cannot hide behind
+// the fixture's own derivation.
+func handoffFilePath(cfg config.Config, featureDir, id string) string {
+	return filepath.Join(featureDir, id+cfg.HandoffFileSuffix)
 }
 
 // newFixture writes feature "demo" under a fresh temp root, using
@@ -91,19 +94,21 @@ func newFixture(t *testing.T) (string, config.Config) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"),
 		[]byte(fixtureStep(cfg, "STEP-01", "done", "STEP-01", "ACCEPTANCE-01",
-			[]string{"did the first thing"}, "HANDOFF-ONLY-01")), 0o600))
+			[]string{"did the first thing"})), 0o600))
+	require.NoError(t, os.WriteFile(handoffFilePath(cfg, featureDir, "STEP-01"), []byte("HANDOFF-ONLY-01\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-02.md"),
 		[]byte(fixtureStep(cfg, "STEP-02", "done", "STEP-02", "ACCEPTANCE-02",
-			[]string{"did the second thing"}, "HANDOFF-ONLY-02")), 0o600))
+			[]string{"did the second thing"})), 0o600))
+	require.NoError(t, os.WriteFile(handoffFilePath(cfg, featureDir, "STEP-02"), []byte("HANDOFF-ONLY-02\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-03.md"),
 		[]byte(fixtureStep(cfg, "STEP-03", "open", "STEP-03 Assemble the brief", "ACCEPTANCE-03",
-			[]string{"CHECKLIST-03-A", "CHECKLIST-03-B"}, "")), 0o600))
+			[]string{"CHECKLIST-03-A", "CHECKLIST-03-B"})), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-04.md"),
 		[]byte(fixtureStep(cfg, "STEP-04", "open", "STEP-04", "ACCEPTANCE-04",
-			[]string{"pending"}, "")), 0o600))
+			[]string{"pending"})), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-05.md"),
 		[]byte(fixtureStep(cfg, "STEP-05", "open", "STEP-05", "ACCEPTANCE-05",
-			[]string{"pending"}, "")), 0o600))
+			[]string{"pending"})), 0o600))
 
 	notes := cfg.StateHeadings.BindingDecisions + "\n\n" +
 		"STATE-DECISION-A (STEP-01)\n" +
@@ -183,7 +188,7 @@ func Test_a_section_distinguishes_present_but_empty_from_not_found_at_all(t *tes
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
 
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"),
-		[]byte(fixtureStep(cfg, "STEP-01", "open", "STEP-01", "ACCEPTANCE-01", nil, "")), 0o600))
+		[]byte(fixtureStep(cfg, "STEP-01", "open", "STEP-01", "ACCEPTANCE-01", nil)), 0o600))
 
 	notes := cfg.StateHeadings.BindingDecisions + "\n\n" +
 		cfg.StateHeadings.LeftUnbuilt + "\n\n" +
@@ -251,6 +256,21 @@ func Test_reports_two_done_and_three_open(t *testing.T) {
 	assert.Equal(t, 3, brief.Open)
 }
 
+// Test_a_handoff_file_is_not_counted_as_a_step proves the naming
+// discipline from the read side: newFixture already writes two handoff
+// files (STEP-01 and STEP-02's), and the counts must stay 2 done, 3 open
+// rather than folding those in as two more step files.
+func Test_a_handoff_file_is_not_counted_as_a_step(t *testing.T) {
+	root, cfg := newFixture(t)
+	srv := assemble.NewServer(cfg, root)
+
+	brief, err := srv.Start(t.Context(), "demo")
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, brief.Done)
+	assert.Equal(t, 3, brief.Open)
+}
+
 func Test_reads_inherited_context_from_the_state_file_not_from_the_step_handoffs(t *testing.T) {
 	root, cfg := newFixture(t)
 	srv := assemble.NewServer(cfg, root)
@@ -263,6 +283,27 @@ func Test_reads_inherited_context_from_the_state_file_not_from_the_step_handoffs
 
 	assert.NotContains(t, whole, "HANDOFF-ONLY-01")
 	assert.NotContains(t, whole, "HANDOFF-ONLY-02")
+}
+
+// Test_each_finished_step_s_handoff_file_carries_its_marker is the control
+// arm for the absence claim above: it reads each handoff file directly
+// from disk, so the previous test's absence cannot pass merely because
+// the fixture never wrote the marker anywhere at all. With the handoff
+// moved out of the step file, Start no longer reads handoff files by any
+// path, so this control no longer proves a filter inside Start discards
+// them — only that the fixture is not vacuous. See STATE.md.
+func Test_each_finished_step_s_handoff_file_carries_its_marker(t *testing.T) {
+	root, cfg := newFixture(t)
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+
+	for id, marker := range map[string]string{
+		"STEP-01": "HANDOFF-ONLY-01",
+		"STEP-02": "HANDOFF-ONLY-02",
+	} {
+		got, err := os.ReadFile(handoffFilePath(cfg, featureDir, id))
+		require.NoError(t, err, "%s: handoff file not found", id)
+		assert.Contains(t, string(got), marker, "%s: handoff file did not carry its own marker", id)
+	}
 }
 
 func Test_carries_no_other_step_s_acceptance_criteria(t *testing.T) {
@@ -284,17 +325,16 @@ func Test_carries_no_other_step_s_acceptance_criteria(t *testing.T) {
 }
 
 // Test_every_step_file_in_the_fixture_carries_acceptance_criteria_the_same_probe_reads
-// is the control arm for the absence claim above: it proves the same
-// probe Start uses — ParseFrontmatter to strip the YAML, then
+// is the control arm for the acceptance absence claim above: it proves the
+// same probe Start uses — ParseFrontmatter to strip the YAML, then
 // markdown.Section on what is left — would in fact see every other step's
-// acceptance marker and handoff marker if nothing filtered them out, so
-// their absence from the previous test's brief is a real filter and not a
-// fixture that never had the marker to begin with. The probe parses
-// frontmatter first because stepFromEntry (assemble.go) runs
-// markdown.Section on e.rest, never on a step file's raw bytes; running it
-// on the raw bytes here would let a "#" inside the YAML front matter — or
-// the front matter's own line shape — desync this control arm from what
-// production actually reads.
+// acceptance marker if nothing filtered them out, so its absence from the
+// previous test's brief is a real filter and not a fixture that never had
+// the marker to begin with. The probe parses frontmatter first because
+// stepFromEntry (assemble.go) runs markdown.Section on e.rest, never on a
+// step file's raw bytes; running it on the raw bytes here would let a "#"
+// inside the YAML front matter — or the front matter's own line shape —
+// desync this control arm from what production actually reads.
 func Test_every_step_file_in_the_fixture_carries_acceptance_criteria_the_same_probe_reads(t *testing.T) {
 	root, cfg := newFixture(t)
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
@@ -316,21 +356,6 @@ func Test_every_step_file_in_the_fixture_carries_acceptance_criteria_the_same_pr
 		require.True(t, ok, "%s: acceptance heading not found by the probe", n)
 		assert.Contains(t, got, marker, "%s: probe did not read its own marker", n)
 	}
-
-	for n, marker := range map[string]string{
-		"STEP-01.md": "HANDOFF-ONLY-01",
-		"STEP-02.md": "HANDOFF-ONLY-02",
-	} {
-		body, err := os.ReadFile(filepath.Join(featureDir, n))
-		require.NoError(t, err)
-
-		_, rest, err := stepfile.ParseFrontmatter(body)
-		require.NoError(t, err)
-
-		got, ok := markdown.Section(string(rest), cfg.HandoffHeading)
-		require.True(t, ok, "%s: handoff heading not found by the probe", n)
-		assert.Contains(t, got, marker, "%s: probe did not read its own marker", n)
-	}
 }
 
 func Test_takes_the_lowest_numbered_open_step_not_the_first_in_directory_order(t *testing.T) {
@@ -341,11 +366,11 @@ func Test_takes_the_lowest_numbered_open_step_not_the_first_in_directory_order(t
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
 
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-2.md"),
-		[]byte(fixtureStep(cfg, "STEP-2", "done", "STEP-2", "ACCEPTANCE-2", nil, "")), 0o600))
+		[]byte(fixtureStep(cfg, "STEP-2", "done", "STEP-2", "ACCEPTANCE-2", nil)), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-9.md"),
-		[]byte(fixtureStep(cfg, "STEP-9", "open", "STEP-9", "ACCEPTANCE-9", nil, "")), 0o600))
+		[]byte(fixtureStep(cfg, "STEP-9", "open", "STEP-9", "ACCEPTANCE-9", nil)), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-10.md"),
-		[]byte(fixtureStep(cfg, "STEP-10", "open", "STEP-10", "ACCEPTANCE-10", nil, "")), 0o600))
+		[]byte(fixtureStep(cfg, "STEP-10", "open", "STEP-10", "ACCEPTANCE-10", nil)), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
 
 	srv := assemble.NewServer(cfg, root)
@@ -364,9 +389,9 @@ func Test_returns_no_next_step_when_every_step_is_done(t *testing.T) {
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
 
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"),
-		[]byte(fixtureStep(cfg, "STEP-01", "done", "STEP-01", "ACCEPTANCE-01", nil, "")), 0o600))
+		[]byte(fixtureStep(cfg, "STEP-01", "done", "STEP-01", "ACCEPTANCE-01", nil)), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-02.md"),
-		[]byte(fixtureStep(cfg, "STEP-02", "done", "STEP-02", "ACCEPTANCE-02", nil, "")), 0o600))
+		[]byte(fixtureStep(cfg, "STEP-02", "done", "STEP-02", "ACCEPTANCE-02", nil)), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
 
 	srv := assemble.NewServer(cfg, root)
@@ -397,7 +422,7 @@ func Test_returns_an_error_when_the_state_file_is_missing(t *testing.T) {
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"),
-		[]byte(fixtureStep(cfg, "STEP-01", "open", "STEP-01", "ACCEPTANCE-01", nil, "")), 0o600))
+		[]byte(fixtureStep(cfg, "STEP-01", "open", "STEP-01", "ACCEPTANCE-01", nil)), 0o600))
 
 	srv := assemble.NewServer(cfg, root)
 
@@ -426,7 +451,7 @@ func Test_refuses_a_state_file_whose_fence_is_unterminated(t *testing.T) {
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"),
-		[]byte(fixtureStep(cfg, "STEP-01", "open", "STEP-01", "ACCEPTANCE-01", nil, "")), 0o600))
+		[]byte(fixtureStep(cfg, "STEP-01", "open", "STEP-01", "ACCEPTANCE-01", nil)), 0o600))
 
 	state := "```\nunterminated\n" + cfg.StateHeadings.BindingDecisions + "\n\nsome decision\n"
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(state), 0o600))

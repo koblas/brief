@@ -18,12 +18,12 @@ import (
 const finishUsage = `Usage:
   brief finish <feature> <step> --handoff <path> --state <path>
 
-Closes step in feature: replaces its handoff block with the body at
---handoff, replaces the feature's state file with the body at --state,
+Closes step in feature: writes the body at --handoff to the step's own
+handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
 from stdin; it may be given for at most one of --handoff and --state.
 
-  --handoff <path>  the step's handoff block, replacing what is there now
+  --handoff <path>  the step's handoff body, written to its own file
   --state <path>    the COMPLETE replacement body for the state file; it
                      replaces the file, it is never appended to
 `
@@ -97,10 +97,7 @@ func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, s
 
 	if err := srv.Finish(ctx, feature, step, handoff, state); err != nil {
 		if refusal, ok := errors.AsType[*scaffold.RefusalError](err); ok {
-			switch refusal.Path {
-			case scaffold.HandoffSource:
-				refusal.Path = sourceLocator(*handoffPath)
-			case scaffold.StateSource:
+			if refusal.Path == scaffold.StateSource {
 				refusal.Path = sourceLocator(*statePath)
 			}
 		}

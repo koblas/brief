@@ -41,3 +41,9 @@ func Test_the_default_profile_names_the_acceptance_heading(t *testing.T) {
 
 	assert.Equal(t, "## Scenario", cfg.AcceptanceHeading)
 }
+
+func Test_the_default_profile_names_the_handoff_file_suffix(t *testing.T) {
+	cfg := config.Default()
+
+	assert.Equal(t, "-HANDOFF.md", cfg.HandoffFileSuffix)
+}

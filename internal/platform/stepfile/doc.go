@@ -1,5 +1,6 @@
-// Package stepfile owns a feature's step-file naming convention and its
-// step files' machine fields. Naming works both directions: turning a step
+// Package stepfile owns a feature's step-file naming convention, the
+// handoff file named beside each step file (CompileHandoff), and step
+// files' machine fields. Naming works both directions: turning a step
 // number into a filename (Name, ID) and recognizing a directory entry as a
 // step file (Number). Machine fields — id, status, depends-on — are
 // parsed from a step file's YAML frontmatter (ParseFrontmatter) rather

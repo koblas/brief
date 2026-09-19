@@ -32,8 +32,7 @@ func newFinishCLIFixture(t *testing.T) string {
 		"## Scenario\n\n" +
 		"the acceptance criteria\n\n" +
 		"## Implementation Plan\n\n" +
-		"- [x] do the thing\n\n" +
-		"## Handoff\n"
+		"- [x] do the thing\n"
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
 
 	state := "## Binding decisions\n\nsome decision\n\n" +
@@ -99,6 +98,55 @@ func Test_finishing_an_already_finished_step_a_second_time_prints_the_same_line_
 	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", secondStderr.String())
 }
 
+// Test_finish_leaves_a_legacy_handoff_section_in_the_step_file_untouched
+// is the migration-tolerance contract for brief's own tree and for any
+// adopter's: a step file that still carries a "## Handoff" section with
+// prose under it — left behind by a tree not yet migrated — finishes
+// successfully and that section survives byte for byte. Finish never
+// reads or refuses it; check (SCENARIO-22, unbuilt) is what will report it
+// as a finding.
+func Test_finish_leaves_a_legacy_handoff_section_in_the_step_file_untouched(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Implementation Plan\n\n" +
+		"- [x] do the thing\n\n" +
+		"## Handoff\n\n" +
+		"LEGACY HANDOFF PROSE, PLEASE KEEP\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
+
+	state := "## Binding decisions\n\nsome decision\n\n" +
+		"## Left unbuilt\n\nsomething left\n\n" +
+		"## Traps\n\na trap\n\n" +
+		"## Open debts\n\na debt\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", state)
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	got, readErr := os.ReadFile(filepath.Join(featureDir, "SCENARIO-01.md"))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(got), "## Handoff\n\nLEGACY HANDOFF PROSE, PLEASE KEEP\n")
+
+	handoffGot, readErr := os.ReadFile(filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "NEW-HANDOFF\n", string(handoffGot))
+}
+
 func Test_replaces_the_state_file_on_disk_when_finishing(t *testing.T) {
 	wd := newFinishCLIFixture(t)
 	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
@@ -123,9 +171,27 @@ func Test_reads_the_handoff_body_from_stdin_when_the_path_is_a_dash(t *testing.T
 	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", "-", "--state", statePath}, stdin, &stdout, &stderr)
 
 	require.NoError(t, err)
-	got, readErr := os.ReadFile(filepath.Join(wd, "docs", "specifications", "demo", "SCENARIO-01.md"))
+	got, readErr := os.ReadFile(filepath.Join(wd, "docs", "specifications", "demo", "SCENARIO-01-HANDOFF.md"))
 	require.NoError(t, readErr)
 	assert.Contains(t, string(got), "HANDOFF-FROM-STDIN")
+}
+
+// Test_writes_the_handoff_file_beside_the_step_file pins the default
+// profile's handoff-file-suffix end to end through the CLI, which no
+// scaffold test pins: "SCENARIO-01-HANDOFF.md" holds the supplied body
+// verbatim.
+func Test_writes_the_handoff_file_beside_the_step_file(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	got, readErr := os.ReadFile(filepath.Join(wd, "docs", "specifications", "demo", "SCENARIO-01-HANDOFF.md"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "NEW-HANDOFF\n", string(got))
 }
 
 func Test_reads_the_state_body_from_stdin_when_the_path_is_a_dash(t *testing.T) {
@@ -222,40 +288,19 @@ func Test_returns_a_usage_error_for_an_unknown_finish_flag(t *testing.T) {
 	assert.Equal(t, "brief finish: flag provided but not defined: -bogus; run 'brief finish <feature> <step> --handoff <path> --state <path>'", oneLine(t, &stderr))
 }
 
-// Test_names_the_handoff_path_when_its_fence_is_unterminated reproduces
-// the reviewer's MAJOR directly: scaffold.Finish has no path for the
-// handoff argument's own bytes, only a placeholder, so cli must replace
-// it with the real --handoff path before the refusal reaches the user —
-// otherwise the reported "<path>:<line>" points at the step file, which
-// both names the wrong file and, at that line, holds ordinary frontmatter
-// rather than anything fence-shaped.
-func Test_names_the_handoff_path_when_its_fence_is_unterminated(t *testing.T) {
-	wd := newFinishCLIFixture(t)
-	handoffPath := writeInput(t, "handoff.md", "Repro:\n\n```bash\ngo test ./...\n")
-	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
-	var stdout, stderr bytes.Buffer
-
-	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
-
-	assert.Equal(t, 1, cli.ExitCode(err))
-	assert.Empty(t, stdout.String())
-
-	line := oneLine(t, &stderr)
-	assert.Contains(t, line, handoffPath+":3", "the refusal must name the handoff path, at the line its fence opened on")
-	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
-}
-
-// Test_names_stdin_when_the_piped_handoff_s_fence_is_unterminated is the
-// stdin half of the same locator upgrade: --handoff - has no path at all
+// Test_names_stdin_when_the_piped_state_s_fence_is_unterminated is the
+// stdin half of the state locator upgrade: --state - has no path at all
 // to fall back to, so the refusal must name "<stdin>" rather than an
-// empty string.
-func Test_names_stdin_when_the_piped_handoff_s_fence_is_unterminated(t *testing.T) {
+// empty string. The handoff argument carries no such check — it is never
+// fence-checked, since nothing reads it structurally — so sourceLocator's
+// <stdin> branch is exercised here rather than through --handoff.
+func Test_names_stdin_when_the_piped_state_s_fence_is_unterminated(t *testing.T) {
 	wd := newFinishCLIFixture(t)
-	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
 	stdin := strings.NewReader("Repro:\n\n```bash\ngo test ./...\n")
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", "-", "--state", statePath}, stdin, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", "-"}, stdin, &stdout, &stderr)
 
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
@@ -289,7 +334,7 @@ func Test_prints_the_finish_usage_for_help(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
-	assert.Contains(t, stdout.String(), "Closes step in feature: replaces its handoff block with the body at")
+	assert.Contains(t, stdout.String(), "Closes step in feature: writes the body at --handoff to the step's own")
 }
 
 func Test_returns_an_error_when_the_handoff_path_is_unreadable(t *testing.T) {
@@ -308,14 +353,13 @@ func Test_returns_an_error_when_the_handoff_path_is_unreadable(t *testing.T) {
 	assert.False(t, strings.HasSuffix(line, "(no files changed)"), "line %q must not carry the write-refusal tail", line)
 }
 
-// Test_finishes_a_step_whose_handoff_heading_ends_in_a_carriage_return
-// reproduces the R14a half of the reviewer's CRLF finding: a step file
-// whose "## Handoff" line carries a trailing "\r" visibly has the anchor,
-// but the old right-trim (" \t" only) never matched it, so finish refused
-// with "no \"## Handoff\" heading found" against a file that plainly has
-// one. The frontmatter delimiter stays LF — stepfile.ParseFrontmatter's
-// own CRLF tolerance is not this finding's scope.
-func Test_finishes_a_step_whose_handoff_heading_ends_in_a_carriage_return(t *testing.T) {
+// Test_preserves_a_CRLF_step_body_when_marking_it_done repoints the
+// reviewer's original CRLF fixture at the one remaining in-file step-file
+// write: SetStatus's frontmatter edit must not disturb a CRLF body. The
+// fixture's original discriminator — the CR-tolerant handoff-anchor scan —
+// no longer exists, since the handoff moved out of the step file; this is
+// the CRLF claim worth keeping from that finding.
+func Test_preserves_a_CRLF_step_body_when_marking_it_done(t *testing.T) {
 	wd := t.TempDir()
 	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
@@ -327,8 +371,7 @@ func Test_finishes_a_step_whose_handoff_heading_ends_in_a_carriage_return(t *tes
 		"---\n\n" +
 		"# SCENARIO-01 Demo step\r\n\r\n" +
 		"## Implementation Plan\r\n\r\n" +
-		"- [x] do the thing\r\n\r\n" +
-		"## Handoff\r\n"
+		"- [x] do the thing\r\n"
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
 
 	state := "## Binding decisions\n\nsome decision\n\n## Left unbuilt\n\nsomething left\n\n## Traps\n\na trap\n\n## Open debts\n\na debt\n"
@@ -346,6 +389,11 @@ func Test_finishes_a_step_whose_handoff_heading_ends_in_a_carriage_return(t *tes
 	require.NoError(t, err)
 	assert.Empty(t, stdout.String())
 	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", stderr.String())
+
+	got, readErr := os.ReadFile(filepath.Join(featureDir, "SCENARIO-01.md"))
+	require.NoError(t, readErr)
+	want := strings.Replace(step, "status: open\n", "status: done\n", 1)
+	assert.Equal(t, want, string(got))
 }
 
 func Test_returns_an_error_for_an_unknown_feature_on_finish(t *testing.T) {

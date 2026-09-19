@@ -91,7 +91,7 @@ func (f *fenceState) step(line string) bool {
 // heading that would end the section. Section returns ("", false) when no
 // line equals heading.
 func Section(body, heading string) (string, bool) {
-	start, end, ok := SectionRange(body, heading)
+	start, end, ok := sectionRange(body, heading)
 	if !ok {
 		return "", false
 	}
@@ -99,7 +99,7 @@ func Section(body, heading string) (string, bool) {
 	return trimBlankLines(body[start:end]), true
 }
 
-// SectionRange returns the byte offsets of the section body under the
+// sectionRange returns the byte offsets of the section body under the
 // first line in body that equals heading after right-trimming: start is
 // the byte just past the heading line's own newline (or len(body) when the
 // heading is the last line and carries no trailing newline), and end is
@@ -108,11 +108,9 @@ func Section(body, heading string) (string, bool) {
 // body[start:end] never truncates the terminating line's indentation — or
 // len(body) when no such heading follows. The anchor search and the end
 // scan are both fence-aware: a line inside a fenced code block (``` or
-// ~~~) is never treated as a heading in either role. Section is
-// implemented on top of SectionRange so the two can never disagree about
-// where a section ends. SectionRange returns (0, 0, false) when no line
-// equals heading.
-func SectionRange(body, heading string) (int, int, bool) {
+// ~~~) is never treated as a heading in either role. sectionRange returns
+// (0, 0, false) when no line equals heading.
+func sectionRange(body, heading string) (int, int, bool) {
 	lines := strings.Split(body, "\n")
 	offsets := lineOffsets(lines)
 
@@ -143,64 +141,6 @@ func SectionRange(body, heading string) (int, int, bool) {
 	}
 
 	return offsets[headingIdx+1], offsets[sectionEnd], true
-}
-
-// HeadingStart returns the byte offset just past heading's own line — the
-// start of the section under it, using the same fence-aware anchor search
-// SectionRange uses. Unlike SectionRange, it reports no end: it exists for
-// a caller that already knows, by a separate contract, that heading is the
-// last heading in body, so there is nothing to scan for and no fence state
-// that a terminator search could get wrong. HeadingStart returns
-// (0, false) when no line in body equals heading.
-func HeadingStart(body, heading string) (int, bool) {
-	lines := strings.Split(body, "\n")
-	offsets := lineOffsets(lines)
-
-	headingIdx, _ := findHeading(lines, heading)
-	if headingIdx == -1 {
-		return 0, false
-	}
-
-	return offsets[headingIdx+1], true
-}
-
-// TrailingHeading returns the first heading line, and its 1-based line
-// number, found anywhere after heading's own line in body — fence-aware,
-// at any level, not only heading's own level, since content under any
-// heading that follows is equally at risk of being silently overwritten
-// by a caller that treats heading's section as running to end of body.
-// found is false when heading has no such successor. TrailingHeading does
-// not distinguish that case from "heading itself is not in body": a
-// caller that needs to tell them apart must check presence separately —
-// this package's own callers always do, via Section or SectionRange,
-// before calling TrailingHeading.
-func TrailingHeading(body, heading string) (string, int, bool) {
-	lines := strings.Split(body, "\n")
-
-	headingIdx, _ := findHeading(lines, heading)
-	if headingIdx == -1 {
-		return "", 0, false
-	}
-
-	var fence fenceState
-
-	for i := headingIdx + 1; i < len(lines); i++ {
-		line := lines[i]
-
-		if fence.step(line) {
-			continue
-		}
-
-		if fence.open {
-			continue
-		}
-
-		if headingLevelOf(line) > 0 {
-			return trimEOL(line), i + 1, true
-		}
-	}
-
-	return "", 0, false
 }
 
 // lineOffsets returns, for each index i in 0..len(lines), the byte offset
@@ -306,8 +246,8 @@ func headingLevelOf(line string) int {
 // fenced code block CommonMark never closes before end of file: line is
 // its 1-based line number and delim is the exact delimiter text (its
 // backtick or tilde run). UnterminatedFence walks body through the same
-// fenceState SectionRange and Section use, so it can never disagree with
-// either about what counts as a fence or when one closes. It returns
+// fenceState Section uses, so the two can never disagree about what counts
+// as a fence or when one closes. It returns
 // ok == false when every fence opened in body is closed before end of
 // file.
 func UnterminatedFence(body string) (int, string, bool) {

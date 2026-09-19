@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/koblas/brief/internal/platform/markdown"
 	"github.com/koblas/brief/internal/platform/stepfile"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/stretchr/testify/assert"
@@ -82,6 +81,9 @@ func readFileString(t *testing.T, path string) string {
 	return string(data)
 }
 
+// Test_re_finishing_a_done_step_with_a_different_handoff_replaces_it is the
+// arm that reddens if the handoff conjunct is dropped from identity;
+// SCENARIO-16 later inverts it into a refusal over the same conjunct.
 func Test_re_finishing_a_done_step_with_a_different_handoff_replaces_it(t *testing.T) {
 	fx := newFinishedFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
@@ -90,15 +92,28 @@ func Test_re_finishing_a_done_step_with_a_different_handoff_replaces_it(t *testi
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, fx.newState)
 	require.NoError(t, err)
 
-	got, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
+	got, readErr := os.ReadFile(fx.handoffPath())
 	require.NoError(t, readErr)
 
-	_, rest, parseErr := stepfile.ParseFrontmatter(got)
-	require.NoError(t, parseErr)
+	assert.Equal(t, string(differentHandoff), string(got))
+}
 
-	handoff, ok := markdown.Section(string(rest), fx.cfg.HandoffHeading)
-	require.True(t, ok)
-	assert.Equal(t, strings.Trim(string(differentHandoff), "\n"), handoff)
+// Test_re_finishing_a_done_step_whose_handoff_file_is_missing_rewrites_it
+// is the single-variable proof that "the handoff file exists" is part of
+// the identity conjunct, not merely "its bytes match": deleting it before
+// an otherwise-identical re-finish must still write, covering the crash-
+// after-state retry and a migrated step alike.
+func Test_re_finishing_a_done_step_whose_handoff_file_is_missing_rewrites_it(t *testing.T) {
+	fx := newFinishedFixture(t)
+	require.NoError(t, os.Remove(fx.handoffPath()))
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.NoError(t, err)
+
+	got, readErr := os.ReadFile(fx.handoffPath())
+	require.NoError(t, readErr)
+	assert.Equal(t, string(fx.newHandoff), string(got))
 }
 
 func Test_re_finishing_a_done_step_with_a_different_state_body_replaces_it(t *testing.T) {
@@ -141,7 +156,7 @@ func Test_the_modification_time_probe_sees_a_write_when_the_progress_entry_diver
 	spec := readFileString(t, specPath)
 	unticked := strings.Replace(spec, "- [x] STEP-02: Assemble the thing", "- [ ] STEP-02: Assemble the thing", 1)
 	require.NoError(t, os.WriteFile(specPath, []byte(unticked), 0o600))
-	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile}
+	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile, "STEP-02" + fx.cfg.HandoffFileSuffix}
 	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
@@ -152,11 +167,12 @@ func Test_the_modification_time_probe_sees_a_write_when_the_progress_entry_diver
 	assert.False(t, after["STEP-02.md"].Equal(pinnedModTime), "step file kept the pinned mtime")
 	assert.False(t, after[fx.cfg.StateFile].Equal(pinnedModTime), "state file kept the pinned mtime")
 	assert.False(t, after[fx.cfg.SpecificationFile].Equal(pinnedModTime), "specification kept the pinned mtime")
+	assert.False(t, after["STEP-02"+fx.cfg.HandoffFileSuffix].Equal(pinnedModTime), "handoff file kept the pinned mtime")
 }
 
 func Test_re_finishing_a_done_step_with_the_same_inputs_preserves_every_modification_time(t *testing.T) {
 	fx := newFinishedFixture(t)
-	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile}
+	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile, "STEP-02" + fx.cfg.HandoffFileSuffix}
 	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
@@ -167,6 +183,7 @@ func Test_re_finishing_a_done_step_with_the_same_inputs_preserves_every_modifica
 	assert.True(t, after["STEP-02.md"].Equal(pinnedModTime), "step file mtime moved")
 	assert.True(t, after[fx.cfg.StateFile].Equal(pinnedModTime), "state file mtime moved")
 	assert.True(t, after[fx.cfg.SpecificationFile].Equal(pinnedModTime), "specification mtime moved")
+	assert.True(t, after["STEP-02"+fx.cfg.HandoffFileSuffix].Equal(pinnedModTime), "handoff file mtime moved")
 }
 
 func Test_re_finishing_a_done_step_with_the_same_inputs_leaves_every_file_byte_identical(t *testing.T) {
@@ -183,8 +200,11 @@ func Test_re_finishing_a_done_step_with_the_same_inputs_leaves_every_file_byte_i
 // Test_a_step_whose_frontmatter_is_still_open_is_marked_done_even_when_every_input_matches_what_is_on_disk
 // reverts only the status line, leaving the handoff, state file and ticked
 // checkbox untouched, so this is the single-variable proof that the
-// fm.Done() gate — not the step-body comparison — is what forces the
-// write.
+// fm.Done() gate — not a step-body byte comparison — is what forces the
+// write. Identity deliberately carries no step-body comparison: adding one
+// back would make this test stop discriminating the gate, since a
+// reverted status line alone would then force the write for a reason
+// other than fm.Done().
 func Test_a_step_whose_frontmatter_is_still_open_is_marked_done_even_when_every_input_matches_what_is_on_disk(t *testing.T) {
 	fx := newFinishedFixture(t)
 	stepPath := fx.stepPath("STEP-02.md")

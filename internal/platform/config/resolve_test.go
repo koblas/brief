@@ -112,7 +112,18 @@ func Test_a_config_file_overrides_the_checklist_heading_and_keeps_other_headings
 	require.NoError(t, err)
 	assert.Equal(t, "## Fixture Checklist", cfg.ChecklistHeading)
 	assert.Equal(t, config.Default().ProgressHeading, cfg.ProgressHeading)
-	assert.Equal(t, config.Default().HandoffHeading, cfg.HandoffHeading)
+	assert.Equal(t, config.Default().HandoffFileSuffix, cfg.HandoffFileSuffix)
+}
+
+func Test_Resolve_reads_the_handoff_file_suffix_from_the_config_file(t *testing.T) {
+	root := t.TempDir()
+	writeConfig(t, root, "handoff-file-suffix: \".fixture-handoff.md\"\n")
+
+	cfg, _, err := config.Resolve(root)
+
+	require.NoError(t, err)
+	assert.Equal(t, ".fixture-handoff.md", cfg.HandoffFileSuffix)
+	assert.Equal(t, config.Default().StepFilePattern, cfg.StepFilePattern)
 }
 
 func Test_a_config_file_overrides_the_state_file_name(t *testing.T) {
