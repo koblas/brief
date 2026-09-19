@@ -393,6 +393,118 @@ func Test_finishing_twice_with_a_nested_fenced_handoff_preserves_a_trailing_sect
 	assert.Contains(t, string(secondWrite), "## Appendix\n\nDO NOT LOSE ME")
 }
 
+// Test_finish_refuses_a_handoff_with_an_unterminated_fence reproduces the
+// reviewer's BLOCKER directly: a handoff with an odd fence count (a single
+// opening ``` never closed) would, if spliced in as-is, make a second,
+// identical Finish silently drop every section after "## Handoff" —
+// including "## Notes" here — because SectionRange's end scan would open
+// the fence and never find a close. Finish must refuse before the first
+// write, on the very first call, so the malformed handoff is never
+// written at all.
+func Test_finish_refuses_a_handoff_with_an_unterminated_fence(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "widgets")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	stepPath := filepath.Join(featureDir, "STEP-02.md")
+	step := "---\nid: STEP-02\nstatus: open\ndepends-on: []\n---\n\n" +
+		"# STEP-02\n\n" + cfg.ChecklistHeading + "\n\n- [x] done\n\n" +
+		cfg.HandoffHeading + "\n\n## Notes\n\nPLEASE KEEP THIS\n"
+	require.NoError(t, os.WriteFile(stepPath, []byte(step), 0o600))
+
+	spec := "# widgets\n\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-02\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
+
+	state := "## Decisions Fixture\n\n## Left Fixture\n\n## Gotchas\n\n## Debts Fixture\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(state), 0o600))
+
+	before := snapshotTree(t, featureDir)
+
+	srv := scaffold.NewServer(cfg, root)
+	handoff := []byte("Repro:\n\n```bash\ngo test ./...\n")
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", handoff, []byte(state))
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrUnterminatedFence)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, stepPath, refusal.Path)
+
+	after := snapshotTree(t, featureDir)
+	assert.Equal(t, before, after, "a refused finish must leave every file byte-identical")
+}
+
+// Test_finish_refuses_a_handoff_whose_closing_fence_is_indented_four_spaces
+// reproduces the reviewer's second repro shape: a closing fence indented
+// four spaces is not a fence delimiter at all per CommonMark's
+// three-space tolerance, so the opening fence is left unterminated — the
+// ordinary shape a nested-list handoff produces by accident.
+func Test_finish_refuses_a_handoff_whose_closing_fence_is_indented_four_spaces(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "widgets")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	stepPath := filepath.Join(featureDir, "STEP-02.md")
+	step := "---\nid: STEP-02\nstatus: open\ndepends-on: []\n---\n\n" +
+		"# STEP-02\n\n" + cfg.ChecklistHeading + "\n\n- [x] done\n\n" +
+		cfg.HandoffHeading + "\n\n## Notes\n\nPLEASE KEEP THIS\n"
+	require.NoError(t, os.WriteFile(stepPath, []byte(step), 0o600))
+
+	spec := "# widgets\n\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-02\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
+
+	state := "## Decisions Fixture\n\n## Left Fixture\n\n## Gotchas\n\n## Debts Fixture\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(state), 0o600))
+
+	before := snapshotTree(t, featureDir)
+
+	srv := scaffold.NewServer(cfg, root)
+	handoff := []byte("```\nRepro body\n    ```\n")
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", handoff, []byte(state))
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrUnterminatedFence)
+
+	after := snapshotTree(t, featureDir)
+	assert.Equal(t, before, after, "a refused finish must leave every file byte-identical")
+}
+
+// Test_Finish_ticks_a_progress_entry_when_the_specification_uses_CRLF
+// reproduces the reviewer's finding directly: tickProgressEntry's heading
+// match, like insertProgressEntry's, used to right-trim only " \t", so a
+// CRLF specification's progress heading never matched and Finish refused
+// with ErrNoProgressHeading on every CRLF feature.
+func Test_Finish_ticks_a_progress_entry_when_the_specification_uses_CRLF(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "widgets")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	step := "---\nid: STEP-02\nstatus: open\ndepends-on: []\n---\n\n" +
+		"# STEP-02\n\n" + cfg.ChecklistHeading + "\n\n- [x] done\n\n" + cfg.HandoffHeading + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-02.md"), []byte(step), 0o600))
+
+	spec := "# widgets\r\n\r\n" + cfg.ProgressHeading + "\r\n\r\n- [ ] STEP-02\r\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
+
+	state := "## Decisions Fixture\n\n## Left Fixture\n\n## Gotchas\n\n## Debts Fixture\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(state), 0o600))
+
+	srv := scaffold.NewServer(cfg, root)
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("NEW-HANDOFF"), []byte(state))
+	require.NoError(t, err)
+
+	got, readErr := os.ReadFile(filepath.Join(featureDir, cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(got), "- [x] STEP-02")
+}
+
 func Test_ticks_the_progress_entry_for_the_finished_step(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)

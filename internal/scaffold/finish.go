@@ -25,7 +25,10 @@ import (
 // byte reaches disk — in the order a refusal must name the first thing
 // wrong (R14a): the step-file pattern compiles; the feature directory
 // opens; a step file exists whose id equals step; its frontmatter parses;
-// its handoff anchor is present; the specification is readable; the
+// its handoff anchor is present; handoff itself closes every fence it
+// opens (ErrUnterminatedFence) — spliced in as-is, an open fence would
+// make the next Finish's section scan run to end of file and silently
+// drop everything after the anchor; the specification is readable; the
 // specification carries the configured progress heading and an entry for
 // step; the state file exists as a regular file. Computing the spliced
 // step body and the frontmatter's "status: done" line during this phase,
@@ -122,6 +125,20 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 			Problem: fmt.Sprintf("no %q heading found", s.cfg.HandoffHeading),
 			Fix:     fmt.Sprintf("add a %q heading to the step file", s.cfg.HandoffHeading),
 			Err:     ErrMalformedFeature,
+		}
+	}
+
+	// Checked before any write: an unterminated fence spliced into the
+	// step file as-is would make the next Finish's SectionRange scan past
+	// every section following the handoff anchor, silently dropping them
+	// (R11 violation). Refusing here means a malformed handoff is never
+	// written in the first place.
+	if line, delim, unterminated := markdown.UnterminatedFence(string(handoff)); unterminated {
+		return &RefusalError{
+			Path:    stepPath,
+			Problem: fmt.Sprintf("handoff has an unclosed %s fence opened at line %d", delim, line),
+			Fix:     "close the fence, or remove the unmatched delimiter, and retry",
+			Err:     ErrUnterminatedFence,
 		}
 	}
 

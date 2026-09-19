@@ -23,22 +23,28 @@ func trimEOL(s string) string {
 }
 
 // fenceDelim reports the fence character and run length line opens or
-// closes, tolerating up to three leading spaces per CommonMark — the same
-// tolerance headingLevelOf applies, so an indented fence and an indented
-// heading are never treated inconsistently. The third return is false
-// when line is not a fence delimiter.
-func fenceDelim(line string) (byte, int, bool) {
+// closes, and the info string trailing the run (the text after "```" on
+// an opening fence, e.g. "go" in "```go"), tolerating up to three leading
+// spaces per CommonMark — the same tolerance headingLevelOf applies, so an
+// indented fence and an indented heading are never treated inconsistently.
+// The fourth return is false when line is not a fence delimiter at all.
+// Per CommonMark §4.5, only an opening fence may carry an info string; a
+// candidate closer carrying one is not a valid close, which fenceState
+// uses to keep such a line from ending the fence it appears inside.
+func fenceDelim(line string) (byte, int, string, bool) {
 	trimmed := strings.TrimLeft(line, " ")
 	if len(line)-len(trimmed) > 3 {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
 
-	m := fenceRe.FindString(trimEOL(trimmed))
+	trimmed = trimEOL(trimmed)
+
+	m := fenceRe.FindString(trimmed)
 	if m == "" {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
 
-	return m[0], len(m), true
+	return m[0], len(m), trimmed[len(m):], true
 }
 
 // fenceState tracks whether a markdown scanner is inside a fenced code
@@ -58,7 +64,7 @@ type fenceState struct {
 // opens a fence, closes one, or is fence-shaped content that does not
 // close the currently open fence.
 func (f *fenceState) step(line string) bool {
-	ch, run, ok := fenceDelim(line)
+	ch, run, info, ok := fenceDelim(line)
 	if !ok {
 		return false
 	}
@@ -68,7 +74,7 @@ func (f *fenceState) step(line string) bool {
 		return true
 	}
 
-	if ch == f.ch && run >= f.run {
+	if ch == f.ch && run >= f.run && strings.TrimSpace(info) == "" {
 		f.open = false
 	}
 
@@ -236,6 +242,40 @@ func headingLevelOf(line string) int {
 	}
 
 	return len(m[1])
+}
+
+// UnterminatedFence reports the first fence delimiter in body that opens a
+// fenced code block CommonMark never closes before end of file: line is
+// its 1-based line number and delim is the exact delimiter text (its
+// backtick or tilde run). UnterminatedFence walks body through the same
+// fenceState SectionRange and Section use, so it can never disagree with
+// either about what counts as a fence or when one closes. It returns
+// ok == false when every fence opened in body is closed before end of
+// file.
+func UnterminatedFence(body string) (int, string, bool) {
+	var fence fenceState
+
+	var openLine int
+
+	var openDelim string
+
+	for i, l := range strings.Split(body, "\n") {
+		wasOpen := fence.open
+		if !fence.step(l) {
+			continue
+		}
+
+		if !wasOpen && fence.open {
+			ch, run, _, _ := fenceDelim(l)
+			openLine, openDelim = i+1, strings.Repeat(string(ch), run)
+		}
+	}
+
+	if fence.open {
+		return openLine, openDelim, true
+	}
+
+	return 0, "", false
 }
 
 // trimBlankLines removes leading and trailing blank lines from s, leaving

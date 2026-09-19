@@ -25,6 +25,13 @@ var ErrNoSuchStep = errors.New("no such step")
 // entry for a step whose file does exist.
 var ErrNoProgressEntry = errors.New("no progress entry found")
 
+// ErrUnterminatedFence is returned when a handoff given to Finish opens a
+// fenced code block it never closes: spliced into the step file as-is, an
+// open fence would swallow every section after the handoff anchor on the
+// very next Finish that re-parses it, since SectionRange would never find
+// the fence's close and would scan to end of file.
+var ErrUnterminatedFence = errors.New("handoff has an unterminated fence")
+
 // RefusalError reports a refusal that changed nothing on disk: the path
 // it concerns, what was wrong with it, and how to fix it. cli renders
 // these three fields into R14a's one-line refusal template.

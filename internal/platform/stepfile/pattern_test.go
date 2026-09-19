@@ -74,6 +74,18 @@ func Test_Compile_accepts_a_zero_padded_width_verb(t *testing.T) {
 	require.Equal(t, "SCENARIO-03.md", p.Name(3))
 }
 
+// Test_Compile_accepts_a_zero_width_zero_padded_verb reproduces the
+// reviewer's finding directly: "%0d" renders and round-trips identically
+// to plain "%d", so it must be accepted the same as "%00d" — verbRe's
+// group used to require at least one digit after the leading "0",
+// rejecting "%0d" while accepting "%00d" for no behavioral reason.
+func Test_Compile_accepts_a_zero_width_zero_padded_verb(t *testing.T) {
+	p, err := stepfile.Compile("SCENARIO-%0d.md")
+
+	require.NoError(t, err)
+	require.Equal(t, "SCENARIO-3.md", p.Name(3))
+}
+
 func Test_Name_renders_the_step_number_through_the_pattern(t *testing.T) {
 	p, err := stepfile.Compile("SCENARIO-%02d.md")
 	require.NoError(t, err)

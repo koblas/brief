@@ -73,7 +73,7 @@ func insertProgressEntry(body, heading, entry string) (string, error) {
 	headingIdx := -1
 
 	for i, line := range lines {
-		if strings.TrimRight(line, " \t") == heading {
+		if strings.TrimRight(line, " \t\r") == heading {
 			headingIdx = i
 
 			break
@@ -172,7 +172,7 @@ func tickProgressEntry(body, heading, id string) (string, error) {
 	headingIdx := -1
 
 	for i, line := range lines {
-		if strings.TrimRight(line, " \t") == heading {
+		if strings.TrimRight(line, " \t\r") == heading {
 			headingIdx = i
 
 			break

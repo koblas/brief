@@ -80,12 +80,32 @@ func Test_leaves_no_temp_file_in_the_feature_directory(t *testing.T) {
 	entries, readErr := os.ReadDir(filepath.Join(root, "specs", "widgets"))
 	require.NoError(t, readErr)
 
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
+	assert.ElementsMatch(t, []string{cfg.SpecificationFile, cfg.StateFile, "STEP-01.md"}, namesOf(entries))
+}
 
-	assert.ElementsMatch(t, []string{cfg.SpecificationFile, cfg.StateFile, "STEP-01.md"}, names)
+// Test_NewStep_finds_a_progress_heading_terminated_by_a_carriage_return
+// reproduces the reviewer's finding directly: insertProgressEntry's
+// heading match used to right-trim only " \t", so a CRLF specification
+// whose progress heading line ends "\r\n" never matched and NewStep
+// refused with ErrNoProgressHeading on every CRLF feature.
+func Test_NewStep_finds_a_progress_heading_terminated_by_a_carriage_return(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "widgets")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	spec := "# widgets\r\n\r\n" + cfg.ProgressHeading + "\r\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
+
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	got, readErr := os.ReadFile(filepath.Join(featureDir, cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(got), "- [ ] STEP-01")
 }
 
 func Test_numbers_the_next_step_from_the_highest_existing_step_file(t *testing.T) {

@@ -145,6 +145,11 @@ func readSteps(root *os.Root, pattern stepfile.Pattern, dirEntries []os.DirEntry
 func stepFromEntry(e stepEntry, cfg config.Config) *Step {
 	body := string(e.rest)
 
+	// ok is discarded deliberately: unlike Acceptance and Checklist, Step
+	// carries no Found flag for Title, so a step file with no "# " line
+	// renders as an empty title rather than a distinguishable "missing"
+	// state — every step file this package reads is expected to open with
+	// one, since stepSkeleton always writes it.
 	title, _ := markdown.Title(body)
 	acceptance, acceptanceFound := markdown.Section(body, cfg.AcceptanceHeading)
 	checklist, checklistFound := markdown.Section(body, cfg.ChecklistHeading)

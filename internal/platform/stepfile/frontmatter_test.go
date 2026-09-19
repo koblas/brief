@@ -1,6 +1,7 @@
 package stepfile_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/stepfile"
@@ -90,4 +91,37 @@ func Test_SetStatus_returns_an_error_when_the_frontmatter_has_no_status_key(t *t
 	_, err := stepfile.SetStatus(body, "done")
 
 	require.ErrorIs(t, err, stepfile.ErrNoStatusField)
+}
+
+// Test_ParseFrontmatter_parses_a_CRLF_step_file reproduces the reviewer's
+// finding directly: ParseFrontmatter's opening-delimiter check used to
+// look for "---\n" only, so a CRLF step file's first line — "---\r\n" —
+// never matched and every CRLF step file was refused with
+// ErrNoFrontmatter.
+func Test_ParseFrontmatter_parses_a_CRLF_step_file(t *testing.T) {
+	body := []byte("---\r\nid: STEP-03\r\nstatus: open\r\ndepends-on: []\r\n---\r\n# STEP-03\r\n")
+
+	fm, rest, err := stepfile.ParseFrontmatter(body)
+
+	require.NoError(t, err)
+	assert.Equal(t, stepfile.Frontmatter{ID: "STEP-03", Status: "open", DependsOn: []string{}}, fm)
+	// rest keeps the leading "\r" that TrimPrefix's "\n"-only cut does not
+	// strip after a CRLF closing delimiter — a pre-existing cosmetic gap,
+	// not this fix's concern; markdown.Section's fence/heading scan
+	// already trims "\r" per line, so every reader of rest tolerates it.
+	assert.Equal(t, "\r\n# STEP-03\r\n", string(rest))
+}
+
+// Test_SetStatus_replaces_the_status_line_in_a_CRLF_step_file mirrors the
+// ParseFrontmatter fix on SetStatus's own opening-delimiter check, and
+// pins that the opening delimiter's own line ending is preserved rather
+// than silently downgraded to LF.
+func Test_SetStatus_replaces_the_status_line_in_a_CRLF_step_file(t *testing.T) {
+	body := []byte("---\r\nid: STEP-02\r\nstatus: open\r\n---\r\n\r\n# STEP-02\r\n")
+
+	got, err := stepfile.SetStatus(body, "done")
+
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(string(got), "---\r\n"))
+	assert.Contains(t, string(got), "status: done\r\n")
 }

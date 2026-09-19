@@ -24,6 +24,21 @@ const statusFieldPrefix = "status:"
 // frontmatter block.
 const frontmatterDelim = "---"
 
+// frontmatterOpenLen returns the number of leading bytes of s that make up
+// an opening frontmatter delimiter line — "---\n" or "---\r\n" — so a CRLF
+// step file is recognized exactly like an LF one. It returns 0 when s does
+// not begin with either.
+func frontmatterOpenLen(s string) int {
+	switch {
+	case strings.HasPrefix(s, frontmatterDelim+"\r\n"):
+		return len(frontmatterDelim) + 2
+	case strings.HasPrefix(s, frontmatterDelim+"\n"):
+		return len(frontmatterDelim) + 1
+	default:
+		return 0
+	}
+}
+
 // Frontmatter holds the machine fields a step file's YAML frontmatter
 // carries: its id, its status, and the ids of the steps it depends on.
 // ID and DependsOn are read but not validated here; finish and check are
@@ -50,11 +65,12 @@ func (fm Frontmatter) Done() bool {
 func ParseFrontmatter(body []byte) (Frontmatter, []byte, error) {
 	s := string(body)
 
-	if !strings.HasPrefix(s, frontmatterDelim+"\n") {
+	openLen := frontmatterOpenLen(s)
+	if openLen == 0 {
 		return Frontmatter{}, nil, ErrNoFrontmatter
 	}
 
-	afterOpen := s[len(frontmatterDelim)+1:]
+	afterOpen := s[openLen:]
 
 	yamlPart, afterClose, found := strings.Cut(afterOpen, "\n"+frontmatterDelim)
 	if !found {
@@ -84,11 +100,12 @@ func ParseFrontmatter(body []byte) (Frontmatter, []byte, error) {
 func SetStatus(body []byte, status string) ([]byte, error) {
 	s := string(body)
 
-	if !strings.HasPrefix(s, frontmatterDelim+"\n") {
+	openLen := frontmatterOpenLen(s)
+	if openLen == 0 {
 		return nil, ErrNoStatusField
 	}
 
-	afterOpen := s[len(frontmatterDelim)+1:]
+	afterOpen := s[openLen:]
 
 	yamlPart, afterClose, found := strings.Cut(afterOpen, "\n"+frontmatterDelim)
 	if !found {
@@ -111,9 +128,14 @@ func SetStatus(body []byte, status string) ([]byte, error) {
 		return nil, ErrNoStatusField
 	}
 
-	lines[statusIdx] = statusFieldPrefix + " " + status
+	newLine := statusFieldPrefix + " " + status
+	if strings.HasSuffix(lines[statusIdx], "\r") {
+		newLine += "\r"
+	}
 
-	result := frontmatterDelim + "\n" + strings.Join(lines, "\n") + "\n" + frontmatterDelim + afterClose
+	lines[statusIdx] = newLine
+
+	result := s[:openLen] + strings.Join(lines, "\n") + "\n" + frontmatterDelim + afterClose
 
 	return []byte(result), nil
 }

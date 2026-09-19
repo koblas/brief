@@ -285,10 +285,16 @@ func Test_carries_no_other_step_s_acceptance_criteria(t *testing.T) {
 
 // Test_every_step_file_in_the_fixture_carries_acceptance_criteria_the_same_probe_reads
 // is the control arm for the absence claim above: it proves the same
-// markdown.Section probe Start uses would in fact see every other step's
+// probe Start uses — ParseFrontmatter to strip the YAML, then
+// markdown.Section on what is left — would in fact see every other step's
 // acceptance marker and handoff marker if nothing filtered them out, so
 // their absence from the previous test's brief is a real filter and not a
-// fixture that never had the marker to begin with.
+// fixture that never had the marker to begin with. The probe parses
+// frontmatter first because stepFromEntry (assemble.go) runs
+// markdown.Section on e.rest, never on a step file's raw bytes; running it
+// on the raw bytes here would let a "#" inside the YAML front matter — or
+// the front matter's own line shape — desync this control arm from what
+// production actually reads.
 func Test_every_step_file_in_the_fixture_carries_acceptance_criteria_the_same_probe_reads(t *testing.T) {
 	root, cfg := newFixture(t)
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
@@ -303,7 +309,10 @@ func Test_every_step_file_in_the_fixture_carries_acceptance_criteria_the_same_pr
 		body, err := os.ReadFile(filepath.Join(featureDir, n))
 		require.NoError(t, err)
 
-		got, ok := markdown.Section(string(body), cfg.AcceptanceHeading)
+		_, rest, err := stepfile.ParseFrontmatter(body)
+		require.NoError(t, err)
+
+		got, ok := markdown.Section(string(rest), cfg.AcceptanceHeading)
 		require.True(t, ok, "%s: acceptance heading not found by the probe", n)
 		assert.Contains(t, got, marker, "%s: probe did not read its own marker", n)
 	}
@@ -315,7 +324,10 @@ func Test_every_step_file_in_the_fixture_carries_acceptance_criteria_the_same_pr
 		body, err := os.ReadFile(filepath.Join(featureDir, n))
 		require.NoError(t, err)
 
-		got, ok := markdown.Section(string(body), cfg.HandoffHeading)
+		_, rest, err := stepfile.ParseFrontmatter(body)
+		require.NoError(t, err)
+
+		got, ok := markdown.Section(string(rest), cfg.HandoffHeading)
 		require.True(t, ok, "%s: handoff heading not found by the probe", n)
 		assert.Contains(t, got, marker, "%s: probe did not read its own marker", n)
 	}

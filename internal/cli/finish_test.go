@@ -230,7 +230,7 @@ func Test_prints_the_finish_usage_for_help(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
-	assert.Contains(t, stdout.String(), "COMPLETE")
+	assert.Contains(t, stdout.String(), "Closes step in feature: replaces its handoff block with the body at")
 }
 
 func Test_returns_an_error_when_the_handoff_path_is_unreadable(t *testing.T) {
