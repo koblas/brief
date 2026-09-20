@@ -1,6 +1,6 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..15. Last updated by SCENARIO-15.
+Scenarios complete: SCENARIO-01..16. Last updated by SCENARIO-16.
 
 ## Binding decisions
 
@@ -15,8 +15,18 @@ Scenarios complete: SCENARIO-01..15. Last updated by SCENARIO-15.
 - `markdown.Section` is the one exported section reader, fence-aware both ends. No exported
   byte-offset API — every write is whole-file. (04-06, HANDOFF-FILE)
 - `finish`'s four writes (handoff → state → step → specification) converge a crash-retry from
-  any point; `status: done` never lands before the handoff file exists. **Identity/no-op (R11):**
-  re-finishing a done step with identical inputs writes nothing. (HANDOFF-FILE, 06)
+  any point; `status: done` never lands before the handoff file exists. **One predicate,
+  `(scaffold.refinish).verdict()`, decides every re-finish of a done step** — identity/no-op
+  (R11: identical handoff+state+spec-tick writes nothing, mtime preserved), or a refusal
+  wrapping `scaffold.ErrAlreadyFinished` naming the specific divergent file (recorded
+  handoff file, or `cfg.StateFile`, handoff checked first). `specTicked` participates only
+  in the noop-vs-write split, never as a divergence trigger — an un-ticked progress entry
+  means "half-applied write to repair", not "different inputs". A done step whose handoff
+  file is missing or unreadable is exempt from both refusals and writes as normal — `finish`
+  is the only path to a done step (R10), so refusing there is a dead end. The state arm
+  never uses `scaffold.StateSource`; it carries the recorded state file's own absolute path,
+  since `cli/finish.go`'s placeholder upgrade would repoint it at the caller's `--state`
+  input instead. (HANDOFF-FILE, 06, 16)
 - `RefusalError.Line` (0 = whole-path), rendered `<path>:<line>` by `cli/refusal.go`. A
   leftover `## Handoff` section is ignored, never refused. `cli.Run` takes `stdin` before
   `stdout`. (fix ×3, HANDOFF-FILE, 05-06)
@@ -82,8 +92,10 @@ Scenarios complete: SCENARIO-01..15. Last updated by SCENARIO-15.
 
 ## Left unbuilt
 
-- Differing-inputs refusal (16), caps (17/18), state-body heading check (19), open-checklist
-  refusal (20), unfinished-`depends-on` refusal (21).
+- Caps (17/18), state-body heading check (19), open-checklist refusal (20), unfinished-
+  `depends-on` refusal (21). `--force`/`--if-state-matches` and any diff/finding output on a
+  re-finish divergence (R9) — deferred by 16, no owner. No un-finish/un-done verb planned;
+  the documented escape from 16's refusal is to edit the recorded file directly.
 - `assemble.Server.Next`/`.Show`/`.Handoff`/`.StateGet`, `status --json` and `--json` on
   `next`/`show`/`state get`/`handoff` (deferred by *Decisions taken* 3 / open question 8, not
   missed — 15), `markdown.Headings` + checklist parser (20/22), R9's diff/finding output,
@@ -148,6 +160,16 @@ Scenarios complete: SCENARIO-01..15. Last updated by SCENARIO-15.
   Unmarshalling **collapses** null-vs-absent and absent-vs-zero, so the four load-bearing
   claims (`step`, `done`/`open`, `shortfalls`, `found`) are asserted on raw bytes, not
   decoded values — do not "clean up" those assertions into unmarshal-and-compare. (15)
+- **This pipeline's own fix-mode re-runs of `finish` on an already-done step now hit
+  SCENARIO-16's refusal** whenever the regenerated handoff or STATE.md body differs from
+  what is recorded — previously a silent overwrite. The crossover note below stays true only
+  for its literal identical-inputs claim. Resolution: read the recorded file and edit it
+  directly, or re-run with the recorded body. (16)
+- **A byte-snapshot alone can't prove a refusal happened before any write** — a refusal taken
+  after a byte-identical rewrite would still pass `snapshotTree`. Pair it with the
+  `pinnedModTime`/`pinModTimes`/`modTimes` probe in `finish_idempotent_test.go` for that
+  claim; a `Contains` assertion on refusal text is also unsafe where the pre-refusal code
+  printed similar text on the same inputs — assert `Equal` on the whole line/string. (16)
 
 ## Open debts
 
@@ -176,7 +198,9 @@ Scenarios complete: SCENARIO-01..15. Last updated by SCENARIO-15.
 ## Crossover note
 
 An identical re-finish being a true no-op means the crossover's "mark SCENARIO-01 through 06
-done" step is safely re-runnable. `SCENARIO-01.md`…`-12.md` and their `-HANDOFF.md` files still
+done" step is safely re-runnable **only when re-run with the same handoff/state bytes** — a
+regenerated body now hits SCENARIO-16's refusal instead of silently overwriting (see Traps).
+`SCENARIO-01.md`…`-12.md` and their `-HANDOFF.md` files still
 carry no frontmatter — the crossover owns adding it, and **must write `id:` as well as
 `status:`**: SCENARIO-13's check 7 (empty `id:` on the briefed step) means a crossover that
 adds only `status:` leaves `brief start brief` refused for a new reason once the frontmatter

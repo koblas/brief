@@ -45,6 +45,19 @@ var ErrNoProgressEntry = errors.New("no progress entry found")
 // open fence there would leave every heading after it unreadable.
 var ErrUnterminatedFence = errors.New("input has an unterminated fence")
 
+// ErrAlreadyFinished is returned when Finish is asked to close a step whose
+// frontmatter already says done, but the supplied handoff or state differs
+// from what is recorded on disk. It travels inside a *RefusalError naming
+// the specific divergent file — the recorded handoff file or the state
+// file — so the caller can read the recorded bytes and compare rather than
+// having their new input silently discarded or the record silently
+// replaced. A done step whose handoff file is missing or unreadable is
+// exempt from this refusal: with no recorded handoff there is nothing to
+// diverge from, and Finish is the only path to a done step, so refusing
+// would leave a crash-then-hand-edit tree, or a tree migrated before
+// handoff files existed, with no way forward.
+var ErrAlreadyFinished = errors.New("step already finished with different inputs")
+
 // StateSource is the RefusalError.Path placeholder a refusal carries when
 // it concerns the bytes of Finish's state argument rather than a file
 // Finish opened itself. Finish never learns where those bytes came from —

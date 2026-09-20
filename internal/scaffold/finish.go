@@ -56,17 +56,30 @@ import (
 // *RefusalError — the template's "(no files changed)" tail would
 // misreport a half-applied write.
 //
-// A re-finish of a step whose frontmatter already says done is a true
-// no-op — Finish writes nothing and mtime on all four files is
-// preserved — when the handoff file exists and its bytes equal handoff,
-// the state bytes equal state, and the spec-with-tick already equals what
-// is on disk; any single divergence, including an absent handoff file,
-// writes as normal. The step-file conjunct is fm.Done() rather than a
-// byte comparison of the step body: with the splice gone the step-file
-// write body is a pure function of the on-disk body, so a byte comparison
-// would hold in almost exactly the cases fm.Done() holds, and where they
-// differ fm.Done() is the correct predicate — the doneness authority is
-// the parsed value, not the byte shape, and R11 requires mtime preserved.
+// A re-finish of a step whose frontmatter already says done resolves to
+// one of three outcomes, decided by (refinish).verdict — see its doc
+// comment for the five facts and six rows that make up the decision:
+//
+//   - A true no-op, writing nothing and preserving mtime on all four
+//     files, when the handoff file exists and its bytes equal handoff, the
+//     state bytes equal state, and the spec-with-tick already equals what
+//     is on disk (R11).
+//   - A refusal wrapping ErrAlreadyFinished, naming the recorded handoff
+//     file, when the handoff file exists but its bytes differ from
+//     handoff.
+//   - A refusal wrapping ErrAlreadyFinished, naming cfg.StateFile, when
+//     the handoff matches but state differs from the recorded state
+//     bytes.
+//
+// A done step whose handoff file is missing or unreadable is exempt from
+// both refusals and writes as normal, the same as an un-ticked progress
+// entry — see (refinish).verdict for why neither is a divergence trigger.
+// The step-file conjunct is fm.Done() rather than a byte comparison of the
+// step body: with the splice gone the step-file write body is a pure
+// function of the on-disk body, so a byte comparison would hold in almost
+// exactly the cases fm.Done() holds, and where they differ fm.Done() is
+// the correct predicate — the doneness authority is the parsed value, not
+// the byte shape, and R11 requires mtime preserved.
 func (s *Server) Finish(_ context.Context, feature, step string, handoff, state []byte) error {
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
 	featurePath := filepath.Join(featureDirPath, feature)
@@ -170,14 +183,22 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	}
 
 	// An unreadable handoff file — including one that does not exist —
-	// is treated as not matching, never as a refusal: the handoff file is
-	// this command's own output, not an input the caller must repair.
+	// exempts a done step from the divergence refusal entirely: the
+	// handoff file is this command's own output, not an input the caller
+	// must repair, and a done step is only ever reached through Finish
+	// (R10), so refusing here would be a dead end for a crash-then-hand-
+	// edit tree or a tree migrated before handoff files existed.
+	handoffPath := filepath.Join(featurePath, handoffName)
 	existingHandoff, handoffReadErr := root.ReadFile(handoffName)
 	handoffMatches := handoffReadErr == nil && string(existingHandoff) == string(handoff)
 
-	identical := handoffMatches &&
-		string(state) == string(stateBytes) &&
-		newSpec == string(specBytes)
+	r := refinish{
+		done:            fm.Done(),
+		handoffRecorded: handoffReadErr == nil,
+		handoffMatches:  handoffMatches,
+		stateMatches:    string(state) == string(stateBytes),
+		specTicked:      newSpec == string(specBytes),
+	}
 
 	newStepBody, err := stepfile.SetStatus(stepBody, "done")
 	if err != nil {
@@ -189,8 +210,15 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		}
 	}
 
-	if fm.Done() && identical {
+	switch r.verdict() {
+	case refinishNoop:
 		return nil
+	case refinishHandoffDiverged:
+		return alreadyFinishedRefusal(handoffPath, step, "handoff")
+	case refinishStateDiverged:
+		return alreadyFinishedRefusal(statePath, step, "state")
+	case refinishWrite:
+		// Falls through to the four writes below.
 	}
 
 	// The four writes below are ordered, and the order is load-bearing:
@@ -309,5 +337,117 @@ func progressRefusal(specPath string, cfg config.Config, feature, step string, e
 		}
 	default:
 		return fmt.Errorf("scaffold: %w", err)
+	}
+}
+
+// refinishVerdict is the outcome (refinish).verdict decides a re-finish of
+// a done step into.
+type refinishVerdict int
+
+const (
+	// refinishWrite means Finish proceeds through its normal four writes:
+	// either the step is not yet done, its handoff file is missing or
+	// unreadable, or the progress entry has not been ticked yet (a
+	// crash-after-step-file retry).
+	refinishWrite refinishVerdict = iota
+	// refinishNoop means every input matches what is already on disk
+	// (R11, SCENARIO-06): Finish writes nothing.
+	refinishNoop
+	// refinishHandoffDiverged means the step is done, its handoff file is
+	// recorded, and the supplied handoff differs from it.
+	refinishHandoffDiverged
+	// refinishStateDiverged means the step is done, the supplied handoff
+	// matches what is recorded, and the supplied state differs from what
+	// is recorded.
+	refinishStateDiverged
+)
+
+// refinish carries the five facts (refinish).verdict decides a re-finish
+// of a done step from, all read at the same point in Finish where the
+// four writes' bodies are computed.
+type refinish struct {
+	// done is fm.Done() — the step's frontmatter status before this call.
+	done bool
+	// handoffRecorded is true when the step's handoff file exists and was
+	// read without error.
+	handoffRecorded bool
+	// handoffMatches is true when handoffRecorded and its bytes equal the
+	// supplied handoff.
+	handoffMatches bool
+	// stateMatches is true when the supplied state equals the state
+	// bytes already on disk.
+	stateMatches bool
+	// specTicked is true when the specification, with step's progress
+	// entry ticked, already equals what is on disk.
+	specTicked bool
+}
+
+// verdict decides a re-finish of a done step among four outcomes, in the
+// order below — rows 3 and 4 ordered handoff-first, matching the write
+// order and R14a's "names the first thing wrong", so a call where both
+// the handoff and the state diverge is reported as a handoff divergence:
+//
+//  1. !done                          -> refinishWrite
+//  2. done && !handoffRecorded       -> refinishWrite (the exemption)
+//  3. done && !handoffMatches        -> refinishHandoffDiverged
+//  4. done && !stateMatches          -> refinishStateDiverged
+//  5. done && specTicked             -> refinishNoop (R11, SCENARIO-06)
+//  6. done && !specTicked            -> refinishWrite
+//
+// specTicked participates only in the noop-vs-write split (rows 5/6),
+// never in a diverged arm: the progress tick is derived from the
+// specification, not a caller input, so an un-ticked entry means
+// "half-applied write to repair", not "different inputs". Test_reports_a_specification_write_that_cannot_be_committed
+// in finish_test.go blocks the fourth write and then retries with the
+// same arguments, leaving the tree at done + handoff matches + state
+// matches + spec un-ticked and requiring that retry to converge; folding
+// specTicked into the divergence trigger would refuse that retry.
+//
+// verdict is a strict refinement of SCENARIO-06: row 5 is reached only
+// when done, handoffRecorded, handoffMatches, stateMatches and specTicked
+// all hold, which is bit-for-bit the no-op's original truth condition —
+// the only behavioural delta this scenario adds is rows 3 and 4.
+//
+// The exemption in row 2 — a done step whose handoff file is missing or
+// unreadable writes as normal rather than being refused — covers a crash
+// between the state write and the step write followed by a hand edit, and
+// a tree migrated before handoff files existed. With no recorded handoff
+// there is nothing to diverge from, and Finish is the only path to a done
+// step (R10), so a refusal there would be a dead end.
+func (r refinish) verdict() refinishVerdict {
+	if !r.done {
+		return refinishWrite
+	}
+
+	if !r.handoffRecorded {
+		return refinishWrite
+	}
+
+	if !r.handoffMatches {
+		return refinishHandoffDiverged
+	}
+
+	if !r.stateMatches {
+		return refinishStateDiverged
+	}
+
+	if r.specTicked {
+		return refinishNoop
+	}
+
+	return refinishWrite
+}
+
+// alreadyFinishedRefusal renders the ErrAlreadyFinished refusal for a
+// re-finish of step whose label ("handoff" or "state") diverges from what
+// is recorded at path. The caller's only route forward is to read the
+// recorded bytes and compare, so the message names the specific divergent
+// file rather than refusing generically.
+func alreadyFinishedRefusal(path, step, label string) *RefusalError {
+	return &RefusalError{
+		Path:    path,
+		Problem: fmt.Sprintf("step %q is already done and the given %s differs from the one recorded here", step, label),
+		Fix:     fmt.Sprintf("diff the %s you passed against it, then edit this file directly if the new %s is correct", label, label),
+		Err:     ErrAlreadyFinished,
 	}
 }

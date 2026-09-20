@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -207,6 +208,56 @@ func Test_reads_the_state_body_from_stdin_when_the_path_is_a_dash(t *testing.T) 
 	got, readErr := os.ReadFile(filepath.Join(wd, "docs", "specifications", "demo", "STATE.md"))
 	require.NoError(t, readErr)
 	assert.Equal(t, newState, string(got))
+}
+
+// Test_refuses_a_re_finish_whose_handoff_differs_from_the_recorded_one is
+// the CLI slice for SCENARIO-16: re-finishing a done step with a handoff
+// that differs from the one recorded on disk is refused rather than
+// silently discarding the new handoff or overwriting the record. The
+// whole stderr string is asserted, not merely Contains, because today's
+// code also prints "brief finish: SCENARIO-01 is done" on exactly these
+// inputs — a Contains assertion here would still pass with the refusal
+// deleted.
+func Test_refuses_a_re_finish_whose_handoff_differs_from_the_recorded_one(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
+	argv := []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}
+	var firstStdout, firstStderr bytes.Buffer
+
+	firstErr := cli.Run(t.Context(), wd, argv, nil, &firstStdout, &firstStderr)
+	require.NoError(t, firstErr)
+
+	names := []string{"SCENARIO-01.md", "STATE.md", "specification.md", "SCENARIO-01-HANDOFF.md"}
+	before := make(map[string][]byte, len(names))
+	for _, name := range names {
+		data, readErr := os.ReadFile(filepath.Join(featureDir, name))
+		require.NoError(t, readErr)
+		before[name] = data
+	}
+
+	differentHandoffPath := writeInput(t, "different-handoff.md", "DIFFERENT-HANDOFF\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", differentHandoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	handoffFile := filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md")
+	want := fmt.Sprintf(
+		"brief finish: %s: step \"SCENARIO-01\" is already done and the given handoff differs "+
+			"from the one recorded here; diff the handoff you passed against it, then edit this "+
+			"file directly if the new handoff is correct (no files changed)\n",
+		handoffFile)
+	assert.Equal(t, want, stderr.String())
+
+	for _, name := range names {
+		data, readErr := os.ReadFile(filepath.Join(featureDir, name))
+		require.NoError(t, readErr)
+		assert.Equal(t, before[name], data, "%s must be byte-identical after a refused re-finish", name)
+	}
 }
 
 func Test_returns_a_usage_error_when_no_feature_is_given_to_finish(t *testing.T) {
