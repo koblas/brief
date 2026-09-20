@@ -34,6 +34,46 @@ func Test_creates_the_feature_and_prints_its_path(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
 	assert.Equal(t, "docs/specifications/payments\n", stdout.String())
+	assert.DirExists(t, filepath.Join(wd, "docs", "specifications"))
+	assert.DirExists(t, filepath.Join(wd, "docs", "specifications", "payments"))
+}
+
+func Test_returns_a_usage_error_when_the_feature_name_contains_whitespace(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"new", "feature", "pay ments"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Equal(t, 2, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, `brief new feature: name "pay ments" contains whitespace; run 'brief new feature <name>' with a name containing no whitespace`, oneLine(t, &stderr))
+	assert.NoDirExists(t, filepath.Join(wd, "docs", "specifications", "pay ments"))
+	assert.NoDirExists(t, filepath.Join(wd, "docs", "specifications"))
+}
+
+func Test_returns_a_usage_error_when_the_feature_name_is_empty(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"new", "feature", ""}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Equal(t, 2, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief new feature: name is empty; run 'brief new feature <name>' with a non-empty name", oneLine(t, &stderr))
+	assert.NoDirExists(t, filepath.Join(wd, "docs", "specifications"))
+}
+
+func Test_keeps_the_refusal_on_one_line_when_the_feature_name_contains_a_newline(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"new", "feature", "pay\nments"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	line := oneLine(t, &stderr)
+	assert.Contains(t, line, `"pay\nments"`)
 }
 
 func Test_returns_a_usage_error_when_no_name_is_given(t *testing.T) {

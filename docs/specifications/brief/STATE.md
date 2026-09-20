@@ -1,6 +1,6 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..06, amended by SCENARIO-HANDOFF-FILE (touches 03/05/06): the
+Scenarios complete: SCENARIO-01..07, amended by SCENARIO-HANDOFF-FILE (touches 03/05/06): the
 handoff moved out of the step file into its own file (R21). Every splice-era entry is gone,
 replaced by the whole-file contract below. The crossover reads this file next.
 
@@ -60,6 +60,14 @@ replaced by the whole-file contract below. The crossover reads this file next.
   out of its own tree mid-migration. (HANDOFF-FILE)
 - `cli.Run` takes `stdin` before `stdout`. `finish` prints nothing to stdout, one stderr line
   `brief finish: <step> is done`. (05-06)
+- **`NewFeature` refuses an empty or whitespace-carrying name as its first statement**, before
+  `os.MkdirAll` — a bare sentinel `scaffold.ErrInvalidFeatureName`, not a `*RefusalError`.
+  `cli/new.go`'s `runNewFeature` branches on it *before* `renderRefusal` and routes through
+  `usageError` → `ErrUsage` → **exit 2**, no `(no files changed)` tail. Predicate is
+  `unicode.IsSpace` anywhere in the name (plus empty) — exactly `strings.Fields`' predicate,
+  which is what makes `status`'s whitespace-separated four-field contract (SCENARIO-09) hold.
+  **SCENARIO-08's already-exists refusal lands in the same function and is the opposite
+  class**: a `*RefusalError` at exit 1 — do not unify the two into one code path. (07)
 
 ## Left unbuilt
 
@@ -73,6 +81,10 @@ replaced by the whole-file contract below. The crossover reads this file next.
   handoff fence refusal; SCENARIO-17's over-cap handoff refusal re-adds both.
 - `HandoffPattern.Number` (recognizing a handoff filename by pattern) — not built; `check` (22)
   and the R6 synthesis are the first callers needing to enumerate handoff files.
+- Already-exists refusal in `NewFeature` (still a raw `os.Mkdir` `EEXIST` wrapped as
+  `scaffold: …`, not yet a `*RefusalError`) — SCENARIO-08 owns it. `NewStep` and `assemble`'s
+  read path do not re-validate a feature name already on disk — creation is the sole choke
+  point, deliberately. (07)
 
 ## Traps
 
@@ -96,6 +108,13 @@ replaced by the whole-file contract below. The crossover reads this file next.
   them. `Lstat`→`Chmod` is an inherent read-then-write window. `PendingFile` is not documented or
   guarded as safe for concurrent `Close`. All three pre-existing, no constructible failure —
   `brief` has one writer — unowned.
+- A whitespace-carrying feature name is a legal directory name on every platform `brief`
+  targets — no OS error catches it, so `validateFeatureName` is the only thing that does.
+  `renderRefusal` returns its error unchanged (exit 1); a future refusal added to `NewFeature`
+  that needs exit 2 must branch in `cli` **before** `renderRefusal`, the same way S07 does.
+  Asserting only `NoDirExists(<feature dir>/<name>)` on a fresh `t.TempDir()` is vacuous — the
+  leaf never exists regardless of the guard; the discriminating probe is `NoDirExists` on the
+  *configured feature directory* itself, paired with a control arm on an accepted name. (07)
 
 ## Open debts
 

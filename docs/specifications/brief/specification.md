@@ -820,7 +820,7 @@ Crossover — this document becomes `brief`'s own feature directory.
 
 Post-crossover — built through the tool:
 
-- [ ] SCENARIO-07: A feature name that would break the status contract is refused
+- [x] SCENARIO-07: A feature name that would break the status contract is refused
 - [ ] SCENARIO-08: Creating a feature that already exists is refused
 - [ ] SCENARIO-09: Status reports one four-field line per feature
 - [ ] SCENARIO-10: Status on a repository with no features succeeds silently

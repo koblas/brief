@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"unicode"
 
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/stepfile"
@@ -30,6 +31,11 @@ func NewServer(cfg config.Config, root string) *Server {
 // feature directory, writing an empty specification skeleton and an empty
 // state file into it, and returns the created directory's path.
 //
+// name is validated before anything touches disk: an empty name, or one
+// containing whitespace, is refused as ErrInvalidFeatureName and no
+// directory — not even the configured feature directory itself — is
+// created.
+//
 // Every write goes through an *os.Root rooted at the feature directory.
 // Root.Mkdir refuses a name that escapes the root (a "../x" name cannot
 // traverse out) and refuses an existing feature outright — that refusal is
@@ -39,6 +45,10 @@ func NewServer(cfg config.Config, root string) *Server {
 // O_CREATE|O_EXCL, which cannot fire while Mkdir guarantees a brand-new
 // leaf, and which holds the line if that guarantee is ever relaxed.
 func (s *Server) NewFeature(_ context.Context, name string) (string, error) {
+	if err := validateFeatureName(name); err != nil {
+		return "", err
+	}
+
 	featureRoot := filepath.Join(s.root, s.cfg.FeatureDirectory)
 	if err := os.MkdirAll(featureRoot, 0o755); err != nil {
 		return "", fmt.Errorf("scaffold: %w", err)
@@ -175,6 +185,26 @@ func noSuchFeatureRefusal(path, feature string) error {
 		Fix:     fmt.Sprintf("run 'brief new feature %s' to create it", feature),
 		Err:     ErrNoSuchFeature,
 	}
+}
+
+// validateFeatureName refuses an empty name, or one carrying a rune
+// unicode.IsSpace reports true for, wrapping ErrInvalidFeatureName with
+// the offending name so the refusal names what was wrong. status is a
+// whitespace-separated four-field contract (strings.Fields splits on the
+// same predicate); a name breaking it here is what makes that contract
+// hold everywhere it is read.
+func validateFeatureName(name string) error {
+	if name == "" {
+		return fmt.Errorf("name is empty: %w", ErrInvalidFeatureName)
+	}
+
+	for _, r := range name {
+		if unicode.IsSpace(r) {
+			return fmt.Errorf("name %q contains whitespace: %w", name, ErrInvalidFeatureName)
+		}
+	}
+
+	return nil
 }
 
 // writeExclusive creates name under root and writes contents to it,

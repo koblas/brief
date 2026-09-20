@@ -5,6 +5,15 @@ import (
 	"fmt"
 )
 
+// ErrInvalidFeatureName is returned when NewFeature is asked to create a
+// name that would break the whitespace-separated four-field status
+// contract: an empty name, or one containing a rune unicode.IsSpace
+// reports true for — the same predicate strings.Fields splits that
+// contract's fields on. It is a bare sentinel, not a *RefusalError: an
+// invalid name is an invocation defect, reported by cli as a usage error
+// rather than as a write refusal.
+var ErrInvalidFeatureName = errors.New("invalid feature name")
+
 // ErrNoSuchFeature is returned when the named feature has no directory
 // under the configured feature directory.
 var ErrNoSuchFeature = errors.New("no such feature")

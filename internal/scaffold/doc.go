@@ -38,6 +38,12 @@
 // itself never learns it. A "## Handoff" section left behind in a step
 // file by an unmigrated tree is ordinary prose Finish never reads.
 //
+// One refusal is not a *RefusalError: an empty or whitespace-carrying name
+// given to NewFeature is an invocation defect, not a write that changed
+// nothing on disk, so it is reported as the bare sentinel
+// ErrInvalidFeatureName and cli classifies it as a usage error rather than
+// rendering it with the "(no files changed)" write-refusal template.
+//
 // scaffold writes through the real filesystem; there is no Store port. The
 // contracts this package ships — no temp file left behind, byte-identity
 // after a refusal — are filesystem properties that an in-memory adapter

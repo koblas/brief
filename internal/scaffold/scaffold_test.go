@@ -43,6 +43,7 @@ func Test_creates_the_feature_directory_under_the_configured_feature_directory(t
 
 	require.NoError(t, err)
 	assert.DirExists(t, filepath.Join(root, "specs", "widgets"))
+	assert.DirExists(t, filepath.Join(root, "specs"))
 }
 
 func Test_returns_the_path_of_the_created_feature_directory(t *testing.T) {
@@ -144,6 +145,90 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 // siblings in this repo; 0o600 carries no bits a conventional umask strips,
 // so unlike the atomicfile fresh-create tests this one is umask-stable
 // either way.
+func Test_refuses_a_feature_name_containing_whitespace(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay ments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+	assert.ErrorContains(t, err, `"pay ments"`)
+}
+
+func Test_refuses_a_feature_name_with_a_leading_space(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), " payments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_a_feature_name_with_a_trailing_space(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "payments ")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_a_feature_name_containing_a_tab(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay\tments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_a_feature_name_containing_a_line_feed(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay\nments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_a_feature_name_containing_a_carriage_return(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay\rments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_a_feature_name_containing_a_non_breaking_space(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay ments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_an_empty_feature_name(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_creates_nothing_at_all_when_the_name_is_refused(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay ments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+	assert.NoDirExists(t, filepath.Join(root, "specs", "pay ments"))
+	assert.NoDirExists(t, filepath.Join(root, "specs"))
+}
+
 func Test_the_scaffolded_files_are_all_created_owner_only(t *testing.T) {
 	oldMask := syscall.Umask(0o022)
 	t.Cleanup(func() { syscall.Umask(oldMask) })
