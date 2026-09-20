@@ -101,14 +101,14 @@ func RenderStatusText(w io.Writer, rows []FeatureStatus) error {
 }
 
 // RenderFindings writes findings to w, one per line, in the profile's
-// finding shape: "[SEVERITY] <path>:<line> — <problem>". It carries no Fix:
+// finding shape: "[SEVERITY] <path>:<line> — <detail>". It carries no Fix:
 // the write-path refusal's "... and retry" copy has no meaning in a report
 // about a tree scaffold.Finish was never asked to write. RenderFindings
 // decides nothing about severity or ordering — Check has already decided
 // both — it only renders the slice it is given, in the order given.
 func RenderFindings(w io.Writer, findings []Finding) error {
 	for _, f := range findings {
-		if _, err := fmt.Fprintf(w, "[%s] %s:%d — %s\n", f.Severity, f.Path, f.Line, f.Problem); err != nil {
+		if _, err := fmt.Fprintf(w, "[%s] %s:%d — %s\n", f.Severity, f.Path, f.Line, f.Detail); err != nil {
 			return fmt.Errorf("assemble: render: %w", err)
 		}
 	}

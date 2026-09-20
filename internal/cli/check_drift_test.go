@@ -91,7 +91,7 @@ func Test_check_drift_over_cap_handoff_matches_finishes_own_refusal(t *testing.T
 	require.NoError(t, checkErr)
 
 	finding := findFinding(t, findings, "HANDOFF")
-	assert.Equal(t, refusal.Problem, finding.Problem)
+	assert.Equal(t, refusal.Problem, finding.Detail)
 }
 
 func Test_check_drift_unterminated_state_fence_matches_finishes_own_refusal(t *testing.T) {
@@ -115,7 +115,7 @@ func Test_check_drift_unterminated_state_fence_matches_finishes_own_refusal(t *t
 	require.NoError(t, checkErr)
 
 	finding := findFinding(t, findings, "STATE.md")
-	assert.Equal(t, refusal.Problem, finding.Problem)
+	assert.Equal(t, refusal.Problem, finding.Detail)
 }
 
 func Test_check_drift_missing_state_heading_matches_finishes_own_refusal(t *testing.T) {
@@ -139,7 +139,7 @@ func Test_check_drift_missing_state_heading_matches_finishes_own_refusal(t *test
 	require.NoError(t, checkErr)
 
 	finding := findFinding(t, findings, "STATE.md")
-	assert.Equal(t, refusal.Problem, finding.Problem)
+	assert.Equal(t, refusal.Problem, finding.Detail)
 }
 
 // Test_check_drift_open_checklist_item_matches_finishes_own_refusal is the
@@ -165,8 +165,8 @@ func Test_check_drift_open_checklist_item_matches_finishes_own_refusal(t *testin
 	require.NoError(t, checkErr)
 
 	finding := findFinding(t, findings, "SCENARIO-01.md")
-	assert.Equal(t, refusal.Problem, finding.Problem)
-	assert.Contains(t, finding.Problem, "second thing")
+	assert.Equal(t, refusal.Problem, finding.Detail)
+	assert.Contains(t, finding.Detail, "second thing")
 }
 
 // findFinding returns the one finding in findings whose Path contains

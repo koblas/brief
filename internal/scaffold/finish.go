@@ -452,9 +452,9 @@ func checkStepDependencies(root *os.Root, pattern stepfile.Pattern, fm stepfile.
 // siblingFrontmatter reads and parses name — one of root's own step
 // files — for checkStepDependencies. A file that cannot be read or whose
 // frontmatter does not parse returns a zero Frontmatter (never done)
-// rather than propagating the error: Decision 5 records that sibling as a
-// known, not-done step so it blocks a dependant rather than being
-// silently skipped.
+// rather than propagating the error: that sibling is recorded as a known,
+// not-done step so it blocks a dependant rather than being silently
+// skipped.
 func siblingFrontmatter(root *os.Root, name string) stepfile.Frontmatter {
 	body, err := root.ReadFile(name)
 	if err != nil {
@@ -544,7 +544,7 @@ const (
 	// crash-after-step-file retry).
 	refinishWrite refinishVerdict = iota
 	// refinishNoop means every input matches what is already on disk
-	// (R11, SCENARIO-06): Finish writes nothing.
+	// (R11): Finish writes nothing.
 	refinishNoop
 	// refinishHandoffDiverged means the step is done, its handoff file is
 	// recorded, and the supplied handoff differs from it.
@@ -584,22 +584,22 @@ type refinish struct {
 //  2. done && !handoffRecorded       -> refinishWrite (the exemption)
 //  3. done && !handoffMatches        -> refinishHandoffDiverged
 //  4. done && !stateMatches          -> refinishStateDiverged
-//  5. done && specTicked             -> refinishNoop (R11, SCENARIO-06)
+//  5. done && specTicked             -> refinishNoop (R11)
 //  6. done && !specTicked            -> refinishWrite
 //
 // specTicked participates only in the noop-vs-write split (rows 5/6),
 // never in a diverged arm: the progress tick is derived from the
 // specification, not a caller input, so an un-ticked entry means
-// "half-applied write to repair", not "different inputs". Test_reports_a_specification_write_that_cannot_be_committed
-// in finish_test.go blocks the fourth write and then retries with the
-// same arguments, leaving the tree at done + handoff matches + state
-// matches + spec un-ticked and requiring that retry to converge; folding
-// specTicked into the divergence trigger would refuse that retry.
+// "half-applied write to repair", not "different inputs". A retry after a
+// blocked specification write — done, handoff matches, state matches, spec
+// still un-ticked — must converge on a second call with the same
+// arguments; folding specTicked into the divergence trigger would refuse
+// that retry instead.
 //
-// verdict is a strict refinement of SCENARIO-06: row 5 is reached only
-// when done, handoffRecorded, handoffMatches, stateMatches and specTicked
-// all hold, which is bit-for-bit the no-op's original truth condition —
-// the only behavioural delta this scenario adds is rows 3 and 4.
+// Row 5 is reached only when done, handoffRecorded, handoffMatches,
+// stateMatches and specTicked all hold — bit-for-bit R11's no-op
+// condition. Rows 3 and 4 are the only outcomes that refuse rather than
+// write or no-op.
 //
 // The exemption in row 2 — a done step whose handoff file is missing or
 // unreadable writes as normal rather than being refused — covers a crash

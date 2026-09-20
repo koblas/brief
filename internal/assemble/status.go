@@ -48,9 +48,8 @@ type FeatureStatus struct {
 // that row's Problem instead — one malformed feature never blinds Status
 // to the rest. A symlink entry in the feature root is marked the same way
 // without being followed, because Status never reads through it; a
-// regular file entry is skipped with no row at all, matching
-// SCENARIO-10's "docs/specifications/ legitimately holds a README.md"
-// decision.
+// regular file entry is skipped with no row at all — the feature directory
+// legitimately holds a README.md or a .DS_Store beside real features.
 func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 	topRoot, err := os.OpenRoot(filepath.Join(s.root, s.cfg.FeatureDirectory))
 	if err != nil {
@@ -79,7 +78,7 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 
 		switch {
 		case e.IsDir():
-			rows = append(rows, featureStatus(topRoot, pattern, e.Name(), entryPath))
+			rows = append(rows, featureStatus(topRoot, s.openRoot, s.readDir, pattern, e.Name(), entryPath))
 		case e.Type()&fs.ModeSymlink != 0:
 			// A symlink is marked without being resolved or opened: brief
 			// does not follow symbolic links in the feature directory, so
@@ -88,15 +87,15 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 				Name: e.Name(),
 				Problem: &Problem{
 					Path:   entryPath,
-					Detail: "symbolic link is not read as a feature directory",
+					Detail: "is a symbolic link, not read as a feature directory",
 					Fix:    "replace it with a real directory",
 				},
 			})
 		default:
 			// A regular file (or other non-directory, non-symlink entry)
-			// is not a feature and produces no row — SCENARIO-10's
-			// decision, preserved: docs/specifications/ legitimately holds
-			// a README.md or a .DS_Store beside real feature directories.
+			// is not a feature and produces no row: the feature directory
+			// legitimately holds a README.md or a .DS_Store beside real
+			// feature directories.
 		}
 	}
 
@@ -108,15 +107,26 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 // directory, or reading or parsing one of its step files, is degraded into
 // the returned row's Problem rather than propagated — the first such
 // failure wins, and the row's counts stay at their zero values.
-// displayPath is name's absolute path, used to build Problem.Path.
-func featureStatus(topRoot *os.Root, pattern stepfile.Pattern, name, displayPath string) FeatureStatus {
-	root, err := topRoot.OpenRoot(name)
+// displayPath is name's absolute path, used to build Problem.Path. openRoot
+// opens name under topRoot — (*os.Root).OpenRoot in production, a fake in a
+// test that injects a permission failure independent of effective uid.
+// readDir lists the opened root's own entries — s.readDir in production, a
+// fake in a test that injects a listing failure the same way, independent
+// of openRoot's own failure.
+func featureStatus(
+	topRoot *os.Root,
+	openRoot func(*os.Root, string) (*os.Root, error),
+	readDir func(*os.Root) ([]os.DirEntry, error),
+	pattern stepfile.Pattern,
+	name, displayPath string,
+) FeatureStatus {
+	root, err := openRoot(topRoot, name)
 	if err != nil {
 		return FeatureStatus{Name: name, Problem: newProblem(displayPath, err, false)}
 	}
 	defer func() { _ = root.Close() }()
 
-	dirEntries, err := fs.ReadDir(root.FS(), ".")
+	dirEntries, err := readDir(root)
 	if err != nil {
 		return FeatureStatus{Name: name, Problem: newProblem(displayPath, err, false)}
 	}

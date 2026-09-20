@@ -1,9 +1,11 @@
 package assemble_test
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/koblas/brief/internal/assemble"
@@ -66,6 +68,13 @@ func Test_status_counts_done_over_total_and_names_the_next_step(t *testing.T) {
 	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 1, Total: 3, Next: "STEP-02", Blocked: 0}, rows[0])
 }
 
+// Test_status_counts_a_step_whose_dependency_is_unfinished_as_blocked seeds
+// two independently, differently blocked open steps (STEP-02 on open
+// STEP-01, STEP-06 on open STEP-07) rather than one: a single blocked step
+// cannot discriminate inverting FirstUnmet's unmet condition from the
+// correct predicate, since blame would silently swap to a different open
+// step while Blocked coincidentally stays 1. Two blocked steps, chosen so
+// neither is the other's dependency, catch that.
 func Test_status_counts_a_step_whose_dependency_is_unfinished_as_blocked(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -80,9 +89,14 @@ func Test_status_counts_a_step_whose_dependency_is_unfinished_as_blocked(t *test
 	writeStepFile(t, featureDir, "STEP-03.md", fixtureStepWithDeps(cfg, "STEP-03", "open", "STEP-03", []string{"STEP-04"}))
 	writeStepFile(t, featureDir, "STEP-04.md", fixtureStepWithDeps(cfg, "STEP-04", "done", "STEP-04", nil))
 	// STEP-05 is done but declares an unfinished dependency (STEP-01, still
-	// open): a done step is never counted as blocked, whatever its
-	// dependencies say, so this must not raise Blocked beyond 1.
+	// open): featureStatus's loop skips a done step before it is ever
+	// weighed against FirstUnmet, so this must not raise Blocked beyond its
+	// independently blocked siblings.
 	writeStepFile(t, featureDir, "STEP-05.md", fixtureStepWithDeps(cfg, "STEP-05", "done", "STEP-05", []string{"STEP-01"}))
+	// STEP-06 is open and depends on STEP-07, which is itself open: a
+	// second, independent blocked step, unrelated to STEP-01/STEP-02.
+	writeStepFile(t, featureDir, "STEP-06.md", fixtureStepWithDeps(cfg, "STEP-06", "open", "STEP-06", []string{"STEP-07"}))
+	writeStepFile(t, featureDir, "STEP-07.md", fixtureStepWithDeps(cfg, "STEP-07", "open", "STEP-07", nil))
 
 	srv := assemble.NewServer(cfg, root)
 
@@ -90,7 +104,7 @@ func Test_status_counts_a_step_whose_dependency_is_unfinished_as_blocked(t *test
 
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, 1, rows[0].Blocked)
+	assert.Equal(t, 2, rows[0].Blocked)
 	assert.Equal(t, "STEP-01", rows[0].Next)
 }
 
@@ -280,22 +294,54 @@ func Test_status_marks_a_feature_whose_step_file_cannot_be_read(t *testing.T) {
 	assert.Equal(t, "make it readable and re-run", rows[0].Problem.Fix)
 }
 
-// Test_status_marks_a_feature_directory_that_cannot_be_listed uses a
-// feature directory at mode 000: root can read anything, so the case is
-// skipped when the test runs as root.
-func Test_status_marks_a_feature_directory_that_cannot_be_listed(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("permission checks do not apply when running as root")
-	}
-
+// Test_status_marks_a_feature_directory_that_cannot_be_opened injects an
+// EACCES failure through assemble.SetOpenRootForTest rather than chmod:
+// root bypasses ordinary permission checks, so a chmod-000 directory does
+// not reproduce this branch under every CI identity, and a skip keyed on
+// os.Geteuid would let the branch go untested there with no signal.
+func Test_status_marks_a_feature_directory_that_cannot_be_opened(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "delta")
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
-	require.NoError(t, os.Chmod(featureDir, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(featureDir, 0o755) })
 
 	srv := assemble.NewServer(cfg, root)
+	assemble.SetOpenRootForTest(srv, func(parent *os.Root, name string) (*os.Root, error) {
+		if name == "delta" {
+			return nil, &fs.PathError{Op: "openat", Path: name, Err: syscall.EACCES}
+		}
+
+		return parent.OpenRoot(name)
+	})
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, featureDir, rows[0].Problem.Path)
+	assert.Equal(t, "permission denied", rows[0].Problem.Detail)
+	assert.Equal(t, "make it readable and re-run", rows[0].Problem.Fix)
+}
+
+// Test_status_marks_a_feature_directory_that_cannot_be_listed is
+// Test_status_marks_a_feature_directory_that_cannot_be_opened's companion
+// one layer deeper: the feature directory opens fine but its step files
+// cannot be listed (the branch a stricter-than-darwin permission model,
+// such as Linux's, takes at a directory readable to enter but not to
+// list). The injected failure goes through assemble.SetReadDirForTest,
+// distinct from SetOpenRootForTest above, so it reddens only when
+// featureStatus's own listing call — not its open call — fails.
+func Test_status_marks_a_feature_directory_that_cannot_be_listed(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "delta")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	srv := assemble.NewServer(cfg, root)
+	assemble.SetReadDirForTest(srv, func(*os.Root) ([]os.DirEntry, error) {
+		return nil, &fs.PathError{Op: "readdirent", Path: ".", Err: syscall.EACCES}
+	})
 
 	rows, err := srv.Status(t.Context())
 
@@ -334,7 +380,7 @@ func Test_status_marks_a_symlinked_feature_directory_rather_than_dropping_it(t *
 	assert.Equal(t, "gamma", rows[0].Name)
 	require.NotNil(t, rows[0].Problem)
 	assert.Equal(t, linkPath, rows[0].Problem.Path)
-	assert.Equal(t, "symbolic link is not read as a feature directory", rows[0].Problem.Detail)
+	assert.Equal(t, "is a symbolic link, not read as a feature directory", rows[0].Problem.Detail)
 	assert.Equal(t, "replace it with a real directory", rows[0].Problem.Fix)
 }
 
@@ -411,26 +457,25 @@ func Test_status_leaves_a_feature_with_no_step_files_unmarked(t *testing.T) {
 }
 
 // Test_status_still_propagates_an_unreadable_top_level_feature_directory
-// is the control that keeps SCENARIO-11's tolerance scoped to one
-// feature at a time: a permission failure on cfg.FeatureDirectory itself —
-// not one feature's directory — still fails the whole call.
+// is the control that keeps the malformed-feature tolerance scoped to one
+// feature at a time: a failure opening cfg.FeatureDirectory itself — not
+// one feature's directory — still fails the whole call. A self-referential
+// symlink at that path is used rather than chmod: it makes os.OpenRoot
+// fail with ELOOP independent of OS permission bits or effective uid,
+// exercising the same propagate branch a chmod-000 root would, under any
+// CI identity.
 func Test_status_still_propagates_an_unreadable_top_level_feature_directory(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("permission checks do not apply when running as root")
-	}
-
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	topDir := filepath.Join(root, cfg.FeatureDirectory)
-	require.NoError(t, os.MkdirAll(topDir, 0o755))
-	require.NoError(t, os.Chmod(topDir, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(topDir, 0o755) })
+	require.NoError(t, os.Symlink(topDir, topDir))
 
 	srv := assemble.NewServer(cfg, root)
 
 	rows, err := srv.Status(t.Context())
 
 	require.Error(t, err)
+	require.NotErrorIs(t, err, fs.ErrNotExist, "a symlink loop must not be classified as a missing root")
 	assert.Nil(t, rows)
 }
 

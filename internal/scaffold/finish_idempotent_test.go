@@ -322,6 +322,39 @@ func Test_re_finishing_a_done_step_with_the_same_inputs_leaves_every_file_byte_i
 // back would make this test stop discriminating the gate, since a
 // reverted status line alone would then force the write for a reason
 // other than fm.Done().
+// Test_re_finishing_a_done_step_whose_progress_title_contains_an_unticked_marker_stays_a_noop
+// is the regression tickProgressEntry's first-occurrence Replace used to
+// cause: on an already-ticked entry whose own title text happens to
+// contain a literal "[ ]" (not the checklist marker itself), Replace
+// rewrote that title-text "[ ]" instead of leaving an already-"[x]" line
+// untouched, silently editing the specification on every re-finish and
+// breaking the noop verdict (R11).
+func Test_re_finishing_a_done_step_whose_progress_title_contains_an_unticked_marker_stays_a_noop(t *testing.T) {
+	fx := newFinishedFixture(t)
+	specPath := filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile)
+	spec := readFileString(t, specPath)
+	withMarkerInTitle := strings.Replace(spec,
+		"- [x] STEP-02: Assemble the thing",
+		"- [x] STEP-02: render a [ ] marker",
+		1)
+	require.NoError(t, os.WriteFile(specPath, []byte(withMarkerInTitle), 0o600))
+
+	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile, "STEP-02" + fx.cfg.HandoffFileSuffix}
+	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
+	before := snapshotTree(t, fx.featureDir())
+
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.NoError(t, err)
+
+	assert.Equal(t, before, snapshotTree(t, fx.featureDir()), "a re-finish with identical inputs must write nothing")
+
+	after := modTimes(t, fx.featureDir(), names)
+	for _, name := range names {
+		assert.True(t, after[name].Equal(pinnedModTime), "%s mtime moved on a would-be noop re-finish", name)
+	}
+}
+
 func Test_a_step_whose_frontmatter_is_still_open_is_marked_done_even_when_every_input_matches_what_is_on_disk(t *testing.T) {
 	fx := newFinishedFixture(t)
 	stepPath := fx.stepPath("STEP-02.md")

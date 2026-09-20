@@ -143,9 +143,13 @@ func insertProgressEntry(body, heading, entry string) (string, error) {
 // section is located by progressSection, the same helper
 // insertProgressEntry uses, so new step and finish agree about where the
 // progress section ends in the same file. A line already "[x]" is left
-// unchanged. An item's text, taken after "- [ ] " or "- [x] ", names id
-// when it begins with id followed by end of line or a rune outside
-// identRune, so "STEP-10" is never matched when id is "STEP-1".
+// unchanged — the marker is replaced within the span checklistItemRe
+// itself matched, never by scanning the rest of the line, so an item whose
+// own title text happens to contain a literal "[ ]" is never mistaken for
+// an unticked marker and rewritten. An item's text, taken after "- [ ] "
+// or "- [x] ", names id when it begins with id followed by end of line or
+// a rune outside identRune, so "STEP-10" is never matched when id is
+// "STEP-1".
 //
 // tickProgressEntry returns ErrNoProgressHeading when no line in body
 // equals heading, and ErrNoProgressEntry when the section has no item
@@ -173,7 +177,7 @@ func tickProgressEntry(body, heading, id string) (string, error) {
 		return "", ErrNoProgressEntry
 	}
 
-	lines[matchIdx] = strings.Replace(lines[matchIdx], "[ ]", "[x]", 1)
+	lines[matchIdx] = tickMarker(lines[matchIdx])
 
 	result := strings.Join(lines, "\n")
 	if hadTrailingNewline {
@@ -181,6 +185,19 @@ func tickProgressEntry(body, heading, id string) (string, error) {
 	}
 
 	return result, nil
+}
+
+// tickMarker flips line's leading "- [ ]" marker to "- [x]", operating only
+// within the span checklistItemRe matched at the start of line — never a
+// scan of the whole line — so a "[ ]" occurring later in the line's own
+// text is never mistaken for the marker and rewritten. line must already
+// satisfy checklistItemRe; a line whose marker is already "[x]" is
+// returned unchanged.
+func tickMarker(line string) string {
+	loc := checklistItemRe.FindStringIndex(line)
+	marker, rest := line[:loc[1]], line[loc[1]:]
+
+	return strings.Replace(marker, "[ ]", "[x]", 1) + rest
 }
 
 // progressItemNames reports whether line — already matched by

@@ -20,13 +20,29 @@ import (
 type Server struct {
 	cfg  config.Config
 	root string
+
+	// openRoot opens name as a subdirectory of parent. It defaults to
+	// (*os.Root).OpenRoot; a test overrides it, through export_test.go, to
+	// inject a directory-open failure that does not depend on OS
+	// permission bits or effective uid.
+	openRoot func(parent *os.Root, name string) (*os.Root, error)
+
+	// readDir lists root's own entries. It defaults to reading root.FS()
+	// with fs.ReadDir; a test overrides it for the same reason as
+	// openRoot.
+	readDir func(root *os.Root) ([]os.DirEntry, error)
 }
 
 // NewServer returns a Server rooted at root, using cfg for every path and
 // heading it reads. Both arguments are required positionally: there is no
 // optional dependency here for a functional option to default.
 func NewServer(cfg config.Config, root string) *Server {
-	return &Server{cfg: cfg, root: root}
+	return &Server{
+		cfg:      cfg,
+		root:     root,
+		openRoot: (*os.Root).OpenRoot,
+		readDir:  func(root *os.Root) ([]os.DirEntry, error) { return fs.ReadDir(root.FS(), ".") },
+	}
 }
 
 // stepEntry is one step file found while enumerating a feature directory:

@@ -264,8 +264,8 @@ func Test_render_status_text_prints_the_marker_for_a_malformed_feature(t *testin
 // report of a tree Finish was never asked to write does not.
 func Test_RenderFindings_writes_the_profile_s_finding_shape(t *testing.T) {
 	findings := []assemble.Finding{
-		{Severity: assemble.SeverityError, Path: "/repo/docs/specifications/demo/STEP-01.md", Line: 12, Problem: `checklist item "x" is not ticked`},
-		{Severity: assemble.SeverityWarn, Path: "/repo/docs/specifications/demo/NOTES.md", Line: 0, Problem: "state is 90 lines, over the cap of 80"},
+		{Severity: assemble.SeverityError, Path: "/repo/docs/specifications/demo/STEP-01.md", Line: 12, Detail: `checklist item "x" is not ticked`},
+		{Severity: assemble.SeverityWarn, Path: "/repo/docs/specifications/demo/NOTES.md", Line: 0, Detail: "state is 90 lines, over the cap of 80"},
 	}
 
 	var out bytes.Buffer

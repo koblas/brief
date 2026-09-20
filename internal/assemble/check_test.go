@@ -2,9 +2,11 @@ package assemble_test
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/koblas/brief/internal/assemble"
@@ -188,9 +190,9 @@ func Test_check_reports_an_over_cap_handoff_file(t *testing.T) {
 	f := onlyFinding(t, findings)
 	assert.Equal(t, filepath.Join(featureDir, "STEP-01"+cfg.HandoffFileSuffix), f.Path)
 	assert.Equal(t, 11, f.Line, "a cap finding's line is cap+1, the first line over it")
-	assert.Contains(t, f.Problem, "11")
-	assert.Contains(t, f.Problem, "10")
-	assert.Contains(t, f.Problem, "over the cap")
+	assert.Contains(t, f.Detail, "11")
+	assert.Contains(t, f.Detail, "10")
+	assert.Contains(t, f.Detail, "over the cap")
 	assert.Equal(t, assemble.SeverityWarn, f.Severity)
 }
 
@@ -233,7 +235,7 @@ func Test_check_reports_a_state_body_over_the_configured_cap(t *testing.T) {
 	f := onlyFinding(t, findings)
 	assert.Equal(t, filepath.Join(featureDir, cfg.StateFile), f.Path)
 	assert.Equal(t, 21, f.Line, "a cap finding's line is cap+1, the first line over it")
-	assert.Equal(t, "state is 21 lines, over the cap of 20", f.Problem)
+	assert.Equal(t, "state is 21 lines, over the cap of 20", f.Detail)
 }
 
 func Test_check_reports_a_state_body_with_an_unterminated_fence(t *testing.T) {
@@ -252,7 +254,7 @@ func Test_check_reports_a_state_body_with_an_unterminated_fence(t *testing.T) {
 
 	f := onlyFinding(t, findings)
 	assert.Equal(t, filepath.Join(featureDir, cfg.StateFile), f.Path)
-	assert.Equal(t, "state has an unclosed ``` fence", f.Problem)
+	assert.Equal(t, "state has an unclosed ``` fence", f.Detail)
 }
 
 func Test_check_reports_a_state_body_missing_a_required_heading(t *testing.T) {
@@ -271,7 +273,7 @@ func Test_check_reports_a_state_body_missing_a_required_heading(t *testing.T) {
 
 	f := onlyFinding(t, findings)
 	assert.Equal(t, filepath.Join(featureDir, cfg.StateFile), f.Path)
-	assert.Equal(t, `state is missing the "## Gotchas" section`, f.Problem)
+	assert.Equal(t, `state is missing the "## Gotchas" section`, f.Detail)
 }
 
 func Test_check_reports_a_missing_state_file(t *testing.T) {
@@ -291,7 +293,7 @@ func Test_check_reports_a_missing_state_file(t *testing.T) {
 
 	f := onlyFinding(t, findings)
 	assert.Equal(t, filepath.Join(featureDir, cfg.StateFile), f.Path)
-	assert.Contains(t, f.Problem, "no such file")
+	assert.Contains(t, f.Detail, "no such file")
 }
 
 func Test_check_reports_a_specification_with_no_progress_heading(t *testing.T) {
@@ -310,7 +312,7 @@ func Test_check_reports_a_specification_with_no_progress_heading(t *testing.T) {
 
 	f := onlyFinding(t, findings)
 	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), f.Path)
-	assert.Contains(t, f.Problem, cfg.ProgressHeading)
+	assert.Contains(t, f.Detail, cfg.ProgressHeading)
 }
 
 // Test_check_reports_a_step_whose_frontmatter_does_not_parse_and_still_reports_its_handoff_cap
@@ -335,9 +337,9 @@ func Test_check_reports_a_step_whose_frontmatter_does_not_parse_and_still_report
 	require.Len(t, findings, 2)
 
 	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), findings[0].Path)
-	assert.Contains(t, findings[0].Problem, "frontmatter does not parse")
+	assert.Contains(t, findings[0].Detail, "frontmatter does not parse")
 	assert.Equal(t, filepath.Join(featureDir, "STEP-01"+cfg.HandoffFileSuffix), findings[1].Path)
-	assert.Contains(t, findings[1].Problem, "over the cap")
+	assert.Contains(t, findings[1].Detail, "over the cap")
 
 	for _, f := range findings {
 		assert.Equal(t, assemble.SeverityError, f.Severity, "an unreadable step's own feature is always in flight")
@@ -362,7 +364,7 @@ func Test_check_reports_an_unticked_checklist_item_on_a_done_step(t *testing.T) 
 	f := onlyFinding(t, findings)
 	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), f.Path)
 	assert.Equal(t, 12, f.Line)
-	assert.Equal(t, `checklist item "second thing" is not ticked`, f.Problem)
+	assert.Equal(t, `checklist item "second thing" is not ticked`, f.Detail)
 }
 
 // Test_check_reports_nothing_for_an_unticked_checklist_item_on_an_open_step
@@ -402,7 +404,7 @@ func Test_check_reports_a_dependency_id_that_names_no_step_file(t *testing.T) {
 
 	f := onlyFinding(t, findings)
 	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), f.Path)
-	assert.Equal(t, `step "STEP-01" depends on "STEP-99", which names no step file`, f.Problem)
+	assert.Equal(t, `step "STEP-01" depends on "STEP-99", which names no step file`, f.Detail)
 }
 
 // Test_check_reports_nothing_for_an_ordinary_unmet_dependency is C8's
@@ -441,7 +443,106 @@ func Test_check_reports_a_step_that_depends_on_itself(t *testing.T) {
 
 	f := onlyFinding(t, findings)
 	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), f.Path)
-	assert.Equal(t, `step "STEP-01" depends on "STEP-01", which is not finished`, f.Problem)
+	assert.Equal(t, `step "STEP-01" depends on "STEP-01", which is not finished`, f.Detail)
+}
+
+// Test_check_reports_a_dangling_dependency_that_is_not_first_in_the_list is
+// C8's masking regression: idx.FirstUnmet stops at the first unmet id, so a
+// dangling id (STEP-99) listed after a merely-open-and-known one (STEP-01)
+// used to be silently dropped. checkStepDependencyFindings must walk every
+// declared id rather than reuse that refusal predicate.
+func Test_check_reports_a_dangling_dependency_that_is_not_first_in_the_list(t *testing.T) {
+	cfg := fixtureConfig()
+	cfg.StepFilePattern = "STEP-%02d.md"
+	root := t.TempDir()
+	featureDir := checkFeatureDir(cfg, root, "demo")
+
+	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
+	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "open", nil, []string{"- [ ] a task"}))
+	checkWriteStep(t, featureDir, "STEP-02", checkStepBody(cfg, "STEP-02", "open", []string{"STEP-01", "STEP-99"}, []string{"- [ ] a task"}))
+
+	srv := assemble.NewServer(cfg, root)
+
+	findings, err := srv.Check(t.Context(), "demo")
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-02.md"), f.Path)
+	assert.Equal(t, `step "STEP-02" depends on "STEP-99", which names no step file`, f.Detail)
+}
+
+// Test_check_reports_a_self_dependency_masked_behind_an_earlier_unmet_dependency
+// is C9's counterpart masking regression: a self-dependency listed after an
+// ordinary open-and-known one used to be hidden the same way — FirstUnmet
+// returned the earlier, unmet-but-known id and never reached the self id at
+// all.
+func Test_check_reports_a_self_dependency_masked_behind_an_earlier_unmet_dependency(t *testing.T) {
+	cfg := fixtureConfig()
+	cfg.StepFilePattern = "STEP-%02d.md"
+	root := t.TempDir()
+	featureDir := checkFeatureDir(cfg, root, "demo")
+
+	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
+	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "open", nil, []string{"- [ ] a task"}))
+	checkWriteStep(t, featureDir, "STEP-02", checkStepBody(cfg, "STEP-02", "open", []string{"STEP-01", "STEP-02"}, []string{"- [ ] a task"}))
+
+	srv := assemble.NewServer(cfg, root)
+
+	findings, err := srv.Check(t.Context(), "demo")
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-02.md"), f.Path)
+	assert.Equal(t, `step "STEP-02" depends on "STEP-02", which is not finished`, f.Detail)
+}
+
+// Test_check_reports_a_self_dependency_on_a_done_step is C9's done-step
+// regression: idx.FirstUnmet short-circuits on fm.Done(), so a done step's
+// self-dependency used to report nothing at all — a permanently
+// unfinishable step (per stepfile's own doc) that Check is the only reader
+// positioned to flag, per R18's backstop role. SCENARIO-22 narrowed only
+// C7 (the checklist rule) to done steps; C8 and C9 carry no such narrowing.
+func Test_check_reports_a_self_dependency_on_a_done_step(t *testing.T) {
+	cfg := fixtureConfig()
+	cfg.StepFilePattern = "STEP-%02d.md"
+	root := t.TempDir()
+	featureDir := checkFeatureDir(cfg, root, "demo")
+
+	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
+	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", []string{"STEP-01"}, []string{"- [x] a task"}))
+
+	srv := assemble.NewServer(cfg, root)
+
+	findings, err := srv.Check(t.Context(), "demo")
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), f.Path)
+	assert.Equal(t, `step "STEP-01" depends on "STEP-01", which is not finished`, f.Detail)
+	assert.Equal(t, assemble.SeverityWarn, f.Severity)
+}
+
+// Test_check_reports_a_dangling_dependency_on_a_done_step is C8's
+// done-step regression, the same short-circuit as the self-dependency case
+// above but for an id that names no step file at all.
+func Test_check_reports_a_dangling_dependency_on_a_done_step(t *testing.T) {
+	cfg := fixtureConfig()
+	cfg.StepFilePattern = "STEP-%02d.md"
+	root := t.TempDir()
+	featureDir := checkFeatureDir(cfg, root, "demo")
+
+	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
+	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", []string{"STEP-99"}, []string{"- [x] a task"}))
+
+	srv := assemble.NewServer(cfg, root)
+
+	findings, err := srv.Check(t.Context(), "demo")
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), f.Path)
+	assert.Equal(t, `step "STEP-01" depends on "STEP-99", which names no step file`, f.Detail)
+	assert.Equal(t, assemble.SeverityWarn, f.Severity)
 }
 
 // Test_check_assigns_ERROR_when_a_feature_is_still_in_flight_and_WARN_when_every_step_is_done
@@ -517,7 +618,7 @@ func Test_check_orders_findings_specification_then_state_then_steps_ascending(t 
 
 	problems := make([]string, 0, len(findings))
 	for _, f := range findings {
-		problems = append(problems, f.Problem)
+		problems = append(problems, f.Detail)
 	}
 
 	assert.Equal(t, []string{
@@ -597,4 +698,227 @@ func Test_check_checks_only_the_named_feature(t *testing.T) {
 	findings, err := srv.Check(t.Context(), "alpha")
 	require.NoError(t, err)
 	assert.Empty(t, findings)
+}
+
+// Test_check_refuses_a_named_feature_when_the_feature_root_does_not_exist
+// is the named-feature half of the root-missing case: Check("") degrades a
+// missing feature-directory root to zero features (nil, nil), but a named
+// feature obviously has no directory when the root holding it does not
+// exist either, so it must refuse with ErrNoSuchFeature rather than share
+// the empty-repository degrade.
+func Test_check_refuses_a_named_feature_when_the_feature_root_does_not_exist(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+
+	srv := assemble.NewServer(cfg, root)
+
+	findings, err := srv.Check(t.Context(), "ghost")
+	require.ErrorIs(t, err, assemble.ErrNoSuchFeature)
+	assert.Nil(t, findings)
+}
+
+// Test_check_refuses_a_named_feature_that_is_a_regular_file pins the third
+// leg of the same precedence chain: a name that exists under the feature
+// directory but is a regular file, not a directory, is not a feature
+// either — ErrNoSuchFeature, the same as a name with no entry at all,
+// never an "unreadable" Finding.
+func Test_check_refuses_a_named_feature_that_is_a_regular_file(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, cfg.FeatureDirectory, "README.md"), []byte("not a feature\n"), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	findings, err := srv.Check(t.Context(), "README.md")
+	require.ErrorIs(t, err, assemble.ErrNoSuchFeature)
+	assert.Nil(t, findings)
+}
+
+// Test_check_reports_an_unreadable_feature_directory_in_the_all_features_scan
+// is C3's companion: a feature directory that exists but cannot be opened
+// as its own root must contribute a Finding naming it, not silently zero
+// findings — the exact backstop failure R18 gives Check to prevent. The
+// injected failure is a fake open, not chmod: root bypasses permission
+// checks, so this must reproduce identically under any CI identity.
+func Test_check_reports_an_unreadable_feature_directory_in_the_all_features_scan(t *testing.T) {
+	cfg := fixtureConfig()
+	cfg.StepFilePattern = "STEP-%02d.md"
+	root := t.TempDir()
+	featureDir := checkFeatureDir(cfg, root, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	srv := assemble.NewServer(cfg, root)
+	assemble.SetOpenRootForTest(srv, func(parent *os.Root, name string) (*os.Root, error) {
+		if name == "demo" {
+			return nil, &fs.PathError{Op: "openat", Path: name, Err: syscall.EACCES}
+		}
+
+		return parent.OpenRoot(name)
+	})
+
+	findings, err := srv.Check(t.Context(), "")
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, featureDir, f.Path)
+	assert.Contains(t, f.Detail, "permission denied")
+	assert.Equal(t, assemble.SeverityError, f.Severity)
+}
+
+// Test_check_reports_an_unreadable_named_feature_directory is the
+// named-feature counterpart: naming the same unreadable feature directly
+// must report the same Finding, not collapse it into ErrNoSuchFeature —
+// the directory plainly exists, it just could not be opened.
+func Test_check_reports_an_unreadable_named_feature_directory(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := checkFeatureDir(cfg, root, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	srv := assemble.NewServer(cfg, root)
+	assemble.SetOpenRootForTest(srv, func(parent *os.Root, name string) (*os.Root, error) {
+		if name == "demo" {
+			return nil, &fs.PathError{Op: "openat", Path: name, Err: syscall.EACCES}
+		}
+
+		return parent.OpenRoot(name)
+	})
+
+	findings, err := srv.Check(t.Context(), "demo")
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, featureDir, f.Path)
+	assert.Contains(t, f.Detail, "permission denied")
+	assert.Equal(t, assemble.SeverityError, f.Severity)
+}
+
+// Test_check_reports_a_feature_whose_step_files_cannot_be_listed is the
+// same C3 defect one layer deeper: the feature directory opens fine but
+// its step files cannot be listed (the branch a stricter-than-darwin
+// permission model, such as Linux's, takes at a directory readable to
+// enter but not to list). checkStepFindings used to swallow this failure
+// silently (return nil, true) rather than report it.
+func Test_check_reports_a_feature_whose_step_files_cannot_be_listed(t *testing.T) {
+	cfg := fixtureConfig()
+	cfg.StepFilePattern = "STEP-%02d.md"
+	root := t.TempDir()
+	featureDir := checkFeatureDir(cfg, root, "demo")
+	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
+
+	srv := assemble.NewServer(cfg, root)
+	assemble.SetReadDirForTest(srv, func(*os.Root) ([]os.DirEntry, error) {
+		return nil, &fs.PathError{Op: "readdirent", Path: ".", Err: syscall.EACCES}
+	})
+
+	findings, err := srv.Check(t.Context(), "demo")
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, featureDir, f.Path)
+	assert.Contains(t, f.Detail, "permission denied")
+	assert.Equal(t, assemble.SeverityError, f.Severity)
+}
+
+// Test_check_refuses_a_feature_argument_containing_a_path_separator pins
+// the MINOR fix alongside MAJOR 2/3: "." and ".." would otherwise reopen
+// the feature-directory root itself (or its parent) as if it were a
+// feature, and a multi-component argument would reach a nested directory
+// no "brief new" or "brief finish" call ever named — none of those are a
+// feature this configuration knows about.
+func Test_check_refuses_a_feature_argument_containing_a_path_separator(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
+
+	srv := assemble.NewServer(cfg, root)
+
+	// "a/b" is deliberately absent: os.Root.Lstat rejects it as ErrNotExist
+	// against this empty fixture whether or not the separator guard ran, so
+	// it would not discriminate the guard from its absence. Each entry below
+	// does: "." reopens the feature root itself and would succeed without the
+	// guard, and the two escaping forms resolve to a path-escape error
+	// distinct from ErrNotExist.
+	for _, feature := range []string{".", "..", "demo/../.."} {
+		findings, err := srv.Check(t.Context(), feature)
+		require.ErrorIsf(t, err, assemble.ErrNoSuchFeature, "feature %q", feature)
+		assert.Nilf(t, findings, "feature %q", feature)
+	}
+}
+
+// Test_check_is_reachable_for_a_feature_name_containing_a_backslash pins
+// validFeatureArgument to POSIX path-separator rules: a backslash is a
+// legal filename character on POSIX, not a separator, so a feature
+// genuinely named with one must remain checkable rather than being
+// rejected as though it were a multi-component argument. os.IsPathSeparator
+// is what makes this platform-correct rather than hardcoding the POSIX
+// answer, so no build guard is needed here.
+func Test_check_is_reachable_for_a_feature_name_containing_a_backslash(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := checkFeatureDir(cfg, root, `foo\bar`)
+	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
+
+	srv := assemble.NewServer(cfg, root)
+
+	findings, err := srv.Check(t.Context(), `foo\bar`)
+
+	require.NoError(t, err)
+	assert.Empty(t, findings)
+}
+
+// Test_check_marks_a_symlinked_feature_directory_rather_than_following_it
+// pins Check's symlink stance to Status's: mark, never follow. The target
+// is a conforming feature, proving the Finding fires because brief never
+// follows the link, not because anything about the target is malformed.
+func Test_check_marks_a_symlinked_feature_directory_rather_than_following_it(t *testing.T) {
+	cfg := fixtureConfig()
+	cfg.StepFilePattern = "STEP-%02d.md"
+	root := t.TempDir()
+
+	realDir := filepath.Join(root, "real-gamma")
+	checkWriteFeature(t, cfg, realDir, checkConformingSpec(cfg), checkConformingState(cfg))
+	checkWriteStep(t, realDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
+	linkPath := filepath.Join(root, cfg.FeatureDirectory, "gamma")
+	require.NoError(t, os.Symlink(realDir, linkPath))
+
+	srv := assemble.NewServer(cfg, root)
+
+	findings, err := srv.Check(t.Context(), "")
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, linkPath, f.Path)
+	assert.Contains(t, f.Detail, "symbolic link")
+	assert.Equal(t, assemble.SeverityError, f.Severity)
+}
+
+// Test_check_marks_a_named_symlinked_feature_directory_rather_than_following_it
+// is the named-feature half of the same stance: naming the symlink
+// directly must not follow it either.
+func Test_check_marks_a_named_symlinked_feature_directory_rather_than_following_it(t *testing.T) {
+	cfg := fixtureConfig()
+	cfg.StepFilePattern = "STEP-%02d.md"
+	root := t.TempDir()
+
+	realDir := filepath.Join(root, "real-gamma")
+	checkWriteFeature(t, cfg, realDir, checkConformingSpec(cfg), checkConformingState(cfg))
+	checkWriteStep(t, realDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
+	linkPath := filepath.Join(root, cfg.FeatureDirectory, "gamma")
+	require.NoError(t, os.Symlink(realDir, linkPath))
+
+	srv := assemble.NewServer(cfg, root)
+
+	findings, err := srv.Check(t.Context(), "gamma")
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, linkPath, f.Path)
+	assert.Contains(t, f.Detail, "symbolic link")
+	assert.Equal(t, assemble.SeverityError, f.Severity)
 }

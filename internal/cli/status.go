@@ -67,9 +67,9 @@ func runStatus(ctx context.Context, wd string, args []string, stdout, stderr io.
 		return nil
 	}
 
-	// A malformed feature always yields a row (never dropped, per
-	// SCENARIO-11), so this loop and the len(rows) == 0 notice above are
-	// mutually exclusive by construction. renderRefusal is not used here:
+	// A malformed feature always yields a row, never dropped, so this loop
+	// and the len(rows) == 0 notice above are mutually exclusive by
+	// construction. renderRefusal is not used here:
 	// it returns err for ExitCode to classify, and a malformed feature
 	// must not drive a non-zero exit — R18 gives that failing role to
 	// check, not status.
