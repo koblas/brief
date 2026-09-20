@@ -88,3 +88,24 @@ func Test_RenderText_writes_nothing_when_there_is_no_next_step(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, out.String())
 }
+
+// Test_render_status_writes_four_space_separated_fields_per_feature pins
+// the exact bytes of the status table: single-space separated, no padding,
+// "-" substituted only at render time for a row whose Next is empty.
+func Test_render_status_writes_four_space_separated_fields_per_feature(t *testing.T) {
+	rows := []assemble.FeatureStatus{
+		{Name: "alpha", Done: 1, Total: 3, Next: "SCENARIO-02", Blocked: 0},
+		{Name: "beta", Done: 3, Total: 3, Next: "", Blocked: 0},
+		{Name: "gamma", Done: 1, Total: 4, Next: "SCENARIO-02", Blocked: 2},
+	}
+
+	var out bytes.Buffer
+	err := assemble.RenderStatusText(&out, rows)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"alpha 1/3 SCENARIO-02 0\n"+
+		"beta 3/3 - 0\n"+
+		"gamma 1/4 SCENARIO-02 2\n",
+		out.String())
+}

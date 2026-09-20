@@ -822,7 +822,7 @@ Post-crossover — built through the tool:
 
 - [x] SCENARIO-07: A feature name that would break the status contract is refused
 - [x] SCENARIO-08: Creating a feature that already exists is refused
-- [ ] SCENARIO-09: Status reports one four-field line per feature
+- [x] SCENARIO-09: Status reports one four-field line per feature
 - [ ] SCENARIO-10: Status on a repository with no features succeeds silently
 - [ ] SCENARIO-11: One malformed feature does not blind status to the rest
 - [ ] SCENARIO-12: A completed feature has no next step

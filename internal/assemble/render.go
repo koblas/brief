@@ -34,6 +34,31 @@ func RenderText(w io.Writer, b Brief) error {
 	return nil
 }
 
+// RenderStatusText writes rows to w, one line per feature:
+//
+//	<name> <done>/<total> <next> <blocked>
+//
+// Fields are single-0x20-space separated, with no padding and no trailing
+// space — padding would make one feature's line depend on the longest
+// other feature's name. "-" is substituted for a row whose Next is empty;
+// FeatureStatus.Next itself stays empty so a later JSON caller sees an
+// empty field rather than the literal string "-". RenderStatusText writes
+// no header and no legend: rows is already the machine format.
+func RenderStatusText(w io.Writer, rows []FeatureStatus) error {
+	for _, row := range rows {
+		next := row.Next
+		if next == "" {
+			next = "-"
+		}
+
+		if _, err := fmt.Fprintf(w, "%s %d/%d %s %d\n", row.Name, row.Done, row.Total, next, row.Blocked); err != nil {
+			return fmt.Errorf("assemble: render: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // writeSection writes a blank line, s.Heading, a blank line and s.Body to
 // w, or nothing at all when s.Body is empty.
 func writeSection(w io.Writer, s Section) error {

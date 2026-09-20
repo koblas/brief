@@ -1,11 +1,14 @@
 // Package assemble reads a feature directory and computes the brief an
 // implementer needs to start its next step: the next open step's id,
 // title, acceptance criteria and checklist, plus the decisions and
-// constraints inherited from the feature's state file.
+// constraints inherited from the feature's state file. It also computes,
+// across every feature, the summary "brief status" prints: steps done over
+// total, the next open step, and how many steps are blocked on an
+// unfinished dependency.
 //
-// Start is the only entry point. It refuses a feature that does not exist
-// (ErrNoSuchFeature) or whose state file is missing, unreadable, or has an
-// unterminated fenced code block (ErrMalformedFeature) rather than
+// Start and Status are the entry points. Start refuses a feature that does
+// not exist (ErrNoSuchFeature) or whose state file is missing, unreadable,
+// or has an unterminated fenced code block (ErrMalformedFeature) rather than
 // assembling a brief that silently omits inherited context — R10's rule
 // that a malformed feature is refused, not degraded into. A step's
 // frontmatter is parsed before any markdown extraction runs, so a "#"

@@ -1,155 +1,97 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..08, amended by SCENARIO-HANDOFF-FILE (touches 03/05/06): the
-handoff moved out of the step file into its own file (R21). Every splice-era entry is gone,
-replaced by the whole-file contract below. The crossover reads this file next.
+Scenarios complete: SCENARIO-01..09. Last updated by SCENARIO-09.
 
 ## Binding decisions
 
 - Config: `.brief.yaml`, upward walk, nearest wins, missing anywhere = `config.Default()`.
   `Resolve(startDir) (Config, string, error)`, `errors.Is`-comparable `ErrInvalidConfig`. (01-04)
-- `stepfile.Frontmatter.Done()` is the sole doneness authority. `SetStatus` edits `status:`
-  **textually**, preserving CRLF, and is now the only in-file step-file write — R21's second
-  clause (preserve everything outside the edited span) covers it and `tickProgressEntry` alone.
-  No `status:` key → `ErrNoStatusField`. (03-05, HANDOFF-FILE)
-- **The handoff lives in its own file, never spliced into the step file (R21).** Named
-  `stepPattern.ID(n) + cfg.HandoffFileSuffix`
-  (`stepfile.CompileHandoff(step, suffix, stateFile, specificationFile)`), default suffix
-  `-HANDOFF.md`. Refuses a digit in the suffix; refuses a step Pattern whose `ID` does not vary
-  with the step number (`.%d` — `filepath.Ext` eats the whole rendered name at every step,
-  aliasing every step's handoff onto one file); and refuses **case-folded rendered-name**
-  collisions, at several representative step numbers, against the step's own name,
-  `cfg.StateFile`, or `cfg.SpecificationFile` — comparing rendered names rather than suffix
-  strings is load-bearing because a multi-dot step pattern (`SCENARIO-%02d.step.md`) makes
-  `Pattern.ID`'s stripped extension narrower than the pattern's whole literal suffix; case
-  folding is load-bearing because this repo's dev platform (macOS/APFS) is case-insensitive.
-  (HANDOFF-FILE, fix)
-- `markdown.Section` is the one exported section reader, fence-aware both ends via a **state
-  machine** (CommonMark §4.5: same character, ≥ opener length, no info string, ≤3 leading
-  spaces; `findHeading` is first-occurrence-wins). `UnterminatedFence` shares that machine and
-  is the sole fence-open detector, validating the state argument and refusing an on-disk state
-  file a terminator scan could not read past. No exported way remains to recover a section's
-  byte offsets — offsets served splicing only, and every write here is whole-file. (04-06,
-  HANDOFF-FILE)
-- `finish`'s check order: step-file pattern → handoff-file-suffix compiles → feature dir → step
-  found → frontmatter parses → state's fence → spec readable → progress entry → state file
-  present → identity → write. Its four **writes** land handoff file → state file → step file →
-  specification: every prefix short of the last write leaves `status:` "open", so a crash-retry
-  takes the full path again and converges. `status: done` must never land before the handoff
-  file exists, or SCENARIO-16's (unbuilt) divergence refusal would refuse the retry that repairs
-  the crash. **Test-verified at all four positions**: a directory planted at each write's own
-  temp sibling (or, for the handoff, at its final name) forces that write to fail without
-  disturbing any other file, and each test also clears the obstruction and retries, proving
-  actual convergence rather than just the open-status precondition
-  (`Test_reports_a_handoff_write_that_cannot_be_committed`,
-  `_a_state_write_…`, `_a_step_file_write_…`, `_a_specification_write_…`). (HANDOFF-FILE, fix)
-- **Identity/no-op (R11):** re-finishing a done step with identical inputs writes nothing, mtime
-  preserved on all four files. Gate: `fm.Done() && handoff file exists and matches && state
-  matches && ticked spec matches`, taken **before `SetStatus`**. Absent/unreadable handoff is
-  not identical — converges a crash-after-state retry and a migrated (hand-marked-done) step
-  alike. **No step-body byte comparison** — one would make the frontmatter-gate test stop
-  discriminating `fm.Done()`. SCENARIO-16 inverts this into a refusal over the same conjuncts.
-  (06, HANDOFF-FILE)
-- `RefusalError` carries `Line int` (0 = whole-path refusal); `cli/refusal.go` renders
-  `<path>:<line>`. `scaffold.StateSource` is the one remaining placeholder `Path`, for a refusal
-  about the state argument's own bytes — `cli/finish.go` upgrades it to the real `--state`
-  source (or `"<stdin>"`). The handoff argument is never fence-checked; nothing reads it
-  structurally. (fix ×3, HANDOFF-FILE)
-- A `## Handoff` section left in a step file by an unmigrated tree is **ignored** by `start` and
-  `finish`, never refused — R7 keeps prose judgment out of the tool; refusing would lock `brief`
-  out of its own tree mid-migration. (HANDOFF-FILE)
-- `cli.Run` takes `stdin` before `stdout`. `finish` prints nothing to stdout, one stderr line
-  `brief finish: <step> is done`. (05-06)
-- **`NewFeature` has two refusal classes in `runNewFeature`, never unify them.** Empty/
-  whitespace name (`unicode.IsSpace` anywhere, plus empty — `strings.Fields`'s predicate,
-  which is what makes `status`'s four-field contract, SCENARIO-09, hold) → bare sentinel
-  `ErrInvalidFeatureName`, before `os.MkdirAll`, `usageError` → exit 2, no `(no files
-  changed)` tail. Existing feature directory (`root.Mkdir` → `errors.Is(err, fs.ErrExist)`,
-  no pre-`Stat`/TOCTOU) → `*RefusalError` wrapping `ErrFeatureExists`, `Path` =
-  `filepath.Join(featureRoot, name)` as requested (not on-disk casing), `Line` 0, via the
-  existing `renderRefusal` → exit 1, `(no files changed)` tail; broadening the predicate
-  would relabel a `"../escaped"` traversal refusal as "already exists". `NewFeature` never
-  inspects what it found — empty/partial/malformed/colliding-file all get identical wording
-  (SCENARIO-11 owns malformed-feature reporting). `internal/cli` needed zero change. (07, 08)
+- `stepfile.Frontmatter.Done()` is the sole doneness authority everywhere — `start`, `finish`,
+  `status` never read the progress list or a markdown heading for doneness. `SetStatus` edits
+  `status:` textually, CRLF-preserving; `ErrNoStatusField` when absent. (03-05, 09)
+- Handoff lives in its own file, `stepPattern.ID(n) + cfg.HandoffFileSuffix`, never spliced
+  into the step file; refuses a suffix digit, a non-varying `ID`, and case-folded name
+  collisions (APFS is case-insensitive). (HANDOFF-FILE)
+- `markdown.Section` is the one exported section reader, fence-aware both ends (CommonMark
+  §4.5 state machine); `UnterminatedFence` shares it. No exported byte-offset API — every
+  write is whole-file. (04-06, HANDOFF-FILE)
+- `finish`'s four writes (handoff → state → step → specification) converge a crash-retry from
+  any point; `status: done` never lands before the handoff file exists — test-verified at all
+  four positions. **Identity/no-op (R11):** re-finishing a done step with identical inputs
+  writes nothing, gate taken before `SetStatus`, no step-body comparison. (HANDOFF-FILE, 06)
+- `RefusalError.Line` (0 = whole-path), rendered `<path>:<line>` by `cli/refusal.go`. A
+  leftover `## Handoff` section is ignored, never refused. `cli.Run` takes `stdin` before
+  `stdout`. (fix ×3, HANDOFF-FILE, 05-06)
+- **`NewFeature` has two refusal classes, never unified:** whitespace/empty name →
+  `ErrInvalidFeatureName`, exit 2, no `(no files changed)` tail; existing directory →
+  `*RefusalError`/`ErrFeatureExists`, exit 1, tail present. (07, 08)
+- **`status` lives on `(*assemble.Server).Status`, rendered by `assemble.RenderStatusText`** —
+  `assemble` owns reading, `scaffold` owns writing; a separate `internal/status` would need
+  `assemble.readSteps`, forbidden by the dependency rule. `next`/`show`/`handoff`/`state get`
+  belong here too. Line: `<name> <done>/<total> <next> <blocked>\n`, single-space, no padding,
+  no header, no legend (exact-bytes-verified at one and three features). (09)
+- `<next>` is `pattern.ID(n)` of the lowest not-done step (not frontmatter `id:` — paste-ready
+  for `finish`), ignores `depends-on` like `Start`. `-` is a renderer-only sentinel;
+  `FeatureStatus.Next` stays `""`. **Blocked** = not-done step with ≥1 `depends-on` id that
+  isn't a done step's `pattern.ID(n)` — direct only, unknown id blocks, done step never
+  blocked, blocked step can still be `<next>`. Feature order is `fs.ReadDir`'s documented byte
+  order, deliberately not re-sorted. (09)
 
 ## Left unbuilt
 
-- Differing-inputs refusal (16, today overwrites and reports success; git + branch mitigates),
-  caps (17/18), state-body required-heading check (19, deferred), open-checklist refusal (20),
-  unfinished-`depends-on` refusal (21).
-- `assemble.Server.Status`/`.Next`/`.Show`/`.Handoff`/`.StateGet`, `--json` (15), complete-feature
-  stderr+exit-0 (12), unknown-feature enumeration (09), `markdown.Headings` + checklist parser
-  (20/22), R13 output truncation, R9's diff/finding output, `FinishResult`.
-- `scaffold.HandoffSource` and `cli/finish.go`'s `--handoff` source upgrade — deleted with the
-  handoff fence refusal; SCENARIO-17's over-cap handoff refusal re-adds both.
-- `HandoffPattern.Number` (recognizing a handoff filename by pattern) — not built; `check` (22)
-  and the R6 synthesis are the first callers needing to enumerate handoff files.
-- `NewStep` and `assemble`'s read path do not re-validate a feature name already on disk —
-  `NewFeature`'s creation path is the sole choke point, deliberately. (07)
+- Differing-inputs refusal (16), caps (17/18), state-body heading check (19), open-checklist
+  refusal (20), unfinished-`depends-on` refusal (21).
+- `assemble.Server.Next`/`.Show`/`.Handoff`/`.StateGet`, `--json` (15), complete-feature
+  stderr+exit-0 (12), status on a missing/empty root → stderr+exit-0 (10), malformed-feature
+  tolerance + `!` field (11), `markdown.Headings` + checklist parser (20/22), R13 truncation,
+  R9's diff/finding output, `FinishResult`.
+- `scaffold.HandoffSource` / `cli/finish.go`'s `--handoff` source upgrade — deleted; 17 re-adds.
+- `HandoffPattern.Number` — not built; `check` (22) and the R6 synthesis need it.
+- `NewStep` and `assemble`'s read path (incl. `Status`) do not re-validate an on-disk feature
+  name — `NewFeature`'s creation path is the sole choke point, deliberately. (07)
 
 ## Traps
 
 - `scaffold` is named for `new feature`/`new step` while also owning `finish` — unowned rename
-  debt; `RefusalError`'s eventual platform move (SCENARIO-13) touches every site here.
-- `tickProgressEntry` mutates a whole line on `[ ]`→`[x]`: an already-ticked title containing
-  `[ ]` gets mutated too. Pre-existing, unowned.
-- `root = wd` unless `.brief.yaml` found — avoid `t.Chdir`/`os.Getwd` in tests; gosec's `G703`
-  flags a straight-line read→transform→write of one fixed path as traversal — route through a
-  helper function-call boundary.
-- The `-HANDOFF.md` suffix sorts *before* its step file (`-` < `.`). Cosmetic; do not change the
-  default without migrating the tree again.
-- `atomicfile.Create`'s temp-sibling mode carries an owner-write exception: an abandoned write's
-  sibling inherits a read-only target's mode, and every later attempt for the same name then fails
-  `permission denied` until the sibling is removed by hand. **The wedge is governed by the
-  sibling's mode, not the target's** — probe-verified: target `0644` + sibling `0400` wedges,
-  target `0400` + sibling `0600` succeeds. Chmodding the target does not lift it; deleting
-  `.<name>.brief-tmp` does. Pre-existing, unowned; do not add an open-EACCES-remove-retry without
-  its own scenario.
-- `atomicfile.Create`'s `Mode().Perm()` masks setuid/setgid/sticky, so a replace silently drops
-  them. `Lstat`→`Chmod` is an inherent read-then-write window. `PendingFile` is not documented or
-  guarded as safe for concurrent `Close`. All three pre-existing, no constructible failure —
-  `brief` has one writer — unowned.
-- A whitespace-carrying feature name is a legal directory name on every platform `brief`
-  targets — no OS error catches it, so `validateFeatureName` is the only thing that does.
-  `renderRefusal` returns its error unchanged (exit 1); a future refusal added to `NewFeature`
-  that needs exit 2 must branch in `cli` **before** `renderRefusal`, the same way S07 does.
-  Asserting only `NoDirExists(<feature dir>/<name>)` on a fresh `t.TempDir()` is vacuous — the
-  leaf never exists regardless of the guard; the discriminating probe is `NoDirExists` on the
-  *configured feature directory* itself, paired with a control arm on an accepted name. (07)
-- **`NewFeature`'s already-exists refusal is guarded twice, not independently falsifiable.**
-  `root.Mkdir` refuses first; `writeExclusive`'s `O_CREATE|O_EXCL` behind it. Mutation-verified:
-  `Mkdir`→`MkdirAll` still dies at `writeExclusive`'s `openat …: file exists` — never disable
-  both guards at once. `DirExists` on the feature path after the refusal is vacuous;
-  `snapshotTree` (`finish_test.go`, `scaffold_test`, non-recursive) is the discriminating
-  probe, reused across S07/S08 in place. (08)
+  debt. `tickProgressEntry` mutates a whole `[ ]`→`[x]` line, including one inside an
+  already-ticked title. Pre-existing, unowned.
+- `root = wd` unless `.brief.yaml` found — route through a helper call boundary or gosec's
+  `G703` flags it as traversal. `-HANDOFF.md` sorts *before* its step file (`-` < `.`).
+- `atomicfile.Create`'s temp-sibling mode can wedge a later write with `permission denied`
+  until the sibling is removed by hand; `Mode().Perm()` masks setuid/setgid/sticky. Both
+  pre-existing, unowned, no constructible failure today.
+- A whitespace-carrying feature name is a legal directory name everywhere `brief` targets;
+  `validateFeatureName` is the only guard — a future exit-2 refusal must branch in `cli`
+  before `renderRefusal`. (07)
+- **`NewFeature`'s already-exists refusal is guarded twice** (`root.Mkdir` then
+  `writeExclusive`'s `O_EXCL`) — mutation-verify individually, never both at once. (08)
+- `assemble.RenderText` prints the frontmatter `id:`; `RenderStatusText` prints
+  `pattern.ID(n)` — equal in any scaffolded tree, diverge after a hand edit; don't unify. (09)
+- **`brief status` cannot read `brief`'s own tree today** — no `SCENARIO-NN.md` here carries
+  frontmatter, same failure as `start`: exit 1, "no frontmatter found". A feature directory
+  with zero step files is conforming — `0/0 - 0`, never `!`; SCENARIO-11's fixture must be
+  malformed some other way. (09)
 
 ## Open debts
 
 - Heading/cap value validation — unowned until SCENARIO-19.
-- A mid-write I/O failure leaves a half-applied result on disk that a same-argument retry
-  repairs (test-verified at all four `finish` write positions, see Binding decisions); nothing
-  yet detects a half-applied result proactively. Unowned; `check` (22) is the detector.
-- Invalid-`step-file-pattern` refusal names the feature dir, not the config — unowned.
-- `insertProgressEntry`/`tickProgressEntry` insert an LF line into a CRLF file (mixed endings);
-  `ParseFrontmatter`'s `rest` keeps a leading `"\r"` after a CRLF close when a blank line follows;
-  `brief start` on a CRLF feature emits mixed line endings. All three unowned MINOR.
-- `SetStatus` returns `ErrNoStatusField` for a missing frontmatter *delimiter* too, not only a
-  missing key. Unowned MINOR.
-- `assemble`'s sentinels duplicate `scaffold`'s (e.g. `ErrNoSuchFeature`, never a
-  `*RefusalError`) — SCENARIO-13 closes this.
-- `check` (22) must report a `## Handoff` section surviving in a step file as a finding; until
-  then the leftover is silently ignored. Unowned — dies unless re-opened.
-- **Data loss:** a symlinked specification or step file is silently replaced by a regular file.
-  `finish` reads through the symlink (`root.ReadFile` follows in-root symlinks), computes the
-  tick against the link's target content, then `replaceBytes`'s rename destroys the link and the
-  real target file never receives the tick. The state file already refuses a non-regular target
-  (`finish.go`'s `IsRegular()` check before its read); the specification and step-file reads carry
-  no such refusal. Pre-existing, real, unowned — needs its own scenario (a refusal, not a silent
-  fix) — dies unless re-opened.
+- A mid-write I/O failure leaves a half-applied result a same-argument retry repairs; `check`
+  (22) is the not-yet-built proactive detector. Invalid `step-file-pattern` refusal names the
+  feature dir, not the config — unowned.
+- `insertProgressEntry`/`tickProgressEntry` insert LF into a CRLF file; `ParseFrontmatter`'s
+  `rest` keeps a leading `"\r"` after a CRLF close + blank line; `SetStatus` returns
+  `ErrNoStatusField` for a missing delimiter too. All unowned MINOR.
+- `assemble`'s sentinels duplicate `scaffold`'s (never a `*RefusalError`) — SCENARIO-13 closes.
+- `check` (22) must report a leftover `## Handoff` section as a finding — unowned until then.
+- **Data loss:** a symlinked specification or step file is silently replaced by `finish`'s
+  rename. Pre-existing, real, unowned — needs its own refusal scenario — dies unless re-opened.
+- **SCENARIO-21's `finish` refusal must reuse `status`'s done-set-by-`pattern.ID(n)` rule**, or
+  the two surfaces disagree about the same tree; `scaffold` can't import `assemble`, so 21
+  reimplements it or the rule moves to `internal/platform/stepfile`. Unowned until 21.
 
 ## Crossover note
 
 An identical re-finish being a true no-op means the crossover's "mark SCENARIO-01 through 06
-done" step is safely re-runnable. `finish` reads the state file on every call now; once the
-crossover lands, `STATE.md` (this file) is that state file. `SCENARIO-01.md`…`-06.md` and their
-new `SCENARIO-0N-HANDOFF.md` files still carry no frontmatter — the crossover owns adding it.
+done" step is safely re-runnable. `SCENARIO-01.md`…`-09.md` and their `-HANDOFF.md` files still
+carry no frontmatter — the crossover owns adding it, and until then neither `start` nor
+`status` can read `brief`'s own feature directory (see Traps).
