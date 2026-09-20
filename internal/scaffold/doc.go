@@ -33,8 +33,8 @@
 // within it, what was wrong, and how to fix it, wrapping one of
 // ErrNoSuchFeature, ErrFeatureExists, ErrMalformedFeature,
 // ErrNoProgressHeading, ErrNoSuchStep, ErrNoProgressEntry,
-// ErrUnterminatedFence, ErrOverCap, ErrMissingStateHeading or
-// ErrAlreadyFinished (or, from internal/platform/stepfile,
+// ErrUnterminatedFence, ErrOverCap, ErrMissingStateHeading,
+// ErrOpenChecklistItem or ErrAlreadyFinished (or, from internal/platform/stepfile,
 // ErrInvalidPattern, ErrInvalidHandoffSuffix or ErrNoStatusField) so
 // callers can branch on the specific cause with
 // errors.Is while still rendering the same "nothing changed on disk"

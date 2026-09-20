@@ -47,7 +47,15 @@ import (
 // body then carries a section for every one of cfg.StateHeadings.Ordered()'s
 // four headings (ErrMissingStateHeading, named against StateSource,
 // checkArgumentHeadings) — checked only after the fence closes, since an
-// open fence would leave a heading after it unreadable; the specification is
+// open fence would leave a heading after it unreadable; the step's own
+// checklist section — under cfg.ChecklistHeading — carries no item left
+// unticked (ErrOpenChecklistItem, checkStepChecklist, naming stepPath and
+// the item's line) — checked only after the state argument band, and
+// ahead of the specification read and (refinish).verdict below, so a step
+// that is both un-ticked and a divergent re-finish reports the open item;
+// a checklist with no items, or no checklist heading at all, is never
+// refused this way, matching assemble.Start's read-side degrade for the
+// same heading; the specification is
 // readable; the specification carries the
 // configured progress heading and an entry for step; the state file exists
 // as a regular file. Computing the frontmatter's "status: done" line during
@@ -171,6 +179,10 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	}
 
 	if refusal := checkArgumentHeadings(state, StateSource, "state", s.cfg.StateHeadings); refusal != nil {
+		return refusal
+	}
+
+	if refusal := checkStepChecklist(stepBody, stepPath, s.cfg.ChecklistHeading); refusal != nil {
 		return refusal
 	}
 
@@ -351,6 +363,36 @@ func checkArgumentHeadings(body []byte, source, label string, headings config.St
 	}
 
 	return nil
+}
+
+// checkStepChecklist refuses when stepBody's checklist section — the
+// section under heading — holds an item not ticked with "[x]"/"[X]"
+// (markdown.FirstUnchecked). It names stepPath and the item's 1-based line
+// number in the whole file, the shape R14a uses for a fault inside a file
+// rather than an argument's placeholder source. stepBody must be the whole
+// step file as read from disk, not the remainder ParseFrontmatter returns:
+// FirstUnchecked's line number is counted from the top of stepBody. A
+// checklist with no items, or an absent heading, is never refused — only
+// an unchecked item triggers, matching assemble.Start's read-side degrade
+// rule for the same heading.
+func checkStepChecklist(stepBody []byte, stepPath, heading string) *RefusalError {
+	line, text, found := markdown.FirstUnchecked(string(stepBody), heading)
+	if !found {
+		return nil
+	}
+
+	problem := "checklist item is not ticked"
+	if text != "" {
+		problem = fmt.Sprintf("checklist item %q is not ticked", text)
+	}
+
+	return &RefusalError{
+		Path:    stepPath,
+		Line:    line,
+		Problem: problem,
+		Fix:     "tick it with [x] once it is done, or remove it, and retry",
+		Err:     ErrOpenChecklistItem,
+	}
 }
 
 // writeFailure wraps a write-path error with the same invocation that

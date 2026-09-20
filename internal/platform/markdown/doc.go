@@ -17,5 +17,8 @@
 // terminator scan could not read past the open fence. CountLines is the
 // one line counter a length cap is measured against, on both the write
 // side (scaffold.Finish) and the read side (check), so the two never
-// disagree about what a "line" is.
+// disagree about what a "line" is. FirstUnchecked is the one
+// checklist-item scanner, fence-aware like Section, so an unticked item is
+// found the same way whether the caller is writing (scaffold.Finish) or
+// reading (check).
 package markdown

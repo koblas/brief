@@ -549,6 +549,54 @@ func Test_preserves_a_CRLF_step_body_when_marking_it_done(t *testing.T) {
 	assert.Equal(t, want, string(got))
 }
 
+// Test_finish_refuses_a_step_with_an_open_checklist_item is the CLI slice
+// for SCENARIO-20: a step whose "## Implementation Plan" checklist still
+// carries an unticked item is refused, naming the step file and the
+// item's line, with the "(no files changed)" tail present. No cli code
+// change backs this: scaffold.RefusalError.Path is already the real step
+// file path, never a placeholder cli must swap in.
+func Test_finish_refuses_a_step_with_an_open_checklist_item(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	stepPath := filepath.Join(featureDir, "SCENARIO-01.md")
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Scenario\n\n" +
+		"the acceptance criteria\n\n" +
+		"## Implementation Plan\n\n" +
+		"- [ ] do the thing\n"
+	require.NoError(t, os.WriteFile(stepPath, []byte(step), 0o600))
+
+	state := "## Binding decisions\n\nsome decision\n\n" +
+		"## Left unbuilt\n\nsomething left\n\n" +
+		"## Traps\n\na trap\n\n" +
+		"## Open debts\n\na debt\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", state)
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	want := fmt.Sprintf(
+		`brief finish: %s:15: checklist item "do the thing" is not ticked; tick it with [x] once it is done, or remove it, and retry (no files changed)`+"\n",
+		stepPath)
+	assert.Equal(t, want, stderr.String())
+}
+
 func Test_returns_an_error_for_an_unknown_feature_on_finish(t *testing.T) {
 	wd := t.TempDir()
 	handoffPath := writeInput(t, "handoff.md", "h")

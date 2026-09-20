@@ -65,6 +65,15 @@ var ErrAlreadyFinished = errors.New("step already finished with different inputs
 // names which body: HandoffSource or StateSource.
 var ErrOverCap = errors.New("input is over the configured line cap")
 
+// ErrOpenChecklistItem is returned when Finish is asked to close a step
+// whose own checklist section — the section under cfg.ChecklistHeading —
+// still carries an item not ticked with "[x]"/"[X]" (markdown.FirstUnchecked).
+// It travels inside a *RefusalError naming the step file and the item's
+// line. A checklist with no items, or a step file with no checklist
+// heading at all, is never refused this way — the freshly scaffolded step
+// NewStep writes is exactly that shape.
+var ErrOpenChecklistItem = errors.New("checklist item is not ticked")
+
 // ErrMissingStateHeading is returned when a replacement state body given to
 // Finish carries no section for one of cfg.StateHeadings.Ordered()'s four
 // required headings. The check is presence-only (markdown.Section's found

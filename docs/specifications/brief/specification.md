@@ -833,6 +833,6 @@ Post-crossover — built through the tool:
 - [x] SCENARIO-17: An over-cap handoff is refused and nothing lands
 - [x] SCENARIO-18: An over-cap state body is refused and nothing lands
 - [x] SCENARIO-19: A state body missing a required heading is refused
-- [ ] SCENARIO-20: A step with an open checklist item cannot be finished
+- [x] SCENARIO-20: A step with an open checklist item cannot be finished
 - [ ] SCENARIO-21: A step with an unfinished dependency cannot be finished
 - [ ] SCENARIO-22: Check reports what the write path would now refuse

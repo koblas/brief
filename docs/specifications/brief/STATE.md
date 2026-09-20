@@ -1,6 +1,6 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..19. Last updated by SCENARIO-19.
+Scenarios complete: SCENARIO-01..20. Last updated by SCENARIO-20.
 
 ## Binding decisions
 
@@ -52,31 +52,39 @@ Scenarios complete: SCENARIO-01..19. Last updated by SCENARIO-19.
   document; `RenderText` writes nothing when `Step` is nil. `splitLeadingPositionals` (shared
   with `finish`) lets `--json` come before or after the feature on `start`. A refusal under
   `--json` is still a plain R14a stderr line at exit 1, no JSON envelope. (15)
-- **`(*scaffold.Server).Finish` validates the `handoff`/`state` arguments in one fixed band**,
-  ahead of `(refinish).verdict()`: handoff cap → state cap → state fence → state headings, all
-  via `markdown.CountLines`/`UnterminatedFence`/`Section`, all named against `HandoffSource`/
-  `StateSource` (a placeholder `cli/finish.go` upgrades to the real `--handoff`/`--state`
-  path). One shared sentinel `ErrOverCap` for both caps; `ErrMissingStateHeading` for the
-  heading check. This band's internal order is mutation-verified test by test: handoff cap
-  before state cap, state cap before state fence, state fence before state headings, and the
-  whole band before `verdict()` — a done step over any of these reports the argument defect,
-  never `ErrAlreadyFinished`. (17, 18, 19)
+- **`(*scaffold.Server).Finish` validates in one fixed band**, ahead of `(refinish).verdict()`:
+  handoff cap → state cap → state fence → state headings → open checklist item, all named
+  against `HandoffSource`/`StateSource`/the real step path (`HandoffSource`/`StateSource` are
+  placeholders `cli/finish.go` upgrades to the real `--handoff`/`--state` path). One shared
+  sentinel `ErrOverCap` for both caps; `ErrMissingStateHeading` for the heading check;
+  `ErrOpenChecklistItem` (`checkStepChecklist`, naming the step file and the item's 1-based
+  line in the whole file) for the checklist. Internal order is mutation-verified test by test:
+  handoff cap → state cap → state fence → state headings → open checklist item → spec read →
+  `verdict()` — a done step over any of these reports the argument/content defect, never
+  `ErrAlreadyFinished`. (17, 18, 19, 20)
 - **The state-heading check is presence-only, any order, empty sections valid** —
-  `markdown.Section(...).found == false`, identical to 14's read-side rule; write and read
-  agree. Order is deliberately unenforced (`assemble.stateSections` reads by name, so an order
-  rule has no consumer — `Ordered()` only picks which missing heading is named first). One
-  refusal line names the first missing heading; unlike 14's degrade path, `Finish` stops at
-  the first fault rather than completing and reporting every one. This narrows R11: an
-  identical re-finish is a true no-op only when the bytes also carry all four headings. (19)
+  `markdown.Section(...).found == false`, identical to 14's read-side rule. Order is
+  deliberately unenforced (`assemble.stateSections` reads by name). One refusal line names the
+  first missing heading; `Finish` stops at the first fault, unlike 14's degrade path. (19)
+- **`markdown.FirstUnchecked(body, heading)` is the sole checklist-item scanner** — grammar
+  `^\s*- \[[ xX]\]`, hyphen bullet only, any leading whitespace, `x`/`X` ticked; fence-aware,
+  same-or-higher-level stop via unexported `sectionSpan` (shared with `sectionRange`). Zero
+  items, an absent heading, and every item ticked are all `found == false`, indistinguishable
+  to a caller. `render.go`'s own `checklistItemRe` (`[ x]`) stays separate and un-widened,
+  deliberately: `tickProgressEntry`'s `strings.Replace(line, "[ ]", "[x]", 1)` would misreport
+  a tick on `[X]` if unified. Both this check and the state-heading check narrow R11 further: a
+  done step's re-finish is a no-op only when its checklist is also complete. (20)
 
 ## Left unbuilt
 
-- Open-checklist refusal (20), unfinished-`depends-on` refusal (21). `--force`/
-  `--if-state-matches` and any diff/finding output on a re-finish divergence (R9) — deferred
-  by 16, no owner. No un-finish/un-done verb planned.
+- Unfinished-`depends-on` refusal (21) — must reuse 20's `checkStepChecklist` position rule
+  and insert its own check *after* it, so a step both un-ticked and blocked reports the
+  checklist item first. `--force`/`--if-state-matches` and any diff/finding output on a
+  re-finish divergence (R9) — deferred by 16, no owner. No un-finish/un-done verb planned.
 - `assemble.Server.Next`/`.Show`/`.Handoff`/`.StateGet`, `status --json` and `--json` on
-  `next`/`show`/`state get`/`handoff` — deferred, not missed (15). `markdown.Headings` +
-  checklist parser (20/22), R9's diff/finding output, `FinishResult`.
+  `next`/`show`/`state get`/`handoff` — deferred, not missed (15). `markdown.Headings` and
+  `markdown.ChecklistItems` (an all-items listing, past the single-item `FirstUnchecked`) —
+  owner: `check` (22). R9's diff/finding output, `FinishResult`.
 - `HandoffPattern.Number` — not built; `check` (22) and the R6 synthesis need it.
 - `NewStep` and `assemble`'s read path (incl. `Status`) do not re-validate an on-disk feature
   name — `NewFeature`'s creation path is the sole choke point, deliberately. (07)
@@ -85,6 +93,8 @@ Scenarios complete: SCENARIO-01..19. Last updated by SCENARIO-19.
   `"feature"` key, no schema-version key. (14, 15)
 - `ErrMissingStateHeading` has no `check` (22) counterpart yet; R18's backstop for pre-19
   state files is still unwritten.
+- Nothing reports a `* [ ]` or `- []` line as an open item — a hand-written step using those
+  bullets finishes silently. Owner: `check` (22) as a finding, or nobody. (20)
 
 ## Traps
 
@@ -149,8 +159,9 @@ Scenarios complete: SCENARIO-01..19. Last updated by SCENARIO-19.
   feature dir, not the config — unowned.
 - `insertProgressEntry`/`tickProgressEntry` insert LF into a CRLF file; `SetStatus` returns
   `ErrNoStatusField` for a missing delimiter too. All unowned MINOR.
-- `check` (22) must report a leftover `## Handoff` section, an id/filename mismatch, and a
-  pre-19 state body missing a heading, as findings — unowned until then.
+- `check` (22) must report a leftover `## Handoff` section, an id/filename mismatch, a
+  pre-19 state body missing a heading, and an open checklist item outside of `finish`
+  refusing on it, as findings — unowned until then.
 - **Data loss:** a symlinked specification or step file is silently replaced by `finish`'s
   rename. Pre-existing, real, unowned — needs its own refusal scenario — dies unless re-opened.
 - **21's `finish` refusal must reuse `status`'s done-set-by-`pattern.ID(n)` rule**, or the two
