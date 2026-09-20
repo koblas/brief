@@ -361,6 +361,8 @@ func Test_takes_the_lowest_numbered_open_step_not_the_first_in_directory_order(t
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-10.md"),
 		[]byte(fixtureStep(cfg, "STEP-10", "open", "STEP-10", "ACCEPTANCE-10", nil)), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
+	spec := "# demo\n\n" + cfg.ProgressHeading + "\n\n- [x] STEP-2\n- [ ] STEP-9\n- [ ] STEP-10\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
 
 	srv := assemble.NewServer(cfg, root)
 
@@ -382,6 +384,8 @@ func Test_returns_no_next_step_when_every_step_is_done(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-02.md"),
 		[]byte(fixtureStep(cfg, "STEP-02", "done", "STEP-02", "ACCEPTANCE-02", nil)), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
+	spec := "# demo\n\n" + cfg.ProgressHeading + "\n\n- [x] STEP-01\n- [x] STEP-02\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
 
 	srv := assemble.NewServer(cfg, root)
 
@@ -405,6 +409,89 @@ func Test_returns_an_error_when_the_feature_does_not_exist(t *testing.T) {
 	require.ErrorIs(t, err, assemble.ErrNoSuchFeature)
 }
 
+// Test_refuses_a_specification_that_does_not_exist is SCENARIO-13's headline
+// claim: before this scenario, an absent specification.md made Start
+// assemble and return a full brief at exit 0, silently omitting the
+// progress context every other check in this file already proves is read.
+// The fixture is otherwise newFixture's conforming shape minus the
+// specification file, so this is a single-variable change from
+// Test_returns_the_lowest_numbered_open_step_s_id_and_title's control arm.
+func Test_refuses_a_specification_that_does_not_exist(t *testing.T) {
+	root, cfg := newFixture(t)
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.Remove(filepath.Join(featureDir, cfg.SpecificationFile)))
+
+	srv := assemble.NewServer(cfg, root)
+
+	brief, err := srv.Start(t.Context(), "demo")
+
+	require.ErrorIs(t, err, assemble.ErrMalformedFeature)
+
+	var refusal *assemble.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), refusal.Path)
+	assert.Zero(t, refusal.Line)
+	assert.NotContains(t, refusal.Fix, "brief new feature")
+	assert.Nil(t, brief.Step)
+	assert.Zero(t, brief.Done)
+	assert.Empty(t, brief.Inherited)
+}
+
+// Test_refuses_a_specification_with_no_progress_heading is the second
+// structural specification check: present, readable and fence-closed, but
+// missing the configured progress heading entirely — the shape a hand-edited
+// specification.md could produce. It differs from newFixture's control arm
+// in exactly one variable, the specification body.
+func Test_refuses_a_specification_with_no_progress_heading(t *testing.T) {
+	root, cfg := newFixture(t)
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	spec := "# demo\n\nno progress list here\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	brief, err := srv.Start(t.Context(), "demo")
+
+	require.ErrorIs(t, err, assemble.ErrMalformedFeature)
+
+	var refusal *assemble.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), refusal.Path)
+	assert.Zero(t, refusal.Line)
+	assert.Contains(t, refusal.Detail, cfg.ProgressHeading)
+	assert.Contains(t, refusal.Fix, cfg.ProgressHeading)
+	assert.Nil(t, brief.Step)
+	assert.Zero(t, brief.Done)
+	assert.Empty(t, brief.Inherited)
+}
+
+// Test_refuses_a_specification_whose_fence_is_unterminated mirrors
+// Test_refuses_a_state_file_whose_fence_is_unterminated: an open fence
+// before the progress heading makes that heading unreadable, indistinguishable
+// from it never having been written at all, so Start refuses rather than
+// silently reporting the heading absent.
+func Test_refuses_a_specification_whose_fence_is_unterminated(t *testing.T) {
+	root, cfg := newFixture(t)
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	spec := "```\nunterminated\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	brief, err := srv.Start(t.Context(), "demo")
+
+	require.ErrorIs(t, err, assemble.ErrMalformedFeature)
+
+	var refusal *assemble.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), refusal.Path)
+	assert.Equal(t, 1, refusal.Line)
+	assert.Contains(t, refusal.Detail, "unclosed")
+	assert.Nil(t, brief.Step)
+	assert.Zero(t, brief.Done)
+	assert.Empty(t, brief.Inherited)
+}
+
 func Test_returns_an_error_when_the_state_file_is_missing(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -412,6 +499,8 @@ func Test_returns_an_error_when_the_state_file_is_missing(t *testing.T) {
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"),
 		[]byte(fixtureStep(cfg, "STEP-01", "open", "STEP-01", "ACCEPTANCE-01", nil)), 0o600))
+	spec := "# demo\n\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
 
 	srv := assemble.NewServer(cfg, root)
 
@@ -441,6 +530,8 @@ func Test_refuses_a_state_file_whose_fence_is_unterminated(t *testing.T) {
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"),
 		[]byte(fixtureStep(cfg, "STEP-01", "open", "STEP-01", "ACCEPTANCE-01", nil)), 0o600))
+	spec := "# demo\n\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
 
 	state := "```\nunterminated\n" + cfg.StateHeadings.BindingDecisions + "\n\nsome decision\n"
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(state), 0o600))
@@ -462,6 +553,8 @@ func Test_returns_an_error_when_a_step_file_has_no_frontmatter(t *testing.T) {
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	spec := "# demo\n\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"), []byte("# STEP-01\n\nno frontmatter here\n"), 0o600))
 
@@ -473,25 +566,123 @@ func Test_returns_an_error_when_a_step_file_has_no_frontmatter(t *testing.T) {
 }
 
 // Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse is
-// SCENARIO-11's tripwire against readSteps becoming tolerant: Status's
-// per-feature tolerance lives in assemble.featureStatus, not in readSteps
-// itself, because readSteps is shared with Start (assemble.go and
-// status.go are its only two callers). Moving the tolerance down would
-// silently make Start tolerant too and evaporate this red before
-// SCENARIO-13 is written to close it properly.
+// SCENARIO-11's tripwire against readSteps becoming tolerant, sharpened by
+// SCENARIO-13: this step file's frontmatter delimiters are present and
+// well-formed — unlike the no-frontmatter fixture above — but the YAML they
+// enclose is not, so this is a single-variable change from that fixture
+// rather than a byte-for-byte duplicate exercising the same absent-delimiter
+// branch under a different name. Status's per-feature tolerance lives in
+// assemble.featureStatus, not in readSteps itself, because readSteps is
+// shared with Start (assemble.go and status.go are its only two callers).
+// Moving the tolerance down would silently make Start tolerant too.
 func Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
 	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	spec := "# demo\n\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"), []byte("# STEP-01\n\nno frontmatter here\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"),
+		[]byte("---\nid: STEP-01\nstatus: [open\n---\n\n# STEP-01\n"), 0o600))
 
 	srv := assemble.NewServer(cfg, root)
 
 	_, err := srv.Start(t.Context(), "demo")
 
-	require.ErrorIs(t, err, stepfile.ErrNoFrontmatter)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, stepfile.ErrNoFrontmatter)
+
+	var refusal *assemble.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, featureDir, refusal.Path)
+	assert.Contains(t, refusal.Detail, "yaml")
+}
+
+// Test_refuses_the_briefed_step_when_its_frontmatter_carries_no_id is check
+// 7: presence only, and only on the step Start would brief. newFixture's
+// STEP-03 is the step Start would pick (the lowest-numbered open one), so
+// blanking only its id is a single-variable change from
+// Test_returns_the_lowest_numbered_open_step_s_id_and_title's control arm —
+// STEP-01, STEP-02, STEP-04 and STEP-05 all keep a valid id.
+func Test_refuses_the_briefed_step_when_its_frontmatter_carries_no_id(t *testing.T) {
+	root, cfg := newFixture(t)
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	step := "---\n" +
+		"id:\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# STEP-03 Assemble the brief\n\n" +
+		cfg.AcceptanceHeading + "\n\naccept\n\n" +
+		cfg.ChecklistHeading + "\n\n- [ ] task\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-03.md"), []byte(step), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	brief, err := srv.Start(t.Context(), "demo")
+
+	require.ErrorIs(t, err, assemble.ErrMalformedFeature)
+
+	var refusal *assemble.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-03.md"), refusal.Path)
+	assert.Zero(t, refusal.Line)
+	assert.Nil(t, brief.Step)
+}
+
+// Test_refuses_the_briefed_step_when_its_checklist_heading_is_absent is
+// check 8: the briefed step carries an acceptance section but no line
+// matching cfg.ChecklistHeading. It is the checklist-side twin of the id
+// test above, changing the same single step in newFixture's fixture.
+func Test_refuses_the_briefed_step_when_its_checklist_heading_is_absent(t *testing.T) {
+	root, cfg := newFixture(t)
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	step := "---\n" +
+		"id: STEP-03\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# STEP-03 Assemble the brief\n\n" +
+		cfg.AcceptanceHeading + "\n\naccept\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-03.md"), []byte(step), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	brief, err := srv.Start(t.Context(), "demo")
+
+	require.ErrorIs(t, err, assemble.ErrMalformedFeature)
+
+	var refusal *assemble.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-03.md"), refusal.Path)
+	assert.Contains(t, refusal.Detail, cfg.ChecklistHeading)
+	assert.Nil(t, brief.Step)
+}
+
+// Test_a_step_with_an_empty_but_present_checklist_stays_conforming is the
+// control arm for the check above: SCENARIO-13's Handoff rules a
+// present-but-empty checklist conforming, because "new step" writes an
+// empty checklist heading and start must still work against it. It reuses
+// newFixture's STEP-04 (open, not the briefed step) with STEP-03 marked
+// done so STEP-04 becomes the one Start briefs.
+func Test_a_step_with_an_empty_but_present_checklist_stays_conforming(t *testing.T) {
+	root, cfg := newFixture(t)
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-03.md"),
+		[]byte(fixtureStep(cfg, "STEP-03", "done", "STEP-03 Assemble the brief", "ACCEPTANCE-03", nil)), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-04.md"),
+		[]byte(fixtureStep(cfg, "STEP-04", "open", "STEP-04", "ACCEPTANCE-04", nil)), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	brief, err := srv.Start(t.Context(), "demo")
+
+	require.NoError(t, err)
+	require.NotNil(t, brief.Step)
+	assert.Equal(t, "STEP-04", brief.Step.ID)
+	assert.True(t, brief.Step.Checklist.Found)
+	assert.Empty(t, brief.Step.Checklist.Body)
 }
 
 func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *testing.T) {

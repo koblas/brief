@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/koblas/brief/internal/cli"
@@ -40,7 +41,36 @@ func newStartFixture(t *testing.T, status string) string {
 		"## Open debts\n\na debt\n"
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
 
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+
 	return wd
+}
+
+// Test_start_refuses_a_specification_with_no_progress_heading is
+// SCENARIO-13's "no partial brief" proof: it differs from
+// Test_prints_the_brief_and_writes_nothing_to_stderr's control arm in
+// exactly one variable — the specification body has no progress heading —
+// so a mutation that deleted the progress-heading check entirely would
+// make this test see the same 46-byte brief that control arm proves exists
+// on stdout at exit 0, not the stdout-empty refusal this test asserts.
+func Test_start_refuses_a_specification_with_no_progress_heading(t *testing.T) {
+	wd := newStartFixture(t, "open")
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	spec := "# demo\n\nno progress list here\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Zero(t, stdout.Len())
+
+	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	require.Len(t, lines, 1)
+	assert.NotContains(t, lines[0], "(no files changed)")
+	assert.Contains(t, lines[0], filepath.Join(featureDir, "specification.md"))
+	assert.Contains(t, lines[0], "## BDD Acceptance Progress")
 }
 
 func Test_prints_the_brief_and_writes_nothing_to_stderr(t *testing.T) {
@@ -90,6 +120,8 @@ func Test_start_says_there_are_no_step_files_yet_for_an_empty_feature(t *testing
 		"## Traps\n\na trap\n\n" +
 		"## Open debts\n\na debt\n"
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+	spec := "# demo\n\n## BDD Acceptance Progress\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
 	var stdout, stderr bytes.Buffer
 
 	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
@@ -132,6 +164,9 @@ func Test_prints_the_full_checklist_when_it_contains_a_nested_fence(t *testing.T
 		"## Traps\n\na trap\n\n" +
 		"## Open debts\n\na debt\n"
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
 
 	var stdout, stderr bytes.Buffer
 
@@ -176,6 +211,9 @@ func Test_prints_the_brief_from_a_CRLF_step_file(t *testing.T) {
 		"## Traps\r\n\r\na trap\r\n\r\n" +
 		"## Open debts\r\n\r\na debt\r\n"
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+
+	spec := "# demo\r\n\r\n## BDD Acceptance Progress\r\n\r\n- [ ] SCENARIO-01\r\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
 
 	var stdout, stderr bytes.Buffer
 
@@ -252,13 +290,15 @@ func Test_start_still_refuses_a_feature_with_no_state_file(t *testing.T) {
 		"---\n\n" +
 		"# SCENARIO-01 Demo step\n"
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
 	var stdout, stderr bytes.Buffer
 
 	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
 
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
-	assert.NotEmpty(t, stderr.String())
+	assert.Contains(t, stderr.String(), filepath.Join(featureDir, "STATE.md"))
 }
 
 func Test_returns_an_error_for_an_unknown_feature_on_start(t *testing.T) {

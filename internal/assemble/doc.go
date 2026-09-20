@@ -7,12 +7,22 @@
 // unfinished dependency.
 //
 // Start and Status are the entry points. Start refuses a feature that does
-// not exist (ErrNoSuchFeature) or whose state file is missing, unreadable,
-// or has an unterminated fenced code block (ErrMalformedFeature) rather than
-// assembling a brief that silently omits inherited context — R10's rule
-// that a malformed feature is refused, not degraded into. A step's
-// frontmatter is parsed before any markdown extraction runs, so a "#"
-// character inside a YAML value is never mistaken for a heading.
+// not exist with ErrNoSuchFeature. It refuses, with a *RefusalError
+// wrapping ErrMalformedFeature, a feature whose structure it cannot
+// assemble around rather than return a brief that silently omits or
+// misreports part of it: a specification that is missing, unreadable,
+// carries an unterminated fenced code block, or has no configured progress
+// heading; a state file that is missing, unreadable, or carries an
+// unterminated fence; or a briefed step whose frontmatter carries no "id:"
+// or whose checklist heading is absent. A step file whose frontmatter is
+// absent or does not parse also refuses, wrapping whatever sentinel
+// readSteps produced, including stepfile.ErrNoFrontmatter. An optional
+// convention falling short of one of these — an absent acceptance heading,
+// an absent state heading, or a repository-configured optional convention —
+// is not among them and does not refuse; that degradation belongs to a
+// later scenario. A step's frontmatter is parsed before any markdown
+// extraction runs, so a "#" character inside a YAML value is never mistaken
+// for a heading.
 //
 // Status takes the opposite stance on the same failure: a feature
 // directory or step file that cannot be read or parsed becomes that row's

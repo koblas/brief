@@ -20,6 +20,10 @@ Prints the next open step's id, title, acceptance criteria and checklist,
 and the decisions and constraints inherited from the feature's state
 file. A feature whose steps are all done, or that has no step files yet,
 prints nothing and says so on stderr instead, still exiting 0.
+brief start refuses, naming the file and the fix, rather than print a
+partial brief: a missing or unreadable specification or state file, an
+unclosed fenced code block in either, a specification with no progress
+heading, or a next step whose frontmatter has no id or no checklist.
 brief start reads; it never writes.
 `
 

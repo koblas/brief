@@ -1,6 +1,6 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
+Scenarios complete: SCENARIO-01..13. Last updated by SCENARIO-13.
 
 ## Binding decisions
 
@@ -26,37 +26,37 @@ Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
 - **`status` lives on `(*assemble.Server).Status`, rendered by `assemble.RenderStatusText`** —
   `assemble` owns reading, `scaffold` owns writing; `next`/`show`/`handoff`/`state get` belong
   here too. Line: `<name> <done>/<total> <next> <blocked>\n`, no header/legend, `-` when
-  `Next` is empty. `<next>` = `pattern.ID(n)` of the lowest not-done step, ignoring
-  `depends-on` like `Start`. **Blocked** = not-done step with ≥1 unresolved *direct*
-  `depends-on` id (unknown id blocks, done step never blocked). Feature order is
-  `fs.ReadDir` byte order, not re-sorted. `Status` returns `nil`, never `[]`, for zero
-  features — 15's `--json` depends on that marshaling to `null`. (09)
-- **A missing feature root is zero features, not an error** — `Status` returns `(nil, nil)`
-  only via `errors.Is(err, fs.ErrNotExist)` on `os.OpenRoot`; every other top-level open/list
-  failure, or an invalid step-file pattern, still propagates. `cli.runStatus` keys the notice
-  on `len(rows) == 0`: `brief status: no features found in <cfg.FeatureDirectory>; run 'brief
-  new feature <name>' to create one` to stderr, exit 0. (10)
+  `Next` is empty. `Status` returns `nil`, never `[]`, for zero features (15's `--json` needs
+  `null`). A missing feature root is zero features, not an error; every other open/list
+  failure, or an invalid step-file pattern, still propagates. (09, 10)
 - **A malformed feature degrades into a row, it is never dropped.** `FeatureStatus.Problem
-  *Problem{Path, Detail, Fix}`, nil when clean; set means `Done`/`Total`/`Next`/`Blocked` stay
-  zero. Renders `<name> ! ! !` — four single-token fields, never a single-field marker (`-`
-  and `0/0` already mean something real). Tolerance lives in `featureStatus`, never
-  `readSteps` (shared with `Start`; SCENARIO-13's red needs `readSteps` to stay intolerant).
-  One Problem per feature, first failure wins. `runStatus` writes `brief status: <absolute
-  path>: <detail>; <fix>\n` per malformed row, inline, not via `renderRefusal` — exit 0
-  always, R18 gives the failing role to `check` (22). `Status`'s entry filter is three-way:
-  directory → read; symlink → `!` row named after it, never followed/resolved (target
-  irrelevant); everything else → skipped, no row (10's decision, unchanged — "not a directory
-  → mark" would wrongly catch a stray `README.md`). An id/filename mismatch and an empty
-  feature directory stay conforming, not malformed. (11)
+  *Problem{Path, Detail, Fix}`, nil when clean. Tolerance lives in `featureStatus`, never
+  `readSteps` (shared with `Start`, which stays intolerant — SCENARIO-13's checks build on
+  that). One Problem per feature, first failure wins; `runStatus` writes it inline, not via
+  `renderRefusal` — exit 0 always, R18 gives the failing role to `check` (22). An id/filename
+  mismatch and an empty feature directory stay conforming, not malformed. (11)
 - **`brief.Step == nil` has two causes; `cli.runStart`, never `assemble`, says which.**
-  `assemble.Start` keeps returning `(Brief, nil)` for both (no sentinel — 15's `--json`
-  marshals the pointer to `"step": null`). `runStart` branches on `Done+Open`: `> 0` →
-  "feature is complete, N of N steps done"; `== 0` → "no step files yet" (a bare `brief new
-  feature x` hits this too; SCENARIO-11 already ruled that directory conforming). Both
-  notices use the **absolute** feature-directory path (13/14 inherit that rule: a specific
-  on-disk object is absolute, a configured location stays config-relative), exit 0, empty
-  stdout, no `(no files changed)` tail. `ErrNoSuchFeature`/`ErrMalformedFeature` are
-  unaffected — the branch is after `srv.Start`'s error check. (12)
+  `assemble.Start` returns `(Brief, nil)` for both. `runStart` branches on `Done+Open`: `> 0` →
+  "feature is complete"; `== 0` → "no step files yet". Both notices use the **absolute**
+  feature-directory path, exit 0, no `(no files changed)` tail. (12)
+- **`Start` refuses a feature it cannot assemble around rather than return a partial Brief**,
+  via `*assemble.RefusalError` (embeds `Problem`, plus `Line`/`Err`; `…Error` name because
+  `errname` is on). Checks run specification → state file → step files → briefed step, first
+  failure wins, before any `Brief` field is populated. Structural: specification present +
+  readable + fence-closed + carrying `cfg.ProgressHeading`; state file present + readable +
+  fence-closed; **briefed** step's frontmatter non-empty `id:` (presence only, never compared
+  to `pattern.ID(n)` — 11's ruling stands); briefed step's checklist heading present.
+  Present-but-empty stays conforming for both lists (`new step` writes an empty checklist).
+  Optional, SCENARIO-14's to degrade: `cfg.AcceptanceHeading` absent, `OptionalConventions`,
+  an absent state heading. Every refusal names an absolute path; `Line` set only for the two
+  fence cases. `Err` is always the real error, not a synthesized sentinel: checks 1-5/7/8
+  wrap `ErrMalformedFeature`, but the step-frontmatter check (readSteps, shared with
+  `Status`) wraps whatever `readSteps` produced — `stepfile.ErrNoFrontmatter` for a
+  missing/unclosed delimiter, a bare yaml error for bad content — so `errors.Is(err,
+  ErrMalformedFeature)` misses that one case by design. `cli/refusal.go` gained a dedicated
+  `*assemble.RefusalError` branch (behavior-neutral today: `Error()` already renders
+  identically through the generic fallback), dropping `(no files changed)` — read refusals
+  never carry it. (13)
 
 ## Left unbuilt
 
@@ -64,14 +64,14 @@ Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
   refusal (20), unfinished-`depends-on` refusal (21).
 - `assemble.Server.Next`/`.Show`/`.Handoff`/`.StateGet`, `--json` (15),
   `markdown.Headings` + checklist parser (20/22), R13 truncation, R9's diff/finding output,
-  `FinishResult`, `Problem.Line` (13 adds one if its refusal needs it). No refusal for a
-  missing progress list — 13 owns it, `Start` still never opens `cfg.SpecificationFile`. No
-  optional-convention shortfall notice — 14 owns it; `start` emits at most one stderr line
-  until then.
+  `FinishResult`. No optional-convention shortfall notice — 14 owns it; `start` emits at
+  most one stderr line until then.
 - `scaffold.HandoffSource` / `cli/finish.go`'s `--handoff` source upgrade — deleted; 17 re-adds.
   `HandoffPattern.Number` — not built; `check` (22) and the R6 synthesis need it.
 - `NewStep` and `assemble`'s read path (incl. `Status`) do not re-validate an on-disk feature
   name — `NewFeature`'s creation path is the sole choke point, deliberately. (07)
+- `status` does not adopt 13's checks — a feature with no specification is still a normal row
+  to `status`, exit 1 to `start`. Owner: `check` (22), reusing `assemble.checkSpecification`.
 
 ## Traps
 
@@ -89,16 +89,23 @@ Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
   `writeExclusive`'s `O_EXCL`) — mutation-verify individually, never both at once. (08)
 - `assemble.RenderText` prints the frontmatter `id:`; `RenderStatusText` prints
   `pattern.ID(n)` — equal in any scaffolded tree, diverge after a hand edit; don't unify. (09)
-- **`stepfile.ParseFrontmatter`'s errors name no file** — `newProblem`'s `nameable` param
-  exists because of this: only an OS-level `*fs.PathError` (open/read failure) names its own
-  file via `.Path`; a parse failure gets only the feature-directory path. (11)
-- **`assemble.Problem` duplicates `scaffold.RefusalError` minus `Line`, knowingly** —
-  `assemble` must not import `scaffold`. Field names don't line up: `RefusalError.Problem` is
-  the text field, `Problem.Detail` is. (11)
+- **`newProblem`'s non-`*fs.PathError` branch cannot name a specific file, only its `base`
+  argument.** `Status`'s `featureStatus` passes `base = feature dir` and pins that exact
+  Path in a test, so `Start`'s new id/checklist checks (13) hand-build their own
+  `RefusalError` instead of calling `newProblem` — reusing it there would need `base` to be
+  both the step file (for `Path`) and the feature dir (for the "brief new step <feature>"
+  fix text), which conflict. `newProblem` stays exactly as `Status` needs it. (11, 13)
+- **`assemble.RefusalError` duplicates `scaffold.RefusalError`, knowingly** — `assemble`
+  must not import `scaffold`. The progress-heading refusal text is duplicated between
+  `checkSpecification` and `scaffold.progressRefusal`/`NewStep` — keep the strings identical
+  by hand. (11, 13)
 - `brief start <f> | wc -c == 0` is exit-code-conditional — a missing/malformed feature also
   gives 0 stdout bytes, at **exit 1**; the scriptable "complete" test is `exit 0 && wc -c ==
   0`. `"step": null` alone can't distinguish complete from zero-steps — 15 needs `done`/`open`
   (`2`/`0` vs `0`/`0`) too. (12)
+- **A plan's fixture-update list can under-count.** 13's plan named 6 fixtures needing a
+  conforming specification; 4 more needed one and weren't listed — caught only by grepping
+  every test writing `cfg.StateFile` with no nearby `cfg.SpecificationFile` write. (13)
 
 ## Open debts
 
@@ -108,7 +115,6 @@ Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
   feature dir, not the config — unowned.
 - `insertProgressEntry`/`tickProgressEntry` insert LF into a CRLF file; `SetStatus` returns
   `ErrNoStatusField` for a missing delimiter too. All unowned MINOR.
-- `assemble`'s sentinels duplicate `scaffold`'s (never a `*RefusalError`) — SCENARIO-13 closes.
 - `check` (22) must report a leftover `## Handoff` section, and an id/filename mismatch, as
   findings — unowned until then.
 - **Data loss:** a symlinked specification or step file is silently replaced by `finish`'s
@@ -118,11 +124,18 @@ Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
   reimplements it or the rule moves to `internal/platform/stepfile`. Unowned until 21.
 - Whether `status` should *follow* a symlinked feature directory — undecided, unowned, dies
   unless re-opened by its own scenario. (11)
+- The `config.InvalidConfigError` refusal still carries the `(no files changed)` tail on a
+  read command (`start`), contradicting R14a's read-refusal rule — shared with every write
+  command, so fixing it needs `renderRefusal` to know read from write. Pre-existing, unowned.
 
 ## Crossover note
 
 An identical re-finish being a true no-op means the crossover's "mark SCENARIO-01 through 06
-done" step is safely re-runnable. `SCENARIO-01.md`…`-11.md` and their `-HANDOFF.md` files still
-carry no frontmatter — the crossover owns adding it. Until then, `start` refuses `brief`'s own
-feature directory (`ErrMalformedFeature`) while `status` prints `brief ! ! !` for it (11
-changed status's failure mode from exit 1 to a marked row; start is untouched).
+done" step is safely re-runnable. `SCENARIO-01.md`…`-12.md` and their `-HANDOFF.md` files still
+carry no frontmatter — the crossover owns adding it, and **must write `id:` as well as
+`status:`**: SCENARIO-13's check 7 (empty `id:` on the briefed step) means a crossover that
+adds only `status:` leaves `brief start brief` refused for a new reason once the frontmatter
+exists at all. Until then, checks 1-5 already pass on this repo's own tree (its
+`specification.md` has the progress heading and balanced fences; `STATE.md` has no fences), so
+SCENARIO-13 adds no new lockout — `brief start brief` still fails with `no frontmatter found`,
+unchanged from before this scenario. `status` still prints `brief ! ! !` for it.

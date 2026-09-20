@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/koblas/brief/internal/platform/stepfile"
 )
@@ -28,23 +27,6 @@ type FeatureStatus struct {
 	Blocked int
 	Problem *Problem
 }
-
-// Problem describes why Status could not read a feature directory or one
-// of its step files: Path is the absolute path of the offending directory
-// or file, Detail is the underlying failure's own message, and Fix is the
-// one-line remedy printed beside it. A feature carries at most one
-// Problem — the first failure Status meets while reading it — so stderr
-// output stays bounded by the feature count.
-type Problem struct {
-	Path   string
-	Detail string
-	Fix    string
-}
-
-// readClassFix is the remedy offered when a feature directory or step file
-// could not be opened or read at all, as opposed to being read and found
-// unparseable.
-const readClassFix = "make it readable and re-run"
 
 // Status returns one FeatureStatus per feature directory under the
 // configured feature directory, in fs.ReadDir's documented byte order of
@@ -173,35 +155,4 @@ func featureStatus(topRoot *os.Root, pattern stepfile.Pattern, name, displayPath
 	}
 
 	return row
-}
-
-// newProblem converts err, returned while opening or listing a feature's
-// own directory or while reading and parsing one of its step files, into
-// the Problem the malformed row carries. Every open/read failure surfaces
-// as a wrapped *fs.PathError; when nameable is true, that error's own Path
-// field (relative to the feature's root) is joined onto base to name the
-// offending step file, and the PathError's own wrapped message becomes
-// Detail. stepfile.ParseFrontmatter's errors carry no file name of their
-// own, so a frontmatter parse failure — the only case that is not a
-// *fs.PathError — keeps base as Path and its full message, stripped of the
-// "assemble: " wrap, as Detail. nameable is false for a failure opening or
-// listing the feature directory itself, where the PathError's Path is
-// already the feature's own name and joining it onto base would repeat it.
-func newProblem(base string, err error, nameable bool) *Problem {
-	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
-		path := base
-		if nameable {
-			path = filepath.Join(base, pathErr.Path)
-		}
-
-		return &Problem{Path: path, Detail: pathErr.Err.Error(), Fix: readClassFix}
-	}
-
-	detail := strings.TrimPrefix(err.Error(), "assemble: ")
-
-	return &Problem{
-		Path:   base,
-		Detail: detail,
-		Fix:    fmt.Sprintf("fix its frontmatter, or run 'brief new step %s' to scaffold a conforming step file", filepath.Base(base)),
-	}
 }
