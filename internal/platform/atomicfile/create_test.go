@@ -202,7 +202,16 @@ func Test_Create_abandoned_without_close_leaves_the_target_untouched(t *testing.
 		"the abandoned write's temp sibling must still be on disk, not silently dropped")
 }
 
+// Test_Create_reports_the_failure_and_keeps_the_target_when_the_rename_cannot_land
+// pins the umask at 0o022 because its temp-sibling assertion sits on the
+// existed==false path, where the observed mode is perm masked by the umask
+// rather than perm exactly — Chmod does not run on a fresh create. Without
+// the pin the assertion false-reds under any umask stricter than 0o022,
+// which says nothing about the IsRegular gate it is there to discriminate.
 func Test_Create_reports_the_failure_and_keeps_the_target_when_the_rename_cannot_land(t *testing.T) {
+	oldMask := syscall.Umask(0o022)
+	t.Cleanup(func() { syscall.Umask(oldMask) })
+
 	root, dir := openRoot(t)
 	targetDir := filepath.Join(dir, "target.txt")
 	require.NoError(t, os.Mkdir(targetDir, 0o755))
@@ -264,7 +273,15 @@ func Test_Create_removes_the_temp_sibling_once_close_has_committed(t *testing.T)
 	assert.ElementsMatch(t, []string{"target.txt"}, names)
 }
 
+// Test_Create_overwrites_a_stale_temp_file_left_by_a_crashed_write pins the
+// umask for the same reason as the rename test above: target.txt does not
+// exist, so this is an existed==false path and the committed mode is perm
+// masked by the umask. The pin keeps the ambient umask out of an assertion
+// about the stale sibling's mode.
 func Test_Create_overwrites_a_stale_temp_file_left_by_a_crashed_write(t *testing.T) {
+	oldMask := syscall.Umask(0o022)
+	t.Cleanup(func() { syscall.Umask(oldMask) })
+
 	root, dir := openRoot(t)
 	stale := filepath.Join(dir, ".target.txt.brief-tmp")
 	require.NoError(t, os.WriteFile(stale, []byte("garbage left by a crashed write"), 0o600))
@@ -410,4 +427,80 @@ func Test_Create_fails_when_the_temp_sibling_cannot_be_opened(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, w)
+}
+
+// Test_Create_reapplies_an_existing_targets_mode_onto_a_reused_stale_sibling
+// covers the one case Chmod is the sole guard for, and the only one where
+// it is load-bearing regardless of the umask.
+//
+// When the target exists, replaceMode takes its bits, but the temp sibling
+// also already exists — left by a crashed write — so OpenFile reuses that
+// inode and ignores its mode argument outright. Neither the umask nor perm
+// enters into it: without Chmod the committed file simply keeps the stale
+// sibling's own 0o666, and the target's 0o640 is silently widened.
+//
+// Deleting the Chmod call leaves the rest of this package green at umask
+// 0o000 — the existing coverage discriminates it only through the umask, on
+// the fresh-sibling path — so this is the fixture that makes the guard
+// individually falsifiable.
+//
+// The three modes are deliberately distinct: 0o640 for the target, 0o666
+// for the stale sibling, 0o600 for perm. A committed 0o666 means the stale
+// mode survived, a 0o600 means perm won over replaceMode, and only 0o640 is
+// the intended result. os.WriteFile's own mode argument is umask-masked
+// too, so both fixture files are Chmod'd after writing — otherwise this
+// test reproduces exactly the defect it was written to catch.
+func Test_Create_reapplies_an_existing_targets_mode_onto_a_reused_stale_sibling(t *testing.T) {
+	oldMask := syscall.Umask(0o022)
+	t.Cleanup(func() { syscall.Umask(oldMask) })
+
+	root, dir := openRoot(t)
+
+	target := filepath.Join(dir, "target.txt")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o640)) //nolint:gosec // the group-readable mode is the fixture under test
+	require.NoError(t, os.Chmod(target, 0o640), "WriteFile's own mode argument is umask-masked too")
+
+	stale := filepath.Join(dir, ".target.txt.brief-tmp")
+	require.NoError(t, os.WriteFile(stale, []byte("garbage left by a crashed write"), 0o666)) //nolint:gosec // the wide mode is the fixture under test, not a real file
+	require.NoError(t, os.Chmod(stale, 0o666), "WriteFile's own mode argument is umask-masked too")
+
+	staleIno := inodeOf(t, stale)
+
+	w, err := atomicfile.Create(root, "target.txt", 0o600)
+	require.NoError(t, err)
+	_, writeErr := io.WriteString(w, "new")
+	require.NoError(t, writeErr)
+	require.NoError(t, w.Close())
+
+	got, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, "new", string(got), "the replacement must still have committed")
+
+	info, statErr := os.Stat(target)
+	require.NoError(t, statErr)
+	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm(),
+		"a reused stale sibling must not carry its own mode onto the target, nor let perm override the target's")
+
+	// Without this, the test's name outruns what it pins: lifting the
+	// !existed gate on removeStaleRegularSibling makes the sibling be
+	// deleted and recreated rather than reused, and every assertion above
+	// still passes — Chmod would then be discriminated only through the
+	// umask again, which is exactly the coverage this test exists to
+	// replace. The inode is what proves OpenFile reopened the stale file.
+	assert.Equal(t, staleIno, inodeOf(t, target),
+		"the committed file must be the stale sibling's own inode, reused rather than recreated")
+}
+
+// inodeOf returns path's inode number, so a test can prove a file was
+// reused in place rather than deleted and recreated at the same name.
+func inodeOf(t *testing.T, path string) uint64 {
+	t.Helper()
+
+	info, err := os.Lstat(path)
+	require.NoError(t, err)
+
+	st, ok := info.Sys().(*syscall.Stat_t)
+	require.True(t, ok, "expected a *syscall.Stat_t from Lstat on this platform")
+
+	return st.Ino
 }

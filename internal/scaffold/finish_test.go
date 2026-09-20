@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/config"
@@ -447,7 +448,9 @@ func Test_finish_leaves_no_temp_file_in_the_feature_directory(t *testing.T) {
 // each write site now carries by hand: the rename happens in Close, so a site
 // that checks only the write and not Close reports success on a write that
 // never landed. A directory at the handoff's path makes the rename fail with
-// nothing else disturbed.
+// nothing else disturbed — asserted file by file: the step file still
+// says open, the state file still holds its old body, and the
+// specification's STEP-02 entry is still unticked.
 //
 // It also pins convergence: the step file must still say status: open, since
 // that is the sole doneness authority and a retry has to be able to repair
@@ -469,6 +472,20 @@ func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 	assert.Contains(t, string(stepBody), "status: open",
 		"a write that could not be committed must leave the step retryable")
 
+	// The three writes after the blocked one must not have run. Their
+	// control arm is the retry below: it changes both of these files, which
+	// is what proves these two probes would have seen a write had one
+	// happened, rather than being satisfied by nothing occurring at all.
+	gotState, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
+	require.NoError(t, readErr)
+	assert.Equal(t, oldStateBody(fx.cfg), string(gotState),
+		"the state write follows the blocked handoff write, so it must not have run")
+
+	gotSpec, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(gotSpec), "- [ ] STEP-02: Assemble the thing",
+		"the specification write follows the blocked handoff write, so STEP-02 must still be unticked")
+
 	require.NoError(t, os.RemoveAll(blocked))
 
 	retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
@@ -481,6 +498,17 @@ func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 	gotStepAfterRetry, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
 	require.NoError(t, readErr)
 	assert.Contains(t, string(gotStepAfterRetry), "status: done")
+
+	// The control arm for the two "did not run" assertions above: the same
+	// two probes, on the same two files, now see the writes the blocked
+	// attempt left undone.
+	stateAfterRetry, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
+	require.NoError(t, readErr)
+	assert.Equal(t, string(fx.newState), string(stateAfterRetry))
+
+	specAfterRetry, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Contains(t, string(specAfterRetry), "- [x] STEP-02: Assemble the thing")
 }
 
 // Test_reports_a_state_write_that_cannot_be_committed covers the second of
@@ -773,4 +801,48 @@ func Test_returns_an_error_and_changes_nothing_when_the_feature_directory_is_not
 	assert.Contains(t, err.Error(), "run 'brief finish widgets STEP-02")
 	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
 	assert.NoFileExists(t, fx.handoffPath(), "the first of the four writes failing must leave nothing partial")
+}
+
+// Test_the_handoff_file_is_created_with_the_same_mode_as_its_siblings pins
+// the mode of the one file Finish creates rather than replaces. The
+// specification, state and step files are all created by writeExclusive at
+// 0o600; the handoff file goes through atomicfile.Create, whose perm
+// argument applies only on a fresh create. A wider perm there lands a
+// world-readable handoff beside three owner-only siblings.
+//
+// That a wrong mode then sticks — every later Finish finding an existing
+// file and preserving whatever mode the first one chose — is a property of
+// atomicfile.Create, proven one layer down by
+// Test_Create_keeps_the_existing_files_permissions_when_it_replaces_it.
+// This test pins only the mode the file is born with.
+//
+// The umask is pinned at 0o022 — the permissive default, which would let a
+// 0o644 perm through intact — so this fails on a wrong perm rather than
+// passing because a stricter ambient umask happened to mask the extra bits
+// away. syscall.Umask is process-global and no test in this package calls
+// t.Parallel, so nothing else observes the pinned value mid-test.
+//
+// The state file's mode is read rather than asserted against a constant
+// alone: the claim is that the handoff matches the siblings Finish writes
+// beside it, and a fixture that somehow created those wider would
+// otherwise go unnoticed.
+func Test_the_handoff_file_is_created_with_the_same_mode_as_its_siblings(t *testing.T) {
+	old := syscall.Umask(0o022)
+	t.Cleanup(func() { syscall.Umask(old) })
+
+	fx := newFinishFixture(t)
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+
+	require.NoError(t, srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState))
+
+	handoffInfo, err := os.Stat(fx.handoffPath())
+	require.NoError(t, err)
+
+	stateInfo, statErr := os.Stat(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
+	require.NoError(t, statErr)
+
+	assert.Equal(t, os.FileMode(0o600), stateInfo.Mode().Perm(),
+		"the fixture's own siblings must be owner-only, or the comparison below proves nothing")
+	assert.Equal(t, stateInfo.Mode().Perm(), handoffInfo.Mode().Perm(),
+		"the handoff file must not be created wider than the siblings Finish writes beside it")
 }

@@ -49,10 +49,17 @@ var (
 //
 // The temp sibling is opened O_CREATE|O_TRUNC, not O_EXCL: one left behind
 // by a crashed write is overwritten by the next attempt rather than wedging
-// every future write — except when name already exists and its mode carries
-// no owner-write bit: replaceMode then takes that mode for the sibling too,
-// and the following OpenFile fails with permission denied on every retry
-// until the sibling is removed by hand. brief runs at most one step per
+// every future write — except when that sibling's own mode carries no
+// owner-write bit, in which case OpenFile fails with permission denied on
+// every retry until the sibling is removed by hand.
+//
+// The condition is the sibling's mode, not the target's. A sibling acquires
+// a read-only mode by being created for a read-only target — replaceMode
+// takes the target's bits for the sibling too — but it is the sibling that
+// OpenFile reopens, so chmodding the target afterwards does not lift the
+// wedge, and a target that is read-only now does not cause one if the
+// sibling left behind is writable. Deleting .<name>.brief-tmp is the
+// recovery. brief runs at most one step per
 // feature at a time with no concurrency machinery, so a genuine collision
 // between two writers for the same name is not a concern this package has
 // to handle.

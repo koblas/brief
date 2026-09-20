@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/config"
@@ -124,4 +125,47 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 
 	require.Error(t, err)
 	assert.NoDirExists(t, filepath.Join(root, "escaped"))
+}
+
+// Test_the_scaffolded_files_are_all_created_owner_only pins the mode
+// writeExclusive creates the specification, state and step files with.
+//
+// This is the other half of a claim the scaffold makes in two places.
+// replace.go passes atomicfile.Create a 0o600 perm so the handoff file --
+// the only file Finish creates rather than replaces -- is born no wider
+// than the files beside it, and Test_the_handoff_file_is_created_with_the_
+// same_mode_as_its_siblings pins that against its fixture's state file. But
+// a fixture's mode is chosen by the fixture: without this test, changing
+// writeExclusive's own constant to 0o644 leaves the whole suite green while
+// real trees grow three 0o644 files beside a 0o600 handoff -- the same
+// inconsistency, reintroduced from the other end.
+//
+// The umask is pinned only so the assertion reads the same way as its
+// siblings in this repo; 0o600 carries no bits a conventional umask strips,
+// so unlike the atomicfile fresh-create tests this one is umask-stable
+// either way.
+func Test_the_scaffolded_files_are_all_created_owner_only(t *testing.T) {
+	oldMask := syscall.Umask(0o022)
+	t.Cleanup(func() { syscall.Umask(oldMask) })
+
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	srv := scaffold.NewServer(cfg, root)
+
+	featureDir, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	stepPath, err := srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	for _, path := range []string{
+		filepath.Join(featureDir, cfg.SpecificationFile),
+		filepath.Join(featureDir, cfg.StateFile),
+		stepPath,
+	} {
+		info, statErr := os.Stat(path)
+		require.NoError(t, statErr, path)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+			"%s must be created owner-only, so the handoff file written beside it matches", path)
+	}
 }
