@@ -318,6 +318,28 @@ func Test_names_stdin_when_the_piped_handoff_is_over_the_cap(t *testing.T) {
 	assert.Equal(t, want, stderr.String())
 }
 
+// Test_refuses_a_state_body_over_the_cap_and_names_the_state_path is the
+// CLI slice for SCENARIO-18: config.Default's state-cap-lines is 80, so an
+// 81-line state file is refused, naming the --state path rather than the
+// scaffold.StateSource placeholder.
+func Test_refuses_a_state_body_over_the_cap_and_names_the_state_path(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", overCapBody(81))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	want := fmt.Sprintf(
+		"brief finish: %s: state is 81 lines, over the cap of 80; cut the state to 80 lines or "+
+			"fewer, or raise state-cap-lines in .brief.yaml, and retry (no files changed)\n",
+		statePath)
+	assert.Equal(t, want, stderr.String())
+}
+
 func Test_returns_a_usage_error_when_no_feature_is_given_to_finish(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer

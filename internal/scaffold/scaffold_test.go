@@ -19,7 +19,10 @@ import (
 // 60, and strictly above the 5-line maximum of every handoff body this
 // package's tests hand to Finish (newFinishFixture.newHandoff), so a cap
 // test proves the value is read from config rather than tripping on an
-// unrelated fixture body.
+// unrelated fixture body. StateCapLines is 20 — distinct from
+// HandoffCapLines and from config.Default's 80, and strictly above the
+// 16-line maximum of every state body this package's tests hand to Finish
+// (newStateBody), for the same reason.
 func fixtureConfig() config.Config {
 	cfg := config.Default()
 	cfg.FeatureDirectory = "specs"
@@ -30,6 +33,7 @@ func fixtureConfig() config.Config {
 	cfg.StepFilePattern = "STEP-%02d.md"
 	cfg.HandoffFileSuffix = ".fixture-handoff.md"
 	cfg.HandoffCapLines = 10
+	cfg.StateCapLines = 20
 	cfg.StateHeadings = config.StateHeadings{
 		BindingDecisions: "## Decisions Fixture",
 		LeftUnbuilt:      "## Left Fixture",

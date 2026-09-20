@@ -16,10 +16,10 @@ import (
 // Finish closes feature's step: it writes handoff to that step's own
 // handoff file, replaces the feature's state file with state, then marks
 // the step file's frontmatter status "done" (R8, R21). handoff is checked
-// against cfg.HandoffCapLines (SCENARIO-17); neither argument is checked
-// against a required-heading schema, and neither is spliced into an
-// existing document — every write here is a whole-file write, so none has
-// a boundary inferred from prose to get wrong.
+// against cfg.HandoffCapLines and state against cfg.StateCapLines; neither
+// argument is checked against a required-heading schema, and neither is
+// spliced into an existing document — every write here is a whole-file
+// write, so none has a boundary inferred from prose to get wrong.
 //
 // The handoff file is named stepPattern.ID(n) + cfg.HandoffFileSuffix
 // (stepfile.CompileHandoff); a "## Handoff" section left behind in a step
@@ -32,13 +32,15 @@ import (
 // directory opens; a step file exists whose id equals step; its
 // frontmatter parses; the handoff argument measures no more than
 // cfg.HandoffCapLines lines (ErrOverCap, named against HandoffSource,
-// counted by markdown.CountLines — SCENARIO-17) — a done step over this cap
-// reports the cap rather than falling through to the re-finish verdict
-// below, since this check runs ahead of it; the replacement state body
-// closes every fence it opens (ErrUnterminatedFence, named against
-// StateSource) — state's configured headings are read by a terminator scan
-// on every later Start, so an open fence there is not merely untidy, it is
-// unreadable; the specification is readable; the specification carries the
+// counted by markdown.CountLines), immediately followed by the same check
+// against cfg.StateCapLines for the replacement state body (named against
+// StateSource) — a done step over either cap reports the cap rather than
+// falling through to the re-finish verdict below, since both checks run
+// ahead of it; the replacement state body then closes every fence it opens
+// (ErrUnterminatedFence, named against StateSource) — state's configured
+// headings are read by a terminator scan on every later Start, so an open
+// fence there is not merely untidy, it is unreadable; the specification is
+// readable; the specification carries the
 // configured progress heading and an entry for step; the state file exists
 // as a regular file. Computing the frontmatter's "status: done" line during
 // this phase, rather than at write time, means a step file with no
@@ -149,6 +151,10 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	}
 
 	if refusal := checkArgumentCap(handoff, HandoffSource, "handoff", s.cfg.HandoffCapLines); refusal != nil {
+		return refusal
+	}
+
+	if refusal := checkArgumentCap(state, StateSource, "state", s.cfg.StateCapLines); refusal != nil {
 		return refusal
 	}
 
