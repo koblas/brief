@@ -14,6 +14,15 @@
 // frontmatter is parsed before any markdown extraction runs, so a "#"
 // character inside a YAML value is never mistaken for a heading.
 //
+// Status takes the opposite stance on the same failure: a feature
+// directory or step file that cannot be read or parsed becomes that row's
+// Problem rather than failing the whole call, because one malformed
+// feature must not blind "brief status" to every other feature in the
+// repository. Start's refusal and Status's degradation both read the same
+// step files through readSteps, which stays intolerant of a parse failure
+// either way — the difference is which caller turns that failure into a
+// refusal (Start) and which caller catches it and marks a row (Status).
+//
 // assemble imports internal/platform/config, internal/platform/stepfile
 // and internal/platform/markdown, and the standard library only. It never
 // imports internal/scaffold or internal/cli: assemble owns reading a

@@ -109,3 +109,20 @@ func Test_render_status_writes_four_space_separated_fields_per_feature(t *testin
 		"gamma 1/4 SCENARIO-02 2\n",
 		out.String())
 }
+
+// Test_render_status_text_prints_the_marker_for_a_malformed_feature pins
+// the exact bytes of a malformed row: "!" in all three computed fields,
+// never a single-field marker — "-" already means "no next step" (09) and
+// "0/0" already means an empty feature directory, so either would fabricate
+// a value that was never measured.
+func Test_render_status_text_prints_the_marker_for_a_malformed_feature(t *testing.T) {
+	rows := []assemble.FeatureStatus{
+		{Name: "delta", Problem: &assemble.Problem{Path: "/repo/docs/specifications/delta", Detail: "no frontmatter found", Fix: "fix it"}},
+	}
+
+	var out bytes.Buffer
+	err := assemble.RenderStatusText(&out, rows)
+
+	require.NoError(t, err)
+	assert.Equal(t, "delta ! ! !\n", out.String())
+}

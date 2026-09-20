@@ -1,6 +1,6 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..10. Last updated by SCENARIO-10.
+Scenarios complete: SCENARIO-01..11. Last updated by SCENARIO-11.
 
 ## Binding decisions
 
@@ -31,21 +31,32 @@ Scenarios complete: SCENARIO-01..10. Last updated by SCENARIO-10.
   never blocked). Feature order is `fs.ReadDir` byte order, not re-sorted. `Status` returns
   `nil`, never `[]`, for zero features — 15's `--json` depends on that marshaling to `null`. (09)
 - **A missing feature root is zero features, not an error** — `Status` returns `(nil, nil)`
-  only via `errors.Is(err, fs.ErrNotExist)` on `os.OpenRoot`; every other open failure (e.g.
-  `ENOTDIR`) still propagates. `cli.runStatus` keys the notice on `len(rows) == 0`, writing
-  `brief status: no features found in <cfg.FeatureDirectory>; run 'brief new feature <name>'
-  to create one` to stderr and returning before `RenderStatusText`. Not R14a's shape — no
-  `<path>:` prefix, no `(no files changed)` tail. (10)
+  only via `errors.Is(err, fs.ErrNotExist)` on `os.OpenRoot`; every other top-level open/list
+  failure, or an invalid step-file pattern, still propagates. `cli.runStatus` keys the notice
+  on `len(rows) == 0`: `brief status: no features found in <cfg.FeatureDirectory>; run 'brief
+  new feature <name>' to create one` to stderr, exit 0. (10)
+- **A malformed feature degrades into a row, it is never dropped.** `FeatureStatus.Problem
+  *Problem{Path, Detail, Fix}`, nil when clean; set means `Done`/`Total`/`Next`/`Blocked` stay
+  zero. Renders `<name> ! ! !` — four single-token fields, never a single-field marker (`-`
+  and `0/0` already mean something real). Tolerance lives in `featureStatus`, never
+  `readSteps` (shared with `Start`; SCENARIO-13's red needs `readSteps` to stay intolerant).
+  One Problem per feature, first failure wins. `runStatus` writes `brief status: <absolute
+  path>: <detail>; <fix>\n` per malformed row, inline, not via `renderRefusal` — exit 0
+  always, R18 gives the failing role to `check` (22). `Status`'s entry filter is three-way:
+  directory → read; symlink → `!` row named after it, never followed/resolved (target
+  irrelevant); everything else → skipped, no row (10's decision, unchanged — "not a directory
+  → mark" would wrongly catch a stray `README.md`). An id/filename mismatch and an empty
+  feature directory stay conforming, not malformed. (11)
 
 ## Left unbuilt
 
 - Differing-inputs refusal (16), caps (17/18), state-body heading check (19), open-checklist
   refusal (20), unfinished-`depends-on` refusal (21).
 - `assemble.Server.Next`/`.Show`/`.Handoff`/`.StateGet`, `--json` (15), complete-feature
-  stderr+exit-0 (12), malformed-feature tolerance + `!` field (11), `markdown.Headings` +
-  checklist parser (20/22), R13 truncation, R9's diff/finding output, `FinishResult`.
+  stderr+exit-0 (12), `markdown.Headings` + checklist parser (20/22), R13 truncation, R9's
+  diff/finding output, `FinishResult`, `Problem.Line` (13 adds one if its refusal needs it).
 - `scaffold.HandoffSource` / `cli/finish.go`'s `--handoff` source upgrade — deleted; 17 re-adds.
-- `HandoffPattern.Number` — not built; `check` (22) and the R6 synthesis need it.
+  `HandoffPattern.Number` — not built; `check` (22) and the R6 synthesis need it.
 - `NewStep` and `assemble`'s read path (incl. `Status`) do not re-validate an on-disk feature
   name — `NewFeature`'s creation path is the sole choke point, deliberately. (07)
 
@@ -65,14 +76,12 @@ Scenarios complete: SCENARIO-01..10. Last updated by SCENARIO-10.
   `writeExclusive`'s `O_EXCL`) — mutation-verify individually, never both at once. (08)
 - `assemble.RenderText` prints the frontmatter `id:`; `RenderStatusText` prints
   `pattern.ID(n)` — equal in any scaffolded tree, diverge after a hand edit; don't unify. (09)
-- **`brief status` cannot read `brief`'s own tree today** — no `SCENARIO-NN.md` here carries
-  frontmatter: exit 1, "no frontmatter found". A feature dir with zero step files is
-  conforming (`0/0 - 0`); only a root with zero *directory entries* triggers "no features". (09)
-- **A typo'd `feature-directory` exits 0** ("no features found in `<typo>`") — the R14 shape,
-  not a bug; don't "fix" into a refusal without reopening SCENARIO-10. `errors.Is(err,
-  fs.ErrNotExist)` only, never a string match (`ENOTDIR`'s message differs). Notice keys on
-  `len(rows) == 0`, not an error value — **11 must emit a row for a malformed feature, not
-  drop it**, or a repo whose only feature is malformed prints "no features found" and exits 0. (10)
+- **`stepfile.ParseFrontmatter`'s errors name no file** — `newProblem`'s `nameable` param
+  exists because of this: only an OS-level `*fs.PathError` (open/read failure) names its own
+  file via `.Path`; a parse failure gets only the feature-directory path. (11)
+- **`assemble.Problem` duplicates `scaffold.RefusalError` minus `Line`, knowingly** —
+  `assemble` must not import `scaffold`. Field names don't line up: `RefusalError.Problem` is
+  the text field, `Problem.Detail` is. (11)
 
 ## Open debts
 
@@ -83,16 +92,20 @@ Scenarios complete: SCENARIO-01..10. Last updated by SCENARIO-10.
 - `insertProgressEntry`/`tickProgressEntry` insert LF into a CRLF file; `SetStatus` returns
   `ErrNoStatusField` for a missing delimiter too. All unowned MINOR.
 - `assemble`'s sentinels duplicate `scaffold`'s (never a `*RefusalError`) — SCENARIO-13 closes.
-- `check` (22) must report a leftover `## Handoff` section as a finding — unowned until then.
+- `check` (22) must report a leftover `## Handoff` section, and an id/filename mismatch, as
+  findings — unowned until then.
 - **Data loss:** a symlinked specification or step file is silently replaced by `finish`'s
   rename. Pre-existing, real, unowned — needs its own refusal scenario — dies unless re-opened.
 - **SCENARIO-21's `finish` refusal must reuse `status`'s done-set-by-`pattern.ID(n)` rule**, or
   the two surfaces disagree about the same tree; `scaffold` can't import `assemble`, so 21
   reimplements it or the rule moves to `internal/platform/stepfile`. Unowned until 21.
+- Whether `status` should *follow* a symlinked feature directory — undecided, unowned, dies
+  unless re-opened by its own scenario. (11)
 
 ## Crossover note
 
 An identical re-finish being a true no-op means the crossover's "mark SCENARIO-01 through 06
-done" step is safely re-runnable. `SCENARIO-01.md`…`-10.md` and their `-HANDOFF.md` files still
-carry no frontmatter — the crossover owns adding it, and until then neither `start` nor
-`status` can read `brief`'s own feature directory (see Traps).
+done" step is safely re-runnable. `SCENARIO-01.md`…`-11.md` and their `-HANDOFF.md` files still
+carry no frontmatter — the crossover owns adding it. Until then, `start` refuses `brief`'s own
+feature directory (`ErrMalformedFeature`) while `status` prints `brief ! ! !` for it (11
+changed status's failure mode from exit 1 to a marked row; start is untouched).

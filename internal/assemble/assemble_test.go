@@ -472,6 +472,28 @@ func Test_returns_an_error_when_a_step_file_has_no_frontmatter(t *testing.T) {
 	require.ErrorIs(t, err, stepfile.ErrNoFrontmatter)
 }
 
+// Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse is
+// SCENARIO-11's tripwire against readSteps becoming tolerant: Status's
+// per-feature tolerance lives in assemble.featureStatus, not in readSteps
+// itself, because readSteps is shared with Start (assemble.go and
+// status.go are its only two callers). Moving the tolerance down would
+// silently make Start tolerant too and evaporate this red before
+// SCENARIO-13 is written to close it properly.
+func Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-01.md"), []byte("# STEP-01\n\nno frontmatter here\n"), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	_, err := srv.Start(t.Context(), "demo")
+
+	require.ErrorIs(t, err, stepfile.ErrNoFrontmatter)
+}
+
 func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()

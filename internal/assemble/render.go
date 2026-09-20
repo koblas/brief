@@ -42,10 +42,23 @@ func RenderText(w io.Writer, b Brief) error {
 // space — padding would make one feature's line depend on the longest
 // other feature's name. "-" is substituted for a row whose Next is empty;
 // FeatureStatus.Next itself stays empty so a later JSON caller sees an
-// empty field rather than the literal string "-". RenderStatusText writes
-// no header and no legend: rows is already the machine format.
+// empty field rather than the literal string "-". A row whose Problem is
+// set renders as "<name> ! ! !" instead — "!" in each of the three
+// computed fields, never a single-field marker, so the line still carries
+// exactly four single-token fields: "-" already means "no next step" and
+// "0/0" already means an empty feature directory, so either would
+// fabricate a count that was never measured. RenderStatusText writes no
+// header and no legend: rows is already the machine format.
 func RenderStatusText(w io.Writer, rows []FeatureStatus) error {
 	for _, row := range rows {
+		if row.Problem != nil {
+			if _, err := fmt.Fprintf(w, "%s ! ! !\n", row.Name); err != nil {
+				return fmt.Errorf("assemble: render: %w", err)
+			}
+
+			continue
+		}
+
 		next := row.Next
 		if next == "" {
 			next = "-"
