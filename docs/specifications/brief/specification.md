@@ -835,4 +835,4 @@ Post-crossover — built through the tool:
 - [x] SCENARIO-19: A state body missing a required heading is refused
 - [x] SCENARIO-20: A step with an open checklist item cannot be finished
 - [x] SCENARIO-21: A step with an unfinished dependency cannot be finished
-- [ ] SCENARIO-22: Check reports what the write path would now refuse
+- [x] SCENARIO-22: Check reports what the write path would now refuse

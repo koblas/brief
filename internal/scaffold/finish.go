@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/koblas/brief/internal/platform/config"
-	"github.com/koblas/brief/internal/platform/markdown"
+	"github.com/koblas/brief/internal/platform/conform"
 	"github.com/koblas/brief/internal/platform/stepfile"
 )
 
@@ -313,102 +313,65 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 
 // checkArgumentFence refuses when body — Finish's state argument, named
 // for the error message by label — opens a fenced code block it never
-// closes. It names source (StateSource) rather than any file, since
-// Finish never learns which file, or whether there was one at all, body's
-// bytes came from. It returns nil when every fence body opens is closed.
+// closes, by conform.UnterminatedFence. It names source (StateSource)
+// rather than any file, since Finish never learns which file, or whether
+// there was one at all, body's bytes came from. It returns nil when every
+// fence body opens is closed.
 func checkArgumentFence(body []byte, source, label string) *RefusalError {
-	line, delim, unterminated := markdown.UnterminatedFence(string(body))
-	if !unterminated {
-		return nil
-	}
-
-	return &RefusalError{
-		Path:    source,
-		Line:    line,
-		Problem: fmt.Sprintf("%s has an unclosed %s fence", label, delim),
-		Fix:     "close the fence, or remove the unmatched delimiter, and retry",
-		Err:     ErrUnterminatedFence,
-	}
+	return refusalFromViolation(source, conform.UnterminatedFence(body, label))
 }
 
 // checkArgumentCap refuses when body — one of Finish's handoff or state
 // arguments, named for the error message by label — measures more lines,
-// by markdown.CountLines, than cap. It names source (HandoffSource or
+// by conform.OverCap, than limit. It names source (HandoffSource or
 // StateSource) rather than any file, matching checkArgumentFence: Finish
 // never learns which file, or whether there was one at all, body's bytes
-// came from. It returns nil when body's line count does not exceed cap —
-// a body of exactly cap lines is accepted.
+// came from. It returns nil when body's line count does not exceed limit —
+// a body of exactly limit lines is accepted.
 func checkArgumentCap(body []byte, source, label string, limit int) *RefusalError {
-	n := markdown.CountLines(string(body))
-	if n <= limit {
-		return nil
-	}
-
-	return &RefusalError{
-		Path:    source,
-		Problem: fmt.Sprintf("%s is %d lines, over the cap of %d", label, n, limit),
-		Fix: fmt.Sprintf("cut the %s to %d lines or fewer, or raise %s-cap-lines in .brief.yaml, and retry",
-			label, limit, label),
-		Err: ErrOverCap,
-	}
+	return refusalFromViolation(source, conform.OverCap(body, label, limit))
 }
 
 // checkArgumentHeadings refuses when body — Finish's state argument, named
 // for the error message by label — carries no section for one of headings'
-// four entries (in headings.Ordered() order). The trigger is
-// markdown.Section's found return, never section content: a section with
-// nothing under it is valid, and heading order in body is not checked, only
-// heading presence — assemble.stateSections reads each configured heading
-// by name, so an order requirement here would have no consumer. It names
-// source (StateSource) rather than any file, matching checkArgumentFence
-// and checkArgumentCap. Only the first missing heading is reported: unlike
-// assemble.Start's shortfall degrade, which completes and can report every
-// shortfall it finds, Finish is a refusal that stops at the first fault. It
-// returns nil when every configured heading is present.
+// four entries, by conform.MissingHeading. It names source (StateSource)
+// rather than any file, matching checkArgumentFence and checkArgumentCap.
+// Only the first missing heading is reported: unlike assemble.Start's
+// shortfall degrade, which completes and can report every shortfall it
+// finds, Finish is a refusal that stops at the first fault. It returns nil
+// when every configured heading is present.
 func checkArgumentHeadings(body []byte, source, label string, headings config.StateHeadings) *RefusalError {
-	for _, heading := range headings.Ordered() {
-		if _, found := markdown.Section(string(body), heading); found {
-			continue
-		}
-
-		return &RefusalError{
-			Path:    source,
-			Problem: fmt.Sprintf("%s is missing the %q section", label, heading),
-			Fix:     fmt.Sprintf("add a %q heading to the %s body — an empty section is valid — and retry", heading, label),
-			Err:     ErrMissingStateHeading,
-		}
-	}
-
-	return nil
+	return refusalFromViolation(source, conform.MissingHeading(body, label, headings))
 }
 
 // checkStepChecklist refuses when stepBody's checklist section — the
-// section under heading — holds an item not ticked with "[x]"/"[X]"
-// (markdown.FirstUnchecked). It names stepPath and the item's 1-based line
+// section under heading — holds an item not ticked with "[x]"/"[X]", by
+// conform.OpenChecklistItem. It names stepPath and the item's 1-based line
 // number in the whole file, the shape R14a uses for a fault inside a file
 // rather than an argument's placeholder source. stepBody must be the whole
 // step file as read from disk, not the remainder ParseFrontmatter returns:
-// FirstUnchecked's line number is counted from the top of stepBody. A
-// checklist with no items, or an absent heading, is never refused — only
-// an unchecked item triggers, matching assemble.Start's read-side degrade
-// rule for the same heading.
+// conform.OpenChecklistItem's line number is counted from the top of
+// stepBody. A checklist with no items, or an absent heading, is never
+// refused — only an unchecked item triggers, matching assemble.Start's
+// read-side degrade rule for the same heading.
 func checkStepChecklist(stepBody []byte, stepPath, heading string) *RefusalError {
-	line, text, found := markdown.FirstUnchecked(string(stepBody), heading)
-	if !found {
+	return refusalFromViolation(stepPath, conform.OpenChecklistItem(stepBody, heading))
+}
+
+// refusalFromViolation renders v, one of conform's four predicates' result,
+// into a *RefusalError naming path — the call site's own file or argument
+// placeholder, which conform never learns. It returns nil when v is nil.
+func refusalFromViolation(path string, v *conform.Violation) *RefusalError {
+	if v == nil {
 		return nil
 	}
 
-	problem := "checklist item is not ticked"
-	if text != "" {
-		problem = fmt.Sprintf("checklist item %q is not ticked", text)
-	}
-
 	return &RefusalError{
-		Path:    stepPath,
-		Line:    line,
-		Problem: problem,
-		Fix:     "tick it with [x] once it is done, or remove it, and retry",
-		Err:     ErrOpenChecklistItem,
+		Path:    path,
+		Line:    v.Line,
+		Problem: v.Problem,
+		Fix:     v.Fix,
+		Err:     v.Err,
 	}
 }
 

@@ -23,13 +23,14 @@ Usage:
   brief new step <feature>     scaffold the next step file and its progress entry
   brief start <feature>        print the next open step's context
   brief status                 print one done/total/next/blocked line per feature
+  brief check [feature]        report faults finish would now refuse to write over
 
   brief finish <feature> <step> --handoff <path> --state <path>
                                 close a step: handoff, state, then done
 
 Run 'brief new feature --help', 'brief new step --help', 'brief start
---help', 'brief status --help' or 'brief finish --help' for details on
-those commands.
+--help', 'brief status --help', 'brief check --help' or 'brief finish
+--help' for details on those commands.
 `
 
 // Run parses args, dispatches to the named command, and renders every
@@ -40,7 +41,7 @@ those commands.
 // read it.
 func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return usageError(stderr, "brief: no command given; expected one of: new, start, finish, status")
+		return usageError(stderr, "brief: no command given; expected one of: new, start, finish, status, check")
 	}
 
 	switch args[0] {
@@ -58,8 +59,10 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 		return runStatus(ctx, wd, args[1:], stdout, stderr)
 	case "finish":
 		return runFinish(ctx, wd, args[1:], stdin, stdout, stderr)
+	case "check":
+		return runCheck(ctx, wd, args[1:], stdout, stderr)
 	default:
-		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new, start, finish, status", args[0]))
+		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new, start, finish, status, check", args[0]))
 	}
 }
 

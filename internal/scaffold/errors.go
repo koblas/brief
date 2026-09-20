@@ -3,6 +3,8 @@ package scaffold
 import (
 	"errors"
 	"fmt"
+
+	"github.com/koblas/brief/internal/platform/conform"
 )
 
 // ErrInvalidFeatureName is returned when NewFeature is asked to create a
@@ -42,8 +44,10 @@ var ErrNoProgressEntry = errors.New("no progress entry found")
 // ErrUnterminatedFence is returned when a replacement state body given to
 // Finish opens a fenced code block it never closes: assemble.Start finds
 // every configured heading by scanning forward for a terminator, so an
-// open fence there would leave every heading after it unreadable.
-var ErrUnterminatedFence = errors.New("input has an unterminated fence")
+// open fence there would leave every heading after it unreadable. It is
+// conform.ErrUnterminatedFence: assemble.Check reports the same fault as a
+// Finding against a state file the write path never validated.
+var ErrUnterminatedFence = conform.ErrUnterminatedFence
 
 // ErrAlreadyFinished is returned when Finish is asked to close a step whose
 // frontmatter already says done, but the supplied handoff or state differs
@@ -61,9 +65,11 @@ var ErrAlreadyFinished = errors.New("step already finished with different inputs
 // ErrOverCap is returned when a body Finish is asked to write measures more
 // lines, by markdown.CountLines, than its configured cap
 // (cfg.HandoffCapLines for the handoff argument, cfg.StateCapLines for the
-// state argument — SCENARIO-17/18 share this one sentinel). RefusalError.Path
-// names which body: HandoffSource or StateSource.
-var ErrOverCap = errors.New("input is over the configured line cap")
+// state argument — both share this one sentinel). RefusalError.Path names
+// which body: HandoffSource or StateSource. It is conform.ErrOverCap:
+// assemble.Check reports the same fault as a Finding against a handoff or
+// state file that predates the cap.
+var ErrOverCap = conform.ErrOverCap
 
 // ErrOpenChecklistItem is returned when Finish is asked to close a step
 // whose own checklist section — the section under cfg.ChecklistHeading —
@@ -71,8 +77,10 @@ var ErrOverCap = errors.New("input is over the configured line cap")
 // It travels inside a *RefusalError naming the step file and the item's
 // line. A checklist with no items, or a step file with no checklist
 // heading at all, is never refused this way — the freshly scaffolded step
-// NewStep writes is exactly that shape.
-var ErrOpenChecklistItem = errors.New("checklist item is not ticked")
+// NewStep writes is exactly that shape. It is conform.ErrOpenChecklistItem:
+// assemble.Check reports the same fault as a Finding, but only against a
+// done step — an open step's unticked item is ordinary in-progress work.
+var ErrOpenChecklistItem = conform.ErrOpenChecklistItem
 
 // ErrUnmetDependency is returned when Finish is asked to close a step whose
 // frontmatter declares a depends-on id that is not a done step —
@@ -100,8 +108,10 @@ var ErrUnmetDependency = errors.New("step depends on a step that is not finished
 // return, the same trigger assemble.Start's shortfall degrade uses), in any
 // order, and a section with an empty body is valid — a freshly scaffolded
 // state file with every section empty is accepted; only a missing heading
-// line itself is refused.
-var ErrMissingStateHeading = errors.New("state is missing a required section")
+// line itself is refused. It is conform.ErrMissingStateHeading: assemble.Check
+// reports the same fault as a Finding against a state file the write path
+// never validated.
+var ErrMissingStateHeading = conform.ErrMissingStateHeading
 
 // StateSource is the RefusalError.Path placeholder a refusal carries when
 // it concerns the bytes of Finish's state argument rather than a file

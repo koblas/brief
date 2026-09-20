@@ -257,3 +257,32 @@ func Test_render_status_text_prints_the_marker_for_a_malformed_feature(t *testin
 	require.NoError(t, err)
 	assert.Equal(t, "delta ! ! !\n", out.String())
 }
+
+// Test_RenderFindings_writes_the_profile_s_finding_shape pins the exact
+// byte shape SCENARIO-22 ships: "[SEVERITY] <path>:<line> — <problem>", one
+// line per Finding, no Fix — the write path's refusal carries one, a
+// report of a tree Finish was never asked to write does not.
+func Test_RenderFindings_writes_the_profile_s_finding_shape(t *testing.T) {
+	findings := []assemble.Finding{
+		{Severity: assemble.SeverityError, Path: "/repo/docs/specifications/demo/STEP-01.md", Line: 12, Problem: `checklist item "x" is not ticked`},
+		{Severity: assemble.SeverityWarn, Path: "/repo/docs/specifications/demo/NOTES.md", Line: 0, Problem: "state is 90 lines, over the cap of 80"},
+	}
+
+	var out bytes.Buffer
+	require.NoError(t, assemble.RenderFindings(&out, findings))
+
+	assert.Equal(t, ""+
+		"[ERROR] /repo/docs/specifications/demo/STEP-01.md:12 — checklist item \"x\" is not ticked\n"+
+		"[WARN] /repo/docs/specifications/demo/NOTES.md:0 — state is 90 lines, over the cap of 80\n",
+		out.String())
+}
+
+// Test_RenderFindings_writes_nothing_for_an_empty_slice is the SCENARIO-10
+// shape's render-side half: a conforming tree's Check result renders as
+// zero bytes, never a header or a "no findings" banner.
+func Test_RenderFindings_writes_nothing_for_an_empty_slice(t *testing.T) {
+	var out bytes.Buffer
+	require.NoError(t, assemble.RenderFindings(&out, nil))
+
+	assert.Empty(t, out.String())
+}

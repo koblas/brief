@@ -116,7 +116,7 @@ func Test_returns_a_usage_error_when_no_command_is_given(t *testing.T) {
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status", oneLine(t, &stderr))
+	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check", oneLine(t, &stderr))
 }
 
 func Test_returns_a_usage_error_when_the_command_is_unknown(t *testing.T) {
@@ -127,7 +127,7 @@ func Test_returns_a_usage_error_when_the_command_is_unknown(t *testing.T) {
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief: unknown command "bogus"; expected one of: new, start, finish, status`, oneLine(t, &stderr))
+	assert.Equal(t, `brief: unknown command "bogus"; expected one of: new, start, finish, status, check`, oneLine(t, &stderr))
 }
 
 func Test_returns_a_usage_error_when_no_type_is_given(t *testing.T) {

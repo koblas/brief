@@ -35,6 +35,17 @@
 // either way — the difference is which caller turns that failure into a
 // refusal (Start) and which caller catches it and marks a row (Status).
 //
+// Check is the backstop R18 assigns the read path: it reports every fault
+// in a feature's on-disk layout that scaffold.Finish would now refuse to
+// write over, so a tree that predates a cap or a rule is still surfaced
+// rather than silently grandfathered in. Unlike Start and Status, Check
+// walks a feature's step files itself rather than through readSteps, so
+// one step file whose frontmatter cannot be read or parsed becomes its own
+// finding rather than collapsing every other step's findings behind it.
+// Every predicate Check shares with Finish lives in
+// internal/platform/conform, the one place each is defined, since
+// assemble and scaffold cannot import each other.
+//
 // assemble imports internal/platform/config, internal/platform/stepfile
 // and internal/platform/markdown, and the standard library only. It never
 // imports internal/scaffold or internal/cli: assemble owns reading a
