@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 
 	"github.com/koblas/brief/internal/assemble"
 	"github.com/koblas/brief/internal/platform/config"
@@ -14,7 +15,7 @@ import (
 
 // startUsage is "brief start"'s help text.
 const startUsage = `Usage:
-  brief start <feature>
+  brief start [--json] <feature>
 
 Prints the next open step's id, title, acceptance criteria and checklist,
 and the decisions and constraints inherited from the feature's state
@@ -28,14 +29,30 @@ missing optional convention — the step's acceptance heading, or a state
 file heading — is named on stderr instead, one line each, and the brief
 still prints on stdout, still exiting 0.
 brief start reads; it never writes.
+
+  --json  print the brief as a single JSON document instead of markdown.
+          Every exit-0 run writes one, even when there is no open step:
+          "step" is null rather than the document being omitted, so a
+          structured caller detects completion the same way a human
+          reads the stderr notice. --json may be given before or after
+          <feature>.
 `
 
-// runStart implements "brief start <feature>".
+// runStart implements "brief start [--json] <feature>".
 func runStart(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	if err := fs.Parse(args); err != nil {
+	jsonOut := fs.Bool("json", false, "print the brief as JSON")
+
+	// --json may precede or follow <feature>, so the feature must be
+	// peeled off before Parse ever sees it, the same way finish peels
+	// off its own leading positionals — otherwise flag.FlagSet.Parse
+	// stops at the first non-flag argument and a trailing --json is
+	// left as an unconsumed "too many arguments" positional.
+	leading, flagArgs := splitLeadingPositionals(args)
+
+	if err := fs.Parse(flagArgs); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(stdout, startUsage)
 			return nil
@@ -44,7 +61,7 @@ func runStart(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		return usageError(stderr, fmt.Sprintf("brief start: %s; run 'brief start <feature>'", err))
 	}
 
-	rest := fs.Args()
+	rest := slices.Concat(leading, fs.Args())
 
 	switch {
 	case len(rest) == 0:
@@ -85,6 +102,17 @@ func runStart(ctx context.Context, wd string, args []string, stdout, stderr io.W
 		} else {
 			fmt.Fprintf(stderr, "brief start: %s: no step files yet; run 'brief new step %s' to scaffold the first one\n",
 				featureDir, feature)
+		}
+	}
+
+	// --json always writes a document, even with no open step: "step"
+	// marshals to null rather than the document being omitted, giving a
+	// structured caller the same discriminator the stderr notice above
+	// gives a human. RenderText's own nil-Step guard already writes
+	// nothing, so the non-JSON path stays exactly as before.
+	if *jsonOut {
+		if err := assemble.RenderJSON(stdout, brief); err != nil {
+			return fmt.Errorf("brief start: %w", err)
 		}
 
 		return nil

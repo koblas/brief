@@ -1,6 +1,8 @@
 package assemble
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -29,6 +31,32 @@ func RenderText(w io.Writer, b Brief) error {
 		if err := writeSection(w, section); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// RenderJSON writes b to w as one compact JSON document followed by a
+// single newline: b.Done, b.Open, b.Step, b.Inherited and b.Shortfalls
+// exactly as Brief's json tags define them, with no field omitted
+// regardless of its zero value. Unlike RenderText, RenderJSON always
+// writes a document — including when b.Step is nil, which marshals to
+// "step":null rather than producing empty output — and it never omits a
+// Section whose body is empty. '<' and '&' in a section body are left
+// unescaped: the payload is not HTML. RenderJSON encodes into a buffer
+// before writing to w, so w sees either the complete document or nothing.
+func RenderJSON(w io.Writer, b Brief) error {
+	var buf bytes.Buffer
+
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+
+	if err := enc.Encode(b); err != nil {
+		return fmt.Errorf("assemble: render: %w", err)
+	}
+
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		return fmt.Errorf("assemble: render: %w", err)
 	}
 
 	return nil

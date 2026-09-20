@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // ErrUsage marks an error caused by the invocation itself — a missing or
@@ -60,6 +61,23 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 	default:
 		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new, start, finish, status", args[0]))
 	}
+}
+
+// splitLeadingPositionals splits args into the leading run of arguments
+// that do not start with "-" and everything from the first "-"-prefixed
+// argument onward, so a flag.FlagSet — which stops parsing at the first
+// non-flag argument — only ever sees flags. finish's feature and step
+// always precede its flags, so its leading run is the whole positional
+// list; start's --json may come before or after its feature, so
+// runStart also merges flag.FlagSet.Args() into the leading run.
+func splitLeadingPositionals(args []string) ([]string, []string) {
+	for i, a := range args {
+		if strings.HasPrefix(a, "-") {
+			return args[:i], args[i:]
+		}
+	}
+
+	return args, nil
 }
 
 // usageError writes msg, followed by a single newline, to stderr and

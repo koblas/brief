@@ -2,11 +2,13 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/koblas/brief/internal/assemble"
 	"github.com/koblas/brief/internal/cli"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -507,4 +509,229 @@ func Test_returns_an_error_for_an_unknown_feature_on_start(t *testing.T) {
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 	assert.NotEmpty(t, stderr.String())
+}
+
+// Test_start_prints_the_brief_as_json_when_asked is 15's core case:
+// --json against newStartFixture's open-step feature decodes to the same
+// fields RenderText already proves through Test_prints_the_brief_and_writes_nothing_to_stderr,
+// with stderr still empty and the command still succeeding.
+func Test_start_prints_the_brief_as_json_when_asked(t *testing.T) {
+	wd := newStartFixture(t, "open")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	var got assemble.Brief
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got))
+
+	require.NotNil(t, got.Step)
+	assert.Equal(t, 0, got.Done)
+	assert.Equal(t, 1, got.Open)
+	assert.Equal(t, "SCENARIO-01", got.Step.ID)
+	assert.Equal(t, "the acceptance criteria", got.Step.Acceptance.Body)
+	assert.Equal(t, "- [ ] do the thing", got.Step.Checklist.Body)
+	assert.Equal(t, "some decision", got.Inherited[0].Body)
+}
+
+// Test_start_json_emits_a_null_step_for_a_completed_feature asserts the
+// raw stdout bytes carry "step":null and a non-zero "done" for a feature
+// whose only step is done — unmarshalling would collapse null and absent
+// into the same value, so the claim is made on bytes. The SCENARIO-12
+// "feature is complete" notice still lands on stderr.
+func Test_start_json_emits_a_null_step_for_a_completed_feature(t *testing.T) {
+	wd := newStartFixture(t, "done")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), `"step":null`)
+	assert.Contains(t, stdout.String(), `"done":1`)
+	assert.Contains(t, stderr.String(), "feature is complete")
+}
+
+// Test_start_json_emits_zero_counts_for_a_feature_with_no_step_files is
+// R14's second discriminated case under --json: a feature directory with
+// no step files at all still writes a document, with "done" and "open"
+// both zero so a structured caller can tell it apart from a completed
+// feature — both share "step":null.
+func Test_start_json_emits_zero_counts_for_a_feature_with_no_step_files(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	state := "## Binding decisions\n\nsome decision\n\n" +
+		"## Left unbuilt\n\nsomething left\n\n" +
+		"## Traps\n\na trap\n\n" +
+		"## Open debts\n\na debt\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+	spec := "# demo\n\n## BDD Acceptance Progress\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), `"step":null`)
+	assert.Contains(t, stdout.String(), `"done":0`)
+	assert.Contains(t, stdout.String(), `"open":0`)
+	assert.Contains(t, stderr.String(), "no step files yet")
+}
+
+// Test_start_json_keeps_stdout_parseable_when_a_convention_is_missing is
+// SCENARIO-14's shortfall case under --json: the shortfall line still
+// lands on stderr, stdout stays a single parseable document that also
+// carries the shortfall.
+func Test_start_json_keeps_stdout_parseable_when_a_convention_is_missing(t *testing.T) {
+	wd := newStartFixture(t, "open")
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Implementation Plan\n\n" +
+		"- [ ] do the thing\n\n" +
+		"## Handoff\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "## Scenario")
+
+	stdoutLines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
+	require.Len(t, stdoutLines, 1)
+
+	var got assemble.Brief
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got))
+	assert.False(t, got.Step.Acceptance.Found)
+	require.Len(t, got.Shortfalls, 1)
+	assert.Contains(t, got.Shortfalls[0].Path, "SCENARIO-01.md")
+}
+
+// Test_start_json_writes_no_bytes_to_stdout_when_it_refuses asserts a
+// refusal under --json is still a plain R14a stderr line at exit 1, with
+// zero stdout bytes and no JSON envelope: runStart calls Start before it
+// renders anything, so a refusal never reaches RenderJSON.
+func Test_start_json_writes_no_bytes_to_stdout_when_it_refuses(t *testing.T) {
+	t.Run("malformed feature", func(t *testing.T) {
+		wd := newStartFixture(t, "open")
+		featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+		spec := "# demo\n\nno progress list here\n"
+		require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
+
+		assert.Equal(t, 1, cli.ExitCode(err))
+		assert.Zero(t, stdout.Len())
+		lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+		require.Len(t, lines, 1)
+		assert.NotContains(t, lines[0], "(no files changed)")
+	})
+
+	t.Run("unknown feature", func(t *testing.T) {
+		wd := t.TempDir()
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"start", "--json", "ghost"}, nil, &stdout, &stderr)
+
+		assert.Equal(t, 1, cli.ExitCode(err))
+		assert.Zero(t, stdout.Len())
+		assert.NotEmpty(t, stderr.String())
+	})
+}
+
+// Test_start_json_still_reports_usage_errors asserts --json does not
+// change usage-error handling: a missing feature, and an undefined flag
+// alongside --json, both still exit 2 with empty stdout.
+func Test_start_json_still_reports_usage_errors(t *testing.T) {
+	t.Run("no feature given", func(t *testing.T) {
+		wd := t.TempDir()
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"start", "--json"}, nil, &stdout, &stderr)
+
+		assert.Equal(t, 2, cli.ExitCode(err))
+		assert.Empty(t, stdout.String())
+	})
+
+	t.Run("undefined flag alongside json", func(t *testing.T) {
+		wd := t.TempDir()
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"start", "--bogus", "--json", "demo"}, nil, &stdout, &stderr)
+
+		assert.Equal(t, 2, cli.ExitCode(err))
+		assert.Empty(t, stdout.String())
+	})
+}
+
+// Test_start_accepts_the_json_flag_after_the_feature asserts --json works
+// in either argument position: "demo --json" produces byte-identical
+// output to "--json demo".
+func Test_start_accepts_the_json_flag_after_the_feature(t *testing.T) {
+	wdBefore := newStartFixture(t, "open")
+	var beforeOut, beforeErr bytes.Buffer
+	require.NoError(t, cli.Run(t.Context(), wdBefore, []string{"start", "--json", "demo"}, nil, &beforeOut, &beforeErr))
+
+	wdAfter := newStartFixture(t, "open")
+	var afterOut, afterErr bytes.Buffer
+
+	err := cli.Run(t.Context(), wdAfter, []string{"start", "demo", "--json"}, nil, &afterOut, &afterErr)
+
+	require.NoError(t, err)
+	assert.Equal(t, beforeOut.String(), afterOut.String())
+	assert.Equal(t, beforeErr.String(), afterErr.String())
+}
+
+// Test_start_json_help_prints_usage_not_json asserts --json --help prints
+// startUsage to stdout rather than a JSON document — help wins regardless
+// of --json's position or value.
+func Test_start_json_help_prints_usage_not_json(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "--json", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.Contains(t, stdout.String(), "brief start reads; it never writes.")
+}
+
+// Test_start_without_json_is_byte_identical_to_the_text_brief pins that
+// 15 left the non-JSON path untouched: the same fixture, without --json,
+// still produces exactly the markdown RenderText produced before this
+// scenario.
+func Test_start_without_json_is_byte_identical_to_the_text_brief(t *testing.T) {
+	wd := newStartFixture(t, "open")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.Equal(t, ""+
+		"SCENARIO-01 — 0 done, 1 open\n\n"+
+		"# SCENARIO-01 Demo step\n\n"+
+		"## Scenario\n\n"+
+		"the acceptance criteria\n\n"+
+		"## Implementation Plan\n\n"+
+		"- [ ] do the thing\n\n"+
+		"## Binding decisions\n\n"+
+		"some decision\n\n"+
+		"## Left unbuilt\n\n"+
+		"something left\n\n"+
+		"## Traps\n\n"+
+		"a trap\n\n"+
+		"## Open debts\n\n"+
+		"a debt\n",
+		stdout.String())
 }

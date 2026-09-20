@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/scaffold"
@@ -113,20 +112,6 @@ func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, s
 // finishInvocation is the invocation string every "brief finish" usage
 // error names as how to fix it.
 const finishInvocation = "brief finish <feature> <step> --handoff <path> --state <path>"
-
-// splitLeadingPositionals splits args into the leading run of arguments
-// that do not start with "-" and everything from the first "-"-prefixed
-// argument onward, so a flag.FlagSet — which stops parsing at the first
-// non-flag argument — only ever sees flags.
-func splitLeadingPositionals(args []string) ([]string, []string) {
-	for i, a := range args {
-		if strings.HasPrefix(a, "-") {
-			return args[:i], args[i:]
-		}
-	}
-
-	return args, nil
-}
 
 // sourceLocator returns the R14a locator for one of finish's --handoff or
 // --state arguments: path unchanged, or "<stdin>" when path is "-", so a

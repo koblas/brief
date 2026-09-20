@@ -828,7 +828,7 @@ Post-crossover — built through the tool:
 - [x] SCENARIO-12: A completed feature has no next step
 - [x] SCENARIO-13: Start refuses a malformed feature rather than assembling half a brief
 - [x] SCENARIO-14: Start degrades on a missing optional convention and says so
-- [ ] SCENARIO-15: Start emits a structured payload on request
+- [x] SCENARIO-15: Start emits a structured payload on request
 - [ ] SCENARIO-16: Finishing a done step with different inputs is refused
 - [ ] SCENARIO-17: An over-cap handoff is refused and nothing lands
 - [ ] SCENARIO-18: An over-cap state body is refused and nothing lands

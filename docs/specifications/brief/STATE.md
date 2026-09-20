@@ -1,6 +1,6 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..14. Last updated by SCENARIO-14.
+Scenarios complete: SCENARIO-01..15. Last updated by SCENARIO-15.
 
 ## Binding decisions
 
@@ -26,9 +26,9 @@ Scenarios complete: SCENARIO-01..14. Last updated by SCENARIO-14.
 - **`status` lives on `(*assemble.Server).Status`, rendered by `assemble.RenderStatusText`** —
   `assemble` owns reading, `scaffold` owns writing; `next`/`show`/`handoff`/`state get` belong
   here too. Line: `<name> <done>/<total> <next> <blocked>\n`, no header/legend, `-` when
-  `Next` is empty. `Status` returns `nil`, never `[]`, for zero features (15's `--json` needs
-  `null`). A missing feature root is zero features, not an error; every other open/list
-  failure, or an invalid step-file pattern, still propagates. (09, 10)
+  `Next` is empty. `Status` returns `nil`, never `[]`, for zero features. A missing feature
+  root is zero features, not an error; every other open/list failure, or an invalid step-file
+  pattern, still propagates. (09, 10)
 - **A malformed feature degrades into a row, it is never dropped.** `FeatureStatus.Problem
   *Problem{Path, Detail, Fix}`, nil when clean. Tolerance lives in `featureStatus`, never
   `readSteps` (shared with `Start`, which stays intolerant). One Problem per feature, first
@@ -62,14 +62,31 @@ Scenarios complete: SCENARIO-01..14. Last updated by SCENARIO-14.
   `cfg.OptionalConventions` stays unconsumed — no vocabulary defines an entry, and no
   Gherkin needs one; the conventions in effect are exactly `cfg.AcceptanceHeading` and the
   four `cfg.StateHeadings`. (14)
+- **`--json` is on `start` and nowhere else** — `status --json` and `--json` on
+  `next`/`show`/`state get`/`handoff` are deferred, not missed (see *Left unbuilt*). The
+  payload is `json.Marshal` of `assemble.Brief`/`Step`/`Section`/`Shortfall`, every field
+  tagged lowercase, **`omitempty` on nothing**: nil marshals to `null` uniformly
+  (`"step":null`, `"shortfalls":null`), and `done`/`open` survive at `0` because that is
+  what separates a complete feature (`2`/`0`) from one with no step files (`0`/`0`) —
+  `"step":null` alone can't. `assemble.RenderJSON` buffers through `json.NewEncoder` with
+  `SetEscapeHTML(false)`, one `Write`, and **always** writes a document — unlike
+  `RenderText`, which writes nothing when `Step` is nil. `cli.runStart` gates only the
+  renderer choice on the flag; the shortfall/complete/no-steps stderr notices are written
+  unconditionally, same as before `--json` existed. `start` accepts `--json` before or after
+  the feature: `splitLeadingPositionals` (moved to `cli.go`, shared with `finish`) gives the
+  leading run, and `runStart` merges it with `fs.Parse`'s own `fs.Args()` via
+  `slices.Concat` — `finish` does **not** need this merge, because its feature and step
+  always precede its flags; do not backport it there without a reason. A refusal under
+  `--json` is still a plain R14a stderr line at exit 1, no JSON envelope — `Start` fails
+  before anything is rendered, so stdout is zero bytes by construction. (15)
 
 ## Left unbuilt
 
 - Differing-inputs refusal (16), caps (17/18), state-body heading check (19), open-checklist
   refusal (20), unfinished-`depends-on` refusal (21).
-- `assemble.Server.Next`/`.Show`/`.Handoff`/`.StateGet`, `--json` for status and start (15,
-  including `Brief.Shortfalls`'s JSON shape — no struct tags or marshal test exist yet),
-  `markdown.Headings` + checklist parser (20/22), R13 truncation, R9's diff/finding output,
+- `assemble.Server.Next`/`.Show`/`.Handoff`/`.StateGet`, `status --json` and `--json` on
+  `next`/`show`/`state get`/`handoff` (deferred by *Decisions taken* 3 / open question 8, not
+  missed — 15), `markdown.Headings` + checklist parser (20/22), R9's diff/finding output,
   `FinishResult`.
 - `scaffold.HandoffSource` / `cli/finish.go`'s `--handoff` source upgrade — deleted; 17 re-adds.
   `HandoffPattern.Number` — not built; `check` (22) and the R6 synthesis need it.
@@ -80,6 +97,9 @@ Scenarios complete: SCENARIO-01..14. Last updated by SCENARIO-14.
 - `cfg.OptionalConventions` consumption, and any convention-name vocabulary — no owner. An
   empty configured heading as an off-switch (`acceptance-heading: ""`) is not built either:
   `markdown.Section` would still match the first blank line, so `Found` stays true. (14)
+- No JSON error/refusal envelope, no `"feature"` key in the JSON payload, no schema-version
+  key. Top-level `usage` in `cli.go` still lists `finish`'s flags inline but not `start
+  --json` — deliberately untouched, out of 15's scope. (15)
 
 ## Traps
 
@@ -107,13 +127,12 @@ Scenarios complete: SCENARIO-01..14. Last updated by SCENARIO-14.
   by hand. (11, 13)
 - `brief start <f> | wc -c == 0` is exit-code-conditional — a missing/malformed feature also
   gives 0 stdout bytes, at **exit 1**; the scriptable "complete" test is `exit 0 && wc -c ==
-  0`. `"step": null` alone can't distinguish complete from zero-steps — 15 needs `done`/`open`
-  (`2`/`0` vs `0`/`0`) too. (12)
+  0`. Under `--json`, stdout is **never** empty on an exit-0 run: the structured completion
+  test is `"step":null` plus `done`/`open` (`2`/`0` vs `0`/`0`), not byte count. (12, 15)
 - **A plan's fixture-update list can under-count.** 13's plan named 6 fixtures needing a
   conforming specification; 4 more needed one and weren't listed — caught only by grepping
-  every test writing `cfg.StateFile` with no nearby `cfg.SpecificationFile` write. 14's own
-  sweep (grepping every `stderr`-empty assertion reachable through `start`) found nothing
-  under-counted, but the method — enumerate, never estimate — is what to repeat. (13, 14)
+  every test writing `cfg.StateFile` with no nearby `cfg.SpecificationFile` write. The method
+  — enumerate, never estimate — is what to repeat. (13, 14)
 - **13's refusal and 14's shortfall can share a `Detail` string** (`no "## X" heading
   found`), so a test asserting only `Contains` on that text cannot tell them apart — always
   also assert exit code and stdout non-emptiness. `RenderText`'s omit-on-empty-body rule
@@ -121,6 +140,14 @@ Scenarios complete: SCENARIO-01..14. Last updated by SCENARIO-14.
   `Section.Found`. A freshly scaffolded feature (`new feature` + `new step`) is not
   shortfall-free: `stepSkeleton` writes no acceptance heading, so `start` on it now prints
   one stderr line — intended, not a bug in `stepSkeleton`. (14)
+- **The struct tags in `brief.go` are the wire contract.** Renaming a `Brief`/`Step`/
+  `Section`/`Shortfall` field silently changes user-visible JSON unless the tag moves with
+  it; without a tag Go falls back to the bare Go field name. `SetEscapeHTML(false)` is
+  deliberate — a plain `json.Marshal` rewrites `<`/`&` in markdown bodies to
+  `<`/`&`. `start --json --help` prints usage text, not JSON — intended.
+  Unmarshalling **collapses** null-vs-absent and absent-vs-zero, so the four load-bearing
+  claims (`step`, `done`/`open`, `shortfalls`, `found`) are asserted on raw bytes, not
+  decoded values — do not "clean up" those assertions into unmarshal-and-compare. (15)
 
 ## Open debts
 
@@ -141,6 +168,10 @@ Scenarios complete: SCENARIO-01..14. Last updated by SCENARIO-14.
   unless re-opened by its own scenario. (11)
 - The `config.InvalidConfigError` refusal still carries the `(no files changed)` tail on a
   read command (`start`), contradicting R14a's read-refusal rule. Pre-existing, unowned.
+- **R13's output budget and truncation is unowned, and must never truncate a `--json`
+  payload** — a line-boundary cut yields an unparseable document, so the eventual owner has
+  to skip or refuse a structured payload rather than trim one. `cfg.DefaultOutputBudgetBytes`
+  (8192) remains unconsumed. (15)
 
 ## Crossover note
 
