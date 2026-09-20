@@ -23,7 +23,10 @@ prints nothing and says so on stderr instead, still exiting 0.
 brief start refuses, naming the file and the fix, rather than print a
 partial brief: a missing or unreadable specification or state file, an
 unclosed fenced code block in either, a specification with no progress
-heading, or a next step whose frontmatter has no id or no checklist.
+heading, or a next step whose frontmatter has no id or no checklist. A
+missing optional convention — the step's acceptance heading, or a state
+file heading — is named on stderr instead, one line each, and the brief
+still prints on stdout, still exiting 0.
 brief start reads; it never writes.
 `
 
@@ -67,6 +70,10 @@ func runStart(ctx context.Context, wd string, args []string, stdout, stderr io.W
 	brief, err := srv.Start(ctx, feature)
 	if err != nil {
 		return renderRefusal(stderr, "start", err)
+	}
+
+	for _, s := range brief.Shortfalls {
+		fmt.Fprintf(stderr, "brief start: %s: %s; %s\n", s.Path, flattenOneLine(s.Detail), flattenOneLine(s.Fix))
 	}
 
 	if brief.Step == nil {

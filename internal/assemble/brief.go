@@ -25,11 +25,26 @@ type Section struct {
 
 // Brief is everything Start assembles for one feature: the done/open
 // counts across every step file, the next open step (nil when every step
-// is done), and every state-file section in the order the configuration
-// requires them.
+// is done), every state-file section in the order the configuration
+// requires them, and any optional convention Start found missing without
+// refusing over it.
 type Brief struct {
-	Done      int
-	Open      int
-	Step      *Step
-	Inherited []Section
+	Done       int
+	Open       int
+	Step       *Step
+	Inherited  []Section
+	Shortfalls []Shortfall
+}
+
+// Shortfall names one optional convention Start found missing from a
+// feature it still assembled a Brief for: an absent acceptance heading in
+// the briefed step, or an absent heading in the state file. Path is the
+// absolute path of the file the convention belongs to, Detail is what is
+// missing, and Fix is the one-line remedy. Unlike Problem, a Shortfall
+// never stops Start from returning a Brief — cli/start.go writes one
+// stderr line per entry and still prints the brief on stdout.
+type Shortfall struct {
+	Path   string
+	Detail string
+	Fix    string
 }

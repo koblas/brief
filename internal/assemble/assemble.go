@@ -54,7 +54,11 @@ type stepEntry struct {
 // in that order — specification, then state file, then step files, then
 // the briefed step — and the first failure wins, so Start never returns a
 // Brief that silently omits inherited context or a malformed next step.
-// Start reads only; it writes nothing to disk.
+// An absent acceptance heading in the briefed step, or an absent heading
+// in the state file, does not refuse: it is appended to Brief.Shortfalls
+// instead, one entry per absent heading, acceptance first then the state
+// headings in cfg.StateHeadings.Ordered() order. Start reads only; it
+// writes nothing to disk.
 func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
 
@@ -134,7 +138,29 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 
 		brief.Step = step
 
+		if !step.Acceptance.Found {
+			brief.Shortfalls = append(brief.Shortfalls, Shortfall{
+				Path:   stepPath,
+				Detail: fmt.Sprintf("no %q heading found", s.cfg.AcceptanceHeading),
+				Fix:    fmt.Sprintf("add a %q heading to the step file", s.cfg.AcceptanceHeading),
+			})
+		}
+
 		break
+	}
+
+	statePath := filepath.Join(featurePath, s.cfg.StateFile)
+
+	for _, section := range brief.Inherited {
+		if section.Found {
+			continue
+		}
+
+		brief.Shortfalls = append(brief.Shortfalls, Shortfall{
+			Path:   statePath,
+			Detail: fmt.Sprintf("no %q heading found", section.Heading),
+			Fix:    fmt.Sprintf("add a %q heading to the state file", section.Heading),
+		})
 	}
 
 	return brief, nil

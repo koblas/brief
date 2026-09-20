@@ -73,6 +73,203 @@ func Test_start_refuses_a_specification_with_no_progress_heading(t *testing.T) {
 	assert.Contains(t, lines[0], "## BDD Acceptance Progress")
 }
 
+// Test_start_names_an_absent_acceptance_heading_and_still_prints_the_brief
+// is SCENARIO-14's core case: a step file missing only its "## Scenario"
+// heading degrades rather than refuses. It reuses newStartFixture for a
+// baseline run, then overwrites SCENARIO-01.md with the same content minus
+// its acceptance section — never editing newStartFixture itself, which
+// every other test in this file shares.
+func Test_start_names_an_absent_acceptance_heading_and_still_prints_the_brief(t *testing.T) {
+	baselineWD := newStartFixture(t, "open")
+	var baselineStdout, baselineStderr bytes.Buffer
+	require.NoError(t, cli.Run(t.Context(), baselineWD, []string{"start", "demo"}, nil, &baselineStdout, &baselineStderr))
+
+	wd := newStartFixture(t, "open")
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Implementation Plan\n\n" +
+		"- [ ] do the thing\n\n" +
+		"## Handoff\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], filepath.Join(featureDir, "SCENARIO-01.md"))
+
+	wantStdout := strings.Replace(baselineStdout.String(), "\n## Scenario\n\nthe acceptance criteria\n", "", 1)
+	assert.Equal(t, wantStdout, stdout.String())
+}
+
+// Test_start_names_an_absent_state_heading_and_still_prints_the_brief is the
+// state-file twin of the acceptance case above: STATE.md is overwritten
+// without its "## Traps" section, and the brief still prints minus that
+// one block.
+func Test_start_names_an_absent_state_heading_and_still_prints_the_brief(t *testing.T) {
+	baselineWD := newStartFixture(t, "open")
+	var baselineStdout, baselineStderr bytes.Buffer
+	require.NoError(t, cli.Run(t.Context(), baselineWD, []string{"start", "demo"}, nil, &baselineStdout, &baselineStderr))
+
+	wd := newStartFixture(t, "open")
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	state := "## Binding decisions\n\nsome decision\n\n" +
+		"## Left unbuilt\n\nsomething left\n\n" +
+		"## Open debts\n\na debt\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], filepath.Join(featureDir, "STATE.md"))
+
+	wantStdout := strings.Replace(baselineStdout.String(), "\n## Traps\n\na trap\n", "", 1)
+	assert.Equal(t, wantStdout, stdout.String())
+}
+
+// Test_start_names_every_absent_convention_on_its_own_line is the
+// one-line-per-shortfall and ordering proof: STATE.md is replaced by prose
+// carrying none of the four required headings and the step's "## Scenario"
+// heading is dropped too, so all five conventions are missing at once.
+// Order is pinned: acceptance, then binding decisions, left unbuilt,
+// traps, open debts — the same order RenderText emits sections in.
+func Test_start_names_every_absent_convention_on_its_own_line(t *testing.T) {
+	baselineWD := newStartFixture(t, "open")
+	var baselineStdout, baselineStderr bytes.Buffer
+	require.NoError(t, cli.Run(t.Context(), baselineWD, []string{"start", "demo"}, nil, &baselineStdout, &baselineStderr))
+
+	wd := newStartFixture(t, "open")
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Implementation Plan\n\n" +
+		"- [ ] do the thing\n\n" +
+		"## Handoff\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte("just some prose, no headings here\n"), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	require.Len(t, lines, 5)
+	assert.Contains(t, lines[0], filepath.Join(featureDir, "SCENARIO-01.md"))
+	assert.Contains(t, lines[0], "## Scenario")
+	assert.Contains(t, lines[1], filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, lines[1], "## Binding decisions")
+	assert.Contains(t, lines[2], filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, lines[2], "## Left unbuilt")
+	assert.Contains(t, lines[3], filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, lines[3], "## Traps")
+	assert.Contains(t, lines[4], filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, lines[4], "## Open debts")
+
+	wantStdout := baselineStdout.String()
+	for _, block := range []string{
+		"\n## Scenario\n\nthe acceptance criteria\n",
+		"\n## Binding decisions\n\nsome decision\n",
+		"\n## Left unbuilt\n\nsomething left\n",
+		"\n## Traps\n\na trap\n",
+		"\n## Open debts\n\na debt\n",
+	} {
+		wantStdout = strings.Replace(wantStdout, block, "", 1)
+	}
+
+	assert.Equal(t, wantStdout, stdout.String())
+}
+
+// Test_start_says_nothing_about_a_present_but_empty_convention is the
+// !Found vs Body == "" discriminator: every heading is present but carries
+// no body, differing from the previous test in exactly one variable — the
+// headings are there. No shortfall may fire.
+func Test_start_says_nothing_about_a_present_but_empty_convention(t *testing.T) {
+	wd := newStartFixture(t, "open")
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Scenario\n\n" +
+		"## Implementation Plan\n\n" +
+		"- [ ] do the thing\n\n" +
+		"## Handoff\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(step), 0o600))
+	state := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+}
+
+// Test_start_on_a_freshly_scaffolded_feature_names_only_the_absent_acceptance_heading
+// is the end-to-end proof of the !Found rule on the shape "new feature" and
+// "new step" actually produce: stateSkeleton writes all four state
+// headings bare, so only the step's missing acceptance heading may fire —
+// a Body == "" implementation would emit five lines here instead of one.
+func Test_start_on_a_freshly_scaffolded_feature_names_only_the_absent_acceptance_heading(t *testing.T) {
+	wd := t.TempDir()
+	var discard bytes.Buffer
+
+	require.NoError(t, cli.Run(t.Context(), wd, []string{"new", "feature", "demo"}, nil, &discard, &discard))
+	require.NoError(t, cli.Run(t.Context(), wd, []string{"new", "step", "demo"}, nil, &discard, &discard))
+
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.NotEmpty(t, stdout.String())
+
+	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "## Scenario")
+}
+
+// Test_start_still_refuses_a_state_file_whose_fence_is_unterminated is the
+// control arm keeping SCENARIO-13's refusal and SCENARIO-14's degrade
+// apart: the same state file, present and readable, with one variable
+// different from a conforming fixture — an unclosed fence instead of an
+// absent heading. Green on arrival: SCENARIO-13 already refuses this.
+func Test_start_still_refuses_a_state_file_whose_fence_is_unterminated(t *testing.T) {
+	wd := newStartFixture(t, "open")
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	state := "```\nunterminated\n## Binding decisions\n\nsome decision\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], filepath.Join(featureDir, "STATE.md"))
+}
+
 func Test_prints_the_brief_and_writes_nothing_to_stderr(t *testing.T) {
 	wd := newStartFixture(t, "open")
 	var stdout, stderr bytes.Buffer

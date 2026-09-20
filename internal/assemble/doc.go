@@ -16,11 +16,13 @@
 // unterminated fence; or a briefed step whose frontmatter carries no "id:"
 // or whose checklist heading is absent. A step file whose frontmatter is
 // absent or does not parse also refuses, wrapping whatever sentinel
-// readSteps produced, including stepfile.ErrNoFrontmatter. An optional
-// convention falling short of one of these — an absent acceptance heading,
-// an absent state heading, or a repository-configured optional convention —
-// is not among them and does not refuse; that degradation belongs to a
-// later scenario. A step's frontmatter is parsed before any markdown
+// readSteps produced, including stepfile.ErrNoFrontmatter. An absent
+// acceptance heading in the briefed step, or an absent heading in the
+// state file, does not refuse: Start reports each as a Shortfall in
+// Brief.Shortfalls and still returns a Brief carrying every other section.
+// A Shortfall fires on a heading's absence, never on an empty body — a
+// heading present with nothing under it stays conforming. A step's
+// frontmatter is parsed before any markdown
 // extraction runs, so a "#" character inside a YAML value is never mistaken
 // for a heading.
 //

@@ -685,6 +685,34 @@ func Test_a_step_with_an_empty_but_present_checklist_stays_conforming(t *testing
 	assert.Empty(t, brief.Step.Checklist.Body)
 }
 
+// Test_start_reports_an_absent_acceptance_heading_as_a_shortfall is
+// SCENARIO-14's degrade case: STEP-03's acceptance heading is dropped,
+// single-variable from Test_refuses_the_briefed_step_when_its_frontmatter_carries_no_id's
+// fixture, but Start still returns a Brief rather than a *RefusalError.
+func Test_start_reports_an_absent_acceptance_heading_as_a_shortfall(t *testing.T) {
+	root, cfg := newFixture(t)
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	step := "---\n" +
+		"id: STEP-03\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# STEP-03 Assemble the brief\n\n" +
+		cfg.ChecklistHeading + "\n\n- [ ] task\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-03.md"), []byte(step), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	brief, err := srv.Start(t.Context(), "demo")
+
+	require.NoError(t, err)
+	require.NotNil(t, brief.Step)
+	assert.False(t, brief.Step.Acceptance.Found)
+	require.Len(t, brief.Shortfalls, 1)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-03.md"), brief.Shortfalls[0].Path)
+	assert.Contains(t, brief.Shortfalls[0].Detail, cfg.AcceptanceHeading)
+}
+
 func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
