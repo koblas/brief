@@ -16,10 +16,14 @@ import (
 // Finish closes feature's step: it writes handoff to that step's own
 // handoff file, replaces the feature's state file with state, then marks
 // the step file's frontmatter status "done" (R8, R21). handoff is checked
-// against cfg.HandoffCapLines and state against cfg.StateCapLines; neither
-// argument is checked against a required-heading schema, and neither is
-// spliced into an existing document — every write here is a whole-file
-// write, so none has a boundary inferred from prose to get wrong.
+// against cfg.HandoffCapLines; state is checked against cfg.StateCapLines
+// and against cfg.StateHeadings, which it must carry all four of (any
+// order, an empty section valid) — the write-side counterpart of
+// assemble.Start's read-side shortfall degrade. handoff carries no such
+// heading check: it is written verbatim to its own file and nothing reads
+// it structurally. Neither argument is spliced into an existing document —
+// every write here is a whole-file write, so none has a boundary inferred
+// from prose to get wrong.
 //
 // The handoff file is named stepPattern.ID(n) + cfg.HandoffFileSuffix
 // (stepfile.CompileHandoff); a "## Handoff" section left behind in a step
@@ -39,7 +43,11 @@ import (
 // ahead of it; the replacement state body then closes every fence it opens
 // (ErrUnterminatedFence, named against StateSource) — state's configured
 // headings are read by a terminator scan on every later Start, so an open
-// fence there is not merely untidy, it is unreadable; the specification is
+// fence there is not merely untidy, it is unreadable; the replacement state
+// body then carries a section for every one of cfg.StateHeadings.Ordered()'s
+// four headings (ErrMissingStateHeading, named against StateSource,
+// checkArgumentHeadings) — checked only after the fence closes, since an
+// open fence would leave a heading after it unreadable; the specification is
 // readable; the specification carries the
 // configured progress heading and an entry for step; the state file exists
 // as a regular file. Computing the frontmatter's "status: done" line during
@@ -159,6 +167,10 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	}
 
 	if refusal := checkArgumentFence(state, StateSource, "state"); refusal != nil {
+		return refusal
+	}
+
+	if refusal := checkArgumentHeadings(state, StateSource, "state", s.cfg.StateHeadings); refusal != nil {
 		return refusal
 	}
 
@@ -310,6 +322,35 @@ func checkArgumentCap(body []byte, source, label string, limit int) *RefusalErro
 			label, limit, label),
 		Err: ErrOverCap,
 	}
+}
+
+// checkArgumentHeadings refuses when body — Finish's state argument, named
+// for the error message by label — carries no section for one of headings'
+// four entries (in headings.Ordered() order). The trigger is
+// markdown.Section's found return, never section content: a section with
+// nothing under it is valid, and heading order in body is not checked, only
+// heading presence — assemble.stateSections reads each configured heading
+// by name, so an order requirement here would have no consumer. It names
+// source (StateSource) rather than any file, matching checkArgumentFence
+// and checkArgumentCap. Only the first missing heading is reported: unlike
+// assemble.Start's shortfall degrade, which completes and can report every
+// shortfall it finds, Finish is a refusal that stops at the first fault. It
+// returns nil when every configured heading is present.
+func checkArgumentHeadings(body []byte, source, label string, headings config.StateHeadings) *RefusalError {
+	for _, heading := range headings.Ordered() {
+		if _, found := markdown.Section(string(body), heading); found {
+			continue
+		}
+
+		return &RefusalError{
+			Path:    source,
+			Problem: fmt.Sprintf("%s is missing the %q section", label, heading),
+			Fix:     fmt.Sprintf("add a %q heading to the %s body — an empty section is valid — and retry", heading, label),
+			Err:     ErrMissingStateHeading,
+		}
+	}
+
+	return nil
 }
 
 // writeFailure wraps a write-path error with the same invocation that

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,7 +16,10 @@ import (
 
 // bodyOfLines returns a handoff or state body of exactly n lines, each
 // distinct so a truncation bug cannot hide behind a repeated one, with a
-// trailing newline.
+// trailing newline. It carries no configured heading, so it is only used
+// where the state argument's caps or fence are under test, never where it
+// must also pass SCENARIO-19's heading check — see stateBodyOfLines for
+// that case.
 func bodyOfLines(n int) []byte {
 	lines := make([]string, n)
 	for i := range lines {
@@ -23,6 +27,27 @@ func bodyOfLines(n int) []byte {
 	}
 
 	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+// stateBodyOfLines returns a state body of exactly n lines that carries
+// cfg's four configured headings, each with distinct content, padded with
+// distinct filler lines after the last one so a truncation bug cannot hide
+// behind a repeated line — bodyOfLines's counterpart for a state argument
+// that must also pass SCENARIO-19's heading check. n must be at least 12
+// (three lines per heading); every caller in this package uses cfg's own
+// StateCapLines or one more, both comfortably above that floor.
+func stateBodyOfLines(cfg config.Config, n int) []byte {
+	var lines []string
+
+	for i, h := range cfg.StateHeadings.Ordered() {
+		lines = append(lines, h, "", fmt.Sprintf("content %d", i))
+	}
+
+	for i := 0; len(lines) < n; i++ {
+		lines = append(lines, fmt.Sprintf("filler line %d", i))
+	}
+
+	return []byte(strings.Join(lines[:n], "\n") + "\n")
 }
 
 func Test_refuses_a_handoff_one_line_over_the_configured_cap(t *testing.T) {
@@ -144,7 +169,7 @@ func Test_refuses_a_state_body_one_line_over_the_configured_cap(t *testing.T) {
 func Test_accepts_a_state_body_of_exactly_the_configured_cap(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
-	atCap := bodyOfLines(fx.cfg.StateCapLines)
+	atCap := stateBodyOfLines(fx.cfg, fx.cfg.StateCapLines)
 
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, atCap)
 
@@ -158,7 +183,7 @@ func Test_accepts_a_state_body_of_exactly_the_configured_cap(t *testing.T) {
 func Test_accepts_a_state_body_of_exactly_the_configured_cap_with_no_trailing_newline(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
-	atCap := bodyOfLines(fx.cfg.StateCapLines)
+	atCap := stateBodyOfLines(fx.cfg, fx.cfg.StateCapLines)
 	atCap = []byte(strings.TrimSuffix(string(atCap), "\n"))
 
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, atCap)

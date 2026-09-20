@@ -65,6 +65,15 @@ var ErrAlreadyFinished = errors.New("step already finished with different inputs
 // names which body: HandoffSource or StateSource.
 var ErrOverCap = errors.New("input is over the configured line cap")
 
+// ErrMissingStateHeading is returned when a replacement state body given to
+// Finish carries no section for one of cfg.StateHeadings.Ordered()'s four
+// required headings. The check is presence-only (markdown.Section's found
+// return, the same trigger assemble.Start's shortfall degrade uses), in any
+// order, and a section with an empty body is valid — a freshly scaffolded
+// state file with every section empty is accepted; only a missing heading
+// line itself is refused.
+var ErrMissingStateHeading = errors.New("state is missing a required section")
+
 // StateSource is the RefusalError.Path placeholder a refusal carries when
 // it concerns the bytes of Finish's state argument rather than a file
 // Finish opened itself. Finish never learns where those bytes came from —

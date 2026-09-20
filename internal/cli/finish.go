@@ -24,7 +24,9 @@ from stdin; it may be given for at most one of --handoff and --state.
 
   --handoff <path>  the step's handoff body, written to its own file
   --state <path>    the COMPLETE replacement body for the state file; it
-                     replaces the file, it is never appended to
+                     replaces the file, it is never appended to; it must
+                     carry the configured state headings, though a section
+                     may be empty
 `
 
 // runFinish implements "brief finish <feature> <step> --handoff <path>

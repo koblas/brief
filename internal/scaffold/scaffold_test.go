@@ -21,8 +21,11 @@ import (
 // test proves the value is read from config rather than tripping on an
 // unrelated fixture body. StateCapLines is 20 — distinct from
 // HandoffCapLines and from config.Default's 80, and strictly above the
-// 16-line maximum of every state body this package's tests hand to Finish
-// (newStateBody), for the same reason.
+// 16-line maximum every state body this package's non-cap tests hand to
+// Finish (newStateBody, oldStateBody, differentStateBody), for the same
+// reason. The cap and heading tests build their own boundary-sized bodies
+// (bodyOfLines, stateBodyOfLines) precisely at or over this line — that is
+// what they test.
 func fixtureConfig() config.Config {
 	cfg := config.Default()
 	cfg.FeatureDirectory = "specs"

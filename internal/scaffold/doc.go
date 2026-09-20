@@ -33,9 +33,10 @@
 // within it, what was wrong, and how to fix it, wrapping one of
 // ErrNoSuchFeature, ErrFeatureExists, ErrMalformedFeature,
 // ErrNoProgressHeading, ErrNoSuchStep, ErrNoProgressEntry,
-// ErrUnterminatedFence or ErrAlreadyFinished (or, from
-// internal/platform/stepfile, ErrInvalidPattern, ErrInvalidHandoffSuffix
-// or ErrNoStatusField) so callers can branch on the specific cause with
+// ErrUnterminatedFence, ErrOverCap, ErrMissingStateHeading or
+// ErrAlreadyFinished (or, from internal/platform/stepfile,
+// ErrInvalidPattern, ErrInvalidHandoffSuffix or ErrNoStatusField) so
+// callers can branch on the specific cause with
 // errors.Is while still rendering the same "nothing changed on disk"
 // line. A refusal about the state argument's own bytes, rather than about
 // a file Finish opened, carries Path == StateSource — a placeholder cli

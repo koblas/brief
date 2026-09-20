@@ -132,7 +132,7 @@ func Test_re_finishing_a_done_step_whose_handoff_file_is_missing_accepts_a_diffe
 	fx := newFinishedFixture(t)
 	require.NoError(t, os.Remove(fx.handoffPath()))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
-	differentState := []byte("DIFFERENT-STATE-BODY\n")
+	differentState := differentStateBody(fx.cfg)
 
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
 	require.NoError(t, err)
@@ -150,7 +150,7 @@ func Test_re_finishing_a_done_step_whose_handoff_file_is_missing_accepts_a_diffe
 func Test_re_finishing_a_done_step_with_a_different_state_body_is_refused(t *testing.T) {
 	fx := newFinishedFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
-	differentState := []byte("DIFFERENT-STATE-BODY\n")
+	differentState := differentStateBody(fx.cfg)
 
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
 
@@ -172,7 +172,7 @@ func Test_re_finishing_a_done_step_with_both_inputs_differing_names_the_handoff_
 	fx := newFinishedFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	differentHandoff := []byte("DIFFERENT-HANDOFF-02\n")
-	differentState := []byte("DIFFERENT-STATE-BODY\n")
+	differentState := differentStateBody(fx.cfg)
 
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, differentState)
 
@@ -195,7 +195,7 @@ func Test_a_refused_re_finish_leaves_every_file_byte_identical(t *testing.T) {
 	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
 	before := snapshotTree(t, fx.featureDir())
 	srv := scaffold.NewServer(fx.cfg, fx.root)
-	differentState := []byte("DIFFERENT-STATE-BODY\n")
+	differentState := differentStateBody(fx.cfg)
 
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
 
