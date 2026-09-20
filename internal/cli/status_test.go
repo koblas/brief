@@ -102,6 +102,40 @@ func Test_status_prints_one_line_for_a_single_feature(t *testing.T) {
 	assert.Equal(t, "alpha 1/2 SCENARIO-02 0\n", stdout.String())
 }
 
+// Test_status_says_no_features_were_found_when_the_feature_root_is_absent
+// is the R14 "nothing to return is not an error" case for a repository
+// that has never run brief: no docs/specifications directory at all.
+func Test_status_says_no_features_were_found_when_the_feature_root_is_absent(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"status"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t,
+		"brief status: no features found in docs/specifications; run 'brief new feature <name>' to create one\n",
+		stderr.String())
+}
+
+// Test_status_says_no_features_were_found_when_the_feature_root_is_empty
+// covers the same notice when docs/specifications exists but holds no
+// feature directories — stdout and the exit code are already empty/0 on
+// arrival; this test is red only on the stderr line.
+func Test_status_says_no_features_were_found_when_the_feature_root_is_empty(t *testing.T) {
+	wd := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(wd, "docs", "specifications"), 0o755))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"status"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t,
+		"brief status: no features found in docs/specifications; run 'brief new feature <name>' to create one\n",
+		stderr.String())
+}
+
 func Test_returns_a_usage_error_when_status_is_given_an_argument(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer

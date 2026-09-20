@@ -18,7 +18,9 @@ const statusUsage = `Usage:
 
 Prints one line per feature: name, steps done over total, the next open
 step's id (or "-" when there is none), and how many steps are blocked on
-an unfinished dependency. brief status reads; it never writes.
+an unfinished dependency. A repository with no features prints nothing
+and exits 0, with one line on stderr saying so. brief status reads; it
+never writes.
 `
 
 // runStatus implements "brief status".
@@ -54,6 +56,12 @@ func runStatus(ctx context.Context, wd string, args []string, stdout, stderr io.
 	rows, err := srv.Status(ctx)
 	if err != nil {
 		return renderRefusal(stderr, "status", err)
+	}
+
+	if len(rows) == 0 {
+		fmt.Fprintf(stderr, "brief status: no features found in %s; run 'brief new feature <name>' to create one\n", cfg.FeatureDirectory)
+
+		return nil
 	}
 
 	if err := assemble.RenderStatusText(stdout, rows); err != nil {

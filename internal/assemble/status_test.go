@@ -144,6 +144,38 @@ func Test_status_reports_no_next_step_for_a_feature_with_no_step_files(t *testin
 	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 0, Total: 0, Next: "", Blocked: 0}, rows[0])
 }
 
+// Test_status_reports_no_features_when_the_feature_root_does_not_exist is
+// R14's "nothing to return is not an error" case: a repository that has
+// never run brief has no feature-directory tree at all.
+func Test_status_reports_no_features_when_the_feature_root_does_not_exist(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}
+
+// Test_status_propagates_a_feature_root_that_is_not_a_directory is the
+// control arm for the test above: a feature-root path that exists but is
+// a regular file is a misconfiguration, not an empty repository, and must
+// stay an error rather than being swallowed by the same ErrNotExist guard.
+func Test_status_propagates_a_feature_root_that_is_not_a_directory(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, cfg.FeatureDirectory), []byte("not a directory"), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.Error(t, err)
+	assert.Nil(t, rows)
+}
+
 // Test_status_orders_features_in_byte_order_not_case_insensitive_order
 // pins fs.ReadDir's documented byte order against a future case-insensitive
 // collation. "Zeta", "alpha" and "Beta" differ from each other by more than

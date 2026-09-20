@@ -2,6 +2,7 @@ package assemble
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -34,13 +35,18 @@ type FeatureStatus struct {
 // resolves for "brief finish" — and, like Start, ignores depends-on for
 // ordering. Blocked counts a not-done step as blocked when it declares at
 // least one depends-on id that does not name a done step's pattern.ID(n):
-// direct dependencies only, and an id naming no step file blocks. Status
-// propagates an error from a missing or unreadable feature root, or from a
-// step file whose frontmatter does not parse, rather than degrading into a
-// partial result.
+// direct dependencies only, and an id naming no step file blocks. A
+// missing feature root is zero features, not an error: Status returns
+// (nil, nil). An unreadable feature root, and a step file whose
+// frontmatter does not parse, still propagate an error rather than
+// degrading into a partial result.
 func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 	topRoot, err := os.OpenRoot(filepath.Join(s.root, s.cfg.FeatureDirectory))
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+
 		return nil, fmt.Errorf("assemble: %w", err)
 	}
 	defer func() { _ = topRoot.Close() }()
