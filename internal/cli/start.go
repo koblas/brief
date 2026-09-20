@@ -18,7 +18,9 @@ const startUsage = `Usage:
 
 Prints the next open step's id, title, acceptance criteria and checklist,
 and the decisions and constraints inherited from the feature's state
-file. brief start reads; it never writes.
+file. A feature whose steps are all done, or that has no step files yet,
+prints nothing and says so on stderr instead, still exiting 0.
+brief start reads; it never writes.
 `
 
 // runStart implements "brief start <feature>".
@@ -61,6 +63,20 @@ func runStart(ctx context.Context, wd string, args []string, stdout, stderr io.W
 	brief, err := srv.Start(ctx, feature)
 	if err != nil {
 		return renderRefusal(stderr, "start", err)
+	}
+
+	if brief.Step == nil {
+		featureDir := filepath.Join(root, cfg.FeatureDirectory, feature)
+
+		if brief.Done+brief.Open > 0 {
+			fmt.Fprintf(stderr, "brief start: %s: feature is complete, %d of %d steps done; run 'brief new step %s' to add the next one\n",
+				featureDir, brief.Done, brief.Done+brief.Open, feature)
+		} else {
+			fmt.Fprintf(stderr, "brief start: %s: no step files yet; run 'brief new step %s' to scaffold the first one\n",
+				featureDir, feature)
+		}
+
+		return nil
 	}
 
 	if err := assemble.RenderText(stdout, brief); err != nil {

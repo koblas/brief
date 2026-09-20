@@ -1,6 +1,6 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..11. Last updated by SCENARIO-11.
+Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
 
 ## Binding decisions
 
@@ -25,11 +25,12 @@ Scenarios complete: SCENARIO-01..11. Last updated by SCENARIO-11.
   `*RefusalError`/`ErrFeatureExists`, exit 1, tail present. (07, 08)
 - **`status` lives on `(*assemble.Server).Status`, rendered by `assemble.RenderStatusText`** —
   `assemble` owns reading, `scaffold` owns writing; `next`/`show`/`handoff`/`state get` belong
-  here too. Line: `<name> <done>/<total> <next> <blocked>\n`, no header/legend. `<next>` =
-  `pattern.ID(n)` of the lowest not-done step, ignoring `depends-on` like `Start`. **Blocked**
-  = not-done step with ≥1 unresolved *direct* `depends-on` id (unknown id blocks, done step
-  never blocked). Feature order is `fs.ReadDir` byte order, not re-sorted. `Status` returns
-  `nil`, never `[]`, for zero features — 15's `--json` depends on that marshaling to `null`. (09)
+  here too. Line: `<name> <done>/<total> <next> <blocked>\n`, no header/legend, `-` when
+  `Next` is empty. `<next>` = `pattern.ID(n)` of the lowest not-done step, ignoring
+  `depends-on` like `Start`. **Blocked** = not-done step with ≥1 unresolved *direct*
+  `depends-on` id (unknown id blocks, done step never blocked). Feature order is
+  `fs.ReadDir` byte order, not re-sorted. `Status` returns `nil`, never `[]`, for zero
+  features — 15's `--json` depends on that marshaling to `null`. (09)
 - **A missing feature root is zero features, not an error** — `Status` returns `(nil, nil)`
   only via `errors.Is(err, fs.ErrNotExist)` on `os.OpenRoot`; every other top-level open/list
   failure, or an invalid step-file pattern, still propagates. `cli.runStatus` keys the notice
@@ -47,14 +48,26 @@ Scenarios complete: SCENARIO-01..11. Last updated by SCENARIO-11.
   irrelevant); everything else → skipped, no row (10's decision, unchanged — "not a directory
   → mark" would wrongly catch a stray `README.md`). An id/filename mismatch and an empty
   feature directory stay conforming, not malformed. (11)
+- **`brief.Step == nil` has two causes; `cli.runStart`, never `assemble`, says which.**
+  `assemble.Start` keeps returning `(Brief, nil)` for both (no sentinel — 15's `--json`
+  marshals the pointer to `"step": null`). `runStart` branches on `Done+Open`: `> 0` →
+  "feature is complete, N of N steps done"; `== 0` → "no step files yet" (a bare `brief new
+  feature x` hits this too; SCENARIO-11 already ruled that directory conforming). Both
+  notices use the **absolute** feature-directory path (13/14 inherit that rule: a specific
+  on-disk object is absolute, a configured location stays config-relative), exit 0, empty
+  stdout, no `(no files changed)` tail. `ErrNoSuchFeature`/`ErrMalformedFeature` are
+  unaffected — the branch is after `srv.Start`'s error check. (12)
 
 ## Left unbuilt
 
 - Differing-inputs refusal (16), caps (17/18), state-body heading check (19), open-checklist
   refusal (20), unfinished-`depends-on` refusal (21).
-- `assemble.Server.Next`/`.Show`/`.Handoff`/`.StateGet`, `--json` (15), complete-feature
-  stderr+exit-0 (12), `markdown.Headings` + checklist parser (20/22), R13 truncation, R9's
-  diff/finding output, `FinishResult`, `Problem.Line` (13 adds one if its refusal needs it).
+- `assemble.Server.Next`/`.Show`/`.Handoff`/`.StateGet`, `--json` (15),
+  `markdown.Headings` + checklist parser (20/22), R13 truncation, R9's diff/finding output,
+  `FinishResult`, `Problem.Line` (13 adds one if its refusal needs it). No refusal for a
+  missing progress list — 13 owns it, `Start` still never opens `cfg.SpecificationFile`. No
+  optional-convention shortfall notice — 14 owns it; `start` emits at most one stderr line
+  until then.
 - `scaffold.HandoffSource` / `cli/finish.go`'s `--handoff` source upgrade — deleted; 17 re-adds.
   `HandoffPattern.Number` — not built; `check` (22) and the R6 synthesis need it.
 - `NewStep` and `assemble`'s read path (incl. `Status`) do not re-validate an on-disk feature
@@ -82,6 +95,10 @@ Scenarios complete: SCENARIO-01..11. Last updated by SCENARIO-11.
 - **`assemble.Problem` duplicates `scaffold.RefusalError` minus `Line`, knowingly** —
   `assemble` must not import `scaffold`. Field names don't line up: `RefusalError.Problem` is
   the text field, `Problem.Detail` is. (11)
+- `brief start <f> | wc -c == 0` is exit-code-conditional — a missing/malformed feature also
+  gives 0 stdout bytes, at **exit 1**; the scriptable "complete" test is `exit 0 && wc -c ==
+  0`. `"step": null` alone can't distinguish complete from zero-steps — 15 needs `done`/`open`
+  (`2`/`0` vs `0`/`0`) too. (12)
 
 ## Open debts
 

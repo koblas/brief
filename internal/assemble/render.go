@@ -12,8 +12,8 @@ import (
 // checklist sections and every inherited state-file section, each under
 // its configured heading verbatim. A section whose body is empty is
 // omitted entirely rather than rendered as a bare heading. RenderText
-// writes nothing when b.Step is nil — the complete-feature case is
-// SCENARIO-12's to render.
+// writes nothing when b.Step is nil; the caller decides what to say about
+// a feature with no open step.
 func RenderText(w io.Writer, b Brief) error {
 	if b.Step == nil {
 		return nil

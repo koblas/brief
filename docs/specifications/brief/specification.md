@@ -825,7 +825,7 @@ Post-crossover — built through the tool:
 - [x] SCENARIO-09: Status reports one four-field line per feature
 - [x] SCENARIO-10: Status on a repository with no features succeeds silently
 - [x] SCENARIO-11: One malformed feature does not blind status to the rest
-- [ ] SCENARIO-12: A completed feature has no next step
+- [x] SCENARIO-12: A completed feature has no next step
 - [ ] SCENARIO-13: Start refuses a malformed feature rather than assembling half a brief
 - [ ] SCENARIO-14: Start degrades on a missing optional convention and says so
 - [ ] SCENARIO-15: Start emits a structured payload on request

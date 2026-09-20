@@ -102,6 +102,23 @@ func Test_status_prints_one_line_for_a_single_feature(t *testing.T) {
 	assert.Equal(t, "alpha 1/2 SCENARIO-02 0\n", stdout.String())
 }
 
+// Test_status_shows_a_dash_for_a_completed_feature pins R14's "-" in the
+// next-step field for a feature whose steps are all done, asserted
+// end-to-end through the CLI rather than only at the FeatureStatus level.
+func Test_status_shows_a_dash_for_a_completed_feature(t *testing.T) {
+	wd := t.TempDir()
+	writeStatusStep(t, wd, "alpha", "SCENARIO-01.md", "SCENARIO-01", "done", nil)
+	writeStatusStep(t, wd, "alpha", "SCENARIO-02.md", "SCENARIO-02", "done", nil)
+
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"status"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.Equal(t, "alpha 2/2 - 0\n", stdout.String())
+}
+
 // Test_status_says_no_features_were_found_when_the_feature_root_is_absent
 // is the R14 "nothing to return is not an error" case for a repository
 // that has never run brief: no docs/specifications directory at all.
