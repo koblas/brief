@@ -15,11 +15,11 @@ import (
 
 // Finish closes feature's step: it writes handoff to that step's own
 // handoff file, replaces the feature's state file with state, then marks
-// the step file's frontmatter status "done" (R8, R21). handoff and state
-// are written verbatim, neither checked against a length cap or a
-// required-heading schema, and neither is spliced into an existing
-// document — every write here is a whole-file write, so none has a
-// boundary inferred from prose to get wrong.
+// the step file's frontmatter status "done" (R8, R21). handoff is checked
+// against cfg.HandoffCapLines (SCENARIO-17); neither argument is checked
+// against a required-heading schema, and neither is spliced into an
+// existing document — every write here is a whole-file write, so none has
+// a boundary inferred from prose to get wrong.
 //
 // The handoff file is named stepPattern.ID(n) + cfg.HandoffFileSuffix
 // (stepfile.CompileHandoff); a "## Handoff" section left behind in a step
@@ -30,18 +30,22 @@ import (
 // wrong (R14a): the step-file pattern compiles; the handoff-file-suffix
 // compiles against it (stepfile.ErrInvalidHandoffSuffix); the feature
 // directory opens; a step file exists whose id equals step; its
-// frontmatter parses; the replacement state body closes every fence it
-// opens (ErrUnterminatedFence, named against StateSource) — state's
-// configured headings are read by a terminator scan on every later Start,
-// so an open fence there is not merely untidy, it is unreadable; the
-// specification is readable; the specification carries the configured
-// progress heading and an entry for step; the state file exists as a
-// regular file. Computing the frontmatter's "status: done" line during
+// frontmatter parses; the handoff argument measures no more than
+// cfg.HandoffCapLines lines (ErrOverCap, named against HandoffSource,
+// counted by markdown.CountLines — SCENARIO-17) — a done step over this cap
+// reports the cap rather than falling through to the re-finish verdict
+// below, since this check runs ahead of it; the replacement state body
+// closes every fence it opens (ErrUnterminatedFence, named against
+// StateSource) — state's configured headings are read by a terminator scan
+// on every later Start, so an open fence there is not merely untidy, it is
+// unreadable; the specification is readable; the specification carries the
+// configured progress heading and an entry for step; the state file exists
+// as a regular file. Computing the frontmatter's "status: done" line during
 // this phase, rather than at write time, means a step file with no
 // "status:" field (stepfile.ErrNoStatusField) is refused before any write
 // lands, not discovered half way through the sequence. The handoff
-// argument itself is never fence-checked: it is written verbatim to its
-// own file and nothing reads it structurally.
+// argument is never fence-checked, only line-counted: it is written
+// verbatim to its own file and nothing reads it structurally.
 //
 // The four writes then land in a fixed order — handoff file, state file,
 // step file, specification — chosen so a crash between them always
@@ -142,6 +146,10 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 			Fix:     "fix the step file's YAML frontmatter",
 			Err:     ErrMalformedFeature,
 		}
+	}
+
+	if refusal := checkArgumentCap(handoff, HandoffSource, "handoff", s.cfg.HandoffCapLines); refusal != nil {
+		return refusal
 	}
 
 	if refusal := checkArgumentFence(state, StateSource, "state"); refusal != nil {
@@ -273,6 +281,28 @@ func checkArgumentFence(body []byte, source, label string) *RefusalError {
 		Problem: fmt.Sprintf("%s has an unclosed %s fence", label, delim),
 		Fix:     "close the fence, or remove the unmatched delimiter, and retry",
 		Err:     ErrUnterminatedFence,
+	}
+}
+
+// checkArgumentCap refuses when body — one of Finish's handoff or state
+// arguments, named for the error message by label — measures more lines,
+// by markdown.CountLines, than cap. It names source (HandoffSource or
+// StateSource) rather than any file, matching checkArgumentFence: Finish
+// never learns which file, or whether there was one at all, body's bytes
+// came from. It returns nil when body's line count does not exceed cap —
+// a body of exactly cap lines is accepted.
+func checkArgumentCap(body []byte, source, label string, limit int) *RefusalError {
+	n := markdown.CountLines(string(body))
+	if n <= limit {
+		return nil
+	}
+
+	return &RefusalError{
+		Path:    source,
+		Problem: fmt.Sprintf("%s is %d lines, over the cap of %d", label, n, limit),
+		Fix: fmt.Sprintf("cut the %s to %d lines or fewer, or raise %s-cap-lines in .brief.yaml, and retry",
+			label, limit, label),
+		Err: ErrOverCap,
 	}
 }
 

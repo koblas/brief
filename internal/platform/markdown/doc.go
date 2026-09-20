@@ -14,5 +14,8 @@
 // level-1 heading, fence-aware like Section. UnterminatedFence is the sole
 // fence-open detector, used both to validate a write argument before it
 // lands and to refuse an on-disk file whose configured headings a
-// terminator scan could not read past the open fence.
+// terminator scan could not read past the open fence. CountLines is the
+// one line counter a length cap is measured against, on both the write
+// side (scaffold.Finish) and the read side (check), so the two never
+// disagree about what a "line" is.
 package markdown

@@ -96,8 +96,11 @@ func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, s
 
 	if err := srv.Finish(ctx, feature, step, handoff, state); err != nil {
 		if refusal, ok := errors.AsType[*scaffold.RefusalError](err); ok {
-			if refusal.Path == scaffold.StateSource {
+			switch refusal.Path {
+			case scaffold.StateSource:
 				refusal.Path = sourceLocator(*statePath)
+			case scaffold.HandoffSource:
+				refusal.Path = sourceLocator(*handoffPath)
 			}
 		}
 

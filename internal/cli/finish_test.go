@@ -260,6 +260,64 @@ func Test_refuses_a_re_finish_whose_handoff_differs_from_the_recorded_one(t *tes
 	}
 }
 
+// overCapBody returns a handoff/state body of exactly n lines, each
+// distinct so a truncation bug cannot hide behind a repeated line, with a
+// trailing newline.
+func overCapBody(n int) string {
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = "line"
+	}
+
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// Test_refuses_a_handoff_over_the_cap_and_names_the_handoff_path is the CLI
+// slice for SCENARIO-17: config.Default's handoff-cap-lines is 60, so a
+// 61-line handoff file is refused, naming the --handoff path rather than
+// the scaffold.HandoffSource placeholder. Equal, not Contains, on the whole
+// stderr line, since a passing run also succeeds silently on unrelated
+// inputs — the byte-identity and mtime proof for "nothing lands" lives at
+// the scaffold level (finish_cap_test.go); this test does not restate it
+// with a weaker probe.
+func Test_refuses_a_handoff_over_the_cap_and_names_the_handoff_path(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", overCapBody(61))
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	want := fmt.Sprintf(
+		"brief finish: %s: handoff is 61 lines, over the cap of 60; cut the handoff to 60 lines or "+
+			"fewer, or raise handoff-cap-lines in .brief.yaml, and retry (no files changed)\n",
+		handoffPath)
+	assert.Equal(t, want, stderr.String())
+}
+
+// Test_names_stdin_when_the_piped_handoff_is_over_the_cap is the stdin half
+// of the handoff locator upgrade: --handoff - has no path at all to fall
+// back to, so the refusal must name "<stdin>" rather than the raw
+// scaffold.HandoffSource placeholder or an empty string.
+func Test_names_stdin_when_the_piped_handoff_is_over_the_cap(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	stdin := strings.NewReader(overCapBody(61))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", "-", "--state", statePath}, stdin, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	want := "brief finish: <stdin>: handoff is 61 lines, over the cap of 60; cut the handoff to 60 lines or " +
+		"fewer, or raise handoff-cap-lines in .brief.yaml, and retry (no files changed)\n"
+	assert.Equal(t, want, stderr.String())
+}
+
 func Test_returns_a_usage_error_when_no_feature_is_given_to_finish(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer

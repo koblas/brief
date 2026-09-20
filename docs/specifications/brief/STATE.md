@@ -1,6 +1,6 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..16. Last updated by SCENARIO-16.
+Scenarios complete: SCENARIO-01..17. Last updated by SCENARIO-17.
 
 ## Binding decisions
 
@@ -89,19 +89,31 @@ Scenarios complete: SCENARIO-01..16. Last updated by SCENARIO-16.
   always precede its flags; do not backport it there without a reason. A refusal under
   `--json` is still a plain R14a stderr line at exit 1, no JSON envelope — `Start` fails
   before anything is rendered, so stdout is zero bytes by construction. (15)
+- **Length caps are measured in lines, by `markdown.CountLines`** (`strings.Count(body,
+  "\n")` plus 1 for a non-empty body with no trailing newline; `""` is 0) — lives in
+  `platform/markdown`, not `scaffold`, since `check` (22) needs the same counter from the
+  read side and `assemble` may not import `scaffold`. `(*scaffold.Server).Finish` checks the
+  handoff argument against `cfg.HandoffCapLines` via `checkArgumentCap`, a generic helper
+  parameterised on label/source/limit so SCENARIO-18 reuses it verbatim for the state
+  argument. The check runs in `Finish`'s argument band, immediately before
+  `checkArgumentFence`, so it pre-empts `(refinish).verdict()`: an over-cap handoff on an
+  already-done step reports `ErrOverCap`, never `ErrAlreadyFinished` — one shared sentinel for
+  both caps, `RefusalError.Path` (`HandoffSource`/`StateSource`) says which body. Boundary is
+  `count > cap` (exactly-at-cap accepted), mutation-verified both ways. `cli/finish.go`'s
+  `StateSource`-to-real-path swap is now a `switch` with a second `HandoffSource` branch. (17)
 
 ## Left unbuilt
 
-- Caps (17/18), state-body heading check (19), open-checklist refusal (20), unfinished-
-  `depends-on` refusal (21). `--force`/`--if-state-matches` and any diff/finding output on a
-  re-finish divergence (R9) — deferred by 16, no owner. No un-finish/un-done verb planned;
-  the documented escape from 16's refusal is to edit the recorded file directly.
+- State cap (18, `cfg.StateCapLines` unconsumed), state-body heading check (19),
+  open-checklist refusal (20), unfinished-`depends-on` refusal (21). `--force`/
+  `--if-state-matches` and any diff/finding output on a re-finish divergence (R9) — deferred
+  by 16, no owner. No un-finish/un-done verb planned; the documented escape from 16's refusal
+  is to edit the recorded file directly.
 - `assemble.Server.Next`/`.Show`/`.Handoff`/`.StateGet`, `status --json` and `--json` on
   `next`/`show`/`state get`/`handoff` (deferred by *Decisions taken* 3 / open question 8, not
   missed — 15), `markdown.Headings` + checklist parser (20/22), R9's diff/finding output,
   `FinishResult`.
-- `scaffold.HandoffSource` / `cli/finish.go`'s `--handoff` source upgrade — deleted; 17 re-adds.
-  `HandoffPattern.Number` — not built; `check` (22) and the R6 synthesis need it.
+- `HandoffPattern.Number` — not built; `check` (22) and the R6 synthesis need it.
 - `NewStep` and `assemble`'s read path (incl. `Status`) do not re-validate an on-disk feature
   name — `NewFeature`'s creation path is the sole choke point, deliberately. (07)
 - `status` does not adopt 13's checks — a feature with no specification is still a normal row
@@ -170,10 +182,18 @@ Scenarios complete: SCENARIO-01..16. Last updated by SCENARIO-16.
   `pinnedModTime`/`pinModTimes`/`modTimes` probe in `finish_idempotent_test.go` for that
   claim; a `Contains` assertion on refusal text is also unsafe where the pre-refusal code
   printed similar text on the same inputs — assert `Equal` on the whole line/string. (16)
+- **`cli/finish.go`'s placeholder swap only upgrades a `RefusalError.Path` it recognizes** —
+  adding a new placeholder (17's `HandoffSource`) without a matching `case` renders the raw
+  `<handoff>` literal; any future placeholder needs its own branch there too.
 
 ## Open debts
 
 - Heading/cap value validation — unowned until SCENARIO-19.
+- **This repository's own artifacts already exceed both length caps** — handoff files run
+  29–373 lines against the 60-line default cap 17 now enforces, and `STATE.md` is over 200
+  against the 80-line cap 18 will enforce. Harmless today (`brief` is not self-hosted —
+  `brief start brief` still fails on missing frontmatter), but `brief finish brief <step>`
+  will refuse on its own bodies once 18 lands. Owner: `check` (22), per R18. (17)
 - A mid-write I/O failure leaves a half-applied result a same-argument retry repairs; `check`
   (22) is the not-yet-built proactive detector. Invalid `step-file-pattern` refusal names the
   feature dir, not the config — unowned.

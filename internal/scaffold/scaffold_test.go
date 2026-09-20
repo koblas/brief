@@ -15,7 +15,11 @@ import (
 
 // fixtureConfig returns a Config whose every field this package reads
 // differs from config.Default(), so a hardcoded default cannot pass a test
-// built against it.
+// built against it. HandoffCapLines is 10 — distinct from config.Default's
+// 60, and strictly above the 5-line maximum of every handoff body this
+// package's tests hand to Finish (newFinishFixture.newHandoff), so a cap
+// test proves the value is read from config rather than tripping on an
+// unrelated fixture body.
 func fixtureConfig() config.Config {
 	cfg := config.Default()
 	cfg.FeatureDirectory = "specs"
@@ -25,6 +29,7 @@ func fixtureConfig() config.Config {
 	cfg.StateFile = "NOTES.md"
 	cfg.StepFilePattern = "STEP-%02d.md"
 	cfg.HandoffFileSuffix = ".fixture-handoff.md"
+	cfg.HandoffCapLines = 10
 	cfg.StateHeadings = config.StateHeadings{
 		BindingDecisions: "## Decisions Fixture",
 		LeftUnbuilt:      "## Left Fixture",

@@ -58,6 +58,13 @@ var ErrUnterminatedFence = errors.New("input has an unterminated fence")
 // handoff files existed, with no way forward.
 var ErrAlreadyFinished = errors.New("step already finished with different inputs")
 
+// ErrOverCap is returned when a body Finish is asked to write measures more
+// lines, by markdown.CountLines, than its configured cap
+// (cfg.HandoffCapLines for the handoff argument, cfg.StateCapLines for the
+// state argument — SCENARIO-17/18 share this one sentinel). RefusalError.Path
+// names which body: HandoffSource or StateSource.
+var ErrOverCap = errors.New("input is over the configured line cap")
+
 // StateSource is the RefusalError.Path placeholder a refusal carries when
 // it concerns the bytes of Finish's state argument rather than a file
 // Finish opened itself. Finish never learns where those bytes came from —
@@ -65,6 +72,9 @@ var ErrAlreadyFinished = errors.New("step already finished with different inputs
 // --state flag, is expected to replace the placeholder with the real
 // source before rendering the refusal.
 const StateSource = "<state>"
+
+// HandoffSource is StateSource's counterpart for Finish's handoff argument.
+const HandoffSource = "<handoff>"
 
 // RefusalError reports a refusal that changed nothing on disk: the path
 // it concerns, what was wrong with it, and how to fix it. cli renders
