@@ -55,7 +55,20 @@ import (
 // that is both un-ticked and a divergent re-finish reports the open item;
 // a checklist with no items, or no checklist heading at all, is never
 // refused this way, matching assemble.Start's read-side degrade for the
-// same heading; the specification is
+// same heading; the step's own frontmatter then carries no depends-on id
+// that is not a done step (ErrUnmetDependency, checkStepDependencies,
+// naming stepPath) — checked immediately after the checklist and ahead of
+// the specification read, so a step both un-ticked and blocked reports the
+// checklist item first; the check is skipped entirely when depends-on is
+// empty, so an unrelated broken sibling step file never affects an
+// ordinary finish; a sibling that cannot be read or whose frontmatter does
+// not parse is recorded as a known, not-done step rather than skipped, so
+// it blocks with the "is not finished" copy rather than the wrong "names
+// no step file" one; a done step is never refused this way, whatever its
+// dependencies say — stepfile.DependencyIndex.FirstUnmet short-circuits on
+// the step's own doneness, the same exemption assemble.Status's blocked
+// count applies, keeping a re-finish of a done step whose dependency was
+// reopened by hand a true no-op; the specification is
 // readable; the specification carries the
 // configured progress heading and an entry for step; the state file exists
 // as a regular file. Computing the frontmatter's "status: done" line during
@@ -184,6 +197,10 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 
 	if refusal := checkStepChecklist(stepBody, stepPath, s.cfg.ChecklistHeading); refusal != nil {
 		return refusal
+	}
+
+	if err := checkStepDependencies(root, pattern, fm, step, stepPath); err != nil {
+		return err
 	}
 
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
@@ -393,6 +410,100 @@ func checkStepChecklist(stepBody []byte, stepPath, heading string) *RefusalError
 		Fix:     "tick it with [x] once it is done, or remove it, and retry",
 		Err:     ErrOpenChecklistItem,
 	}
+}
+
+// checkStepDependencies refuses when fm — the frontmatter of the step
+// being finished, named stepID and living at stepPath — declares a
+// depends-on id that is not a done step, by stepfile.DependencyIndex.
+// FirstUnmet: the same rule assemble.Status's blocked count applies, so
+// status and finish never disagree about the same tree. It returns nil
+// immediately when fm.DependsOn is empty, without scanning root at all, so
+// an unrelated broken sibling step file can never affect an ordinary
+// finish. Otherwise it scans root for every entry pattern
+// recognizes as a step file and records each into a
+// stepfile.DependencyIndex, keyed by pattern.ID(n) rather than the
+// sibling's own frontmatter id — a sibling that cannot be read or whose
+// frontmatter does not parse is still Recorded, from a zero Frontmatter,
+// rather than skipped, so it blocks with the "is not finished" copy
+// rather than the wrong "names no step file" one — then renders
+// FirstUnmet's result through Known into one of two refusal copies: an id
+// that names an existing, not-done step ("is not finished" — a
+// self-dependency takes this branch too, naming stepID on both sides of
+// the line, and is then permanently unfinishable until the frontmatter is
+// edited by hand) or an id Known reports nothing was recorded under
+// ("names no step file"). A done fm is never refused here — FirstUnmet
+// short-circuits on fm.Done() before either branch is reached, which is
+// what keeps a re-finish of a done step whose dependency was reopened by
+// hand a no-op. checkStepDependencies returns error, not *RefusalError,
+// because root's directory failing to list at all is a distinct,
+// non-refusal fault from any individual sibling's read or parse failure;
+// callers recover the refusal with errors.As, the same way every other
+// *RefusalError in this package is recovered.
+func checkStepDependencies(root *os.Root, pattern stepfile.Pattern, fm stepfile.Frontmatter, stepID, stepPath string) error {
+	if len(fm.DependsOn) == 0 {
+		return nil
+	}
+
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return fmt.Errorf("scaffold: %w", err)
+	}
+
+	idx := stepfile.NewDependencyIndex()
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+
+		n, ok := pattern.Number(e.Name())
+		if !ok {
+			continue
+		}
+
+		idx.Record(pattern.ID(n), siblingFrontmatter(root, e.Name()))
+	}
+
+	dep, unmet := idx.FirstUnmet(fm)
+	if !unmet {
+		return nil
+	}
+
+	if idx.Known(dep) {
+		return &RefusalError{
+			Path:    stepPath,
+			Problem: fmt.Sprintf("step %q depends on %q, which is not finished", stepID, dep),
+			Fix:     fmt.Sprintf("finish %s first, or remove it from this step's depends-on, and retry", dep),
+			Err:     ErrUnmetDependency,
+		}
+	}
+
+	return &RefusalError{
+		Path:    stepPath,
+		Problem: fmt.Sprintf("step %q depends on %q, which names no step file", stepID, dep),
+		Fix:     "correct the id in this step's depends-on, or remove it, and retry",
+		Err:     ErrUnmetDependency,
+	}
+}
+
+// siblingFrontmatter reads and parses name — one of root's own step
+// files — for checkStepDependencies. A file that cannot be read or whose
+// frontmatter does not parse returns a zero Frontmatter (never done)
+// rather than propagating the error: Decision 5 records that sibling as a
+// known, not-done step so it blocks a dependant rather than being
+// silently skipped.
+func siblingFrontmatter(root *os.Root, name string) stepfile.Frontmatter {
+	body, err := root.ReadFile(name)
+	if err != nil {
+		return stepfile.Frontmatter{}
+	}
+
+	fm, _, err := stepfile.ParseFrontmatter(body)
+	if err != nil {
+		return stepfile.Frontmatter{}
+	}
+
+	return fm
 }
 
 // writeFailure wraps a write-path error with the same invocation that

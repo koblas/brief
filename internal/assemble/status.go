@@ -128,12 +128,13 @@ func featureStatus(topRoot *os.Root, pattern stepfile.Pattern, name, displayPath
 
 	row := FeatureStatus{Name: name, Total: len(steps)}
 
-	done := make(map[string]bool, len(steps))
+	idx := stepfile.NewDependencyIndex()
 
 	for _, e := range steps {
+		idx.Record(pattern.ID(e.number), e.fm)
+
 		if e.fm.Done() {
 			row.Done++
-			done[pattern.ID(e.number)] = true
 		}
 	}
 
@@ -146,11 +147,8 @@ func featureStatus(topRoot *os.Root, pattern stepfile.Pattern, name, displayPath
 			row.Next = pattern.ID(e.number)
 		}
 
-		for _, dep := range e.fm.DependsOn {
-			if !done[dep] {
-				row.Blocked++
-				break
-			}
+		if _, unmet := idx.FirstUnmet(e.fm); unmet {
+			row.Blocked++
 		}
 	}
 

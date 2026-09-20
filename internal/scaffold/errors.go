@@ -74,6 +74,26 @@ var ErrOverCap = errors.New("input is over the configured line cap")
 // NewStep writes is exactly that shape.
 var ErrOpenChecklistItem = errors.New("checklist item is not ticked")
 
+// ErrUnmetDependency is returned when Finish is asked to close a step whose
+// frontmatter declares a depends-on id that is not a done step —
+// stepfile.DependencyIndex.FirstUnmet, the same rule assemble.Status's
+// blocked count uses. It travels inside a *RefusalError naming the step
+// file being finished (Line 0), and covers two distinct causes rendered as
+// different copy: the dependency names a step file that exists but is not
+// done — including a self-dependency, which can never become done through
+// this check alone since the tool refuses rather than writes — or the
+// dependency names no step file at all (stepfile.DependencyIndex.Known is
+// false). A done step is never refused this way, whatever its dependencies
+// say: FirstUnmet short-circuits on the dependant's own doneness, the same
+// exemption assemble.Status's blocked count applies, so a re-finish of a
+// done step whose dependency was later reopened stays a no-op. A step
+// file this scenario depends on that cannot be read or whose frontmatter
+// does not parse is recorded as a known, not-done step rather than
+// skipped, so it takes the "is not finished" branch, never the "names no
+// step file" one — finish grows no separate malformed-sibling refusal for
+// that case.
+var ErrUnmetDependency = errors.New("step depends on a step that is not finished")
+
 // ErrMissingStateHeading is returned when a replacement state body given to
 // Finish carries no section for one of cfg.StateHeadings.Ordered()'s four
 // required headings. The check is presence-only (markdown.Section's found
