@@ -8,11 +8,17 @@ import (
 
 // replaceBytes atomically replaces name under root with data.
 //
+// The 0o600 perm matches what writeExclusive creates the specification,
+// state and step files with, so the handoff file — the only file Finish
+// creates rather than replaces — does not land wider than the siblings
+// beside it. It applies only on a fresh create: for a file that already
+// exists, atomicfile preserves the mode it already has.
+//
 // It returns atomicfile's error unwrapped on purpose: Finish's writeFailure
 // wraps it once for that boundary and adds the retry hint, and wrapping
 // here as well would put "scaffold:" in the message twice.
 func replaceBytes(root *os.Root, name string, data []byte) error {
-	w, err := atomicfile.Create(root, name, 0o644)
+	w, err := atomicfile.Create(root, name, 0o600)
 	if err != nil {
 		return err //nolint:wrapcheck // the caller owns this boundary
 	}
@@ -24,12 +30,12 @@ func replaceBytes(root *os.Root, name string, data []byte) error {
 
 // replaceString atomically replaces name under root with data, writing it
 // through io.StringWriter so the caller's string is not copied into a
-// []byte first.
+// []byte first. Its perm argument carries the same 0o600 as replaceBytes'.
 //
 // It returns atomicfile's error unwrapped on purpose, for the same reason
 // as replaceBytes: the caller owns the one place this boundary is wrapped.
 func replaceString(root *os.Root, name, data string) error {
-	w, err := atomicfile.Create(root, name, 0o644)
+	w, err := atomicfile.Create(root, name, 0o600)
 	if err != nil {
 		return err //nolint:wrapcheck // the caller owns this boundary
 	}

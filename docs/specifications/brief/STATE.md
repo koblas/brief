@@ -85,10 +85,13 @@ replaced by the whole-file contract below. The crossover reads this file next.
   helper function-call boundary.
 - The `-HANDOFF.md` suffix sorts *before* its step file (`-` < `.`). Cosmetic; do not change the
   default without migrating the tree again.
-- `atomicfile.Create`'s temp-sibling mode carries an owner-write exception: when name exists and
-  its own mode has no owner-write bit, an abandoned write's sibling inherits that mode too, and
-  every later attempt for the same name fails `permission denied` until the sibling is removed by
-  hand. Pre-existing, unowned; do not add an open-EACCES-remove-retry without its own scenario.
+- `atomicfile.Create`'s temp-sibling mode carries an owner-write exception: an abandoned write's
+  sibling inherits a read-only target's mode, and every later attempt for the same name then fails
+  `permission denied` until the sibling is removed by hand. **The wedge is governed by the
+  sibling's mode, not the target's** — probe-verified: target `0644` + sibling `0400` wedges,
+  target `0400` + sibling `0600` succeeds. Chmodding the target does not lift it; deleting
+  `.<name>.brief-tmp` does. Pre-existing, unowned; do not add an open-EACCES-remove-retry without
+  its own scenario.
 - `atomicfile.Create`'s `Mode().Perm()` masks setuid/setgid/sticky, so a replace silently drops
   them. `Lstat`→`Chmod` is an inherent read-then-write window. `PendingFile` is not documented or
   guarded as safe for concurrent `Close`. All three pre-existing, no constructible failure —
