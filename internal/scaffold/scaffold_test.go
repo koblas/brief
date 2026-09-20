@@ -111,7 +111,7 @@ func Test_does_not_overwrite_an_existing_specification_when_the_feature_director
 
 	_, err := srv.NewFeature(context.Background(), "widgets")
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrFeatureExists)
 
 	got, readErr := os.ReadFile(filepath.Join(featureDir, cfg.SpecificationFile))
 	require.NoError(t, readErr)
@@ -125,7 +125,86 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 	_, err := srv.NewFeature(context.Background(), "../escaped")
 
 	require.Error(t, err)
+	require.NotErrorIs(t, err, scaffold.ErrFeatureExists)
 	assert.NoDirExists(t, filepath.Join(root, "escaped"))
+}
+
+// Test_refuses_an_existing_feature_naming_its_directory pins the refusal
+// shape NewFeature returns when the feature directory it would create
+// already exists: a *RefusalError naming that directory and wrapping
+// ErrFeatureExists, at Line 0 since the refusal concerns the whole
+// directory rather than one line inside a file.
+func Test_refuses_an_existing_feature_naming_its_directory(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, err = srv.NewFeature(context.Background(), "widgets")
+	require.Error(t, err)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, filepath.Join(root, "specs", "widgets"), refusal.Path)
+	assert.Equal(t, 0, refusal.Line)
+	assert.ErrorIs(t, err, scaffold.ErrFeatureExists)
+}
+
+// Test_leaves_an_existing_features_files_byte_identical_when_it_refuses is
+// expected green on arrival: root.Mkdir already refuses before any write,
+// and writeExclusive's O_CREATE|O_EXCL is a second guard behind it. The
+// snapshot equality also catches an added temp file, which a
+// DirExists-only assertion would miss.
+func Test_leaves_an_existing_features_files_byte_identical_when_it_refuses(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	featureDir := filepath.Join(root, "specs", "widgets")
+	before := snapshotTree(t, featureDir)
+
+	_, err = srv.NewFeature(context.Background(), "widgets")
+	require.Error(t, err)
+
+	after := snapshotTree(t, featureDir)
+	assert.Equal(t, before, after)
+}
+
+// Test_the_byte_identity_probe_sees_a_change_when_the_scaffold_writes_one
+// is the control arm for the byte-identity claim above: same fixture, same
+// probe, same directory, with NewStep in place of the refused NewFeature.
+// Without this control, snapshot equality passing would be equally
+// consistent with a probe that cannot detect a change at all.
+func Test_the_byte_identity_probe_sees_a_change_when_the_scaffold_writes_one(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	featureDir := filepath.Join(root, "specs", "widgets")
+	before := snapshotTree(t, featureDir)
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	after := snapshotTree(t, featureDir)
+	assert.NotEqual(t, before, after)
 }
 
 // Test_the_scaffolded_files_are_all_created_owner_only pins the mode

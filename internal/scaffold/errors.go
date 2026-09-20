@@ -18,6 +18,11 @@ var ErrInvalidFeatureName = errors.New("invalid feature name")
 // under the configured feature directory.
 var ErrNoSuchFeature = errors.New("no such feature")
 
+// ErrFeatureExists is returned when NewFeature is asked to create a
+// feature whose directory already exists. It travels inside a
+// *RefusalError naming that directory.
+var ErrFeatureExists = errors.New("feature already exists")
+
 // ErrMalformedFeature is returned when a feature directory exists but is
 // missing a file this package requires, such as its specification.
 var ErrMalformedFeature = errors.New("malformed feature")

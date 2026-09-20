@@ -1,6 +1,6 @@
 # brief — current state
 
-Scenarios complete: SCENARIO-01..07, amended by SCENARIO-HANDOFF-FILE (touches 03/05/06): the
+Scenarios complete: SCENARIO-01..08, amended by SCENARIO-HANDOFF-FILE (touches 03/05/06): the
 handoff moved out of the step file into its own file (R21). Every splice-era entry is gone,
 replaced by the whole-file contract below. The crossover reads this file next.
 
@@ -60,14 +60,17 @@ replaced by the whole-file contract below. The crossover reads this file next.
   out of its own tree mid-migration. (HANDOFF-FILE)
 - `cli.Run` takes `stdin` before `stdout`. `finish` prints nothing to stdout, one stderr line
   `brief finish: <step> is done`. (05-06)
-- **`NewFeature` refuses an empty or whitespace-carrying name as its first statement**, before
-  `os.MkdirAll` — a bare sentinel `scaffold.ErrInvalidFeatureName`, not a `*RefusalError`.
-  `cli/new.go`'s `runNewFeature` branches on it *before* `renderRefusal` and routes through
-  `usageError` → `ErrUsage` → **exit 2**, no `(no files changed)` tail. Predicate is
-  `unicode.IsSpace` anywhere in the name (plus empty) — exactly `strings.Fields`' predicate,
-  which is what makes `status`'s whitespace-separated four-field contract (SCENARIO-09) hold.
-  **SCENARIO-08's already-exists refusal lands in the same function and is the opposite
-  class**: a `*RefusalError` at exit 1 — do not unify the two into one code path. (07)
+- **`NewFeature` has two refusal classes in `runNewFeature`, never unify them.** Empty/
+  whitespace name (`unicode.IsSpace` anywhere, plus empty — `strings.Fields`'s predicate,
+  which is what makes `status`'s four-field contract, SCENARIO-09, hold) → bare sentinel
+  `ErrInvalidFeatureName`, before `os.MkdirAll`, `usageError` → exit 2, no `(no files
+  changed)` tail. Existing feature directory (`root.Mkdir` → `errors.Is(err, fs.ErrExist)`,
+  no pre-`Stat`/TOCTOU) → `*RefusalError` wrapping `ErrFeatureExists`, `Path` =
+  `filepath.Join(featureRoot, name)` as requested (not on-disk casing), `Line` 0, via the
+  existing `renderRefusal` → exit 1, `(no files changed)` tail; broadening the predicate
+  would relabel a `"../escaped"` traversal refusal as "already exists". `NewFeature` never
+  inspects what it found — empty/partial/malformed/colliding-file all get identical wording
+  (SCENARIO-11 owns malformed-feature reporting). `internal/cli` needed zero change. (07, 08)
 
 ## Left unbuilt
 
@@ -81,10 +84,8 @@ replaced by the whole-file contract below. The crossover reads this file next.
   handoff fence refusal; SCENARIO-17's over-cap handoff refusal re-adds both.
 - `HandoffPattern.Number` (recognizing a handoff filename by pattern) — not built; `check` (22)
   and the R6 synthesis are the first callers needing to enumerate handoff files.
-- Already-exists refusal in `NewFeature` (still a raw `os.Mkdir` `EEXIST` wrapped as
-  `scaffold: …`, not yet a `*RefusalError`) — SCENARIO-08 owns it. `NewStep` and `assemble`'s
-  read path do not re-validate a feature name already on disk — creation is the sole choke
-  point, deliberately. (07)
+- `NewStep` and `assemble`'s read path do not re-validate a feature name already on disk —
+  `NewFeature`'s creation path is the sole choke point, deliberately. (07)
 
 ## Traps
 
@@ -115,6 +116,12 @@ replaced by the whole-file contract below. The crossover reads this file next.
   Asserting only `NoDirExists(<feature dir>/<name>)` on a fresh `t.TempDir()` is vacuous — the
   leaf never exists regardless of the guard; the discriminating probe is `NoDirExists` on the
   *configured feature directory* itself, paired with a control arm on an accepted name. (07)
+- **`NewFeature`'s already-exists refusal is guarded twice, not independently falsifiable.**
+  `root.Mkdir` refuses first; `writeExclusive`'s `O_CREATE|O_EXCL` behind it. Mutation-verified:
+  `Mkdir`→`MkdirAll` still dies at `writeExclusive`'s `openat …: file exists` — never disable
+  both guards at once. `DirExists` on the feature path after the refusal is vacuous;
+  `snapshotTree` (`finish_test.go`, `scaffold_test`, non-recursive) is the discriminating
+  probe, reused across S07/S08 in place. (08)
 
 ## Open debts
 

@@ -27,10 +27,11 @@
 //
 // A caller-facing refusal is a *RefusalError: a path, an optional line
 // within it, what was wrong, and how to fix it, wrapping one of
-// ErrNoSuchFeature, ErrMalformedFeature, ErrNoProgressHeading,
-// ErrNoSuchStep, ErrNoProgressEntry or ErrUnterminatedFence (or, from
-// internal/platform/stepfile, ErrInvalidPattern, ErrInvalidHandoffSuffix
-// or ErrNoStatusField) so callers can branch on the specific cause with
+// ErrNoSuchFeature, ErrFeatureExists, ErrMalformedFeature,
+// ErrNoProgressHeading, ErrNoSuchStep, ErrNoProgressEntry or
+// ErrUnterminatedFence (or, from internal/platform/stepfile,
+// ErrInvalidPattern, ErrInvalidHandoffSuffix or ErrNoStatusField) so
+// callers can branch on the specific cause with
 // errors.Is while still rendering the same "nothing changed on disk"
 // line. A refusal about the state argument's own bytes, rather than about
 // a file Finish opened, carries Path == StateSource — a placeholder cli

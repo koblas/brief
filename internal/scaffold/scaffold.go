@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -38,12 +39,16 @@ func NewServer(cfg config.Config, root string) *Server {
 //
 // Every write goes through an *os.Root rooted at the feature directory.
 // Root.Mkdir refuses a name that escapes the root (a "../x" name cannot
-// traverse out) and refuses an existing feature outright — that refusal is
-// what stops an existing specification from being truncated: brief new
-// feature brief run inside this repository would otherwise overwrite this
-// project's own approved specification.md. Each file is additionally opened
-// O_CREATE|O_EXCL, which cannot fire while Mkdir guarantees a brand-new
-// leaf, and which holds the line if that guarantee is ever relaxed.
+// traverse out); when it fails because the feature directory already
+// exists, that failure is reported as a *RefusalError wrapping
+// ErrFeatureExists naming the existing directory — the guard that stops an
+// existing specification from being truncated: brief new feature brief run
+// inside this repository would otherwise overwrite this project's own
+// approved specification.md. Every other Mkdir failure, including the
+// traversal case above, keeps its plain wrapped-error shape. Each file is
+// additionally opened O_CREATE|O_EXCL, a second guard behind Mkdir's that
+// cannot fire while Mkdir guarantees a brand-new leaf, and which holds the
+// line if that guarantee is ever relaxed.
 func (s *Server) NewFeature(_ context.Context, name string) (string, error) {
 	if err := validateFeatureName(name); err != nil {
 		return "", err
@@ -61,6 +66,17 @@ func (s *Server) NewFeature(_ context.Context, name string) (string, error) {
 	defer func() { _ = root.Close() }()
 
 	if err := root.Mkdir(name, 0o755); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			featurePath := filepath.Join(featureRoot, name)
+
+			return "", &RefusalError{
+				Path:    featurePath,
+				Problem: "feature already exists",
+				Fix:     fmt.Sprintf("run 'brief new step %s' to add a step to it, or choose a different name", name),
+				Err:     ErrFeatureExists,
+			}
+		}
+
 		return "", fmt.Errorf("scaffold: %w", err)
 	}
 
