@@ -451,6 +451,12 @@ func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T)
 // no arguments, pointing at "brief --version" — never as the unknown-flag
 // wording argVersionFlag's msg would otherwise carry (R4).
 //
+// The four rows are one behavior — any trailing argument, whatever its
+// shape — not four independent rules: "extra" and "--json" are the
+// specification's own examples, and "--help"/"--version" pin that args[1]
+// is never classified at all (R8), a shape no mutation in this arm can
+// discriminate. No mutation reddens one row without reddening all four.
+//
 // Mutation-verified, restored byte-identical after each: widening the
 // argVersionFlag arm's guard from "len(args) == 1" to "len(args) >= 1"
 // reddens every row here (nil error, version printed instead of the usage

@@ -55,6 +55,8 @@ Scenarios complete: SCENARIO-01, SCENARIO-02, SCENARIO-03. Last updated by SCENA
 - `exhaustive` lint is enabled (`default: all`, no `default:` case allowed). Every
   `classifyDashArg` switch (root, `new`, help stub) must carry an arm for every `argKind` —
   clean as of SCENARIO-03; no new `argKind` was added this scenario.
+  `cli_internal_test.go:28`'s `newTreeWithExtraCommands` is a hidden `newRootCommand` caller
+  whose signature includes `readBuildInfo` — a later change to that signature breaks it too.
 - cobra's `Command.Version` / `InitDefaultVersionFlag` never fire: root has `DisableFlagParsing:
   true`. Do not set `root.Version` — it would be silently inert.
 - In a `go test` binary, `Main.Version` is `"(devel)"` — black-box tests through `cli.Run`
