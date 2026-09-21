@@ -104,11 +104,7 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 			Next:        next,
 		}
 
-		if err := writeJSONDocument(out.stdout, doc); err != nil {
-			return fmt.Errorf("brief finish: %w", err)
-		}
-
-		return nil
+		return out.document(doc)
 	}
 
 	if !res.Changed {

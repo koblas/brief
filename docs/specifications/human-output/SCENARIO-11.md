@@ -28,7 +28,10 @@ state file that was replaced, **not** the `--state` input. Both are relative via
 `{<jsonHeader>, "feature", "step", "changed", "handoff_path", "state_path", "next"}`.
 Paths are absolute, passed through verbatim from scaffold. `changed` is `false` only on the R11
 no-op. `next` is a bare id string or `null`, not a `{id,title,path}` object like status's.
-The header's `files_changed` stays `false` from `filesChangedFor`, as S01 decided. Do not touch it.
+On a refusal or a write-path failure, the header's `files_changed` reports what actually
+happened on disk (R3): `false` when nothing was written, `true` when at least one of finish's
+four writes (handoff, state, step file, specification) landed before the one that failed, via
+`errors.Is(err, scaffold.ErrPartialWrite)`.
 
 Definition of `next`: the step `brief start <feature>` would brief after this finish, which is
 the **lowest-numbered step file (by `pattern.Number`) whose frontmatter status is not "done"**,

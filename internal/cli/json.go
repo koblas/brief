@@ -3,10 +3,12 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
+	"github.com/koblas/brief/internal/scaffold"
 	"github.com/spf13/cobra"
 )
 
@@ -61,7 +63,9 @@ func newJSONHeader(command string, exitCode int) jsonHeader {
 // failure (reporter.refusal) leaves problem always filled, path null only
 // for "<stdin>", a bare not-found or a generic failure, and line null
 // unless the refusal names a specific one. files_changed is null for a
-// read command or a pointer to false for a write one (filesChangedFor).
+// read command; for a write command it is what actually happened on disk —
+// false when nothing was written, true when at least one write landed
+// before the failure (filesChangedFor).
 type jsonError struct {
 	Kind         string  `json:"kind"`
 	Message      string  `json:"message"`
@@ -126,7 +130,7 @@ func scanJSONFlag(args []string) ([]string, bool, bool) {
 			stripped = append(stripped, a)
 		case a == "--json":
 			jsonMode = true
-		case a == "--json=" || strings.HasPrefix(a, "--json="):
+		case strings.HasPrefix(a, "--json="):
 			hasValue = true
 
 			stripped = append(stripped, a)
@@ -183,18 +187,23 @@ func usageFix(msg string, cmd *cobra.Command) string {
 	return "run '" + usageHint(cmd) + "'"
 }
 
-// filesChangedFor reports R3's "files_changed" value for command: false
-// for a write command (new, new feature, new step, finish), nil (JSON
-// null) for a read command.
-func filesChangedFor(command string) *bool {
-	switch command {
-	case "new", "new feature", "new step", "finish":
-		f := false
-
-		return &f
-	default:
+// filesChangedFor reports R3's "files_changed" value for cmd, one of the
+// commands carrying writesFilesAnnotation ("new", "new feature", "new
+// step", "finish"): nil (JSON null) for every other command, since a read
+// command never changes anything to report on; for a write command, what
+// actually happened on disk — true when err wraps scaffold.ErrPartialWrite
+// (at least one write landed before the failure that reached cli), false
+// otherwise (a usage error, a refusal that changed nothing, or a failure
+// before the first write). err is nil for a usage error, which never
+// reaches a write at all.
+func filesChangedFor(cmd *cobra.Command, err error) *bool {
+	if cmd.Annotations[writesFilesAnnotation] == "" {
 		return nil
 	}
+
+	f := errors.Is(err, scaffold.ErrPartialWrite)
+
+	return &f
 }
 
 // jsonTakesNoValueMessage renders "--json=<v>"'s always-text usage line
@@ -266,7 +275,7 @@ func (r reporter) usageError(msg string) error {
 				Kind:         errorKindUsage,
 				Message:      msg,
 				Fix:          usageFix(msg, r.cmd),
-				FilesChanged: filesChangedFor(command),
+				FilesChanged: filesChangedFor(r.cmd, nil),
 			},
 		}
 
@@ -278,4 +287,16 @@ func (r reporter) usageError(msg string) error {
 	fmt.Fprintln(r.stderr, msg)
 
 	return fmt.Errorf("%s: %w", msg, ErrUsage)
+}
+
+// document writes v — one of status, check, start, finish, new feature or
+// new step's own success document — to r.stdout as R1/R2's one JSON
+// document, wrapping a write failure with "brief <path>: " naming r.cmd's
+// own command path, the one place every such write's error is wrapped.
+func (r reporter) document(v any) error {
+	if err := writeJSONDocument(r.stdout, v); err != nil {
+		return fmt.Errorf("brief %s: %w", commandName(r.cmd), err)
+	}
+
+	return nil
 }

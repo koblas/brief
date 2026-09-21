@@ -28,7 +28,10 @@ format, byte-pinned text tests are rewritten; `--json` on literally all commands
   "problem", "fix", "files_changed"}`. `kind` ∈ `usage` (exit 2), `refusal` (exit 1: invalid
   config, scaffold/assemble refusals, not-found), `failure` (exit 1: anything else). `message`
   is the exact text-mode line. Unused fields are `null`, never omitted. `files_changed` is
-  `false` for write commands, `null` for read commands. `fix` always filled.
+  `null` for read commands; for write commands it reports what actually happened on disk —
+  `false` when nothing was written (a usage error, a refusal, or a failure before the first
+  write), `true` when at least one write landed before the failure that reached cli. `fix`
+  always filled.
 - R4: **Problems that are data stay data.** `status --json` with malformed features exits 0
   with a per-feature `problem` object; `check --json` findings are payload (exit 1 on any
   ERROR) with no `error` object.

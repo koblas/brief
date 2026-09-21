@@ -304,7 +304,7 @@ func (r reporter) refusal(err error) error {
 				Line:         c.jsonLine(),
 				Problem:      &problem,
 				Fix:          fix,
-				FilesChanged: filesChangedFor(command),
+				FilesChanged: filesChangedFor(r.cmd, err),
 			},
 		}
 

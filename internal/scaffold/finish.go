@@ -324,24 +324,27 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 // between the crash and the retry, newSpec already equals what is on disk
 // and fm.Done() is already true — so the retry instead converges by
 // hitting Finish's no-op gate and returning before touching any file at
-// all. It returns writeFailure(err, feature, step) for whichever write
-// fails first, never a *RefusalError, since every earlier write in this
-// call has already landed.
+// all. It returns writeFailure(err, feature, step, partial) for whichever
+// write fails first, never a *RefusalError, since every earlier write in
+// this call has already landed. partial is false only for the handoff
+// write — the first of the four — and true for every write after it, since
+// by then the handoff file has already landed: cli's files_changed (R3)
+// reads that distinction through errors.Is(err, ErrPartialWrite).
 func applyFinishWrites(root *os.Root, cfg config.Config, feature, step, handoffName string, handoff []byte, stepFileName string, newStepBody []byte, newSpec string, state []byte) error {
 	if err := replaceBytes(root, handoffName, handoff); err != nil {
-		return writeFailure(err, feature, step)
+		return writeFailure(err, feature, step, false)
 	}
 
 	if err := replaceBytes(root, cfg.StateFile, state); err != nil {
-		return writeFailure(err, feature, step)
+		return writeFailure(err, feature, step, true)
 	}
 
 	if err := replaceBytes(root, stepFileName, newStepBody); err != nil {
-		return writeFailure(err, feature, step)
+		return writeFailure(err, feature, step, true)
 	}
 
 	if err := replaceString(root, cfg.SpecificationFile, newSpec); err != nil {
-		return writeFailure(err, feature, step)
+		return writeFailure(err, feature, step, true)
 	}
 
 	return nil
@@ -508,9 +511,15 @@ func siblingFrontmatter(root *os.Root, name string) stepfile.Frontmatter {
 // writeFailure wraps a write-path error with the same invocation that
 // would retry it. It is never a *RefusalError: the write it reports on
 // already changed a file, so the refusal template's "(no files changed)"
-// tail would misreport that.
-func writeFailure(err error, feature, step string) error {
-	return fmt.Errorf("scaffold: %w; run 'brief finish %s %s --handoff <path> --state <path>' to retry", err, feature, step)
+// tail would misreport that. partial marks it with ErrPartialWrite when an
+// earlier write in this same call has already landed.
+func writeFailure(err error, feature, step string, partial bool) error {
+	wrapped := fmt.Errorf("scaffold: %w; run 'brief finish %s %s --handoff <path> --state <path>' to retry", err, feature, step)
+	if !partial {
+		return wrapped
+	}
+
+	return markPartial(wrapped)
 }
 
 // findStepFile scans root for the step file whose pattern.ID equals step,

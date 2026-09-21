@@ -40,11 +40,11 @@ type startDocument struct {
 
 // runStart implements "brief start [--json] <feature>"; rest is its
 // positional arguments, from either side of --json, flags already parsed
-// away. jsonOut is out.json, read once at the call site: every
-// JSON-capable leaf's own pflag "json" flag stays registered only so its
-// help table row still renders, since run's own scanJSONFlag strips every
-// "--json" token before pflag ever parses one.
-func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, out reporter) error {
+// away. start's own pflag "json" flag stays registered only so its help
+// table row still renders, since run's own scanJSONFlag strips every
+// "--json" token before pflag ever parses one — out.json alone decides
+// this run's mode.
+func runStart(ctx context.Context, wd string, rest []string, out reporter) error {
 	switch {
 	case len(rest) == 0:
 		return out.usageError(fmt.Sprintf("brief start: no feature given; run '%s'", startInvocation))
@@ -71,14 +71,10 @@ func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, out r
 	// / "no step files yet" notices are payload-derivable from step:null
 	// plus done/open, so the document alone is the discriminator a
 	// structured caller reads.
-	if jsonOut {
+	if out.json {
 		doc := startDocument{jsonHeader: out.successHeader(), Brief: brief}
 
-		if err := writeJSONDocument(out.stdout, doc); err != nil {
-			return fmt.Errorf("brief start: %w", err)
-		}
-
-		return nil
+		return out.document(doc)
 	}
 
 	for _, s := range brief.Shortfalls {

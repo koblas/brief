@@ -123,11 +123,7 @@ func runStatus(ctx context.Context, wd string, rest []string, out reporter) erro
 	if out.json {
 		doc := statusDocument{jsonHeader: out.successHeader(), Features: statusFeatures(rows)}
 
-		if err := writeJSONDocument(out.stdout, doc); err != nil {
-			return fmt.Errorf("brief status: %w", err)
-		}
-
-		return nil
+		return out.document(doc)
 	}
 
 	if len(rows) == 0 {

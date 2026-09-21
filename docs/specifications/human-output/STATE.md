@@ -1,6 +1,6 @@
 # human-output — current state
 
-Scenarios complete: SCENARIO-01..14 (all). Last updated by SCENARIO-14.
+Scenarios complete: SCENARIO-01..14 (all). Last updated by a post-scenario fix round.
 
 ## Binding decisions
 
@@ -9,11 +9,19 @@ Scenarios complete: SCENARIO-01..14 (all). Last updated by SCENARIO-14.
 - `reporter` (`internal/cli/json.go`) is the one per-Run output seam: `usageError`/`refusal`
   render R3's error document; success is a per-command `<cmd>Document` embedding `jsonHeader`
   first, by value, never nil slices (`[]` not `null`). `--json` always writes before any
-  text-mode write (R1, mutation-verified).
-- `files_changed`: `false` for `new`, `new feature`, `new step`, `finish`; `null` otherwise.
+  text-mode write (R1, mutation-verified). `reporter.document(v)` is the one place a success
+  document's write error is wrapped (`status`, `check`, `start`, `finish`, both `new` leaves).
+- `files_changed`: `null` for a read command; for a write command (`new`, `new feature`,
+  `new step`, `finish` — each carries `writesFilesAnnotation`, read by `filesChangedFor(cmd,
+  err)`) it is what actually landed: `false` when nothing was written, `true` iff
+  `errors.Is(err, scaffold.ErrPartialWrite)`. Set by `scaffold.writeFailure(..., partial bool)`
+  for every write in `Finish.applyFinishWrites` after the first, by `markPartial` on `NewStep`'s
+  specification write, and on both of `NewFeature`'s writes (its `Mkdir` already landed) —
+  mutation-verified per site. `partialWriteError.Unwrap() []error` carries the sentinel without
+  changing `Error()`'s text, so `message`/`problem` are unaffected.
 - `classifyRefusal(err)` order: `*config.InvalidConfigError`, `*unknownFeatureError`,
   `*scaffold.RefusalError`, `*assemble.RefusalError`, generic `errorKindFailure` — load-bearing
-  (mutation-verified).
+  (mutation-verified). Every refusal-matrix row's `fix` is asserted `Equal`, not just non-empty.
 - **Paths: absolute in `assemble`/`scaffold`/JSON, relative in text (R6)** via
   `displayPath(wd, p)` — every command goes through it.
 - `finish --json`'s `next` is `*string` — null, not omitted, on the no-op; `changed` false
@@ -25,24 +33,14 @@ Scenarios complete: SCENARIO-01..14 (all). Last updated by SCENARIO-14.
 - `versionString(readBuildInfo)` is the one version rule (`"(devel)"` fallback), shared text
   and JSON.
 - Every help document comes from one `root.SetHelpFunc` wrapper (`help_json.go`); `command` is
-  always the literal `"help"`; `flags` via `cmd.LocalFlags().VisitAll`/`pflag.UnquoteUsage`,
-  `InitDefaultHelpFlag()` called explicitly per entry.
-- R11: `brief completion <shell> --json` (recognized shell) is a usage error, guarded only on
-  `runCompletion`'s resolved-shell branch.
-- **`--json` is a real pflag on every JSON-capable leaf** (`new feature`, `new step`, `start`,
-  `finish`, `status`, `check`) and the help stub, via one helper `addJSONFlag` (`cli.go`)
-  sharing one usage const `jsonFlagUsage` = `"print one JSON document on stdout"`.
-  `leafCommand` does not call it itself — `completion`'s own call still passes `nil` (R11).
-  Registration is display-only: `scanJSONFlag` still strips every `--json` before pflag runs.
+  always the literal `"help"`. Both the help stub's topic-acceptance check and the template's
+  own row loop share one predicate, `listedForHelp(cmd)`.
+- **`--json` is a real pflag on every JSON-capable leaf**, via one helper `addJSONFlag`
+  (`cli.go`) sharing one usage const `jsonFlagUsage`. Registration is display-only:
+  `scanJSONFlag` still strips every `--json` before pflag runs.
 - Every JSON-capable command's `Long` ends with a JSON paragraph built from one shared trio in
-  `cli.go`: `jsonParagraphHeaderClause` (common-header sentence, wrapped once, reused
-  verbatim), `jsonFieldsParagraph(keys...)` (that command's own top-level keys, wrapped
-  separately from the header clause), `wrapWords` (mechanical greedy wrap). `startLong` also
-  carries the "step is null" / "`--json` before or after `<feature>`" facts, no longer in
-  `jsonFlagUsage` itself. `status`/`check` additionally end with `jsonScriptHint` ("For
-  scripts, use --json; the text layout may change.") — no other command carries it. Root and
-  bare `new` get neither row nor paragraph (`rootHelp`/`newHelp` unchanged). `Long` is the
-  help-document `description`, so every paragraph is JSON-visible too.
+  `cli.go`: `jsonParagraphHeaderClause`, `jsonFieldsParagraph(keys...)`, `wrapWords`.
+  `status`/`check` additionally carry `jsonScriptHint`.
 
 ## Left unbuilt
 
@@ -53,8 +51,9 @@ Scenarios complete: SCENARIO-01..14 (all). Last updated by SCENARIO-14.
 - A `blocked` flag in `finish`'s output, and a flag `shorthand` field in help entries — neither
   is in the ruled shape.
 - `--version` never appears in the help index — root is not an entry.
-- A JSON-mode hint in root's or `new`'s own group help — nobody owns it; neither renders a
-  Flags table, so a future owner needs a mechanism other than `addJSONFlag`.
+- A JSON-mode hint in root's or `new`'s own group help — nobody owns it.
+- `start --json`'s `shortfalls` renders `null`, not `[]`, when empty — never normalized to R9's
+  empty-slice-not-null convention the other list fields follow.
 
 ## Traps
 
@@ -65,26 +64,22 @@ Scenarios complete: SCENARIO-01..14 (all). Last updated by SCENARIO-14.
   payload struct is silently resolved by encoding/json's equal-depth rule.
 - `known:` lists only openable dirs. A zero-step feature with findings is `InFlight == false`
   → `(complete)` in `check`, though `status.Complete()` disagrees. Both pre-existing.
-- A new feature-level `Finding` producer must stamp its own `Feature`/`FeaturePath`/
-  `InFlight`/`Rule` itself, at every `Finding{...}` site (mutation-verified).
-- `os.ReadDir` order is filename order — `nextOpenStep` picks the minimum by `pattern.Number`;
-  a sibling with unparseable frontmatter counts as not done and can be named `next`, though
-  `brief start` then refuses the whole feature.
-- `root.HelpFunc()` must be captured **before** `SetHelpFunc` replaces it, or the wrapper
-  recurses into itself. `HelpFunc`/`cmd.Help()` never return an error, so a write failure in
-  the JSON wrapper can't become a non-zero exit — same limit as cobra's own text help.
+- `os.ReadDir` order is filename order — `nextOpenStep` picks the minimum by `pattern.Number`.
 - pflag sorts a leaf's Flags rows by name: `--json` lands between `--help` and `--state` in
-  finish's table and its help-JSON `flags[]` — a future flag addition must check where pflag's
-  sort puts it, not assume append order.
-- A word-coverage assertion over a whole help text can pass vacuously: short keys (`step`,
-  `path`, `open`, `next`) already appear elsewhere in several commands' prose, and
-  `features`/`feature` are substrings of each other — search only the slice starting at
-  `jsonParagraphMarker`, whole words only, when adding a future field key.
-- The 80-column sweep (`Test_every_leaf_help_line_fits_in_80_columns`) checks `Long` prose
-  too; pflag never wraps `Long` — hand-wrap, or route through `wrapWords`.
+  finish's table — a future flag addition must check where pflag's sort puts it.
+- `scaffold.writeExclusive` (`O_CREATE|O_EXCL`, no atomicfile temp sibling) has no seam to force
+  a mid-sequence write failure the way `replaceBytes`/`replaceString` do via a decoy
+  `.<name>.brief-tmp` directory — `NewFeature`'s two writes are marked `ErrPartialWrite` by
+  reasoning only, not a red/green test; `Finish`'s four sites and `NewStep`'s specification
+  write are the ones actually mutation-verified.
 
 ## Open debts
 
-- `assemble.RenderJSON`, `brief new --json`'s success document, and a JSON-mode hint in
-  root's/`new`'s own group help (see Left unbuilt) — all unowned, all die unless re-opened.
+- Everything in "Left unbuilt" above is unowned and dies unless re-opened.
 - `scaffold.noSuchFeatureRefusal`'s dead `Problem`/`Fix` fields — unowned.
+- A sticky write-error for a usage/refusal/help JSON write failure (today silently discarded:
+  `_ = writeJSONDocument(...)`) — unowned — dies unless re-opened.
+- A success document's own write failure and a text-mode render failure exit with different
+  codes/messages for the same underlying I/O fault — unowned asymmetry — dies unless re-opened.
+- `NewFeature`'s write-site test gap above — unowned unless a future change routes its writes
+  through `replaceBytes`/atomicfile, which would also give it the same decoy-directory seam.

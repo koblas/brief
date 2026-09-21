@@ -480,6 +480,8 @@ func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.Error(t, err)
+	require.NotErrorIs(t, err, scaffold.ErrPartialWrite,
+		"the handoff write is the first of the four; nothing landed before it failed")
 
 	stepBody, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
 	require.NoError(t, readErr)
@@ -544,6 +546,8 @@ func Test_reports_a_state_write_that_cannot_be_committed(t *testing.T) {
 
 	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrPartialWrite,
+		"the handoff write ahead of the blocked state write already landed")
 
 	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
 	require.NoError(t, readErr)
@@ -596,6 +600,8 @@ func Test_reports_a_step_file_write_that_cannot_be_committed(t *testing.T) {
 
 	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrPartialWrite,
+		"the handoff and state writes ahead of the blocked step-file write already landed")
 
 	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
 	require.NoError(t, readErr)
@@ -648,6 +654,8 @@ func Test_reports_a_specification_write_that_cannot_be_committed(t *testing.T) {
 
 	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrPartialWrite,
+		"the handoff, state and step-file writes ahead of the blocked specification write already landed")
 
 	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
 	require.NoError(t, readErr)

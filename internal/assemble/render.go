@@ -148,9 +148,10 @@ func flattenTabwriterField(s string) string {
 // meaning in a report about a tree scaffold.Finish was never asked to
 // write. RenderFindings renders Path verbatim — the caller relativizes it
 // for text mode — and decides nothing about grouping, severity or
-// ordering, all decided upstream; a tab or newline in Detail is flattened
-// to a single space, the same tabwriter-safety stance RenderStatusText
-// takes, even though this output is not itself a tabwriter table.
+// ordering, all decided upstream; a tab or newline in the group's own Name
+// or in a finding's Detail is flattened to a single space, the same
+// tabwriter-safety stance RenderStatusText takes, even though this output
+// is not itself a tabwriter table.
 func RenderFindings(w io.Writer, groups []FeatureFindings) error {
 	for i, g := range groups {
 		if i > 0 {
@@ -164,7 +165,7 @@ func RenderFindings(w io.Writer, groups []FeatureFindings) error {
 			status = "(in flight)"
 		}
 
-		if _, err := fmt.Fprintf(w, "%s  %s\n", g.Name, status); err != nil {
+		if _, err := fmt.Fprintf(w, "%s  %s\n", flattenTabwriterField(g.Name), status); err != nil {
 			return fmt.Errorf("assemble: render: %w", err)
 		}
 

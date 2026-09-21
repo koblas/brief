@@ -380,6 +380,25 @@ func Test_RenderFindings_flattens_a_tab_or_newline_in_the_detail(t *testing.T) {
 	assert.Contains(t, out.String(), "  a b c\n")
 }
 
+// Test_RenderFindings_flattens_a_tab_or_newline_in_the_group_name pins the
+// same stance for the group header's own Name, symmetric with Detail above:
+// RenderStatusText already flattens a feature row's Name the same way.
+func Test_RenderFindings_flattens_a_tab_or_newline_in_the_group_name(t *testing.T) {
+	groups := []assemble.FeatureFindings{
+		{
+			Name: "de\tmo\nx", Path: "/repo/docs/specifications/demo", InFlight: true,
+			Findings: []assemble.Finding{
+				{Severity: assemble.SeverityError, Path: "/repo/docs/specifications/demo/A.md", Detail: "a problem"},
+			},
+		},
+	}
+
+	var out bytes.Buffer
+	require.NoError(t, assemble.RenderFindings(&out, groups))
+
+	assert.Contains(t, out.String(), "de mo x  (in flight)\n")
+}
+
 // Test_RenderFindings_writes_nothing_for_an_empty_slice is the SCENARIO-10
 // shape's render-side half: a conforming tree's Check result renders as
 // zero bytes, never a header or a "no findings" banner.

@@ -185,8 +185,8 @@ func runCheck(ctx context.Context, wd string, rest []string, out reporter) error
 			Features:   checkFeatures(groups),
 		}
 
-		if err := writeJSONDocument(out.stdout, doc); err != nil {
-			return fmt.Errorf("brief check: %w", err)
+		if err := out.document(doc); err != nil {
+			return err
 		}
 
 		return runErr
@@ -210,7 +210,7 @@ func runCheck(ctx context.Context, wd string, rest []string, out reporter) error
 // displayFindings returns a copy of groups with every Finding.Path
 // relativized to wd (R6) through displayPath — a copy of both the group
 // slice and each group's own findings slice, never a mutation of groups'
-// backing arrays: check --json (S09) builds its own document from the
+// backing arrays: check --json builds its own document from the
 // un-relativized findings Check returned, and must see them unchanged.
 func displayFindings(wd string, groups []assemble.FeatureFindings) []assemble.FeatureFindings {
 	out := make([]assemble.FeatureFindings, len(groups))

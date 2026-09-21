@@ -104,12 +104,15 @@ func (s *Server) NewFeature(_ context.Context, name string) (Result, error) {
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
 	statePath := filepath.Join(featurePath, s.cfg.StateFile)
 
+	// Both failures below are marked ErrPartialWrite: root.Mkdir above has
+	// already landed the feature directory itself by the time either can
+	// fail, so cli's files_changed (R3) must report true, not false.
 	if err := writeExclusive(root, filepath.Join(name, s.cfg.SpecificationFile), specificationSkeleton(s.cfg, name)); err != nil {
-		return Result{}, err
+		return Result{}, markPartial(err)
 	}
 
 	if err := writeExclusive(root, filepath.Join(name, s.cfg.StateFile), stateSkeleton(s.cfg)); err != nil {
-		return Result{}, err
+		return Result{}, markPartial(err)
 	}
 
 	return Result{
@@ -215,8 +218,10 @@ func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 		return Result{}, fmt.Errorf("scaffold: %w", err)
 	}
 
+	// Marked ErrPartialWrite: the step file above has already landed by the
+	// time this can fail, so cli's files_changed (R3) must report true.
 	if err := replaceString(root, s.cfg.SpecificationFile, newSpec); err != nil {
-		return Result{}, fmt.Errorf("scaffold: %w", err)
+		return Result{}, markPartial(fmt.Errorf("scaffold: %w", err))
 	}
 
 	stepPath := filepath.Join(featurePath, stepName)

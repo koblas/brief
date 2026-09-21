@@ -277,6 +277,8 @@ func Test_reports_a_specification_write_that_cannot_be_committed_on_new_step(t *
 	_, err = srv.NewStep(context.Background(), "widgets")
 
 	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrPartialWrite,
+		"the step file ahead of the blocked specification write already landed")
 	assert.FileExists(t, filepath.Join(featureDir, "STEP-01.md"),
 		"the step file lands before the specification write, so it must survive the specification write's failure")
 }

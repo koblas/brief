@@ -113,6 +113,13 @@ var ErrUnmetDependency = errors.New("step depends on a step that is not finished
 // never validated.
 var ErrMissingStateHeading = conform.ErrMissingStateHeading
 
+// ErrPartialWrite marks a write-path error returned after at least one of
+// Finish's, NewFeature's, or NewStep's own writes already landed on disk —
+// distinct from one returned before any of them did. cli's files_changed
+// (R3) reads this through errors.Is rather than assuming every write
+// command's own failure always changed nothing.
+var ErrPartialWrite = errors.New("partial write")
+
 // StateSource is the RefusalError.Path placeholder a refusal carries when
 // it concerns the bytes of Finish's state argument rather than a file
 // Finish opened itself. Finish never learns where those bytes came from —
@@ -150,4 +157,26 @@ func (e *RefusalError) Error() string {
 // Unwrap exposes Err so errors.Is reaches the sentinel this refusal wraps.
 func (e *RefusalError) Unwrap() error {
 	return e.Err
+}
+
+// partialWriteError marks err as ErrPartialWrite without changing what
+// Error() reports: Go's multi-error Unwrap lets errors.Is reach both err's
+// own chain and ErrPartialWrite, while Error() renders exactly what err
+// alone would have, so a --json document's "message"/"problem" text is
+// never affected by whether a write landed before this error was returned.
+type partialWriteError struct {
+	err error
+}
+
+func (e *partialWriteError) Error() string   { return e.err.Error() }
+func (e *partialWriteError) Unwrap() []error { return []error{e.err, ErrPartialWrite} }
+
+// markPartial wraps err with ErrPartialWrite, reporting that at least one
+// write already landed before err was produced. It returns nil unchanged.
+func markPartial(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return &partialWriteError{err: err}
 }

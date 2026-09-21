@@ -169,6 +169,14 @@ const listedInHelpAnnotation = "listedInHelp"
 // root carries none, so helpTemplate falls back to the literal "command".
 const commandNounAnnotation = "commandNoun"
 
+// writesFilesAnnotation is the cobra.Command.Annotations key marking a
+// command whose successful run can modify the tree — "new", "new
+// feature", "new step" and "finish" — so filesChangedFor knows R3's
+// files_changed is false (not null) on a usage error or a refusal that
+// changed nothing for one of these, true when at least one write landed
+// before the failure, and null for every other command.
+const writesFilesAnnotation = "writesFiles"
+
 // jsonFlagUsage is every JSON-capable command's own --json flag's usage
 // string, shown in its Flags table: one ruled line, the same wording on
 // every command so the help index's own "usage" field can never drift
@@ -395,43 +403,48 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		DisableFlagParsing:    true,
 		DisableFlagsInUseLine: true,
 		Args:                  cobra.ArbitraryArgs,
-		Annotations:           map[string]string{commandNounAnnotation: "type"},
+		Annotations:           map[string]string{commandNounAnnotation: "type", writesFilesAnnotation: "true"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runNew(cmd, args, out.forCommand(cmd))
 		},
 	}
-	newCmd.AddCommand(
-		leafCommand("feature <name>", "scaffold a new feature's specification and state file", newFeatureInvocation, newFeatureLong, addJSONFlag,
-			func(cmd *cobra.Command, args []string) error {
-				return runNewFeature(cmd.Context(), wd, args, out.forCommand(cmd))
-			}),
-		leafCommand("step <feature>", "scaffold the next step file and its progress entry", newStepInvocation, newStepLong, addJSONFlag,
-			func(cmd *cobra.Command, args []string) error {
-				return runNewStep(cmd.Context(), wd, args, out.forCommand(cmd))
-			}),
-	)
+
+	newFeatureCmd := leafCommand("feature <name>", "scaffold a new feature's specification and state file", newFeatureInvocation, newFeatureLong, addJSONFlag,
+		func(cmd *cobra.Command, args []string) error {
+			return runNewFeature(cmd.Context(), wd, args, out.forCommand(cmd))
+		})
+	newFeatureCmd.Annotations[writesFilesAnnotation] = "true"
+
+	newStepCmd := leafCommand("step <feature>", "scaffold the next step file and its progress entry", newStepInvocation, newStepLong, addJSONFlag,
+		func(cmd *cobra.Command, args []string) error {
+			return runNewStep(cmd.Context(), wd, args, out.forCommand(cmd))
+		})
+	newStepCmd.Annotations[writesFilesAnnotation] = "true"
+
+	newCmd.AddCommand(newFeatureCmd, newStepCmd)
+
+	finishCmd := leafCommand("finish <feature> <step> --handoff <path> --state <path>", "close a step: handoff, state, then done", finishInvocation, finishLong,
+		func(fs *pflag.FlagSet) {
+			fs.String("handoff", "", handoffFlagUsage)
+			fs.String("state", "", stateFlagUsage)
+			addJSONFlag(fs)
+		},
+		func(cmd *cobra.Command, args []string) error {
+			handoffPath, _ := cmd.Flags().GetString("handoff")
+			statePath, _ := cmd.Flags().GetString("state")
+
+			return runFinish(cmd.Context(), wd, args, handoffPath, statePath, stdin, out.forCommand(cmd))
+		})
+	finishCmd.Annotations[writesFilesAnnotation] = "true"
 
 	root.AddCommand(
 		newCmd,
 		leafCommand("start [--json] <feature>", "print the next open step's context", startInvocation, startLong,
 			addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
-				forStart := out.forCommand(cmd)
-
-				return runStart(cmd.Context(), wd, args, forStart.json, forStart)
+				return runStart(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
-		leafCommand("finish <feature> <step> --handoff <path> --state <path>", "close a step: handoff, state, then done", finishInvocation, finishLong,
-			func(fs *pflag.FlagSet) {
-				fs.String("handoff", "", handoffFlagUsage)
-				fs.String("state", "", stateFlagUsage)
-				addJSONFlag(fs)
-			},
-			func(cmd *cobra.Command, args []string) error {
-				handoffPath, _ := cmd.Flags().GetString("handoff")
-				statePath, _ := cmd.Flags().GetString("state")
-
-				return runFinish(cmd.Context(), wd, args, handoffPath, statePath, stdin, out.forCommand(cmd))
-			}),
+		finishCmd,
 		leafCommand("status", "print a FEATURE/DONE/BLOCKED/NEXT table of every feature", statusInvocation, statusLong, addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
 				return runStatus(cmd.Context(), wd, args, out.forCommand(cmd))
@@ -573,8 +586,7 @@ func newHelpCommand(out reporter) *cobra.Command {
 			}
 
 			target, residual, _ := cmd.Root().Find(args)
-			listed := target.Annotations[listedInHelpAnnotation] != ""
-			if len(residual) > 0 || (target != cmd.Root() && !target.IsAvailableCommand() && !listed) {
+			if len(residual) > 0 || (target != cmd.Root() && !listedForHelp(target)) {
 				return reported.usageError(fmt.Sprintf("brief help: unknown command %q; expected one of: %s", strings.Join(args, " "), expectedCommandList(cmd)))
 			}
 
@@ -640,10 +652,9 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 //
 // A sole "--version" under out.json (R5's stripping already puts
 // "--version" and "--json" in either order into this same len(args)==1
-// arm) writes versionDocument instead of versionLine's text line —
-// SCENARIO-12 — before returning; the value and trailing-argument arms
-// above stay text-only errors in both modes (out.usageError renders
-// those itself).
+// arm) writes versionDocument instead of versionLine's text line before
+// returning; the value and trailing-argument arms above stay text-only
+// errors in both modes (out.usageError renders those itself).
 func runRoot(cmd *cobra.Command, args []string, out reporter, readBuildInfo func() (*debug.BuildInfo, bool)) error {
 	if len(args) == 0 {
 		return out.usageError("brief: no command given; expected one of: " + expectedCommandList(cmd))

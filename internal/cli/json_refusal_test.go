@@ -124,6 +124,12 @@ func Test_json_mode_renders_a_refusal_as_one_document(t *testing.T) {
 // noStdin is a refusalCase's newStdin for a row that never reads stdin.
 func noStdin() io.Reader { return nil }
 
+// unclosedFenceLine is the line both the "finish --state relative path
+// fails conformance" and "finish --state - fails conformance" rows' own
+// fixtures leave an unclosed fenced code block on: each fixture opens its
+// fence as the third line of its own body.
+const unclosedFenceLine = 3
+
 // refusalCase is one Test_json_mode_refusal_matrix row's own fixture and
 // expectation, built by that row's setup so every row's wd, args and
 // expected path/line come from the same fixture rather than being
@@ -136,6 +142,7 @@ type refusalCase struct {
 	wantKind string
 	wantPath *string
 	wantLine *int
+	wantFix  string
 }
 
 // refusalMatrixRow is one Test_json_mode_refusal_matrix row: setup builds
@@ -170,6 +177,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &statePath,
+					wantFix:  "make it readable and re-run",
 				}
 			},
 			command: "start",
@@ -189,6 +197,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &featureDir,
+					wantFix:  "known: none; run 'brief new feature ghost' to create it",
 				}
 			},
 			command: "start",
@@ -209,6 +218,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &configPath,
+					wantFix:  "fix it or remove it to fall back to the shipped defaults",
 				}
 			},
 			command: "status",
@@ -229,6 +239,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &configPath,
+					wantFix:  "fix it or remove it to fall back to the shipped defaults",
 				}
 			},
 			command: "check",
@@ -248,6 +259,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &featureDir,
+					wantFix:  "known: none; run 'brief new feature ghost' to create it",
 				}
 			},
 			command: "check",
@@ -270,6 +282,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &featureDir,
+					wantFix:  "run 'brief new step demo' to see the next step, or check the id",
 				}
 			},
 			command:      "finish",
@@ -289,7 +302,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					[]byte("## Binding decisions\n\n```\nunterminated\n"), 0o600))
 				t.Chdir(wd)
 				wantPath := filepath.Join(wd, "state.md")
-				wantLine := 3
+				wantLine := unclosedFenceLine // this fixture's own unclosed "```" line
 
 				return refusalCase{
 					wd:       wd,
@@ -299,6 +312,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					wantKind: "refusal",
 					wantPath: &wantPath,
 					wantLine: &wantLine,
+					wantFix:  "close the fence, or remove the unmatched delimiter, and retry",
 				}
 			},
 			command:      "finish",
@@ -311,7 +325,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 
 				wd := newFinishCLIFixture(t)
 				handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
-				wantLine := 3
+				wantLine := unclosedFenceLine // the piped body's own unclosed "```bash" line
 
 				return refusalCase{
 					wd:       wd,
@@ -320,6 +334,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: func() io.Reader { return strings.NewReader("Repro:\n\n```bash\ngo test ./...\n") },
 					wantKind: "refusal",
 					wantLine: &wantLine,
+					wantFix:  "close the fence, or remove the unmatched delimiter, and retry",
 				}
 			},
 			command:      "finish",
@@ -341,6 +356,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					textArgs: []string{"finish", "demo", "SCENARIO-01", "--handoff", missingHandoff, "--state", statePath},
 					newStdin: noStdin,
 					wantKind: "failure",
+					wantFix:  "resolve the problem, then run 'brief finish <feature> <step> --handoff <path> --state <path>' again",
 				}
 			},
 			command:      "finish",
@@ -363,6 +379,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &featurePath,
+					wantFix:  "run 'brief new step demo' to add a step to it, or choose a different name",
 				}
 			},
 			command:      "new feature",
@@ -383,6 +400,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &featureDir,
+					wantFix:  "known: none; run 'brief new feature ghost' to create it",
 				}
 			},
 			command:      "new step",
@@ -397,12 +415,12 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 // with and without --json against the same fixture and argv. Every row
 // shares one assertion tuple — kind, message equal to the text-mode
 // line, path/line as the fixture predicts, problem non-empty and a
-// substring of message, fix non-empty, files_changed per command — so
-// each row discriminates only through its own setup's fixture and
-// expectations in refusalMatrixRows, never through branching in the loop
-// body. fix's presence inside message is not asserted here: a generic
-// failure's fix is a --json-only fallback that never appears in the
-// text-mode line, so that containment does not hold uniformly across
+// substring of message, fix equal to that row's own wantFix, files_changed
+// per command — so each row discriminates only through its own setup's
+// fixture and expectations in refusalMatrixRows, never through branching
+// in the loop body. fix's presence inside message is not asserted here: a
+// generic failure's fix is a --json-only fallback that never appears in
+// the text-mode line, so that containment does not hold uniformly across
 // every row.
 func Test_json_mode_refusal_matrix(t *testing.T) {
 	falseVal := false
@@ -431,7 +449,7 @@ func Test_json_mode_refusal_matrix(t *testing.T) {
 			require.NotNil(t, got.Problem)
 			assert.NotEmpty(t, *got.Problem)
 			assert.Contains(t, got.Message, *got.Problem)
-			assert.NotEmpty(t, got.Fix)
+			assert.Equal(t, c.wantFix, got.Fix)
 			assert.Equal(t, tt.filesChanged, got.FilesChanged)
 		})
 	}
