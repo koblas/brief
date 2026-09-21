@@ -48,7 +48,9 @@ type Result struct {
 // NewFeature creates the feature directory for name under the configured
 // feature directory, writing an empty specification skeleton and an empty
 // state file into it, and returns a Result naming the created directory
-// and the two files written into it, in write order.
+// and the two files written into it. Result.Created is always exactly
+// [specification, state], in that order — a caller may index it directly
+// rather than ranging over it.
 //
 // name is validated before anything touches disk: an empty name, or one
 // containing whitespace, is refused as ErrInvalidFeatureName and no

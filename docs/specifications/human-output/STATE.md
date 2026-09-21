@@ -26,15 +26,9 @@ Scenarios complete: SCENARIO-01..10. Last updated by SCENARIO-10.
   always before returning; every `--json` branch runs **before** any success-path
   stdout/stderr write (R1) — mutation-verified for `status`, `check`, `new feature`, `new
   step`. Slices in JSON are never nil, so zero rows render `[]`, not `null`. (S06-S10)
-- `assemble.Finding{Rule, Severity, Path, Line, Detail, Feature, FeaturePath, InFlight}` —
-  `Rule`/`Severity` render verbatim as `check --json`'s `rule`/`severity`. `GroupByFeature`
-  order is Check's emission order, never sorted; `InFlight` is the group-header label, never
-  severity — feature-level producers hard-code `InFlight:true` regardless of doneness. JSON
-  `rule`/`detail` are raw, never flattened; `Line *int` is `nil` iff `Finding.Line == 0`.
-  (S08, S09)
-- `countFindings(groups) (int, int)` is the single ERROR/WARN tally shared by
-  `checkSummary`'s text line, `checkDocument.Counts` and the `errCheckFindings` exit
-  decision — the three can never disagree. (S09)
+- `assemble.Finding`/`GroupByFeature`/`countFindings` carry `check`'s rule/severity/tally
+  contract (Check's own emission order, `InFlight` hard-coded per feature-level producer,
+  one shared ERROR/WARN tally). (S08, S09)
 - `scaffold.NewFeature`/`NewStep` return `Result{Feature, Step, Path, Created}` instead of a
   bare path. `Step` is `""` for `NewFeature`; the id exists only inside scaffold
   (`pattern.ID(next)`) — cli must never recompile `step-file-pattern` to recover it.
