@@ -137,3 +137,143 @@ func Test_reports_an_undefined_short_flag_as_one_usage_line_naming_the_command_i
 		})
 	}
 }
+
+// Test_rejects_a_single_dash_long_flag_as_one_usage_line_naming_the_command_invocation
+// is SCENARIO-04's table: a single-dash spelling of a long flag ("-json",
+// "-handoff", "-state", "-help") parses as a pflag shorthand cluster, not
+// as the long flag, and is rejected through the same root SetFlagErrorFunc
+// frame as SCENARIO-02/03. "-help" and "-handoff" both start with "h",
+// cobra's auto help shorthand: pflag consumes it first and reports only
+// the residual cluster ("-elp", "-andoff"), the same residual rule
+// SCENARIO-03 pinned for "-hx". "-json" and "-state" have no defined first
+// letter, so the whole word is quoted.
+func Test_rejects_a_single_dash_long_flag_as_one_usage_line_naming_the_command_invocation(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "start -json",
+			args:       []string{"start", "-json", "demo"},
+			wantStderr: "brief start: unknown shorthand flag: 'j' in -json; run 'brief start <feature>'",
+		},
+		{
+			name:       "finish -handoff",
+			args:       []string{"finish", "demo", "SCENARIO-01", "-handoff", "h", "--state", "s"},
+			wantStderr: "brief finish: unknown shorthand flag: 'a' in -andoff; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "finish -state",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--handoff", "h", "-state", "s"},
+			wantStderr: "brief finish: unknown shorthand flag: 's' in -state; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "start -help",
+			args:       []string{"start", "-help", "demo"},
+			wantStderr: "brief start: unknown shorthand flag: 'e' in -elp; run 'brief start <feature>'",
+		},
+		{
+			name:       "finish -help",
+			args:       []string{"finish", "demo", "SCENARIO-01", "-help"},
+			wantStderr: "brief finish: unknown shorthand flag: 'e' in -elp; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "status -help",
+			args:       []string{"status", "-help"},
+			wantStderr: "brief status: unknown shorthand flag: 'e' in -elp; run 'brief status'",
+		},
+		{
+			name:       "check -help",
+			args:       []string{"check", "-help"},
+			wantStderr: "brief check: unknown shorthand flag: 'e' in -elp; run 'brief check [feature]'",
+		},
+		{
+			name:       "new feature -help",
+			args:       []string{"new", "feature", "-help", "payments"},
+			wantStderr: "brief new feature: unknown shorthand flag: 'e' in -elp; run 'brief new feature <name>'",
+		},
+		{
+			name:       "new step -help",
+			args:       []string{"new", "step", "-help", "demo"},
+			wantStderr: "brief new step: unknown shorthand flag: 'e' in -elp; run 'brief new step <feature>'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
+}
+
+// Test_accepts_the_double_dash_spelling_of_each_single_dash_flag_rejected_above
+// is the control arm for the table above: every row differs from a
+// rejected row only in the flag's dash count ("-x" -> "--x") and succeeds,
+// proving the rejection above is specific to the single-dash spelling
+// rather than to the flag or command itself. Each row asserts nil error
+// and exit 0, the observable every row shares; stderr is not asserted
+// uniformly because a successful "finish" writes its own completion line
+// there (pinned by Test_finishes_the_step_and_prints_nothing_to_stdout),
+// unlike the --json and --help rows. JSON body, finish disk effects and
+// help text are already pinned in start_test.go/finish_test.go. Each
+// subtest builds its own fixture — finish mutates its (marks the step
+// done, rewrites STATE.md), so a fixture shared across rows would hit the
+// re-finish refusal on a later row.
+func Test_accepts_the_double_dash_spelling_of_each_single_dash_flag_rejected_above(t *testing.T) {
+	t.Run("start --json", func(t *testing.T) {
+		wd := newStartFixture(t, "open")
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
+
+		require.NoError(t, err)
+		assert.Equal(t, 0, cli.ExitCode(err))
+		assert.Empty(t, stderr.String())
+	})
+
+	t.Run("finish --handoff --state", func(t *testing.T) {
+		wd := newFinishCLIFixture(t)
+		handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+		statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+		require.NoError(t, err)
+		assert.Equal(t, 0, cli.ExitCode(err))
+	})
+
+	helpRows := []struct {
+		name string
+		args []string
+	}{
+		{name: "start --help", args: []string{"start", "--help"}},
+		{name: "finish --help", args: []string{"finish", "--help"}},
+		{name: "status --help", args: []string{"status", "--help"}},
+		{name: "check --help", args: []string{"check", "--help"}},
+		{name: "new feature --help", args: []string{"new", "feature", "--help"}},
+		{name: "new step --help", args: []string{"new", "step", "--help"}},
+	}
+
+	for _, tt := range helpRows {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			assert.Equal(t, 0, cli.ExitCode(err))
+			assert.Empty(t, stderr.String())
+		})
+	}
+}
