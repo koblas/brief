@@ -215,6 +215,135 @@ func Test_rejects_a_single_dash_long_flag_as_one_usage_line_naming_the_command_i
 	}
 }
 
+// Test_reports_a_flag_missing_its_value_as_one_usage_line_naming_the_command_invocation
+// is SCENARIO-05's table: "finish" is the only leaf with a value-taking flag
+// (--handoff, --state, both String); a bare --json can never be "missing its
+// value" because pflag gives every Bool an implicit NoOptDefVal. Flag
+// parsing runs before runFinish's own argument-count check, so a missing
+// value is reported even when no positional was given at all. Expected
+// stderr is written out literally per row, per the file's existing rule.
+func Test_reports_a_flag_missing_its_value_as_one_usage_line_naming_the_command_invocation(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "--handoff at the end",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--handoff"},
+			wantStderr: "brief finish: flag needs an argument: --handoff; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "--state at the end, --handoff already given",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--handoff", "h.md", "--state"},
+			wantStderr: "brief finish: flag needs an argument: --state; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "--handoff at the end, --state already given",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--state", "s.md", "--handoff"},
+			wantStderr: "brief finish: flag needs an argument: --handoff; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "no positionals at all",
+			args:       []string{"finish", "--handoff"},
+			wantStderr: "brief finish: flag needs an argument: --handoff; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
+}
+
+// Test_reports_an_empty_flag_value_as_that_flag_being_required pins that
+// "--handoff=" / "--state=" are not flag-parse errors: pflag accepts the
+// explicit empty value, so parsing succeeds and runFinish's own
+// handoffPath == "" / statePath == "" guard reports it as the flag being
+// required, in brief's own required-flag wording rather than pflag's
+// "needs an argument" wording.
+func Test_reports_an_empty_flag_value_as_that_flag_being_required(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "--handoff= with --state given",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--handoff=", "--state", "s.md"},
+			wantStderr: "brief finish: --handoff is required; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "--state= with --handoff given",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--handoff", "h.md", "--state="},
+			wantStderr: "brief finish: --state is required; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
+}
+
+// Test_takes_the_next_flag_as_the_value_of_a_flag_missing_its_value pins
+// that pflag takes the next token as a flag's value even when that token
+// itself starts with "--": "--handoff --state s.md" reads "--state" as
+// --handoff's value and "s.md" as a third positional, so the result is
+// "too many arguments", never a "needs an argument" error; "--handoff
+// --state" with nothing after it reads "--state" as --handoff's value and
+// leaves --state itself unset, so the result is "--state is required".
+func Test_takes_the_next_flag_as_the_value_of_a_flag_missing_its_value(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "--handoff swallows --state, s.md becomes a third positional",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--handoff", "--state", "s.md"},
+			wantStderr: "brief finish: too many arguments; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "--handoff swallows --state, leaving --state itself unset",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--handoff", "--state"},
+			wantStderr: "brief finish: --state is required; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
+}
+
 // Test_accepts_the_double_dash_spelling_of_each_single_dash_flag_rejected_above
 // is the control arm for the table above: every row differs from a
 // rejected row only in the flag's dash count ("-x" -> "--x") and succeeds,

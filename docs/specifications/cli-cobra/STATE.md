@@ -1,6 +1,6 @@
 # cli-cobra — current state
 
-Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
+Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
 
 ## Binding decisions
 
@@ -14,22 +14,25 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
   argument-count checking. (SCENARIO-01)
 - R14's invocation frame is one root `SetFlagErrorFunc`: path = `cmd.CommandPath()` minus
   `"brief "`, invocation = `cmd.Annotations["invocation"]`. pflag's own wording passes
-  through verbatim. Mutation-verified per moving part by S02/S03/S04 (see Handoffs for
-  detail). S05/S06 assert against this same output; do not re-derive it per command.
-  (SCENARIO-01..04)
+  through verbatim, mutation-verified per moving part by S02–S05. S06 asserts against this
+  same output; do not re-derive it per command. (SCENARIO-01..05)
 - `flag_error_test.go` (`cli_test` package) holds one flag-parse-error table per scenario,
   using `run_test.go`'s `oneLine` helper; expected stderr is always a literal, never built
   from a production `invocation` constant. Tables so far: S02 long-flag, S03 shorthand
-  (`new feature`/`start`/`finish`/`status`/`check`/`new step` singles + `-xy`/`-hx` clusters
-  on `new feature`), S04 single-dash-long-flag rejection (9 rows) + its `--x` control arm (8
-  rows, fixture built inside each control subtest — `finish` mutates it). S05/S06 add their
-  own tables here too. (SCENARIO-02..04)
+  (per-leaf singles + `-xy`/`-hx` clusters), S04 single-dash-long-flag rejection (9 rows) +
+  `--x` control arm (8 rows, `finish` mutates its own fixture), S05 missing-value (4 rows),
+  empty-`=`-value (2 rows), next-flag-consumed (2 rows). (SCENARIO-02..05)
 - Single-dash long flags (`-json`, `-handoff`, `-state`, `-help`) parse as pflag shorthand
   clusters and are rejected through R14 — approved change (R4), S04. `-help`/`-handoff` start
   with `h` (cobra's auto help shorthand): pflag consumes it first, reports only the residual
   cluster (`'e' in -elp`, `'a' in -andoff`). `-json`/`-state` have no defined first letter, so
   the whole word is quoted. No leaf may add shorthand `j`/`s`/`a`/`e`, or a long name that
   defines those letters, without updating S04's rows. (SCENARIO-04)
+- Missing-value errors (`flag needs an argument: --handoff`) use the R14 frame verbatim.
+  `--handoff=`/`--state=` are **not** flag-parse errors — pflag accepts the empty value, so
+  they reach `runFinish`'s own `--handoff is required`/`--state is required` guard instead.
+  Moving required-flag checking into cobra (`MarkFlagRequired`) changes that wording and
+  must update S05's two `=` rows. (SCENARIO-05)
 - Help is one root `SetHelpFunc` printing `cmd.Long` verbatim; each `*Usage` constant sits in
   `Long` unchanged. cobra's own help template is never invoked — S07 introduces one.
   (SCENARIO-01)
@@ -50,10 +53,13 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
 - `new` help listing `new feature`/`new step` — S10.
 - Tree-derived `expected one of:` list — S11; `runRoot` keeps a hard-coded literal until then.
 - `completion` command (`CompletionOptions.DisableDefaultCmd` flips back on) — S12/S13.
-- Missing-value flag-error table (`flag needs an argument: --handoff`) — S05.
 - `--help` next to an undefined flag, either order — S06.
-- Assertion that a rejected `finish -handoff`/`-state` writes nothing to disk — not in S04's
-  contract; rejection happens in flag parsing before `runFinish`, no test pins it.
+- Assertion that a rejected `finish -handoff`/`-state` writes nothing to disk (S04) or a
+  value-taking flag row for a leaf other than `finish` (S05) — neither exists today; no
+  scenario owns either.
+- `start demo --json=` → Go-internal `strconv.ParseBool` wording reaches the user through
+  R14 (observed, exit 2). No scenario covers it; flagged for the final product-vision pass.
+  (SCENARIO-05)
 
 ## Traps
 
@@ -79,6 +85,14 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
   cluster (`-hx` -> `in -x`); an all-undefined cluster quotes the whole thing (`-xy` ->
   `in -xy`). `-h` is presently the only defined shorthand anywhere in the tree; a future leaf
   shorthand only collides with S03's `x`/`y` probes if it picks those letters. (SCENARIO-03)
+- `finish demo SCENARIO-01 --handoff --state s.md` reports `too many arguments`, not a
+  missing-value error: pflag takes `--state` as `--handoff`'s value, leaving `s.md` a third
+  positional. With no trailing token, `statePath` is left unset and the result is `--state
+  is required` instead. pflag's `parseLongArg` takes `NoOptDefVal` before "consume the next
+  token", and only `--flag=value` bypasses it — mutating one flag's `NoOptDefVal` therefore
+  reddens every space-separated occurrence of that flag in the suite, including rows using
+  it only as unrelated setup; expect that spillover in a future mutation-verification of a
+  value-taking flag rather than reading it as a cascade. (SCENARIO-05)
 
 ## Open debts
 
