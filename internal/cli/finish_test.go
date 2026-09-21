@@ -72,6 +72,19 @@ func Test_finishes_the_step_and_prints_nothing_to_stdout(t *testing.T) {
 	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", stderr.String())
 }
 
+func Test_finishes_the_step_when_the_flags_precede_the_feature_and_step(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "--handoff", handoffPath, "--state", statePath, "demo", "SCENARIO-01"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", stderr.String())
+}
+
 // Test_finishing_an_already_finished_step_a_second_time_prints_the_same_line_and_succeeds
 // pins the user-visible contract of a no-op re-finish: exit 0, nothing on
 // stdout (reserved for R9 findings), the same state-describing stderr
@@ -438,7 +451,7 @@ func Test_returns_a_usage_error_for_an_unknown_finish_flag(t *testing.T) {
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief finish: flag provided but not defined: -bogus; run 'brief finish <feature> <step> --handoff <path> --state <path>'", oneLine(t, &stderr))
+	assert.Equal(t, "brief finish: unknown flag: --bogus; run 'brief finish <feature> <step> --handoff <path> --state <path>'", oneLine(t, &stderr))
 }
 
 // Test_names_stdin_when_the_piped_state_s_fence_is_unterminated is the
@@ -477,17 +490,6 @@ func Test_names_the_state_path_when_its_fence_is_unterminated(t *testing.T) {
 
 	line := oneLine(t, &stderr)
 	assert.Contains(t, line, statePath+":3")
-}
-
-func Test_prints_the_finish_usage_for_help(t *testing.T) {
-	wd := t.TempDir()
-	var stdout, stderr bytes.Buffer
-
-	err := cli.Run(t.Context(), wd, []string{"finish", "--help"}, nil, &stdout, &stderr)
-
-	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
-	assert.Contains(t, stdout.String(), "Closes step in feature: writes the body at --handoff to the step's own")
 }
 
 func Test_returns_an_error_when_the_handoff_path_is_unreadable(t *testing.T) {

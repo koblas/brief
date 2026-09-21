@@ -57,7 +57,7 @@ func Test_returns_a_usage_error_when_a_flag_is_not_defined_for_step(t *testing.T
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief new step: flag provided but not defined: -x; run 'brief new step <feature>'", oneLine(t, &stderr))
+	assert.Equal(t, "brief new step: unknown shorthand flag: 'x' in -x; run 'brief new step <feature>'", oneLine(t, &stderr))
 }
 
 func Test_prints_usage_to_stdout_when_help_is_requested_for_new_step(t *testing.T) {

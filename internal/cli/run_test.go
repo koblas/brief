@@ -119,15 +119,41 @@ func Test_returns_a_usage_error_when_no_command_is_given(t *testing.T) {
 	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check", oneLine(t, &stderr))
 }
 
+// Test_returns_a_usage_error_when_the_command_is_unknown pins R7's "no Did
+// you mean" clause: a one-edit near-miss of a real command name gets the
+// same one-line error as an unrelated typo, never a cobra suggestion —
+// DisableSuggestions already makes this so, so that row is green on
+// arrival.
 func Test_returns_a_usage_error_when_the_command_is_unknown(t *testing.T) {
-	wd := t.TempDir()
-	var stdout, stderr bytes.Buffer
+	tests := []struct {
+		name    string
+		command string
+		stderr  string
+	}{
+		{
+			name:    "unrelated typo",
+			command: "bogus",
+			stderr:  `brief: unknown command "bogus"; expected one of: new, start, finish, status, check`,
+		},
+		{
+			name:    "near-miss of a real command",
+			command: "startt",
+			stderr:  `brief: unknown command "startt"; expected one of: new, start, finish, status, check`,
+		},
+	}
 
-	err := cli.Run(t.Context(), wd, []string{"bogus"}, nil, &stdout, &stderr)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
 
-	require.ErrorIs(t, err, cli.ErrUsage)
-	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief: unknown command "bogus"; expected one of: new, start, finish, status, check`, oneLine(t, &stderr))
+			err := cli.Run(t.Context(), wd, []string{tc.command}, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tc.stderr, oneLine(t, &stderr))
+		})
+	}
 }
 
 func Test_returns_a_usage_error_when_no_type_is_given(t *testing.T) {
@@ -160,7 +186,7 @@ func Test_returns_a_usage_error_when_a_flag_is_not_defined(t *testing.T) {
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief new feature: flag provided but not defined: -x; run 'brief new feature <name>'", oneLine(t, &stderr))
+	assert.Equal(t, "brief new feature: unknown shorthand flag: 'x' in -x; run 'brief new feature <name>'", oneLine(t, &stderr))
 }
 
 func Test_returns_a_usage_error_when_there_are_too_many_arguments(t *testing.T) {
@@ -230,4 +256,210 @@ func Test_prints_usage_to_stdout_when_help_is_requested_for_the_subcommand(t *te
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
 	assert.NotEmpty(t, stdout.String())
+}
+
+// Test_returns_a_usage_error_when_args_are_nil guards the cobra port's
+// os.Args fallback: cobra's *Command reads os.Args[1:] itself when
+// SetArgs receives a nil slice, which would parse the test binary's own
+// flags instead of brief's. Run must always hand cobra a non-nil copy, so
+// a nil args slice here still reaches the ordinary no-command usage error.
+func Test_returns_a_usage_error_when_args_are_nil(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, nil, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check", oneLine(t, &stderr))
+}
+
+// Test_prints_root_usage_and_a_nil_error_for_brief_help pins today's
+// dispatch: "brief help" with no topic prints the root usage text, exit 0.
+func Test_prints_root_usage_and_a_nil_error_for_brief_help(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.NotEmpty(t, stdout.String())
+}
+
+// Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments
+// pins that root's "-h"/"--help" routing to cmd.Help() applies only when
+// it is the sole argument, matching runNew's own sole-argument rule
+// (new.go's runNew) and the help stub's own -h/--help rule: any trailing
+// argument alongside "-h"/"--help" is reported as that flag taking no
+// arguments, naming it exactly as typed and pointing at "brief help
+// <command>" — never as an unknown command naming "-h"/"--help" itself.
+func Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "--help bogus",
+			args:    []string{"--help", "bogus"},
+			wantErr: `brief: '--help' takes no arguments; run 'brief help <command>'`,
+		},
+		{
+			name:    "-h bogus",
+			args:    []string{"-h", "bogus"},
+			wantErr: `brief: '-h' takes no arguments; run 'brief help <command>'`,
+		},
+		{
+			name:    "--help start",
+			args:    []string{"--help", "start"},
+			wantErr: `brief: '--help' takes no arguments; run 'brief help <command>'`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantErr, oneLine(t, &stderr))
+		})
+	}
+}
+
+// Test_still_prints_root_help_for_a_bare_help_flag is the control arm for
+// the table above: "--help"/"-h" alone, with no trailing argument, still
+// routes to root help — nil error, exit 0, non-empty stdout — proving the
+// rejection above is about trailing arguments, not about the flag itself.
+func Test_still_prints_root_help_for_a_bare_help_flag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "--help", args: []string{"--help"}},
+		{name: "-h", args: []string{"-h"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			assert.Equal(t, 0, cli.ExitCode(err))
+			assert.Empty(t, stderr.String())
+			assert.NotEmpty(t, stdout.String())
+		})
+	}
+}
+
+// Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag
+// pins that "-x" at the root is reported the way pflag itself would report
+// an undefined shorthand flag on a leaf — root disables cobra's flag
+// parsing and so never reaches that frame itself — pointing at "brief
+// <command> --help" rather than naming a bogus command.
+func Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"-x"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief: unknown shorthand flag: 'x' in -x; run 'brief <command> --help'", oneLine(t, &stderr))
+}
+
+// Test_returns_a_usage_error_when_the_new_type_is_a_single_dash_flag pins
+// the same wording for "-x" under "new", pointing at "brief new <type>
+// --help".
+func Test_returns_a_usage_error_when_the_new_type_is_a_single_dash_flag(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"new", "-x"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'", oneLine(t, &stderr))
+}
+
+// Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root
+// pins the double-dash shape of the same rule, using a plausible-looking
+// flag ("--version") that brief does not define, to prove the wording is
+// generic rather than specific to any one bogus name.
+func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"--version"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief: unknown flag: --version; run 'brief <command> --help'", oneLine(t, &stderr))
+}
+
+// Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new is
+// the "new" shape of the same rule.
+func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"new", "--bogus"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief new: unknown flag: --bogus; run 'brief new <type> --help'", oneLine(t, &stderr))
+}
+
+// Test_treats_a_bare_dash_as_a_plain_unknown_command is the control arm
+// for classifyDashArg's argNotFlag case: a standalone "-" is pflag's own
+// convention for stdin, never a flag (parseArgs treats len(s) == 1 the
+// same as no "-" prefix at all), so it keeps the ordinary
+// unknown-command/unknown-type wording rather than the flag-shaped wording
+// above.
+//
+// Mutation-verified: making classifyDashArg return argUnknownFlag for "-"
+// reds all three rows, the help row included.
+func Test_treats_a_bare_dash_as_a_plain_unknown_command(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "root",
+			args:    []string{"-"},
+			wantErr: `brief: unknown command "-"; expected one of: new, start, finish, status, check`,
+		},
+		{
+			name:    "new",
+			args:    []string{"new", "-"},
+			wantErr: `brief new: unknown type "-"; expected one of: feature, step`,
+		},
+		{
+			name:    "help",
+			args:    []string{"help", "-"},
+			wantErr: `brief help: unknown command "-"; expected one of: new, start, finish, status, check`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantErr, oneLine(t, &stderr))
+		})
+	}
 }

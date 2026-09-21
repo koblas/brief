@@ -3,57 +3,23 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
-	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/scaffold"
 )
 
-// finishUsage is "brief finish"'s help text.
-const finishUsage = `Usage:
-  brief finish <feature> <step> --handoff <path> --state <path>
-
-Closes step in feature: writes the body at --handoff to the step's own
+// finishLong is "brief finish"'s help prose.
+const finishLong = `Closes step in feature: writes the body at --handoff to the step's own
 handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
-from stdin; it may be given for at most one of --handoff and --state.
-
-  --handoff <path>  the step's handoff body, written to its own file
-  --state <path>    the COMPLETE replacement body for the state file; it
-                     replaces the file, it is never appended to; it must
-                     carry the configured state headings, though a section
-                     may be empty
-`
+from stdin; it may be given for at most one of --handoff and --state.`
 
 // runFinish implements "brief finish <feature> <step> --handoff <path>
-// --state <path>".
-func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("finish", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-
-	handoffPath := fs.String("handoff", "", "path to the handoff body, or - for stdin")
-	statePath := fs.String("state", "", "path to the replacement state body, or - for stdin")
-
-	// flag.FlagSet.Parse stops at the first argument that does not start
-	// with "-", so <feature> and <step> — which precede every flag in
-	// this command's contract — must be peeled off before Parse ever
-	// sees them, or they would swallow --handoff and --state as
-	// leftover positional arguments.
-	rest, flagArgs := splitLeadingPositionals(args)
-
-	if err := fs.Parse(flagArgs); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, finishUsage)
-			return nil
-		}
-
-		return usageError(stderr, fmt.Sprintf("brief finish: %s; run '%s'", err, finishInvocation))
-	}
-
+// --state <path>"; rest is its positional arguments and handoffPath and
+// statePath its flag values, "" when the flag was not given.
+func runFinish(ctx context.Context, wd string, rest []string, handoffPath, statePath string, stdin io.Reader, stderr io.Writer) error {
 	switch {
 	case len(rest) == 0:
 		return usageError(stderr, fmt.Sprintf("brief finish: no feature given; run '%s'", finishInvocation))
@@ -66,32 +32,27 @@ func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, s
 	feature, step := rest[0], rest[1]
 
 	switch {
-	case *handoffPath == "":
+	case handoffPath == "":
 		return usageError(stderr, fmt.Sprintf("brief finish: --handoff is required; run '%s'", finishInvocation))
-	case *statePath == "":
+	case statePath == "":
 		return usageError(stderr, fmt.Sprintf("brief finish: --state is required; run '%s'", finishInvocation))
-	case *handoffPath == "-" && *statePath == "-":
+	case handoffPath == "-" && statePath == "-":
 		return usageError(stderr, "brief finish: - may be given for at most one of --handoff and --state")
 	}
 
-	handoff, err := readSource(*handoffPath, stdin)
+	handoff, err := readSource(handoffPath, stdin)
 	if err != nil {
 		return renderRefusal(stderr, "finish", err)
 	}
 
-	state, err := readSource(*statePath, stdin)
+	state, err := readSource(statePath, stdin)
 	if err != nil {
 		return renderRefusal(stderr, "finish", err)
 	}
 
-	cfg, source, err := config.Resolve(wd)
+	cfg, root, err := resolveRoot(wd)
 	if err != nil {
 		return renderRefusal(stderr, "finish", err)
-	}
-
-	root := wd
-	if source != "" {
-		root = filepath.Dir(source)
 	}
 
 	srv := scaffold.NewServer(cfg, root)
@@ -100,9 +61,9 @@ func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, s
 		if refusal, ok := errors.AsType[*scaffold.RefusalError](err); ok {
 			switch refusal.Path {
 			case scaffold.StateSource:
-				refusal.Path = sourceLocator(*statePath)
+				refusal.Path = sourceLocator(statePath)
 			case scaffold.HandoffSource:
-				refusal.Path = sourceLocator(*handoffPath)
+				refusal.Path = sourceLocator(handoffPath)
 			}
 		}
 
@@ -118,9 +79,9 @@ func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, s
 // error names as how to fix it.
 const finishInvocation = "brief finish <feature> <step> --handoff <path> --state <path>"
 
-// sourceLocator returns the R14a locator for one of finish's --handoff or
-// --state arguments: path unchanged, or "<stdin>" when path is "-", so a
-// refusal about piped input never names an empty or misleading path.
+// sourceLocator returns the refusal locator for one of finish's --handoff
+// or --state arguments: path unchanged, or "<stdin>" when path is "-", so
+// a refusal about piped input never names an empty or misleading path.
 func sourceLocator(path string) string {
 	if path == "-" {
 		return "<stdin>"

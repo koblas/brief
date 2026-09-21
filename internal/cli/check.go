@@ -3,20 +3,14 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"github.com/koblas/brief/internal/assemble"
-	"github.com/koblas/brief/internal/platform/config"
 )
 
-// checkUsage is "brief check"'s help text.
-const checkUsage = `Usage:
-  brief check [feature]
-
-Reports every fault in a feature's on-disk layout that finish would now
+// checkLong is "brief check"'s help prose.
+const checkLong = `Reports every fault in a feature's on-disk layout that finish would now
 refuse to write over: caps, an unclosed fence, a missing heading, an
 unticked checklist item on a done step, or a broken dependency, on a tree
 that predates the tool or a raised cap. With no feature given, checks
@@ -31,8 +25,7 @@ unreadable); WARN marks the same fault on a feature whose every step is
 done. brief check exits 1 when it prints any ERROR finding, 0 otherwise —
 including a run that prints WARN findings only. A conforming repository,
 or feature, prints nothing on stdout and exits 0, with one line on stderr
-saying so. brief check reads; it never writes.
-`
+saying so. brief check reads; it never writes.`
 
 // errCheckFindings marks a run of runCheck that printed at least one
 // ERROR-severity finding: ExitCode's default branch maps any non-nil,
@@ -41,37 +34,25 @@ saying so. brief check reads; it never writes.
 // written by RenderFindings and the stderr summary below it.
 var errCheckFindings = errors.New("check reported an error-severity finding")
 
-// runCheck implements "brief check [feature]".
-func runCheck(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("check", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+// checkInvocation is the invocation string every "brief check" usage error
+// names as how to fix it.
+const checkInvocation = "brief check [feature]"
 
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, checkUsage)
-			return nil
-		}
-
-		return usageError(stderr, fmt.Sprintf("brief check: %s; run 'brief check [feature]'", err))
-	}
-
-	if len(fs.Args()) > 1 {
-		return usageError(stderr, "brief check: too many arguments; run 'brief check [feature]'")
+// runCheck implements "brief check [feature]"; rest is its positional
+// arguments, flags already parsed away.
+func runCheck(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
+	if len(rest) > 1 {
+		return usageError(stderr, fmt.Sprintf("brief check: too many arguments; run '%s'", checkInvocation))
 	}
 
 	var feature string
-	if len(fs.Args()) == 1 {
-		feature = fs.Args()[0]
+	if len(rest) == 1 {
+		feature = rest[0]
 	}
 
-	cfg, source, err := config.Resolve(wd)
+	cfg, root, err := resolveRoot(wd)
 	if err != nil {
 		return renderRefusal(stderr, "check", err)
-	}
-
-	root := wd
-	if source != "" {
-		root = filepath.Dir(source)
 	}
 
 	srv := assemble.NewServer(cfg, root)
