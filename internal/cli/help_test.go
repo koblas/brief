@@ -67,7 +67,7 @@ Usage:
   brief start [--json] <feature>   print the next open step's context
   brief finish <feature> <step> --handoff <path> --state <path>
                                    close a step: handoff, state, then done
-  brief status                     print one done/total/next/blocked line per feature
+  brief status                     print a FEATURE/DONE/BLOCKED/NEXT table of every feature
   brief check [feature]            report faults finish would now refuse to write over
   brief completion <bash|zsh|fish|powershell>
                                    print a shell completion script

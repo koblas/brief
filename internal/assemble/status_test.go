@@ -65,7 +65,58 @@ func Test_status_counts_done_over_total_and_names_the_next_step(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 1, Total: 3, Next: "STEP-02", Blocked: 0}, rows[0])
+	assert.Equal(t, assemble.FeatureStatus{
+		Name:  "demo",
+		Done:  1,
+		Total: 3,
+		Next:  &assemble.NextStep{ID: "STEP-02", Title: "STEP-02", Path: filepath.Join(featureDir, "STEP-02.md")},
+		Path:  featureDir,
+	}, rows[0])
+}
+
+// Test_status_names_the_next_step_s_title_and_path uses a fixture whose
+// heading text differs from its frontmatter id — unlike every other fixture
+// in this file, which writes "# <id>" and so cannot discriminate Title
+// being the id echoed twice from Title actually being markdown.Title's own
+// result.
+func Test_status_names_the_next_step_s_title_and_path(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "Handle the widget", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Next)
+	assert.Equal(t, "STEP-01", rows[0].Next.ID)
+	assert.Equal(t, "Handle the widget", rows[0].Next.Title)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), rows[0].Next.Path)
+}
+
+// Test_status_reports_the_feature_directory_path pins FeatureStatus.Path as
+// the feature's own absolute directory — distinct from Next.Path, which
+// names the open step file inside it.
+func Test_status_reports_the_feature_directory_path(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, featureDir, rows[0].Path)
 }
 
 // Test_status_counts_a_step_whose_dependency_is_unfinished_as_blocked seeds
@@ -105,7 +156,8 @@ func Test_status_counts_a_step_whose_dependency_is_unfinished_as_blocked(t *test
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, 2, rows[0].Blocked)
-	assert.Equal(t, "STEP-01", rows[0].Next)
+	require.NotNil(t, rows[0].Next)
+	assert.Equal(t, "STEP-01", rows[0].Next.ID)
 }
 
 func Test_status_reports_an_unknown_dependency_id_as_blocking(t *testing.T) {
@@ -140,7 +192,7 @@ func Test_status_reports_no_next_step_for_a_completed_feature(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 2, Total: 2, Next: "", Blocked: 0}, rows[0])
+	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 2, Total: 2, Next: nil, Blocked: 0, Path: featureDir}, rows[0])
 }
 
 func Test_status_reports_no_next_step_for_a_feature_with_no_step_files(t *testing.T) {
@@ -155,7 +207,7 @@ func Test_status_reports_no_next_step_for_a_feature_with_no_step_files(t *testin
 
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 0, Total: 0, Next: "", Blocked: 0}, rows[0])
+	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 0, Total: 0, Next: nil, Blocked: 0, Path: featureDir}, rows[0])
 }
 
 // Test_status_reports_no_features_when_the_feature_root_does_not_exist is
@@ -230,16 +282,25 @@ func Test_status_marks_a_feature_whose_step_frontmatter_does_not_parse(t *testin
 		byName[row.Name] = row
 	}
 
-	assert.Equal(t, assemble.FeatureStatus{Name: "alpha", Done: 1, Total: 2, Next: "STEP-02", Blocked: 0}, byName["alpha"])
-	assert.Equal(t, assemble.FeatureStatus{Name: "beta", Done: 1, Total: 1, Next: "", Blocked: 0}, byName["beta"])
-	assert.Equal(t, assemble.FeatureStatus{Name: "gamma", Done: 0, Total: 1, Next: "STEP-01", Blocked: 0}, byName["gamma"])
+	assert.Equal(t, assemble.FeatureStatus{
+		Name: "alpha", Done: 1, Total: 2,
+		Next: &assemble.NextStep{ID: "STEP-02", Title: "STEP-02", Path: filepath.Join(alphaDir, "STEP-02.md")},
+		Path: alphaDir,
+	}, byName["alpha"])
+	assert.Equal(t, assemble.FeatureStatus{Name: "beta", Done: 1, Total: 1, Next: nil, Blocked: 0, Path: betaDir}, byName["beta"])
+	assert.Equal(t, assemble.FeatureStatus{
+		Name: "gamma", Done: 0, Total: 1,
+		Next: &assemble.NextStep{ID: "STEP-01", Title: "STEP-01", Path: filepath.Join(gammaDir, "STEP-01.md")},
+		Path: gammaDir,
+	}, byName["gamma"])
 
 	delta := byName["delta"]
 	require.NotNil(t, delta.Problem)
 	assert.Equal(t, 0, delta.Done)
 	assert.Equal(t, 0, delta.Total)
-	assert.Empty(t, delta.Next)
+	assert.Nil(t, delta.Next)
 	assert.Equal(t, 0, delta.Blocked)
+	assert.Equal(t, deltaDir, delta.Path)
 	assert.Equal(t, filepath.Join(deltaDir, "STEP-01.md"), delta.Problem.Path)
 	assert.Equal(t, "no frontmatter found", delta.Problem.Detail)
 	assert.Equal(t, "run 'brief check delta' to list every fault", delta.Problem.Fix)
@@ -379,6 +440,7 @@ func Test_status_marks_a_symlinked_feature_directory_rather_than_dropping_it(t *
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "gamma", rows[0].Name)
+	assert.Equal(t, linkPath, rows[0].Path)
 	require.NotNil(t, rows[0].Problem)
 	assert.Equal(t, linkPath, rows[0].Problem.Path)
 	assert.Equal(t, "is a symbolic link, not read as a feature directory", rows[0].Problem.Detail)
@@ -435,7 +497,8 @@ func Test_status_leaves_a_feature_whose_frontmatter_id_disagrees_with_its_filena
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Nil(t, rows[0].Problem)
-	assert.Equal(t, "STEP-01", rows[0].Next)
+	require.NotNil(t, rows[0].Next)
+	assert.Equal(t, "STEP-01", rows[0].Next.ID)
 }
 
 // Test_status_leaves_a_feature_with_no_step_files_unmarked pins the other
@@ -538,4 +601,29 @@ func Test_status_orders_features_in_byte_order_not_case_insensitive_order(t *tes
 	require.NoError(t, err)
 	require.Len(t, rows, 3)
 	assert.Equal(t, []string{"Beta", "Zeta", "alpha"}, []string{rows[0].Name, rows[1].Name, rows[2].Name})
+}
+
+// Test_complete reports (FeatureStatus).Complete's one rule — Problem ==
+// nil && Total > 0 && Done == Total — over its four discriminating shapes.
+// The malformed case sets Done == Total == 3 specifically so a mutant that
+// drops the Problem == nil check would read this case as complete; the
+// zero-step case sets Done == Total == 0 so a mutant that drops Total > 0
+// would read it as complete too.
+func Test_complete(t *testing.T) {
+	cases := []struct {
+		name string
+		row  assemble.FeatureStatus
+		want bool
+	}{
+		{name: "in progress", row: assemble.FeatureStatus{Total: 3, Done: 1}, want: false},
+		{name: "all steps done", row: assemble.FeatureStatus{Total: 3, Done: 3}, want: true},
+		{name: "zero step files", row: assemble.FeatureStatus{Total: 0, Done: 0}, want: false},
+		{name: "malformed despite done equaling total", row: assemble.FeatureStatus{Total: 3, Done: 3, Problem: &assemble.Problem{Detail: "x", Fix: "y"}}, want: false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, c.row.Complete())
+		})
+	}
 }

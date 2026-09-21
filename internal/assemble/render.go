@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
+	"text/tabwriter"
 )
 
 // RenderText writes b to w as the markdown payload an implementer pastes
@@ -62,42 +64,78 @@ func RenderJSON(w io.Writer, b Brief) error {
 	return nil
 }
 
-// RenderStatusText writes rows to w, one line per feature:
-//
-//	<name> <done>/<total> <next> <blocked>
-//
-// Fields are single-0x20-space separated, with no padding and no trailing
-// space — padding would make one feature's line depend on the longest
-// other feature's name. "-" is substituted for a row whose Next is empty;
-// FeatureStatus.Next itself stays empty so a later JSON caller sees an
-// empty field rather than the literal string "-". A row whose Problem is
-// set renders as "<name> ! ! !" instead — "!" in each of the three
-// computed fields, never a single-field marker, so the line still carries
-// exactly four single-token fields: "-" already means "no next step" and
-// "0/0" already means an empty feature directory, so either would
-// fabricate a count that was never measured. RenderStatusText writes no
-// header and no legend: rows is already the machine format.
+// RenderStatusText writes rows to w as a table for a person to read: a
+// header row "FEATURE  DONE  BLOCKED  NEXT", then one row per feature,
+// columns aligned with text/tabwriter (2-space padding, the FEATURE/DONE/
+// BLOCKED columns padded to the longest value in that column, the NEXT
+// column unpadded since it is last). RenderStatusText writes nothing at
+// all — not even the header — when rows is empty (R9): an empty table
+// still has a header, but "no rows" is a state the header must not claim
+// otherwise exists. A row whose Problem is set renders "-", "-" and
+// "(malformed, see below)" in DONE, BLOCKED and NEXT — never a real count,
+// since none was measured. A complete row (row.Complete()) renders
+// "(complete)" in NEXT. Otherwise NEXT is "-" when row.Next is nil, the
+// step's id alone when its Title is empty, or "<id>  <title>" (two literal
+// spaces, not a tab) otherwise. A tab or newline embedded in a feature name
+// or a step title is flattened to a space first, so it cannot corrupt the
+// table's own column alignment.
 func RenderStatusText(w io.Writer, rows []FeatureStatus) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+
+	if _, err := fmt.Fprintln(tw, "FEATURE\tDONE\tBLOCKED\tNEXT"); err != nil {
+		return fmt.Errorf("assemble: render: %w", err)
+	}
+
 	for _, row := range rows {
-		if row.Problem != nil {
-			if _, err := fmt.Fprintf(w, "%s ! ! !\n", row.Name); err != nil {
-				return fmt.Errorf("assemble: render: %w", err)
-			}
+		done, blocked, next := statusRowCells(row)
 
-			continue
-		}
-
-		next := row.Next
-		if next == "" {
-			next = "-"
-		}
-
-		if _, err := fmt.Fprintf(w, "%s %d/%d %s %d\n", row.Name, row.Done, row.Total, next, row.Blocked); err != nil {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", flattenTabwriterField(row.Name), done, blocked, next); err != nil {
 			return fmt.Errorf("assemble: render: %w", err)
 		}
 	}
 
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("assemble: render: %w", err)
+	}
+
 	return nil
+}
+
+// statusRowCells renders row's DONE, BLOCKED and NEXT cells per
+// RenderStatusText's contract.
+func statusRowCells(row FeatureStatus) (string, string, string) {
+	if row.Problem != nil {
+		return "-", "-", "(malformed, see below)"
+	}
+
+	done := fmt.Sprintf("%d/%d", row.Done, row.Total)
+	blocked := strconv.Itoa(row.Blocked)
+
+	var next string
+
+	switch {
+	case row.Complete():
+		next = "(complete)"
+	case row.Next == nil:
+		next = "-"
+	case row.Next.Title == "":
+		next = flattenTabwriterField(row.Next.ID)
+	default:
+		next = flattenTabwriterField(row.Next.ID) + "  " + flattenTabwriterField(row.Next.Title)
+	}
+
+	return done, blocked, next
+}
+
+// flattenTabwriterField replaces every tab and newline in s with a single
+// space: either would be read by text/tabwriter as a cell or line
+// terminator and corrupt the table's own column alignment.
+func flattenTabwriterField(s string) string {
+	return strings.NewReplacer("\t", " ", "\n", " ").Replace(s)
 }
 
 // RenderFindings writes findings to w, one per line, in the profile's

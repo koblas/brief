@@ -8,24 +8,45 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/koblas/brief/internal/platform/markdown"
 	"github.com/koblas/brief/internal/platform/stepfile"
 )
 
-// FeatureStatus is one feature's status line: its directory name, how many
-// of its step files are done, how many it has in total, the pattern.ID of
-// the lowest-numbered not-done step (empty when there is none — the
-// caller's renderer, not FeatureStatus, is where that becomes "-"), how
-// many not-done steps are blocked on an unfinished dependency, and
-// Problem, non-nil when the feature could not be read at all. When Problem
-// is set, Done, Total, Next and Blocked stay at their zero values — a
-// partial count would look measured and was not.
+// NextStep names the lowest-numbered not-done step a FeatureStatus row
+// reports: ID is pattern.ID(n) — the same token scaffold.findStepFile
+// resolves for "brief finish" — Title is markdown.Title of the step body
+// after frontmatter (empty when the step file has no "# " heading), and
+// Path is the step file's own absolute path.
+type NextStep struct {
+	ID    string
+	Title string
+	Path  string
+}
+
+// FeatureStatus is one feature's status line: its directory name, its own
+// absolute directory path, how many of its step files are done, how many
+// it has in total, the lowest-numbered not-done step (nil when there is
+// none), how many not-done steps are blocked on an unfinished dependency,
+// and Problem, non-nil when the feature could not be read at all. When
+// Problem is set, Done, Total, Next and Blocked stay at their zero values —
+// a partial count would look measured and was not; Path is still set, so a
+// caller can still name the feature's own directory.
 type FeatureStatus struct {
 	Name    string
+	Path    string
 	Done    int
 	Total   int
-	Next    string
+	Next    *NextStep
 	Blocked int
 	Problem *Problem
+}
+
+// Complete reports whether row's feature is done: every step file read
+// without error (Problem == nil), at least one step file exists (Total >
+// 0), and every one of them is done (Done == Total). A feature with no
+// step files at all is not complete — it has nothing to be complete about.
+func (row FeatureStatus) Complete() bool {
+	return row.Problem == nil && row.Total > 0 && row.Done == row.Total
 }
 
 // Status returns one FeatureStatus per feature directory under the
@@ -85,6 +106,7 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 			// its target is irrelevant to what the row reports.
 			rows = append(rows, FeatureStatus{
 				Name: e.Name(),
+				Path: entryPath,
 				Problem: &Problem{
 					Path:   entryPath,
 					Detail: "is a symbolic link, not read as a feature directory",
@@ -122,21 +144,21 @@ func featureStatus(
 ) FeatureStatus {
 	root, err := openRoot(topRoot, name)
 	if err != nil {
-		return FeatureStatus{Name: name, Problem: newProblem(displayPath, err, false)}
+		return FeatureStatus{Name: name, Path: displayPath, Problem: newProblem(displayPath, err, false)}
 	}
 	defer func() { _ = root.Close() }()
 
 	dirEntries, err := readDir(root)
 	if err != nil {
-		return FeatureStatus{Name: name, Problem: newProblem(displayPath, err, false)}
+		return FeatureStatus{Name: name, Path: displayPath, Problem: newProblem(displayPath, err, false)}
 	}
 
 	steps, err := readSteps(root, pattern, dirEntries)
 	if err != nil {
-		return FeatureStatus{Name: name, Problem: newProblem(displayPath, err, true)}
+		return FeatureStatus{Name: name, Path: displayPath, Problem: newProblem(displayPath, err, true)}
 	}
 
-	row := FeatureStatus{Name: name, Total: len(steps)}
+	row := FeatureStatus{Name: name, Path: displayPath, Total: len(steps)}
 
 	idx := stepfile.NewDependencyIndex()
 
@@ -153,8 +175,13 @@ func featureStatus(
 			continue
 		}
 
-		if row.Next == "" {
-			row.Next = pattern.ID(e.number)
+		if row.Next == nil {
+			title, _ := markdown.Title(string(e.rest))
+			row.Next = &NextStep{
+				ID:    pattern.ID(e.number),
+				Title: title,
+				Path:  filepath.Join(displayPath, pattern.Name(e.number)),
+			}
 		}
 
 		if _, unmet := idx.FirstUnmet(e.fm); unmet {

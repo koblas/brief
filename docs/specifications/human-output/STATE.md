@@ -1,6 +1,6 @@
 # human-output — current state
 
-Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
+Scenarios complete: SCENARIO-01..06. Last updated by SCENARIO-06.
 
 ## Binding decisions
 
@@ -15,26 +15,29 @@ Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
   (`filesChangedFor`).
 - `classifyRefusal(err)` is the pure classifier text line and `--json` `message` share.
   Order: `*config.InvalidConfigError`, `*unknownFeatureError`, `*scaffold.RefusalError`,
-  `*assemble.RefusalError`, generic `errorKindFailure` (fix from `usageHint(cmd)`). No
-  bare-sentinel branch remains — every not-found arrives pre-enriched. `errCheckFindings`
-  never renders through `refusal` (R4).
-- **Not-found is enriched at the call site, not in `classifyRefusal`.**
-  `start.go`/`check.go`/`finish.go`/`new.go` (new step) each call
-  `enrichUnknownFeature(ctx, cfg, root, feature, err)` before `out.refusal(...)`: recognizes
-  `scaffold.ErrNoSuchFeature`/`assemble.ErrNoSuchFeature` anywhere in `err`'s chain, lists
-  the feature directory via new `assemble.(*Server).Features` (real dirs only, `fs.ReadDir`
-  order, `(nil,nil)` on a missing dir), wraps into `*unknownFeatureError{name, dir, known,
-  err}` — `err` unchanged, `errors.Is` still reaches either sentinel. A listing failure
-  returns in its own error's place, never rendered as `known: none`. Text: `<problem> in
-  <dir>; known: <a>, <b>` or `known: none; run 'brief new feature <name>' to create it`,
-  tail `(no files changed)` only when the wrapped sentinel is `scaffold.ErrNoSuchFeature`.
-  New `refusalClassification.layout` field selects `textLine`'s shape. (S05)
+  `*assemble.RefusalError`, generic `errorKindFailure`. Not-found is enriched at the call
+  site (`enrichUnknownFeature` in `start.go`/`check.go`/`finish.go`/`new.go`), never in
+  `classifyRefusal` itself, and `*unknownFeatureError` **must** be checked before
+  `*scaffold.RefusalError` (mutation-verified M7, S05) or `new step`/`finish` silently keep
+  the old path-less copy.
 - **Paths: absolute in `assemble`/`scaffold`/JSON, relative in text (R6)** via
   `internal/cli/refusal.go`'s `displayPath(wd, p)`. (S04)
-- A step-file frontmatter parse failure wraps as `*stepFrontmatterError{name, err}`
-  (`internal/assemble/errors.go`); `newProblem` names the step file, fix
-  `run 'brief check <feature>' to list every fault`. A read failure (`*fs.PathError`) keeps
-  `readClassFix` instead. (S04)
+- A step-file frontmatter parse failure wraps as `*stepFrontmatterError{name, err}`; `newProblem`
+  names the step file, fix `run 'brief check <feature>' to list every fault`. (S04)
+- `assemble.FeatureStatus`: `Next *NextStep{ID,Title,Path}` (nil = no open step), `Path`
+  absolute feature dir set on **every** row including Problem rows. `Next.Title` is
+  `markdown.Title` of the step body after frontmatter (empty when no `# ` heading — the
+  status table then shows the id alone); `Next.Path` = feature dir joined with
+  `pattern.Name(n)`, the same join `Start` uses. `(FeatureStatus).Complete()` =
+  `Problem == nil && Total > 0 && Done == Total` is the one definition of "complete" — a
+  zero-step feature is NOT complete (DONE `0/0`, NEXT `-`, counted **in progress**). (S06)
+- `assemble.RenderStatusText` renders the FEATURE/DONE/BLOCKED/NEXT table via
+  `text/tabwriter` (2-space pad, NEXT unpadded/last, header omitted for zero rows per R9);
+  it carries no paths and knows nothing of `wd`. `internal/cli/status.go`'s `runStatus`
+  writes the table to stdout first (flushed), then one stderr line per malformed row —
+  `brief status: <feature>: <rel path>: <detail>; <fix>` — then always (when rows exist)
+  `unexported statusSummary(rows)`: `brief status: N features: A in progress, B complete,
+  C malformed` (`1 feature` singular, all three buckets always printed). (S06)
 - Golden policy: one exact-bytes golden pins key order per document shape; matrix/decode
   tests check dynamic fields against a captured value, never a literal copied from
   production.
@@ -45,13 +48,13 @@ Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
   lands that command runs its **text** path under `--json`.
 - `completion … --json` usage-error document — S13; today it prints the script regardless.
 - `--json` flag row in every command's help — S14. Only `start` registers it.
-- `check`'s own text/JSON paths (`RenderFindings`) are still absolute, and carry no stable
-  `rule` id (R8) — S08.
-- `status`'s stderr frame is still `brief status: <rel path>: <detail>; <fix>` — S06 changes
-  it to name the feature, add the table and summary line.
+- `check`'s own text/JSON paths (`RenderFindings`) are still absolute, carry no stable
+  `rule` id (R8), and print `:0` for a whole-file finding — S08.
 - `new`'s stdout path and `new`/`finish` success stderr are still absolute — S10/S11.
-- A structured `known` array in the JSON error object — not built; a `--json` caller needing
-  the list uses `status --json` (S07).
+- `status --json` document (`statusDocument`), `Problem.Line` (still absent — S07's
+  `problem.line` needs it or `null`), status help's "For scripts, use --json; the text
+  layout may change." sentence, and a structured `known` array in the JSON error object —
+  all S07/S14; a `--json` caller needing the known list uses `status --json` (S07).
 - `assemble.RenderJSON` — no production caller now that start builds its own document;
   removing it is a refactor, **unowned by any scenario**.
 
@@ -62,25 +65,20 @@ Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
   be the user's own relative `--state`/`--handoff` argument.
 - A reserved-name collision (`schema`, `command`, `ok`, `exit_code`, `error`) in a future
   payload struct is silently resolved by encoding/json's equal-depth rule.
-- **`classifyRefusal` must test `*unknownFeatureError` before `*scaffold.RefusalError`.**
-  `noSuchFeatureRefusal` (scaffold) returns a `*scaffold.RefusalError` wrapping
-  `scaffold.ErrNoSuchFeature`, and `enrichUnknownFeature` wraps that whole error unchanged.
-  Checking the scaffold type first lets `errors.AsType` find the *inner* type through
-  `Unwrap` and silently keep the old path-less copy for `new step`/`finish` while
-  `start`/`check` looked fixed. Mutation-verified (M7): reversing the order reddens exactly
-  `new step`/`finish`.
-- `scaffold.noSuchFeatureRefusal`'s own `Problem`/`Fix` copy is never rendered any more —
-  `*unknownFeatureError` always wins first; editing it in `internal/scaffold/scaffold.go`
-  changes nothing user-visible.
-- `known:` lists only openable directories via `assemble.Features` — a symlink named like a
-  feature appears in `brief status` (Problem row) but never in `known:`. S06/S07 must not
-  "reconcile" the two lists into one.
-- A directory `OpenRoot` cannot open (permission denied, symlink escape) still maps to
-  not-found by `Start`/`NewStep`/`Finish`, so its own name then appears in `known:` —
-  contradictory but pre-existing, unowned.
+- `known:` (unknown-feature errors) lists only openable directories via `assemble.Features`
+  — a symlink or an unopenable directory named like a feature appears in `brief status`'s
+  table but never in `known:`, contradictory but pre-existing. S07 must not "reconcile" the
+  two lists into one.
+- `text/tabwriter` pads only tab-terminated cells: NEXT (last column) must never be
+  followed by a tab, or every line gains trailing padding; a tab/newline inside a feature
+  name or step title corrupts the table's columns unless flattened first
+  (`flattenTabwriterField`). S07's JSON payload must not reuse this flattening — JSON needs
+  the raw title.
+- Defining "complete" as `Next == nil` (instead of via `Complete()`) makes a zero-step
+  feature misread as complete; S07's `complete` bool must call `Complete()`, not recompute.
 
 ## Open debts
 
 - `assemble.RenderJSON` (see Left unbuilt) — unowned; dies unless re-opened.
-- `scaffold.noSuchFeatureRefusal`'s dead `Problem`/`Fix` fields (see Traps) — unowned; a
-  future pass touching `internal/scaffold/scaffold.go` should consider deleting them.
+- `scaffold.noSuchFeatureRefusal`'s dead `Problem`/`Fix` fields — unowned; a future pass
+  touching `internal/scaffold/scaffold.go` should consider deleting them.

@@ -343,7 +343,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 
 				return runFinish(cmd.Context(), wd, args, handoffPath, statePath, stdin, out.forCommand(cmd))
 			}),
-		leafCommand("status", "print one done/total/next/blocked line per feature", statusInvocation, statusLong, nil,
+		leafCommand("status", "print a FEATURE/DONE/BLOCKED/NEXT table of every feature", statusInvocation, statusLong, nil,
 			func(cmd *cobra.Command, args []string) error {
 				return runStatus(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),

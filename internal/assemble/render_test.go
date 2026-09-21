@@ -3,6 +3,7 @@ package assemble_test
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/koblas/brief/internal/assemble"
@@ -220,14 +221,22 @@ func Test_RenderText_writes_nothing_when_there_is_no_next_step(t *testing.T) {
 	assert.Empty(t, out.String())
 }
 
-// Test_render_status_writes_four_space_separated_fields_per_feature pins
-// the exact bytes of the status table: single-space separated, no padding,
-// "-" substituted only at render time for a row whose Next is empty.
-func Test_render_status_writes_four_space_separated_fields_per_feature(t *testing.T) {
+// Test_RenderStatusText_prints_a_table_with_header_and_aligned_columns pins
+// the exact bytes of the status table across every row shape in one golden:
+// an in-progress row (NEXT "<id>  <title>"), a complete row ("(complete)"),
+// a zero-step row (DONE "0/0", NEXT "-"), an in-progress row with an empty
+// title (NEXT is the id alone, no trailing spaces), and a malformed row
+// (DONE/BLOCKED "-", NEXT "(malformed, see below)") carrying the longest
+// feature name, placed last — proving column width is computed from every
+// row, not only the ones rendered before it, and that RenderStatusText
+// preserves row order rather than sorting the malformed row elsewhere.
+func Test_RenderStatusText_prints_a_table_with_header_and_aligned_columns(t *testing.T) {
 	rows := []assemble.FeatureStatus{
-		{Name: "alpha", Done: 1, Total: 3, Next: "SCENARIO-02", Blocked: 0},
-		{Name: "beta", Done: 3, Total: 3, Next: "", Blocked: 0},
-		{Name: "gamma", Done: 1, Total: 4, Next: "SCENARIO-02", Blocked: 2},
+		{Name: "alpha", Done: 1, Total: 3, Blocked: 0, Next: &assemble.NextStep{ID: "SCENARIO-02", Title: "Open the door"}},
+		{Name: "beta", Done: 3, Total: 3, Blocked: 0},
+		{Name: "gamma", Done: 0, Total: 0, Blocked: 0},
+		{Name: "epsilon", Done: 1, Total: 2, Blocked: 1, Next: &assemble.NextStep{ID: "SCENARIO-02"}},
+		{Name: "zzz-longest-feature-name", Problem: &assemble.Problem{Path: "/repo/docs/specifications/zzz-longest-feature-name", Detail: "no frontmatter found", Fix: "fix it"}},
 	}
 
 	var out bytes.Buffer
@@ -235,27 +244,50 @@ func Test_render_status_writes_four_space_separated_fields_per_feature(t *testin
 
 	require.NoError(t, err)
 	assert.Equal(t, ""+
-		"alpha 1/3 SCENARIO-02 0\n"+
-		"beta 3/3 - 0\n"+
-		"gamma 1/4 SCENARIO-02 2\n",
+		"FEATURE                   DONE  BLOCKED  NEXT\n"+
+		"alpha                     1/3   0        SCENARIO-02  Open the door\n"+
+		"beta                      3/3   0        (complete)\n"+
+		"gamma                     0/0   0        -\n"+
+		"epsilon                   1/2   1        SCENARIO-02\n"+
+		"zzz-longest-feature-name  -     -        (malformed, see below)\n",
 		out.String())
+
+	for line := range strings.SplitSeq(strings.TrimSuffix(out.String(), "\n"), "\n") {
+		assert.False(t, strings.HasSuffix(line, " "), "line %q must not end in a space", line)
+	}
 }
 
-// Test_render_status_text_prints_the_marker_for_a_malformed_feature pins
-// the exact bytes of a malformed row: "!" in all three computed fields,
-// never a single-field marker — "-" already means "no next step" (09) and
-// "0/0" already means an empty feature directory, so either would fabricate
-// a value that was never measured.
-func Test_render_status_text_prints_the_marker_for_a_malformed_feature(t *testing.T) {
+// Test_RenderStatusText_writes_nothing_for_an_empty_slice is R9's render-side
+// half: zero features means zero bytes, not a bare header — "brief status |
+// wc -l" of 0 must still mean no features.
+func Test_RenderStatusText_writes_nothing_for_an_empty_slice(t *testing.T) {
+	var out bytes.Buffer
+	err := assemble.RenderStatusText(&out, nil)
+
+	require.NoError(t, err)
+	assert.Empty(t, out.String())
+}
+
+// Test_RenderStatusText_flattens_a_tab_or_newline_in_the_feature_name_or_title
+// pins that a tab or newline embedded in a feature name or a step title is
+// rewritten to a single space before the table is built — either would
+// otherwise be read by text/tabwriter as a cell or line terminator and
+// corrupt the table's own column alignment. Both the name and the title
+// carry one, so a fix that flattens only one of the two fields still
+// reddens this test.
+func Test_RenderStatusText_flattens_a_tab_or_newline_in_the_feature_name_or_title(t *testing.T) {
 	rows := []assemble.FeatureStatus{
-		{Name: "delta", Problem: &assemble.Problem{Path: "/repo/docs/specifications/delta", Detail: "no frontmatter found", Fix: "fix it"}},
+		{Name: "a\tb", Done: 0, Total: 1, Blocked: 0, Next: &assemble.NextStep{ID: "SCENARIO-01", Title: "Open\nthe door"}},
 	}
 
 	var out bytes.Buffer
 	err := assemble.RenderStatusText(&out, rows)
 
 	require.NoError(t, err)
-	assert.Equal(t, "delta ! ! !\n", out.String())
+	assert.Equal(t, ""+
+		"FEATURE  DONE  BLOCKED  NEXT\n"+
+		"a b      0/1   0        SCENARIO-01  Open the door\n",
+		out.String())
 }
 
 // Test_RenderFindings_writes_the_profile_s_finding_shape pins the exact

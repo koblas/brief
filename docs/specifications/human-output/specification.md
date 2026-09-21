@@ -227,7 +227,7 @@ Scenario: SCENARIO-14 Every command's help advertises --json
 - [x] SCENARIO-03: start --json success carries the common header
 - [x] SCENARIO-04: A malformed feature names the step file at fault
 - [x] SCENARIO-05: An unknown feature lists the known ones
-- [ ] SCENARIO-06: status reads as a table for people
+- [x] SCENARIO-06: status reads as a table for people
 - [ ] SCENARIO-07: status --json
 - [ ] SCENARIO-08: check groups findings by feature and names each rule
 - [ ] SCENARIO-09: check --json
