@@ -21,8 +21,11 @@ import (
 // cross-site table), so this table keeps only the shapes that table can't
 // reach on its own: "" and "-xy" are never exercised as root/"new"/help's
 // args[0] by any black-box test today; "feature" and one all-h cluster
-// stand in as non-decorative anchors for argNotFlag and argHelpFlag so
-// this table still documents every argKind without re-covering ground the
+// stand in as non-decorative anchors for argNotFlag and argHelpFlag; and
+// "--version" pins argVersionFlag's own (kind, msg) pair directly, since no
+// black-box test asserts that pairing by name — root's own sole-argument
+// "--version" behavior is covered separately, through the run seam. This
+// table still documents every argKind without re-covering ground the
 // black-box tables already own.
 //
 // Mutation-verified: dropping classifyDashArg's "arg[0] != '-'" guard reds
@@ -39,6 +42,7 @@ func Test_classifyDashArg_classifies_every_token_shape(t *testing.T) {
 		{name: "a plain word is not a flag", arg: "feature", wantKind: argNotFlag},
 		{name: "-hh is an all-h cluster", arg: "-hh", wantKind: argHelpFlag},
 		{name: "-xy is an unknown shorthand cluster", arg: "-xy", wantKind: argUnknownFlag, wantMsg: "unknown shorthand flag: 'x' in -xy"},
+		{name: "--version is the version flag", arg: "--version", wantKind: argVersionFlag, wantMsg: "unknown flag: --version"},
 	}
 
 	for _, tt := range tests {
@@ -65,7 +69,7 @@ func FuzzClassifyDashArg(f *testing.F) {
 		"-h=x", "-hh=x", "-hh=", "--help=x", "--help=",
 		"-hx", "-hhx", "-x", "-xy", "-=", "-=x",
 		"--bogus", "--=x", "---x", "--", "--fo\no", "-z\nq",
-		"plain", "feature", "-h\nx",
+		"plain", "feature", "-h\nx", "--version", "--version=x",
 	}
 	for _, s := range seeds {
 		f.Add(s)

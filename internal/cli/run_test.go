@@ -392,17 +392,18 @@ func Test_returns_a_usage_error_when_the_new_type_is_a_single_dash_flag(t *testi
 
 // Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root
 // pins the double-dash shape of the same rule, using a plausible-looking
-// flag ("--version") that brief does not define, to prove the wording is
-// generic rather than specific to any one bogus name.
+// flag ("--bogus") that brief does not define, to prove the wording is
+// generic rather than specific to any one bogus name. "--version" is not
+// used here since it is now its own argKind (see version_internal_test.go).
 func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"--version"}, nil, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"--bogus"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief: unknown flag: --version; run 'brief <command> --help'", oneLine(t, &stderr))
+	assert.Equal(t, "brief: unknown flag: --bogus; run 'brief <command> --help'", oneLine(t, &stderr))
 }
 
 // Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new is
@@ -416,6 +417,24 @@ func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new(t *tes
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
 	assert.Equal(t, "brief new: unknown flag: --bogus; run 'brief new <type> --help'", oneLine(t, &stderr))
+}
+
+// Test_version_flag_through_Run_prints_one_brief_line_to_stdout is the only
+// test proving cli.Run wires debug.ReadBuildInfo into "--version" — see
+// version_internal_test.go for the exact-value pin against a fake reader.
+// It cannot assert a specific version text: a go test binary's own
+// debug.ReadBuildInfo reports Main.Version as "" or "(devel)" rather than
+// the module's real version, and that fallback text belongs to S02.
+func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"--version"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	line := oneLine(t, &stdout)
+	assert.True(t, strings.HasPrefix(line, "brief "), "line %q must start with %q", line, "brief ")
 }
 
 // Test_treats_a_bare_dash_as_a_plain_unknown_command is the control arm

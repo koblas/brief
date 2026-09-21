@@ -124,7 +124,7 @@ Scenario: SCENARIO-07 Root help points to --version
 
 ## BDD Acceptance Progress
 
-- [ ] SCENARIO-01: --version prints the build's stored version
+- [x] SCENARIO-01: --version prints the build's stored version
 - [ ] SCENARIO-02: A build with no stored version reports (devel)
 - [ ] SCENARIO-03: --version takes no arguments
 - [ ] SCENARIO-04: --version takes no value

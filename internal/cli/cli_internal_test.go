@@ -9,6 +9,7 @@ package cli
 
 import (
 	"bytes"
+	"runtime/debug"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -19,13 +20,16 @@ import (
 // newTreeWithExtraCommands builds production's own command tree via
 // newRootCommand, then adds one extra visible command ("extra") and one
 // extra command ("hiddenextra") whose Hidden field is hiddenExtraHidden —
-// the only field that varies between the two tests below.
+// the only field that varies between the two tests below. It passes a
+// non-nil readBuildInfo only to satisfy newRootCommand's signature: none of
+// this file's tests dispatch "--version".
 func newTreeWithExtraCommands(t *testing.T, hiddenExtraHidden bool) (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 
 	wd := t.TempDir()
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	root := newRootCommand(wd, nil, stdout, stderr)
+	readBuildInfo := func() (*debug.BuildInfo, bool) { return nil, false }
+	root := newRootCommand(wd, nil, stdout, stderr, readBuildInfo)
 	extra := &cobra.Command{
 		Use:  "extra",
 		Args: cobra.ArbitraryArgs,

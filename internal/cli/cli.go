@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/koblas/brief/internal/platform/config"
@@ -195,14 +196,24 @@ section may be empty`
 // used to resolve configuration and to relativize any printed path — Run
 // never calls os.Getwd. stdin backs "-" arguments on commands that read one
 // (finish's --handoff/--state); commands that take no such argument never
-// read it.
+// read it. Run delegates to run, passing debug.ReadBuildInfo as the source
+// "--version" reads (R3).
 func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	return run(ctx, wd, args, stdin, stdout, stderr, debug.ReadBuildInfo)
+}
+
+// run is Run's implementation, taking readBuildInfo as an explicit
+// dependency so a test can pin "--version"'s output against a fake build
+// info without a real binary (R3, R2's guard against a false ok). It has
+// the same signature as debug.ReadBuildInfo: production passes that
+// function itself.
+func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) error {
 	// cobra's RunE has no context.Context parameter; every closure below
 	// reads it via cmd.Context(), which ExecuteContext(ctx) sets on the
 	// resolved command before RunE runs. contextcheck cannot see that
 	// guarantee through cobra's own dispatch and instead flags the
 	// context.Background() fallback inside Command.Context()'s body.
-	root := newRootCommand(wd, stdin, stdout, stderr) //nolint:contextcheck
+	root := newRootCommand(wd, stdin, stdout, stderr, readBuildInfo) //nolint:contextcheck
 
 	argsCopy := make([]string, len(args))
 	copy(argsCopy, args)
@@ -217,7 +228,9 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // newRootCommand builds brief's command tree for one Run. It is rebuilt on
 // every call rather than held in a package variable: cobra records parse
 // state and flag values on the *Command itself, so a shared tree would
-// leak one invocation's flags into the next.
+// leak one invocation's flags into the next. readBuildInfo threads through
+// to runRoot's "--version" arm unchanged; nothing else in the tree reads
+// it.
 //
 // The root and "new" disable cobra's flag parsing and resolve their first
 // argument themselves, via runRoot and runNew, so a missing or unknown
@@ -242,7 +255,7 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // dispatchable, but excluded from expectedCommandList, which filters on
 // IsAvailableCommand alone) and carries listedInHelpAnnotation instead, so
 // it still gets a root-help row and remains a valid "brief help" topic.
-func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
+func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) *cobra.Command {
 	root := &cobra.Command{
 		Use:                "brief",
 		Long:               rootShort,
@@ -252,7 +265,7 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 		SilenceUsage:       true,
 		DisableSuggestions: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoot(cmd, args, stderr)
+			return runRoot(cmd, args, stdout, stderr, readBuildInfo)
 		},
 	}
 	root.CompletionOptions.DisableDefaultCmd = true
@@ -398,7 +411,7 @@ func newHelpCommand(stderr io.Writer) *cobra.Command {
 					}
 
 					return usageError(stderr, fmt.Sprintf("brief help: '%s' takes no arguments; run 'brief help <command>'", args[0]))
-				case argUnknownFlag:
+				case argUnknownFlag, argVersionFlag:
 					return usageError(stderr, fmt.Sprintf("brief help: %s; run 'brief help <command>'", msg))
 				case argNotFlag:
 				}
@@ -446,12 +459,13 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 
 // runRoot handles a top-level invocation that named no known command:
 // nothing at all, "--help"/"-h" given a value, a sole "-h"/"--help", a
-// "-h"/"--help" alongside another argument, some other dash-prefixed
-// token, "--" (pflag's flag-parsing terminator, never a flag itself), or
-// an unknown command name. Cobra intercepts "help" as a dispatch to the
-// tree's own help command (see newRootCommand's SetHelpCommand) before
-// this ever runs, so this function never sees "help" as args[0].
-func runRoot(cmd *cobra.Command, args []string, stderr io.Writer) error {
+// "-h"/"--help" alongside another argument, a sole "--version", some other
+// dash-prefixed token, "--" (pflag's flag-parsing terminator, never a flag
+// itself), or an unknown command name. Cobra intercepts "help" as a
+// dispatch to the tree's own help command (see newRootCommand's
+// SetHelpCommand) before this ever runs, so this function never sees
+// "help" as args[0].
+func runRoot(cmd *cobra.Command, args []string, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief: no command given; expected one of: "+expectedCommandList(cmd))
 	}
@@ -465,12 +479,29 @@ func runRoot(cmd *cobra.Command, args []string, stderr io.Writer) error {
 		}
 
 		return usageError(stderr, fmt.Sprintf("brief: '%s' takes no arguments; run 'brief help <command>'", args[0]))
+	case argVersionFlag:
+		if len(args) == 1 {
+			fmt.Fprintln(stdout, versionLine(readBuildInfo))
+
+			return nil
+		}
+
+		return usageError(stderr, fmt.Sprintf("brief: %s; run 'brief <command> --help'", msg))
 	case argUnknownFlag:
 		return usageError(stderr, fmt.Sprintf("brief: %s; run 'brief <command> --help'", msg))
 	case argNotFlag:
 	}
 
 	return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommandList(cmd)))
+}
+
+// versionLine renders "--version"'s stdout line, prefix included but the
+// trailing newline excluded: "brief " followed by readBuildInfo's
+// Main.Version verbatim (R1).
+func versionLine(readBuildInfo func() (*debug.BuildInfo, bool)) string {
+	info, _ := readBuildInfo()
+
+	return "brief " + info.Main.Version
 }
 
 // usageError writes msg, followed by a single newline, to stderr and

@@ -74,6 +74,27 @@ func Test_reports_an_undefined_long_flag_as_one_usage_line_naming_the_command_in
 	}
 }
 
+// Test_new_reports_the_version_flag_as_unknown pins that "--version" is
+// root-only (R6): a bare "new --version" (no subtype) is reported byte-
+// identical to today's argUnknownFlag wording, through runNew's own
+// argVersionFlag arm. S06 owns the full new/help/leaf byte-identity table
+// this belongs to.
+//
+// Mutation-verified: routing runNew's argVersionFlag case to argNotFlag's
+// bodyless arm instead of the argUnknownFlag one reds this test — "new
+// --version" would then report "unknown type "--version"" instead.
+func Test_new_reports_the_version_flag_as_unknown(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"new", "--version"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Equal(t, 2, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief new: unknown flag: --version; run 'brief new <type> --help'", oneLine(t, &stderr))
+}
+
 // Test_reports_an_undefined_short_flag_as_one_usage_line_naming_the_command_invocation
 // is SCENARIO-03's table: every leaf reports an undefined shorthand flag
 // through the same root SetFlagErrorFunc frame as SCENARIO-02's long-flag
