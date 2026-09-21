@@ -9,17 +9,21 @@ import (
 	"path/filepath"
 
 	"github.com/koblas/brief/internal/platform/config"
-	"github.com/koblas/brief/internal/platform/markdown"
+	"github.com/koblas/brief/internal/platform/conform"
 	"github.com/koblas/brief/internal/platform/stepfile"
 )
 
 // Finish closes feature's step: it writes handoff to that step's own
 // handoff file, replaces the feature's state file with state, then marks
-// the step file's frontmatter status "done" (R8, R21). handoff and state
-// are written verbatim, neither checked against a length cap or a
-// required-heading schema, and neither is spliced into an existing
-// document — every write here is a whole-file write, so none has a
-// boundary inferred from prose to get wrong.
+// the step file's frontmatter status "done" (R8, R21). handoff is checked
+// against cfg.HandoffCapLines; state is checked against cfg.StateCapLines
+// and against cfg.StateHeadings, which it must carry all four of (any
+// order, an empty section valid) — the write-side counterpart of
+// assemble.Start's read-side shortfall degrade. handoff carries no such
+// heading check: it is written verbatim to its own file and nothing reads
+// it structurally. Neither argument is spliced into an existing document —
+// every write here is a whole-file write, so none has a boundary inferred
+// from prose to get wrong.
 //
 // The handoff file is named stepPattern.ID(n) + cfg.HandoffFileSuffix
 // (stepfile.CompileHandoff); a "## Handoff" section left behind in a step
@@ -30,18 +34,49 @@ import (
 // wrong (R14a): the step-file pattern compiles; the handoff-file-suffix
 // compiles against it (stepfile.ErrInvalidHandoffSuffix); the feature
 // directory opens; a step file exists whose id equals step; its
-// frontmatter parses; the replacement state body closes every fence it
-// opens (ErrUnterminatedFence, named against StateSource) — state's
-// configured headings are read by a terminator scan on every later Start,
-// so an open fence there is not merely untidy, it is unreadable; the
-// specification is readable; the specification carries the configured
-// progress heading and an entry for step; the state file exists as a
-// regular file. Computing the frontmatter's "status: done" line during
+// frontmatter parses; the handoff argument measures no more than
+// cfg.HandoffCapLines lines (ErrOverCap, named against HandoffSource,
+// counted by markdown.CountLines), immediately followed by the same check
+// against cfg.StateCapLines for the replacement state body (named against
+// StateSource) — a done step over either cap reports the cap rather than
+// falling through to the re-finish verdict below, since both checks run
+// ahead of it; the replacement state body then closes every fence it opens
+// (ErrUnterminatedFence, named against StateSource) — state's configured
+// headings are read by a terminator scan on every later Start, so an open
+// fence there is not merely untidy, it is unreadable; the replacement state
+// body then carries a section for every one of cfg.StateHeadings.Ordered()'s
+// four headings (ErrMissingStateHeading, named against StateSource,
+// checkArgumentHeadings) — checked only after the fence closes, since an
+// open fence would leave a heading after it unreadable; the step's own
+// checklist section — under cfg.ChecklistHeading — carries no item left
+// unticked (ErrOpenChecklistItem, checkStepChecklist, naming stepPath and
+// the item's line) — checked only after the state argument band, and
+// ahead of the specification read and (refinish).verdict below, so a step
+// that is both un-ticked and a divergent re-finish reports the open item;
+// a checklist with no items, or no checklist heading at all, is never
+// refused this way, matching assemble.Start's read-side degrade for the
+// same heading; the step's own frontmatter then carries no depends-on id
+// that is not a done step (ErrUnmetDependency, checkStepDependencies,
+// naming stepPath) — checked immediately after the checklist and ahead of
+// the specification read, so a step both un-ticked and blocked reports the
+// checklist item first; the check is skipped entirely when depends-on is
+// empty, so an unrelated broken sibling step file never affects an
+// ordinary finish; a sibling that cannot be read or whose frontmatter does
+// not parse is recorded as a known, not-done step rather than skipped, so
+// it blocks with the "is not finished" copy rather than the wrong "names
+// no step file" one; a done step is never refused this way, whatever its
+// dependencies say — stepfile.DependencyIndex.FirstUnmet short-circuits on
+// the step's own doneness, the same exemption assemble.Status's blocked
+// count applies, keeping a re-finish of a done step whose dependency was
+// reopened by hand a true no-op; the specification is
+// readable; the specification carries the
+// configured progress heading and an entry for step; the state file exists
+// as a regular file. Computing the frontmatter's "status: done" line during
 // this phase, rather than at write time, means a step file with no
 // "status:" field (stepfile.ErrNoStatusField) is refused before any write
 // lands, not discovered half way through the sequence. The handoff
-// argument itself is never fence-checked: it is written verbatim to its
-// own file and nothing reads it structurally.
+// argument is never fence-checked, only line-counted: it is written
+// verbatim to its own file and nothing reads it structurally.
 //
 // The four writes then land in a fixed order — handoff file, state file,
 // step file, specification — chosen so a crash between them always
@@ -56,17 +91,30 @@ import (
 // *RefusalError — the template's "(no files changed)" tail would
 // misreport a half-applied write.
 //
-// A re-finish of a step whose frontmatter already says done is a true
-// no-op — Finish writes nothing and mtime on all four files is
-// preserved — when the handoff file exists and its bytes equal handoff,
-// the state bytes equal state, and the spec-with-tick already equals what
-// is on disk; any single divergence, including an absent handoff file,
-// writes as normal. The step-file conjunct is fm.Done() rather than a
-// byte comparison of the step body: with the splice gone the step-file
-// write body is a pure function of the on-disk body, so a byte comparison
-// would hold in almost exactly the cases fm.Done() holds, and where they
-// differ fm.Done() is the correct predicate — the doneness authority is
-// the parsed value, not the byte shape, and R11 requires mtime preserved.
+// A re-finish of a step whose frontmatter already says done resolves to
+// one of three outcomes, decided by (refinish).verdict — see its doc
+// comment for the five facts and six rows that make up the decision:
+//
+//   - A true no-op, writing nothing and preserving mtime on all four
+//     files, when the handoff file exists and its bytes equal handoff, the
+//     state bytes equal state, and the spec-with-tick already equals what
+//     is on disk (R11).
+//   - A refusal wrapping ErrAlreadyFinished, naming the recorded handoff
+//     file, when the handoff file exists but its bytes differ from
+//     handoff.
+//   - A refusal wrapping ErrAlreadyFinished, naming cfg.StateFile, when
+//     the handoff matches but state differs from the recorded state
+//     bytes.
+//
+// A done step whose handoff file is missing or unreadable is exempt from
+// both refusals and writes as normal, the same as an un-ticked progress
+// entry — see (refinish).verdict for why neither is a divergence trigger.
+// The step-file conjunct is fm.Done() rather than a byte comparison of the
+// step body: with the splice gone the step-file write body is a pure
+// function of the on-disk body, so a byte comparison would hold in almost
+// exactly the cases fm.Done() holds, and where they differ fm.Done() is
+// the correct predicate — the doneness authority is the parsed value, not
+// the byte shape, and R11 requires mtime preserved.
 func (s *Server) Finish(_ context.Context, feature, step string, handoff, state []byte) error {
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
 	featurePath := filepath.Join(featureDirPath, feature)
@@ -131,8 +179,28 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		}
 	}
 
+	if refusal := checkArgumentCap(handoff, HandoffSource, "handoff", s.cfg.HandoffCapLines); refusal != nil {
+		return refusal
+	}
+
+	if refusal := checkArgumentCap(state, StateSource, "state", s.cfg.StateCapLines); refusal != nil {
+		return refusal
+	}
+
 	if refusal := checkArgumentFence(state, StateSource, "state"); refusal != nil {
 		return refusal
+	}
+
+	if refusal := checkArgumentHeadings(state, StateSource, "state", s.cfg.StateHeadings); refusal != nil {
+		return refusal
+	}
+
+	if refusal := checkStepChecklist(stepBody, stepPath, s.cfg.ChecklistHeading); refusal != nil {
+		return refusal
+	}
+
+	if err := checkStepDependencies(root, pattern, fm, step, stepPath); err != nil {
+		return err
 	}
 
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
@@ -170,14 +238,22 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	}
 
 	// An unreadable handoff file — including one that does not exist —
-	// is treated as not matching, never as a refusal: the handoff file is
-	// this command's own output, not an input the caller must repair.
+	// exempts a done step from the divergence refusal entirely: the
+	// handoff file is this command's own output, not an input the caller
+	// must repair, and a done step is only ever reached through Finish
+	// (R10), so refusing here would be a dead end for a crash-then-hand-
+	// edit tree or a tree migrated before handoff files existed.
+	handoffPath := filepath.Join(featurePath, handoffName)
 	existingHandoff, handoffReadErr := root.ReadFile(handoffName)
 	handoffMatches := handoffReadErr == nil && string(existingHandoff) == string(handoff)
 
-	identical := handoffMatches &&
-		string(state) == string(stateBytes) &&
-		newSpec == string(specBytes)
+	r := refinish{
+		done:            fm.Done(),
+		handoffRecorded: handoffReadErr == nil,
+		handoffMatches:  handoffMatches,
+		stateMatches:    string(state) == string(stateBytes),
+		specTicked:      newSpec == string(specBytes),
+	}
 
 	newStepBody, err := stepfile.SetStatus(stepBody, "done")
 	if err != nil {
@@ -189,8 +265,15 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		}
 	}
 
-	if fm.Done() && identical {
+	switch r.verdict() {
+	case refinishNoop:
 		return nil
+	case refinishHandoffDiverged:
+		return alreadyFinishedRefusal(handoffPath, step, "handoff")
+	case refinishStateDiverged:
+		return alreadyFinishedRefusal(statePath, step, "state")
+	case refinishWrite:
+		// Falls through to the four writes below.
 	}
 
 	// The four writes below are ordered, and the order is load-bearing:
@@ -230,22 +313,160 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 
 // checkArgumentFence refuses when body — Finish's state argument, named
 // for the error message by label — opens a fenced code block it never
-// closes. It names source (StateSource) rather than any file, since
-// Finish never learns which file, or whether there was one at all, body's
-// bytes came from. It returns nil when every fence body opens is closed.
+// closes, by conform.UnterminatedFence. It names source (StateSource)
+// rather than any file, since Finish never learns which file, or whether
+// there was one at all, body's bytes came from. It returns nil when every
+// fence body opens is closed.
 func checkArgumentFence(body []byte, source, label string) *RefusalError {
-	line, delim, unterminated := markdown.UnterminatedFence(string(body))
-	if !unterminated {
+	return refusalFromViolation(source, conform.UnterminatedFence(body, label))
+}
+
+// checkArgumentCap refuses when body — one of Finish's handoff or state
+// arguments, named for the error message by label — measures more lines,
+// by conform.OverCap, than limit. It names source (HandoffSource or
+// StateSource) rather than any file, matching checkArgumentFence: Finish
+// never learns which file, or whether there was one at all, body's bytes
+// came from. It returns nil when body's line count does not exceed limit —
+// a body of exactly limit lines is accepted.
+func checkArgumentCap(body []byte, source, label string, limit int) *RefusalError {
+	return refusalFromViolation(source, conform.OverCap(body, label, limit))
+}
+
+// checkArgumentHeadings refuses when body — Finish's state argument, named
+// for the error message by label — carries no section for one of headings'
+// four entries, by conform.MissingHeading. It names source (StateSource)
+// rather than any file, matching checkArgumentFence and checkArgumentCap.
+// Only the first missing heading is reported: unlike assemble.Start's
+// shortfall degrade, which completes and can report every shortfall it
+// finds, Finish is a refusal that stops at the first fault. It returns nil
+// when every configured heading is present.
+func checkArgumentHeadings(body []byte, source, label string, headings config.StateHeadings) *RefusalError {
+	return refusalFromViolation(source, conform.MissingHeading(body, label, headings))
+}
+
+// checkStepChecklist refuses when stepBody's checklist section — the
+// section under heading — holds an item not ticked with "[x]"/"[X]", by
+// conform.OpenChecklistItem. It names stepPath and the item's 1-based line
+// number in the whole file, the shape R14a uses for a fault inside a file
+// rather than an argument's placeholder source. stepBody must be the whole
+// step file as read from disk, not the remainder ParseFrontmatter returns:
+// conform.OpenChecklistItem's line number is counted from the top of
+// stepBody. A checklist with no items, or an absent heading, is never
+// refused — only an unchecked item triggers, matching assemble.Start's
+// read-side degrade rule for the same heading.
+func checkStepChecklist(stepBody []byte, stepPath, heading string) *RefusalError {
+	return refusalFromViolation(stepPath, conform.OpenChecklistItem(stepBody, heading))
+}
+
+// refusalFromViolation renders v, one of conform's four predicates' result,
+// into a *RefusalError naming path — the call site's own file or argument
+// placeholder, which conform never learns. It returns nil when v is nil.
+func refusalFromViolation(path string, v *conform.Violation) *RefusalError {
+	if v == nil {
 		return nil
 	}
 
 	return &RefusalError{
-		Path:    source,
-		Line:    line,
-		Problem: fmt.Sprintf("%s has an unclosed %s fence", label, delim),
-		Fix:     "close the fence, or remove the unmatched delimiter, and retry",
-		Err:     ErrUnterminatedFence,
+		Path:    path,
+		Line:    v.Line,
+		Problem: v.Problem,
+		Fix:     v.Fix,
+		Err:     v.Err,
 	}
+}
+
+// checkStepDependencies refuses when fm — the frontmatter of the step
+// being finished, named stepID and living at stepPath — declares a
+// depends-on id that is not a done step, by stepfile.DependencyIndex.
+// FirstUnmet: the same rule assemble.Status's blocked count applies, so
+// status and finish never disagree about the same tree. It returns nil
+// immediately when fm.DependsOn is empty, without scanning root at all, so
+// an unrelated broken sibling step file can never affect an ordinary
+// finish. Otherwise it scans root for every entry pattern
+// recognizes as a step file and records each into a
+// stepfile.DependencyIndex, keyed by pattern.ID(n) rather than the
+// sibling's own frontmatter id — a sibling that cannot be read or whose
+// frontmatter does not parse is still Recorded, from a zero Frontmatter,
+// rather than skipped, so it blocks with the "is not finished" copy
+// rather than the wrong "names no step file" one — then renders
+// FirstUnmet's result through Known into one of two refusal copies: an id
+// that names an existing, not-done step ("is not finished" — a
+// self-dependency takes this branch too, naming stepID on both sides of
+// the line, and is then permanently unfinishable until the frontmatter is
+// edited by hand) or an id Known reports nothing was recorded under
+// ("names no step file"). A done fm is never refused here — FirstUnmet
+// short-circuits on fm.Done() before either branch is reached, which is
+// what keeps a re-finish of a done step whose dependency was reopened by
+// hand a no-op. checkStepDependencies returns error, not *RefusalError,
+// because root's directory failing to list at all is a distinct,
+// non-refusal fault from any individual sibling's read or parse failure;
+// callers recover the refusal with errors.As, the same way every other
+// *RefusalError in this package is recovered.
+func checkStepDependencies(root *os.Root, pattern stepfile.Pattern, fm stepfile.Frontmatter, stepID, stepPath string) error {
+	if len(fm.DependsOn) == 0 {
+		return nil
+	}
+
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return fmt.Errorf("scaffold: %w", err)
+	}
+
+	idx := stepfile.NewDependencyIndex()
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+
+		n, ok := pattern.Number(e.Name())
+		if !ok {
+			continue
+		}
+
+		idx.Record(pattern.ID(n), siblingFrontmatter(root, e.Name()))
+	}
+
+	dep, unmet := idx.FirstUnmet(fm)
+	if !unmet {
+		return nil
+	}
+
+	if idx.Known(dep) {
+		return &RefusalError{
+			Path:    stepPath,
+			Problem: fmt.Sprintf("step %q depends on %q, which is not finished", stepID, dep),
+			Fix:     fmt.Sprintf("finish %s first, or remove it from this step's depends-on, and retry", dep),
+			Err:     ErrUnmetDependency,
+		}
+	}
+
+	return &RefusalError{
+		Path:    stepPath,
+		Problem: fmt.Sprintf("step %q depends on %q, which names no step file", stepID, dep),
+		Fix:     "correct the id in this step's depends-on, or remove it, and retry",
+		Err:     ErrUnmetDependency,
+	}
+}
+
+// siblingFrontmatter reads and parses name — one of root's own step
+// files — for checkStepDependencies. A file that cannot be read or whose
+// frontmatter does not parse returns a zero Frontmatter (never done)
+// rather than propagating the error: that sibling is recorded as a known,
+// not-done step so it blocks a dependant rather than being silently
+// skipped.
+func siblingFrontmatter(root *os.Root, name string) stepfile.Frontmatter {
+	body, err := root.ReadFile(name)
+	if err != nil {
+		return stepfile.Frontmatter{}
+	}
+
+	fm, _, err := stepfile.ParseFrontmatter(body)
+	if err != nil {
+		return stepfile.Frontmatter{}
+	}
+
+	return fm
 }
 
 // writeFailure wraps a write-path error with the same invocation that
@@ -309,5 +530,117 @@ func progressRefusal(specPath string, cfg config.Config, feature, step string, e
 		}
 	default:
 		return fmt.Errorf("scaffold: %w", err)
+	}
+}
+
+// refinishVerdict is the outcome (refinish).verdict decides a re-finish of
+// a done step into.
+type refinishVerdict int
+
+const (
+	// refinishWrite means Finish proceeds through its normal four writes:
+	// either the step is not yet done, its handoff file is missing or
+	// unreadable, or the progress entry has not been ticked yet (a
+	// crash-after-step-file retry).
+	refinishWrite refinishVerdict = iota
+	// refinishNoop means every input matches what is already on disk
+	// (R11): Finish writes nothing.
+	refinishNoop
+	// refinishHandoffDiverged means the step is done, its handoff file is
+	// recorded, and the supplied handoff differs from it.
+	refinishHandoffDiverged
+	// refinishStateDiverged means the step is done, the supplied handoff
+	// matches what is recorded, and the supplied state differs from what
+	// is recorded.
+	refinishStateDiverged
+)
+
+// refinish carries the five facts (refinish).verdict decides a re-finish
+// of a done step from, all read at the same point in Finish where the
+// four writes' bodies are computed.
+type refinish struct {
+	// done is fm.Done() — the step's frontmatter status before this call.
+	done bool
+	// handoffRecorded is true when the step's handoff file exists and was
+	// read without error.
+	handoffRecorded bool
+	// handoffMatches is true when handoffRecorded and its bytes equal the
+	// supplied handoff.
+	handoffMatches bool
+	// stateMatches is true when the supplied state equals the state
+	// bytes already on disk.
+	stateMatches bool
+	// specTicked is true when the specification, with step's progress
+	// entry ticked, already equals what is on disk.
+	specTicked bool
+}
+
+// verdict decides a re-finish of a done step among four outcomes, in the
+// order below — rows 3 and 4 ordered handoff-first, matching the write
+// order and R14a's "names the first thing wrong", so a call where both
+// the handoff and the state diverge is reported as a handoff divergence:
+//
+//  1. !done                          -> refinishWrite
+//  2. done && !handoffRecorded       -> refinishWrite (the exemption)
+//  3. done && !handoffMatches        -> refinishHandoffDiverged
+//  4. done && !stateMatches          -> refinishStateDiverged
+//  5. done && specTicked             -> refinishNoop (R11)
+//  6. done && !specTicked            -> refinishWrite
+//
+// specTicked participates only in the noop-vs-write split (rows 5/6),
+// never in a diverged arm: the progress tick is derived from the
+// specification, not a caller input, so an un-ticked entry means
+// "half-applied write to repair", not "different inputs". A retry after a
+// blocked specification write — done, handoff matches, state matches, spec
+// still un-ticked — must converge on a second call with the same
+// arguments; folding specTicked into the divergence trigger would refuse
+// that retry instead.
+//
+// Row 5 is reached only when done, handoffRecorded, handoffMatches,
+// stateMatches and specTicked all hold — bit-for-bit R11's no-op
+// condition. Rows 3 and 4 are the only outcomes that refuse rather than
+// write or no-op.
+//
+// The exemption in row 2 — a done step whose handoff file is missing or
+// unreadable writes as normal rather than being refused — covers a crash
+// between the state write and the step write followed by a hand edit, and
+// a tree migrated before handoff files existed. With no recorded handoff
+// there is nothing to diverge from, and Finish is the only path to a done
+// step (R10), so a refusal there would be a dead end.
+func (r refinish) verdict() refinishVerdict {
+	if !r.done {
+		return refinishWrite
+	}
+
+	if !r.handoffRecorded {
+		return refinishWrite
+	}
+
+	if !r.handoffMatches {
+		return refinishHandoffDiverged
+	}
+
+	if !r.stateMatches {
+		return refinishStateDiverged
+	}
+
+	if r.specTicked {
+		return refinishNoop
+	}
+
+	return refinishWrite
+}
+
+// alreadyFinishedRefusal renders the ErrAlreadyFinished refusal for a
+// re-finish of step whose label ("handoff" or "state") diverges from what
+// is recorded at path. The caller's only route forward is to read the
+// recorded bytes and compare, so the message names the specific divergent
+// file rather than refusing generically.
+func alreadyFinishedRefusal(path, step, label string) *RefusalError {
+	return &RefusalError{
+		Path:    path,
+		Problem: fmt.Sprintf("step %q is already done and the given %s differs from the one recorded here", step, label),
+		Fix:     fmt.Sprintf("diff the %s you passed against it, then edit this file directly if the new %s is correct", label, label),
+		Err:     ErrAlreadyFinished,
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // ErrUsage marks an error caused by the invocation itself — a missing or
@@ -21,12 +22,15 @@ Usage:
   brief new feature <name>     scaffold a new feature's specification and state file
   brief new step <feature>     scaffold the next step file and its progress entry
   brief start <feature>        print the next open step's context
+  brief status                 print one done/total/next/blocked line per feature
+  brief check [feature]        report faults finish would now refuse to write over
 
   brief finish <feature> <step> --handoff <path> --state <path>
                                 close a step: handoff, state, then done
 
 Run 'brief new feature --help', 'brief new step --help', 'brief start
---help' or 'brief finish --help' for details on those commands.
+--help', 'brief status --help', 'brief check --help' or 'brief finish
+--help' for details on those commands.
 `
 
 // Run parses args, dispatches to the named command, and renders every
@@ -37,7 +41,7 @@ Run 'brief new feature --help', 'brief new step --help', 'brief start
 // read it.
 func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return usageError(stderr, "brief: no command given; expected one of: new, start, finish")
+		return usageError(stderr, "brief: no command given; expected one of: new, start, finish, status, check")
 	}
 
 	switch args[0] {
@@ -51,11 +55,32 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 		return runNew(ctx, wd, args[1:], stdout, stderr)
 	case "start":
 		return runStart(ctx, wd, args[1:], stdout, stderr)
+	case "status":
+		return runStatus(ctx, wd, args[1:], stdout, stderr)
 	case "finish":
 		return runFinish(ctx, wd, args[1:], stdin, stdout, stderr)
+	case "check":
+		return runCheck(ctx, wd, args[1:], stdout, stderr)
 	default:
-		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new, start, finish", args[0]))
+		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new, start, finish, status, check", args[0]))
 	}
+}
+
+// splitLeadingPositionals splits args into the leading run of arguments
+// that do not start with "-" and everything from the first "-"-prefixed
+// argument onward, so a flag.FlagSet — which stops parsing at the first
+// non-flag argument — only ever sees flags. finish's feature and step
+// always precede its flags, so its leading run is the whole positional
+// list; start's --json may come before or after its feature, so
+// runStart also merges flag.FlagSet.Args() into the leading run.
+func splitLeadingPositionals(args []string) ([]string, []string) {
+	for i, a := range args {
+		if strings.HasPrefix(a, "-") {
+			return args[:i], args[i:]
+		}
+	}
+
+	return args, nil
 }
 
 // usageError writes msg, followed by a single newline, to stderr and

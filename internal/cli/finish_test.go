@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,6 +210,158 @@ func Test_reads_the_state_body_from_stdin_when_the_path_is_a_dash(t *testing.T) 
 	assert.Equal(t, newState, string(got))
 }
 
+// Test_refuses_a_re_finish_whose_handoff_differs_from_the_recorded_one is
+// the CLI slice for SCENARIO-16: re-finishing a done step with a handoff
+// that differs from the one recorded on disk is refused rather than
+// silently discarding the new handoff or overwriting the record. The
+// whole stderr string is asserted, not merely Contains, because today's
+// code also prints "brief finish: SCENARIO-01 is done" on exactly these
+// inputs — a Contains assertion here would still pass with the refusal
+// deleted.
+func Test_refuses_a_re_finish_whose_handoff_differs_from_the_recorded_one(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
+	argv := []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}
+	var firstStdout, firstStderr bytes.Buffer
+
+	firstErr := cli.Run(t.Context(), wd, argv, nil, &firstStdout, &firstStderr)
+	require.NoError(t, firstErr)
+
+	names := []string{"SCENARIO-01.md", "STATE.md", "specification.md", "SCENARIO-01-HANDOFF.md"}
+	before := make(map[string][]byte, len(names))
+	for _, name := range names {
+		data, readErr := os.ReadFile(filepath.Join(featureDir, name))
+		require.NoError(t, readErr)
+		before[name] = data
+	}
+
+	differentHandoffPath := writeInput(t, "different-handoff.md", "DIFFERENT-HANDOFF\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", differentHandoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	handoffFile := filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md")
+	want := fmt.Sprintf(
+		"brief finish: %s: step \"SCENARIO-01\" is already done and the given handoff differs "+
+			"from the one recorded here; diff the handoff you passed against it, then edit this "+
+			"file directly if the new handoff is correct (no files changed)\n",
+		handoffFile)
+	assert.Equal(t, want, stderr.String())
+
+	for _, name := range names {
+		data, readErr := os.ReadFile(filepath.Join(featureDir, name))
+		require.NoError(t, readErr)
+		assert.Equal(t, before[name], data, "%s must be byte-identical after a refused re-finish", name)
+	}
+}
+
+// overCapBody returns a handoff/state body of exactly n lines, each
+// distinct so a truncation bug cannot hide behind a repeated line, with a
+// trailing newline.
+func overCapBody(n int) string {
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = "line"
+	}
+
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// Test_refuses_a_handoff_over_the_cap_and_names_the_handoff_path is the CLI
+// slice for SCENARIO-17: config.Default's handoff-cap-lines is 60, so a
+// 61-line handoff file is refused, naming the --handoff path rather than
+// the scaffold.HandoffSource placeholder. Equal, not Contains, on the whole
+// stderr line, since a passing run also succeeds silently on unrelated
+// inputs — the byte-identity and mtime proof for "nothing lands" lives at
+// the scaffold level (finish_cap_test.go); this test does not restate it
+// with a weaker probe.
+func Test_refuses_a_handoff_over_the_cap_and_names_the_handoff_path(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", overCapBody(61))
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	want := fmt.Sprintf(
+		"brief finish: %s: handoff is 61 lines, over the cap of 60; cut the handoff to 60 lines or "+
+			"fewer, or raise handoff-cap-lines in .brief.yaml, and retry (no files changed)\n",
+		handoffPath)
+	assert.Equal(t, want, stderr.String())
+}
+
+// Test_names_stdin_when_the_piped_handoff_is_over_the_cap is the stdin half
+// of the handoff locator upgrade: --handoff - has no path at all to fall
+// back to, so the refusal must name "<stdin>" rather than the raw
+// scaffold.HandoffSource placeholder or an empty string.
+func Test_names_stdin_when_the_piped_handoff_is_over_the_cap(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	stdin := strings.NewReader(overCapBody(61))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", "-", "--state", statePath}, stdin, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	want := "brief finish: <stdin>: handoff is 61 lines, over the cap of 60; cut the handoff to 60 lines or " +
+		"fewer, or raise handoff-cap-lines in .brief.yaml, and retry (no files changed)\n"
+	assert.Equal(t, want, stderr.String())
+}
+
+// Test_refuses_a_state_body_over_the_cap_and_names_the_state_path is the
+// CLI slice for SCENARIO-18: config.Default's state-cap-lines is 80, so an
+// 81-line state file is refused, naming the --state path rather than the
+// scaffold.StateSource placeholder.
+func Test_refuses_a_state_body_over_the_cap_and_names_the_state_path(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", overCapBody(81))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	want := fmt.Sprintf(
+		"brief finish: %s: state is 81 lines, over the cap of 80; cut the state to 80 lines or "+
+			"fewer, or raise state-cap-lines in .brief.yaml, and retry (no files changed)\n",
+		statePath)
+	assert.Equal(t, want, stderr.String())
+}
+
+// Test_refuses_a_state_body_missing_a_heading_and_names_the_state_path is
+// the CLI slice for SCENARIO-19: a state body missing one of
+// config.Default's four required headings is refused, naming the --state
+// path rather than the scaffold.StateSource placeholder, with the "(no
+// files changed)" tail present.
+func Test_refuses_a_state_body_missing_a_heading_and_names_the_state_path(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Open debts\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	want := fmt.Sprintf(
+		`brief finish: %s: state is missing the "## Traps" section; add a "## Traps" heading to the state body — an empty section is valid — and retry (no files changed)`+"\n",
+		statePath)
+	assert.Equal(t, want, stderr.String())
+}
+
 func Test_returns_a_usage_error_when_no_feature_is_given_to_finish(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -394,6 +547,130 @@ func Test_preserves_a_CRLF_step_body_when_marking_it_done(t *testing.T) {
 	require.NoError(t, readErr)
 	want := strings.Replace(step, "status: open\n", "status: done\n", 1)
 	assert.Equal(t, want, string(got))
+}
+
+// Test_finish_refuses_a_step_with_an_open_checklist_item is the CLI slice
+// for SCENARIO-20: a step whose "## Implementation Plan" checklist still
+// carries an unticked item is refused, naming the step file and the
+// item's line, with the "(no files changed)" tail present. No cli code
+// change backs this: scaffold.RefusalError.Path is already the real step
+// file path, never a placeholder cli must swap in.
+func Test_finish_refuses_a_step_with_an_open_checklist_item(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	stepPath := filepath.Join(featureDir, "SCENARIO-01.md")
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Scenario\n\n" +
+		"the acceptance criteria\n\n" +
+		"## Implementation Plan\n\n" +
+		"- [ ] do the thing\n"
+	require.NoError(t, os.WriteFile(stepPath, []byte(step), 0o600))
+
+	state := "## Binding decisions\n\nsome decision\n\n" +
+		"## Left unbuilt\n\nsomething left\n\n" +
+		"## Traps\n\na trap\n\n" +
+		"## Open debts\n\na debt\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", state)
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	want := fmt.Sprintf(
+		`brief finish: %s:15: checklist item "do the thing" is not ticked; tick it with [x] once it is done, or remove it, and retry (no files changed)`+"\n",
+		stepPath)
+	assert.Equal(t, want, stderr.String())
+}
+
+// Test_finish_refuses_a_step_whose_dependency_is_unfinished is the CLI
+// slice for SCENARIO-21: SCENARIO-02 declares depends-on: [SCENARIO-01],
+// and SCENARIO-01 is open, so the refusal names SCENARIO-02's own step
+// file, with the "(no files changed)" tail, exit 1, empty stdout, and the
+// tree left byte-identical. No cli code change backs this:
+// scaffold.RefusalError.Path is already the real step file path, never a
+// placeholder cli must swap in.
+func Test_finish_refuses_a_step_whose_dependency_is_unfinished(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	step01Path := filepath.Join(featureDir, "SCENARIO-01.md")
+	step01 := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Scenario\n\n" +
+		"the acceptance criteria\n\n" +
+		"## Implementation Plan\n\n" +
+		"- [ ] do the thing\n"
+	require.NoError(t, os.WriteFile(step01Path, []byte(step01), 0o600))
+
+	step02Path := filepath.Join(featureDir, "SCENARIO-02.md")
+	step02 := "---\n" +
+		"id: SCENARIO-02\n" +
+		"status: open\n" +
+		"depends-on: [SCENARIO-01]\n" +
+		"---\n\n" +
+		"# SCENARIO-02 Demo step\n\n" +
+		"## Scenario\n\n" +
+		"the acceptance criteria\n\n" +
+		"## Implementation Plan\n\n" +
+		"- [x] do the thing\n"
+	require.NoError(t, os.WriteFile(step02Path, []byte(step02), 0o600))
+
+	state := "## Binding decisions\n\nsome decision\n\n" +
+		"## Left unbuilt\n\nsomething left\n\n" +
+		"## Traps\n\na trap\n\n" +
+		"## Open debts\n\na debt\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n- [ ] SCENARIO-02\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+
+	names := []string{"SCENARIO-01.md", "SCENARIO-02.md", "STATE.md", "specification.md"}
+	before := make(map[string][]byte, len(names))
+	for _, name := range names {
+		data, readErr := os.ReadFile(filepath.Join(featureDir, name))
+		require.NoError(t, readErr)
+		before[name] = data
+	}
+
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", state)
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-02", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+
+	want := fmt.Sprintf(
+		`brief finish: %s: step "SCENARIO-02" depends on "SCENARIO-01", which is not finished; finish SCENARIO-01 first, or remove it from this step's depends-on, and retry (no files changed)`+"\n",
+		step02Path)
+	assert.Equal(t, want, stderr.String())
+
+	for _, name := range names {
+		data, readErr := os.ReadFile(filepath.Join(featureDir, name))
+		require.NoError(t, readErr)
+		assert.Equal(t, before[name], data, "%s must be byte-identical after a refused finish", name)
+	}
 }
 
 func Test_returns_an_error_for_an_unknown_feature_on_finish(t *testing.T) {

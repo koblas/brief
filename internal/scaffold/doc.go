@@ -23,20 +23,34 @@
 // returned as-is, never as a *RefusalError, since nothing changed on disk
 // is not true past that point. Finishing an already-finished step with
 // the same handoff and state is a true no-op: nothing is written and
-// every file's modification time is preserved.
+// every file's modification time is preserved. Finishing it again with a
+// handoff or state that differs from what is recorded is refused instead,
+// naming the specific divergent file, unless the recorded handoff file is
+// missing or unreadable, which exempts the step from the refusal
+// entirely.
 //
 // A caller-facing refusal is a *RefusalError: a path, an optional line
 // within it, what was wrong, and how to fix it, wrapping one of
-// ErrNoSuchFeature, ErrMalformedFeature, ErrNoProgressHeading,
-// ErrNoSuchStep, ErrNoProgressEntry or ErrUnterminatedFence (or, from
-// internal/platform/stepfile, ErrInvalidPattern, ErrInvalidHandoffSuffix
-// or ErrNoStatusField) so callers can branch on the specific cause with
+// ErrNoSuchFeature, ErrFeatureExists, ErrMalformedFeature,
+// ErrNoProgressHeading, ErrNoSuchStep, ErrNoProgressEntry or
+// ErrAlreadyFinished; or, from internal/platform/conform, ErrUnterminatedFence,
+// ErrOverCap, ErrMissingStateHeading or ErrOpenChecklistItem — the four
+// body-shaped predicates internal/assemble's Check reports as findings
+// against the same rule; or, from internal/platform/stepfile,
+// ErrInvalidPattern, ErrInvalidHandoffSuffix or ErrNoStatusField — so
+// callers can branch on the specific cause with
 // errors.Is while still rendering the same "nothing changed on disk"
 // line. A refusal about the state argument's own bytes, rather than about
 // a file Finish opened, carries Path == StateSource — a placeholder cli
 // replaces with the real --state source before rendering, since Finish
 // itself never learns it. A "## Handoff" section left behind in a step
 // file by an unmigrated tree is ordinary prose Finish never reads.
+//
+// One refusal is not a *RefusalError: an empty or whitespace-carrying name
+// given to NewFeature is an invocation defect, not a write that changed
+// nothing on disk, so it is reported as the bare sentinel
+// ErrInvalidFeatureName and cli classifies it as a usage error rather than
+// rendering it with the "(no files changed)" write-refusal template.
 //
 // scaffold writes through the real filesystem; there is no Store port. The
 // contracts this package ships — no temp file left behind, byte-identity

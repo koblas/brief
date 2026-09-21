@@ -2,10 +2,12 @@ package scaffold
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"unicode"
 
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/stepfile"
@@ -30,15 +32,28 @@ func NewServer(cfg config.Config, root string) *Server {
 // feature directory, writing an empty specification skeleton and an empty
 // state file into it, and returns the created directory's path.
 //
+// name is validated before anything touches disk: an empty name, or one
+// containing whitespace, is refused as ErrInvalidFeatureName and no
+// directory — not even the configured feature directory itself — is
+// created.
+//
 // Every write goes through an *os.Root rooted at the feature directory.
 // Root.Mkdir refuses a name that escapes the root (a "../x" name cannot
-// traverse out) and refuses an existing feature outright — that refusal is
-// what stops an existing specification from being truncated: brief new
-// feature brief run inside this repository would otherwise overwrite this
-// project's own approved specification.md. Each file is additionally opened
-// O_CREATE|O_EXCL, which cannot fire while Mkdir guarantees a brand-new
-// leaf, and which holds the line if that guarantee is ever relaxed.
+// traverse out); when it fails because the feature directory already
+// exists, that failure is reported as a *RefusalError wrapping
+// ErrFeatureExists naming the existing directory — the guard that stops an
+// existing specification from being truncated: brief new feature brief run
+// inside this repository would otherwise overwrite this project's own
+// approved specification.md. Every other Mkdir failure, including the
+// traversal case above, keeps its plain wrapped-error shape. Each file is
+// additionally opened O_CREATE|O_EXCL, a second guard behind Mkdir's that
+// cannot fire while Mkdir guarantees a brand-new leaf, and which holds the
+// line if that guarantee is ever relaxed.
 func (s *Server) NewFeature(_ context.Context, name string) (string, error) {
+	if err := validateFeatureName(name); err != nil {
+		return "", err
+	}
+
 	featureRoot := filepath.Join(s.root, s.cfg.FeatureDirectory)
 	if err := os.MkdirAll(featureRoot, 0o755); err != nil {
 		return "", fmt.Errorf("scaffold: %w", err)
@@ -51,6 +66,17 @@ func (s *Server) NewFeature(_ context.Context, name string) (string, error) {
 	defer func() { _ = root.Close() }()
 
 	if err := root.Mkdir(name, 0o755); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			featurePath := filepath.Join(featureRoot, name)
+
+			return "", &RefusalError{
+				Path:    featurePath,
+				Problem: "feature already exists",
+				Fix:     fmt.Sprintf("run 'brief new step %s' to add a step to it, or choose a different name", name),
+				Err:     ErrFeatureExists,
+			}
+		}
+
 		return "", fmt.Errorf("scaffold: %w", err)
 	}
 
@@ -175,6 +201,26 @@ func noSuchFeatureRefusal(path, feature string) error {
 		Fix:     fmt.Sprintf("run 'brief new feature %s' to create it", feature),
 		Err:     ErrNoSuchFeature,
 	}
+}
+
+// validateFeatureName refuses an empty name, or one carrying a rune
+// unicode.IsSpace reports true for, wrapping ErrInvalidFeatureName with
+// the offending name so the refusal names what was wrong. status is a
+// whitespace-separated four-field contract (strings.Fields splits on the
+// same predicate); a name breaking it here is what makes that contract
+// hold everywhere it is read.
+func validateFeatureName(name string) error {
+	if name == "" {
+		return fmt.Errorf("name is empty: %w", ErrInvalidFeatureName)
+	}
+
+	for _, r := range name {
+		if unicode.IsSpace(r) {
+			return fmt.Errorf("name %q contains whitespace: %w", name, ErrInvalidFeatureName)
+		}
+	}
+
+	return nil
 }
 
 // writeExclusive creates name under root and writes contents to it,

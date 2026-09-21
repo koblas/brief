@@ -18,6 +18,8 @@ const newFeatureUsage = `Usage:
 
 Scaffolds docs/specifications/<name> (or the configured feature directory)
 with an empty specification skeleton and an empty state file.
+
+A name may not be empty or contain whitespace.
 `
 
 // newStepUsage is "brief new step"'s help text.
@@ -83,6 +85,14 @@ func runNewFeature(ctx context.Context, wd string, args []string, stdout, stderr
 
 	path, err := srv.NewFeature(ctx, name)
 	if err != nil {
+		if errors.Is(err, scaffold.ErrInvalidFeatureName) {
+			if name == "" {
+				return usageError(stderr, "brief new feature: name is empty; run 'brief new feature <name>' with a non-empty name")
+			}
+
+			return usageError(stderr, fmt.Sprintf("brief new feature: name %q contains whitespace; run 'brief new feature <name>' with a name containing no whitespace", name))
+		}
+
 		return renderRefusal(stderr, "new feature", err)
 	}
 

@@ -820,19 +820,19 @@ Crossover — this document becomes `brief`'s own feature directory.
 
 Post-crossover — built through the tool:
 
-- [ ] SCENARIO-07: A feature name that would break the status contract is refused
-- [ ] SCENARIO-08: Creating a feature that already exists is refused
-- [ ] SCENARIO-09: Status reports one four-field line per feature
-- [ ] SCENARIO-10: Status on a repository with no features succeeds silently
-- [ ] SCENARIO-11: One malformed feature does not blind status to the rest
-- [ ] SCENARIO-12: A completed feature has no next step
-- [ ] SCENARIO-13: Start refuses a malformed feature rather than assembling half a brief
-- [ ] SCENARIO-14: Start degrades on a missing optional convention and says so
-- [ ] SCENARIO-15: Start emits a structured payload on request
-- [ ] SCENARIO-16: Finishing a done step with different inputs is refused
-- [ ] SCENARIO-17: An over-cap handoff is refused and nothing lands
-- [ ] SCENARIO-18: An over-cap state body is refused and nothing lands
-- [ ] SCENARIO-19: A state body missing a required heading is refused
-- [ ] SCENARIO-20: A step with an open checklist item cannot be finished
-- [ ] SCENARIO-21: A step with an unfinished dependency cannot be finished
-- [ ] SCENARIO-22: Check reports what the write path would now refuse
+- [x] SCENARIO-07: A feature name that would break the status contract is refused
+- [x] SCENARIO-08: Creating a feature that already exists is refused
+- [x] SCENARIO-09: Status reports one four-field line per feature
+- [x] SCENARIO-10: Status on a repository with no features succeeds silently
+- [x] SCENARIO-11: One malformed feature does not blind status to the rest
+- [x] SCENARIO-12: A completed feature has no next step
+- [x] SCENARIO-13: Start refuses a malformed feature rather than assembling half a brief
+- [x] SCENARIO-14: Start degrades on a missing optional convention and says so
+- [x] SCENARIO-15: Start emits a structured payload on request
+- [x] SCENARIO-16: Finishing a done step with different inputs is refused
+- [x] SCENARIO-17: An over-cap handoff is refused and nothing lands
+- [x] SCENARIO-18: An over-cap state body is refused and nothing lands
+- [x] SCENARIO-19: A state body missing a required heading is refused
+- [x] SCENARIO-20: A step with an open checklist item cannot be finished
+- [x] SCENARIO-21: A step with an unfinished dependency cannot be finished
+- [x] SCENARIO-22: Check reports what the write path would now refuse

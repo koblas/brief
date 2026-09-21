@@ -2,6 +2,7 @@ package assemble
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -19,13 +20,29 @@ import (
 type Server struct {
 	cfg  config.Config
 	root string
+
+	// openRoot opens name as a subdirectory of parent. It defaults to
+	// (*os.Root).OpenRoot; a test overrides it, through export_test.go, to
+	// inject a directory-open failure that does not depend on OS
+	// permission bits or effective uid.
+	openRoot func(parent *os.Root, name string) (*os.Root, error)
+
+	// readDir lists root's own entries. It defaults to reading root.FS()
+	// with fs.ReadDir; a test overrides it for the same reason as
+	// openRoot.
+	readDir func(root *os.Root) ([]os.DirEntry, error)
 }
 
 // NewServer returns a Server rooted at root, using cfg for every path and
 // heading it reads. Both arguments are required positionally: there is no
 // optional dependency here for a functional option to default.
 func NewServer(cfg config.Config, root string) *Server {
-	return &Server{cfg: cfg, root: root}
+	return &Server{
+		cfg:      cfg,
+		root:     root,
+		openRoot: (*os.Root).OpenRoot,
+		readDir:  func(root *os.Root) ([]os.DirEntry, error) { return fs.ReadDir(root.FS(), ".") },
+	}
 }
 
 // stepEntry is one step file found while enumerating a feature directory:
@@ -42,10 +59,22 @@ type stepEntry struct {
 // step file, and every section of the feature's state file. "Next" is the
 // lowest-numbered step file whose frontmatter status is not "done";
 // depends-on is parsed but ignored for ordering. Start returns
-// ErrNoSuchFeature when feature has no directory, ErrMalformedFeature when
-// the feature has no state file, and a wrapped error when a step file's
-// frontmatter does not parse. Start reads only; it writes nothing to
-// disk.
+// ErrNoSuchFeature when feature has no directory. It returns a
+// *RefusalError, wrapping ErrMalformedFeature, when the feature's
+// specification is missing, unreadable, carries an unclosed fenced code
+// block, or has no configured progress heading; when its state file is
+// missing, unreadable or carries an unclosed fence; or when the briefed
+// step's frontmatter carries no "id:" or its checklist heading is absent.
+// A step file whose frontmatter is absent or does not parse also returns a
+// *RefusalError, wrapping whatever sentinel readSteps produced. Checks run
+// in that order — specification, then state file, then step files, then
+// the briefed step — and the first failure wins, so Start never returns a
+// Brief that silently omits inherited context or a malformed next step.
+// An absent acceptance heading in the briefed step, or an absent heading
+// in the state file, does not refuse: it is appended to Brief.Shortfalls
+// instead, one entry per absent heading, acceptance first then the state
+// headings in cfg.StateHeadings.Ordered() order. Start reads only; it
+// writes nothing to disk.
 func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
 
@@ -61,20 +90,15 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 	}
 	defer func() { _ = root.Close() }()
 
-	stateBytes, err := root.ReadFile(s.cfg.StateFile)
-	if err != nil {
-		return Brief{}, ErrMalformedFeature
+	featurePath := filepath.Join(featureDirPath, feature)
+
+	if err := s.checkSpecification(root, featurePath); err != nil {
+		return Brief{}, err
 	}
 
-	// stateSections below finds each configured heading's section by
-	// scanning forward for a terminator, the same way Section always has.
-	// An open fence makes that scan run to end of file, so every heading
-	// after the fence opens sits inside it and reads as absent — R10's
-	// "the worst this tool could produce": a brief that looks complete
-	// while silently omitting every inherited section. Refusing here means
-	// Start never returns that shape.
-	if line, delim, unterminated := markdown.UnterminatedFence(string(stateBytes)); unterminated {
-		return Brief{}, fmt.Errorf("assemble: %w: state file has an unclosed %s fence opened at line %d", ErrMalformedFeature, delim, line)
+	stateBytes, err := s.readStateFile(root, featurePath)
+	if err != nil {
+		return Brief{}, err
 	}
 
 	pattern, err := stepfile.Compile(s.cfg.StepFilePattern)
@@ -89,7 +113,7 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 
 	steps, err := readSteps(root, pattern, dirEntries)
 	if err != nil {
-		return Brief{}, err
+		return Brief{}, &RefusalError{Problem: *newProblem(featurePath, err, true), Err: err}
 	}
 
 	brief := Brief{Inherited: stateSections(string(stateBytes), s.cfg)}
@@ -107,12 +131,132 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 			continue
 		}
 
-		brief.Step = stepFromEntry(e, s.cfg)
+		step := stepFromEntry(e, s.cfg)
+		stepPath := filepath.Join(featurePath, pattern.Name(e.number))
+
+		if step.ID == "" {
+			return Brief{}, &RefusalError{
+				Path:   stepPath,
+				Detail: `no "id:" found in frontmatter`,
+				Fix:    `add an "id:" field to the step file's frontmatter`,
+				Err:    ErrMalformedFeature,
+			}
+		}
+
+		if !step.Checklist.Found {
+			return Brief{}, &RefusalError{
+				Path:   stepPath,
+				Detail: fmt.Sprintf("no %q heading found", s.cfg.ChecklistHeading),
+				Fix:    fmt.Sprintf("add a %q heading to the step file", s.cfg.ChecklistHeading),
+				Err:    ErrMalformedFeature,
+			}
+		}
+
+		brief.Step = step
+
+		if !step.Acceptance.Found {
+			brief.Shortfalls = append(brief.Shortfalls, Shortfall{
+				Path:   stepPath,
+				Detail: fmt.Sprintf("no %q heading found", s.cfg.AcceptanceHeading),
+				Fix:    fmt.Sprintf("add a %q heading to the step file", s.cfg.AcceptanceHeading),
+			})
+		}
 
 		break
 	}
 
+	statePath := filepath.Join(featurePath, s.cfg.StateFile)
+
+	for _, section := range brief.Inherited {
+		if section.Found {
+			continue
+		}
+
+		brief.Shortfalls = append(brief.Shortfalls, Shortfall{
+			Path:   statePath,
+			Detail: fmt.Sprintf("no %q heading found", section.Heading),
+			Fix:    fmt.Sprintf("add a %q heading to the state file", section.Heading),
+		})
+	}
+
 	return brief, nil
+}
+
+// checkSpecification reads feature's specification through root and
+// refuses with a *RefusalError, wrapping ErrMalformedFeature, when it is
+// absent, unreadable, carries an unclosed fenced code block, or has no
+// line matching cfg.ProgressHeading — the model's rule (see doc.go) that a
+// feature's progress list lives in its specification, and that omission is
+// undetectable rather than nameable once a fence swallows it. Absent gets
+// its own imperative rather than reusing the unreadable case's "make it
+// readable": a file that does not exist cannot be made readable.
+func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
+	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
+
+	specBytes, err := root.ReadFile(s.cfg.SpecificationFile)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return &RefusalError{
+				Path:   specPath,
+				Detail: s.cfg.SpecificationFile + " not found",
+				Fix:    fmt.Sprintf("write a %s with a %q heading and re-run", s.cfg.SpecificationFile, s.cfg.ProgressHeading),
+				Err:    ErrMalformedFeature,
+			}
+		}
+
+		return &RefusalError{Problem: *newProblem(specPath, err, false), Err: ErrMalformedFeature}
+	}
+
+	if line, delim, unterminated := markdown.UnterminatedFence(string(specBytes)); unterminated {
+		return &RefusalError{
+			Path:   specPath,
+			Detail: fmt.Sprintf("specification has an unclosed %s fence opened at line %d", delim, line),
+			Fix:    "close the fence and re-run",
+			Line:   line,
+			Err:    ErrMalformedFeature,
+		}
+	}
+
+	if _, found := markdown.Section(string(specBytes), s.cfg.ProgressHeading); !found {
+		return &RefusalError{
+			Path:   specPath,
+			Detail: fmt.Sprintf("no %q heading found", s.cfg.ProgressHeading),
+			Fix:    fmt.Sprintf("add a %q heading to the specification", s.cfg.ProgressHeading),
+			Err:    ErrMalformedFeature,
+		}
+	}
+
+	return nil
+}
+
+// readStateFile reads feature's state file through root and refuses with a
+// *RefusalError, wrapping ErrMalformedFeature, when it is absent,
+// unreadable, or carries an unclosed fenced code block. stateSections
+// below finds each configured heading's section by scanning forward for a
+// terminator, the same way Section always has; an open fence makes that
+// scan run to end of file, so every heading after the fence opens sits
+// inside it and reads as absent — R10's "the worst this tool could
+// produce": a brief that looks complete while silently omitting every
+// inherited section. Refusing here means Start never returns that shape.
+func (s *Server) readStateFile(root *os.Root, featurePath string) ([]byte, error) {
+	statePath := filepath.Join(featurePath, s.cfg.StateFile)
+
+	stateBytes, err := root.ReadFile(s.cfg.StateFile)
+	if err != nil {
+		return nil, &RefusalError{Problem: *newProblem(statePath, err, false), Err: ErrMalformedFeature}
+	}
+
+	if line, delim, unterminated := markdown.UnterminatedFence(string(stateBytes)); unterminated {
+		return nil, &RefusalError{
+			Path:   statePath,
+			Detail: fmt.Sprintf("state file has an unclosed %s fence opened at line %d", delim, line),
+			Fix:    "close the fence and re-run",
+			Line:   line,
+			Err:    ErrMalformedFeature,
+		}
+	}
+
+	return stateBytes, nil
 }
 
 // readSteps reads and parses the frontmatter of every entry dirEntries

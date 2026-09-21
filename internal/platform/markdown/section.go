@@ -114,6 +114,24 @@ func sectionRange(body, heading string) (int, int, bool) {
 	lines := strings.Split(body, "\n")
 	offsets := lineOffsets(lines)
 
+	headingIdx, sectionEnd, ok := sectionSpan(lines, heading)
+	if !ok {
+		return 0, 0, false
+	}
+
+	return offsets[headingIdx+1], offsets[sectionEnd], true
+}
+
+// sectionSpan returns the line-index boundaries of the section under the
+// first line in lines that equals heading after right-trimming:
+// headingIdx is that line's own index and sectionEnd is the index of the
+// next line, outside any fenced code block, that opens a heading of the
+// same or higher level — or len(lines) when no such line follows.
+// sectionRange turns these into byte offsets for splicing; FirstUnchecked
+// scans checklist items directly between them, since a line index is all
+// it needs. sectionSpan returns (0, 0, false) when no line in lines
+// equals heading.
+func sectionSpan(lines []string, heading string) (int, int, bool) {
 	headingIdx, headingLevel := findHeading(lines, heading)
 	if headingIdx == -1 {
 		return 0, 0, false
@@ -140,7 +158,7 @@ func sectionRange(body, heading string) (int, int, bool) {
 		}
 	}
 
-	return offsets[headingIdx+1], offsets[sectionEnd], true
+	return headingIdx, sectionEnd, true
 }
 
 // lineOffsets returns, for each index i in 0..len(lines), the byte offset

@@ -90,6 +90,20 @@ func newStateBody(cfg config.Config) []byte {
 	return []byte(body.String())
 }
 
+// differentStateBody is a replacement state body carrying the four
+// configured headings, each holding a marker distinct from both
+// oldStateBody's and newStateBody's, for tests that need a state argument
+// that both passes SCENARIO-19's heading check and still diverges from
+// whatever is already recorded on disk.
+func differentStateBody(cfg config.Config) []byte {
+	var body strings.Builder
+	for _, h := range cfg.StateHeadings.Ordered() {
+		body.WriteString(h + "\n\nDIFFERENT-STATE-ENTRY\n\n")
+	}
+
+	return []byte(body.String())
+}
+
 // step02Body is the target step's body, in stepSkeleton's shape plus one
 // key Frontmatter does not know (owner: planner) and a depends-on
 // satisfied by STEP-01. Its checklist is fully ticked and holds a fenced
@@ -718,7 +732,7 @@ func Test_refuses_a_specification_with_no_progress_heading_on_finish(t *testing.
 	srv := scaffold.NewServer(cfg, root)
 	before := snapshotTree(t, featureDir)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte("s"))
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte(oldStateBody(cfg)))
 
 	require.ErrorIs(t, err, scaffold.ErrNoProgressHeading)
 	assert.Equal(t, before, snapshotTree(t, featureDir))
@@ -740,7 +754,7 @@ func Test_refuses_a_progress_list_with_no_entry_for_the_step(t *testing.T) {
 	srv := scaffold.NewServer(cfg, root)
 	before := snapshotTree(t, featureDir)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte("s"))
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte(oldStateBody(cfg)))
 
 	require.ErrorIs(t, err, scaffold.ErrNoProgressEntry)
 	assert.Equal(t, before, snapshotTree(t, featureDir))
@@ -762,7 +776,7 @@ func Test_refuses_a_missing_state_file_on_finish(t *testing.T) {
 	srv := scaffold.NewServer(cfg, root)
 	before := snapshotTree(t, featureDir)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte("s"))
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte(oldStateBody(cfg)))
 
 	require.ErrorIs(t, err, scaffold.ErrMalformedFeature)
 	assert.Equal(t, before, snapshotTree(t, featureDir))

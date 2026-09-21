@@ -15,7 +15,17 @@ import (
 
 // fixtureConfig returns a Config whose every field this package reads
 // differs from config.Default(), so a hardcoded default cannot pass a test
-// built against it.
+// built against it. HandoffCapLines is 10 — distinct from config.Default's
+// 60, and strictly above the 5-line maximum of every handoff body this
+// package's tests hand to Finish (newFinishFixture.newHandoff), so a cap
+// test proves the value is read from config rather than tripping on an
+// unrelated fixture body. StateCapLines is 20 — distinct from
+// HandoffCapLines and from config.Default's 80, and strictly above the
+// 16-line maximum every state body this package's non-cap tests hand to
+// Finish (newStateBody, oldStateBody, differentStateBody), for the same
+// reason. The cap and heading tests build their own boundary-sized bodies
+// (bodyOfLines, stateBodyOfLines) precisely at or over this line — that is
+// what they test.
 func fixtureConfig() config.Config {
 	cfg := config.Default()
 	cfg.FeatureDirectory = "specs"
@@ -25,6 +35,8 @@ func fixtureConfig() config.Config {
 	cfg.StateFile = "NOTES.md"
 	cfg.StepFilePattern = "STEP-%02d.md"
 	cfg.HandoffFileSuffix = ".fixture-handoff.md"
+	cfg.HandoffCapLines = 10
+	cfg.StateCapLines = 20
 	cfg.StateHeadings = config.StateHeadings{
 		BindingDecisions: "## Decisions Fixture",
 		LeftUnbuilt:      "## Left Fixture",
@@ -43,6 +55,7 @@ func Test_creates_the_feature_directory_under_the_configured_feature_directory(t
 
 	require.NoError(t, err)
 	assert.DirExists(t, filepath.Join(root, "specs", "widgets"))
+	assert.DirExists(t, filepath.Join(root, "specs"))
 }
 
 func Test_returns_the_path_of_the_created_feature_directory(t *testing.T) {
@@ -110,7 +123,7 @@ func Test_does_not_overwrite_an_existing_specification_when_the_feature_director
 
 	_, err := srv.NewFeature(context.Background(), "widgets")
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrFeatureExists)
 
 	got, readErr := os.ReadFile(filepath.Join(featureDir, cfg.SpecificationFile))
 	require.NoError(t, readErr)
@@ -124,7 +137,86 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 	_, err := srv.NewFeature(context.Background(), "../escaped")
 
 	require.Error(t, err)
+	require.NotErrorIs(t, err, scaffold.ErrFeatureExists)
 	assert.NoDirExists(t, filepath.Join(root, "escaped"))
+}
+
+// Test_refuses_an_existing_feature_naming_its_directory pins the refusal
+// shape NewFeature returns when the feature directory it would create
+// already exists: a *RefusalError naming that directory and wrapping
+// ErrFeatureExists, at Line 0 since the refusal concerns the whole
+// directory rather than one line inside a file.
+func Test_refuses_an_existing_feature_naming_its_directory(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, err = srv.NewFeature(context.Background(), "widgets")
+	require.Error(t, err)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, filepath.Join(root, "specs", "widgets"), refusal.Path)
+	assert.Equal(t, 0, refusal.Line)
+	assert.ErrorIs(t, err, scaffold.ErrFeatureExists)
+}
+
+// Test_leaves_an_existing_features_files_byte_identical_when_it_refuses is
+// expected green on arrival: root.Mkdir already refuses before any write,
+// and writeExclusive's O_CREATE|O_EXCL is a second guard behind it. The
+// snapshot equality also catches an added temp file, which a
+// DirExists-only assertion would miss.
+func Test_leaves_an_existing_features_files_byte_identical_when_it_refuses(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	featureDir := filepath.Join(root, "specs", "widgets")
+	before := snapshotTree(t, featureDir)
+
+	_, err = srv.NewFeature(context.Background(), "widgets")
+	require.Error(t, err)
+
+	after := snapshotTree(t, featureDir)
+	assert.Equal(t, before, after)
+}
+
+// Test_the_byte_identity_probe_sees_a_change_when_the_scaffold_writes_one
+// is the control arm for the byte-identity claim above: same fixture, same
+// probe, same directory, with NewStep in place of the refused NewFeature.
+// Without this control, snapshot equality passing would be equally
+// consistent with a probe that cannot detect a change at all.
+func Test_the_byte_identity_probe_sees_a_change_when_the_scaffold_writes_one(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	featureDir := filepath.Join(root, "specs", "widgets")
+	before := snapshotTree(t, featureDir)
+
+	_, err = srv.NewStep(context.Background(), "widgets")
+	require.NoError(t, err)
+
+	after := snapshotTree(t, featureDir)
+	assert.NotEqual(t, before, after)
 }
 
 // Test_the_scaffolded_files_are_all_created_owner_only pins the mode
@@ -144,6 +236,90 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 // siblings in this repo; 0o600 carries no bits a conventional umask strips,
 // so unlike the atomicfile fresh-create tests this one is umask-stable
 // either way.
+func Test_refuses_a_feature_name_containing_whitespace(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay ments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+	assert.ErrorContains(t, err, `"pay ments"`)
+}
+
+func Test_refuses_a_feature_name_with_a_leading_space(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), " payments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_a_feature_name_with_a_trailing_space(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "payments ")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_a_feature_name_containing_a_tab(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay\tments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_a_feature_name_containing_a_line_feed(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay\nments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_a_feature_name_containing_a_carriage_return(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay\rments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_a_feature_name_containing_a_non_breaking_space(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay ments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_refuses_an_empty_feature_name(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+}
+
+func Test_creates_nothing_at_all_when_the_name_is_refused(t *testing.T) {
+	root := t.TempDir()
+	srv := scaffold.NewServer(fixtureConfig(), root)
+
+	_, err := srv.NewFeature(context.Background(), "pay ments")
+
+	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
+	assert.NoDirExists(t, filepath.Join(root, "specs", "pay ments"))
+	assert.NoDirExists(t, filepath.Join(root, "specs"))
+}
+
 func Test_the_scaffolded_files_are_all_created_owner_only(t *testing.T) {
 	oldMask := syscall.Umask(0o022)
 	t.Cleanup(func() { syscall.Umask(oldMask) })

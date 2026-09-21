@@ -81,28 +81,34 @@ func readFileString(t *testing.T, path string) string {
 	return string(data)
 }
 
-// Test_re_finishing_a_done_step_with_a_different_handoff_replaces_it is the
-// arm that reddens if the handoff conjunct is dropped from identity;
-// SCENARIO-16 later inverts it into a refusal over the same conjunct.
-func Test_re_finishing_a_done_step_with_a_different_handoff_replaces_it(t *testing.T) {
+// Test_re_finishing_a_done_step_with_a_different_handoff_is_refused inverts
+// the arm that used to prove the handoff conjunct silently overwrote the
+// recorded file: a done step re-finished with a handoff that differs from
+// the one on disk must now be refused, naming the handoff file specifically,
+// rather than discarding the caller's new bytes while claiming success.
+func Test_re_finishing_a_done_step_with_a_different_handoff_is_refused(t *testing.T) {
 	fx := newFinishedFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	differentHandoff := []byte("DIFFERENT-HANDOFF-02\n")
 
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, fx.newState)
-	require.NoError(t, err)
 
-	got, readErr := os.ReadFile(fx.handoffPath())
-	require.NoError(t, readErr)
+	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
 
-	assert.Equal(t, string(differentHandoff), string(got))
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, fx.handoffPath(), refusal.Path)
+	assert.Contains(t, refusal.Problem, "already done")
+	assert.Contains(t, refusal.Problem, "handoff differs")
+	assert.Contains(t, refusal.Fix, "diff the handoff you passed")
 }
 
 // Test_re_finishing_a_done_step_whose_handoff_file_is_missing_rewrites_it
-// is the single-variable proof that "the handoff file exists" is part of
-// the identity conjunct, not merely "its bytes match": deleting it before
-// an otherwise-identical re-finish must still write, covering the crash-
-// after-state retry and a migrated step alike.
+// is the single-variable proof that a missing handoff file exempts a done
+// step from the divergence refusal entirely, rather than merely relaxing a
+// byte comparison: deleting it before an otherwise-identical re-finish must
+// still write, covering the crash-after-state retry and a migrated step
+// alike.
 func Test_re_finishing_a_done_step_whose_handoff_file_is_missing_rewrites_it(t *testing.T) {
 	fx := newFinishedFixture(t)
 	require.NoError(t, os.Remove(fx.handoffPath()))
@@ -116,18 +122,129 @@ func Test_re_finishing_a_done_step_whose_handoff_file_is_missing_rewrites_it(t *
 	assert.Equal(t, string(fx.newHandoff), string(got))
 }
 
-func Test_re_finishing_a_done_step_with_a_different_state_body_replaces_it(t *testing.T) {
+// Test_re_finishing_a_done_step_whose_handoff_file_is_missing_accepts_a_different_state
+// is Step 4's control arm: identical to
+// Test_a_refused_re_finish_leaves_every_file_byte_identical but for the
+// handoff file's presence — one variable, opposite outcome, same probe. A
+// missing handoff file exempts the step from the divergence refusal, so a
+// differing state now writes rather than being refused.
+func Test_re_finishing_a_done_step_whose_handoff_file_is_missing_accepts_a_different_state(t *testing.T) {
 	fx := newFinishedFixture(t)
+	require.NoError(t, os.Remove(fx.handoffPath()))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
-	differentState := []byte("DIFFERENT-STATE-BODY\n")
+	differentState := differentStateBody(fx.cfg)
 
 	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
 	require.NoError(t, readErr)
-
 	assert.Equal(t, string(differentState), string(got))
+}
+
+// Test_re_finishing_a_done_step_with_a_different_state_body_is_refused
+// inverts the arm that used to prove the state conjunct silently
+// overwrote the recorded file: a done step re-finished with a state body
+// that differs from the one on disk must now be refused, naming
+// cfg.StateFile specifically.
+func Test_re_finishing_a_done_step_with_a_different_state_body_is_refused(t *testing.T) {
+	fx := newFinishedFixture(t)
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+	differentState := differentStateBody(fx.cfg)
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
+
+	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, filepath.Join(fx.featureDir(), fx.cfg.StateFile), refusal.Path)
+	assert.Contains(t, refusal.Problem, "already done")
+	assert.Contains(t, refusal.Problem, "state differs")
+	assert.Contains(t, refusal.Fix, "diff the state you passed")
+}
+
+// Test_re_finishing_a_done_step_with_both_inputs_differing_names_the_handoff_first
+// pins R14a's first-thing-wrong order for measured case (d): when both the
+// handoff and the state differ from what is recorded, the refusal names the
+// handoff file, matching the write order (handoff lands before state).
+func Test_re_finishing_a_done_step_with_both_inputs_differing_names_the_handoff_first(t *testing.T) {
+	fx := newFinishedFixture(t)
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+	differentHandoff := []byte("DIFFERENT-HANDOFF-02\n")
+	differentState := differentStateBody(fx.cfg)
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, differentState)
+
+	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, fx.handoffPath(), refusal.Path, "both inputs differing must still name the handoff first")
+}
+
+// Test_a_refused_re_finish_leaves_every_file_byte_identical pins the
+// state-divergence arm's "nothing lands" claim with both probes:
+// snapshotTree alone would still pass a refusal taken after a byte-
+// identical rewrite, so it is paired with pinModTimes/modTimes to prove
+// the refusal happens before the first write, not merely that any write
+// that did happen reproduced the same bytes.
+func Test_a_refused_re_finish_leaves_every_file_byte_identical(t *testing.T) {
+	fx := newFinishedFixture(t)
+	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile, "STEP-02" + fx.cfg.HandoffFileSuffix}
+	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
+	before := snapshotTree(t, fx.featureDir())
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+	differentState := differentStateBody(fx.cfg)
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
+
+	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
+	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
+
+	after := modTimes(t, fx.featureDir(), names)
+	for _, name := range names {
+		assert.True(t, after[name].Equal(pinnedModTime), "%s mtime moved on a refused re-finish", name)
+	}
+}
+
+// Test_the_snapshot_probe_sees_a_write_on_a_legitimate_finish is the
+// probe-sanity control for Test_a_refused_re_finish_leaves_every_file_byte_identical:
+// the same snapshotTree probe, over a first, successful Finish call on an
+// open step, must show a difference — proving the probe is capable of
+// detecting a write at all, so its silence on the refused arm is evidence
+// of "nothing landed" rather than of a probe that never fires.
+func Test_the_snapshot_probe_sees_a_write_on_a_legitimate_finish(t *testing.T) {
+	fx := newFinishFixture(t)
+	before := snapshotTree(t, fx.featureDir())
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, before, snapshotTree(t, fx.featureDir()))
+}
+
+// Test_re_finishing_a_done_step_with_an_un_ticked_entry_and_a_different_handoff_is_refused
+// pins that an un-ticked progress entry is not an escape hatch from the
+// divergence arms: specTicked participates only in the noop-vs-write split
+// (SCENARIO-06/R11), never as a signal that inputs are free to diverge.
+func Test_re_finishing_a_done_step_with_an_un_ticked_entry_and_a_different_handoff_is_refused(t *testing.T) {
+	fx := newFinishedFixture(t)
+	specPath := filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile)
+	spec := readFileString(t, specPath)
+	unticked := strings.Replace(spec, "- [x] STEP-02: Assemble the thing", "- [ ] STEP-02: Assemble the thing", 1)
+	require.NoError(t, os.WriteFile(specPath, []byte(unticked), 0o600))
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+	differentHandoff := []byte("DIFFERENT-HANDOFF-02\n")
+
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, fx.newState)
+
+	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, fx.handoffPath(), refusal.Path)
 }
 
 func Test_re_finishing_a_done_step_whose_progress_entry_was_un_ticked_re_ticks_it(t *testing.T) {
@@ -205,6 +322,39 @@ func Test_re_finishing_a_done_step_with_the_same_inputs_leaves_every_file_byte_i
 // back would make this test stop discriminating the gate, since a
 // reverted status line alone would then force the write for a reason
 // other than fm.Done().
+// Test_re_finishing_a_done_step_whose_progress_title_contains_an_unticked_marker_stays_a_noop
+// is the regression tickProgressEntry's first-occurrence Replace used to
+// cause: on an already-ticked entry whose own title text happens to
+// contain a literal "[ ]" (not the checklist marker itself), Replace
+// rewrote that title-text "[ ]" instead of leaving an already-"[x]" line
+// untouched, silently editing the specification on every re-finish and
+// breaking the noop verdict (R11).
+func Test_re_finishing_a_done_step_whose_progress_title_contains_an_unticked_marker_stays_a_noop(t *testing.T) {
+	fx := newFinishedFixture(t)
+	specPath := filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile)
+	spec := readFileString(t, specPath)
+	withMarkerInTitle := strings.Replace(spec,
+		"- [x] STEP-02: Assemble the thing",
+		"- [x] STEP-02: render a [ ] marker",
+		1)
+	require.NoError(t, os.WriteFile(specPath, []byte(withMarkerInTitle), 0o600))
+
+	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile, "STEP-02" + fx.cfg.HandoffFileSuffix}
+	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
+	before := snapshotTree(t, fx.featureDir())
+
+	srv := scaffold.NewServer(fx.cfg, fx.root)
+	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.NoError(t, err)
+
+	assert.Equal(t, before, snapshotTree(t, fx.featureDir()), "a re-finish with identical inputs must write nothing")
+
+	after := modTimes(t, fx.featureDir(), names)
+	for _, name := range names {
+		assert.True(t, after[name].Equal(pinnedModTime), "%s mtime moved on a would-be noop re-finish", name)
+	}
+}
+
 func Test_a_step_whose_frontmatter_is_still_open_is_marked_done_even_when_every_input_matches_what_is_on_disk(t *testing.T) {
 	fx := newFinishedFixture(t)
 	stepPath := fx.stepPath("STEP-02.md")

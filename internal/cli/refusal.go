@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/koblas/brief/internal/assemble"
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/scaffold"
 )
@@ -33,6 +34,12 @@ func flattenOneLine(s string) string {
 //
 //	brief <command>: <path>[:<line>]: <problem>; <fix> (no files changed)
 //
+// A *assemble.RefusalError is the read-side counterpart: assemble.Start
+// never writes, so its refusals carry no "nothing changed" promise to make
+// and drop the tail entirely:
+//
+//	brief <command>: <path>[:<line>]: <detail>; <fix>
+//
 // Every other error renders as one flattened line:
 //
 //	brief <command>: <cause>
@@ -52,6 +59,18 @@ func renderRefusal(stderr io.Writer, cmd string, err error) error {
 
 		fmt.Fprintf(stderr, "brief %s: %s: %s; %s (no files changed)\n",
 			cmd, path, flattenOneLine(refusal.Problem), flattenOneLine(refusal.Fix))
+
+		return err
+	}
+
+	if refusal, ok := errors.AsType[*assemble.RefusalError](err); ok {
+		path := refusal.Path
+		if refusal.Line > 0 {
+			path = fmt.Sprintf("%s:%d", refusal.Path, refusal.Line)
+		}
+
+		fmt.Fprintf(stderr, "brief %s: %s: %s; %s\n",
+			cmd, path, flattenOneLine(refusal.Detail), flattenOneLine(refusal.Fix))
 
 		return err
 	}
