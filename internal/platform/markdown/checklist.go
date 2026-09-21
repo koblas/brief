@@ -22,15 +22,22 @@ import (
 // which matters because the body is split on "\n" but a "\r" can survive),
 // and the lazy (.*?) with a trailing trim group leaves text free of
 // surrounding blanks without a second pass.
+//
+// The order of the two tail elements is load-bearing: the trim class has
+// to come before \r?, so that a line ending in blanks AND a carriage
+// return has the blanks eaten before the \r is consumed. Swap them and the
+// trim class finds nothing left to eat, the lazy group swallows both, and
+// "- [ ] two \r" yields "two \r" instead of "two".
 var checklistItemRe = regexp.MustCompile(`^\s*- \[([ xX])\][^\S\r\n]*(.*?)[^\S\r\n]*\r?$`)
 
 // FirstUnchecked returns the first checklist item in the section under
 // heading in body that is not ticked: line is its 1-based line number in
 // the whole of body — not within the section — so a caller can report it
 // against the file body was read from; text is the item's content, with
-// leading whitespace and a trailing "\r" a CRLF body leaves attached both
-// trimmed. A line inside a fenced code block (``` or ~~~) is never
-// treated as an item, matching Section and UnterminatedFence. found is
+// horizontal whitespace at either end, and a trailing "\r" a CRLF body
+// leaves attached, all trimmed. A line inside a fenced code block (``` or
+// ~~~) is never treated as an item, matching Section and
+// UnterminatedFence. found is
 // false when heading is absent from body, the section holds no checklist
 // items, or every item in it is already ticked ("- [x]" or "- [X]") —
 // FirstUnchecked never distinguishes those three cases, since a caller

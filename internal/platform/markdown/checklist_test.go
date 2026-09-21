@@ -28,8 +28,13 @@ func Test_FirstUnchecked_reports_nothing(t *testing.T) {
 			body: "## Implementation Plan\n\n- [x] one\n- [x] two\n",
 		},
 		{
-			name: "the section holds no items",
-			body: "## Implementation Plan\n\n## Next Section\n\nprose\n",
+			// Replaces an earlier "the section holds no items" case whose
+			// body carried no checklist syntax at all, so no mutation could
+			// flip it — decorative by the rule this table is written under.
+			// An empty bracket pair is the grammar point the package doc
+			// claims is prose and nothing else covered.
+			name: "an empty bracket pair is prose, not an item",
+			body: "## Implementation Plan\n\n- [] no space in the marker\n",
 		},
 		{
 			name: "the heading is absent",
@@ -113,4 +118,23 @@ func Test_trims_tabs_around_an_items_text(t *testing.T) {
 
 	assert.True(t, found)
 	assert.Equal(t, "tabbed", text)
+}
+
+// Test_trims_trailing_whitespace_before_a_carriage_return is the case the
+// tab and CRLF tests each half-cover and neither pins: horizontal
+// whitespace AND a carriage return, together, at the end of one line.
+//
+// It is what fixes the order of the item regexp's two tail elements.
+// Trimming the whitespace before consuming the "\r" yields "two"; consuming
+// the "\r" first leaves the trim class nothing to eat at the end of the
+// text, and the lazy group swallows both, yielding "two \r". Every other
+// test here is blind to that swap, because each supplies only one of the
+// two characters.
+func Test_trims_trailing_whitespace_before_a_carriage_return(t *testing.T) {
+	body := "## Implementation Plan\r\n\r\n- [ ] two \r\n"
+
+	_, text, found := markdown.FirstUnchecked(body, "## Implementation Plan")
+
+	assert.True(t, found)
+	assert.Equal(t, "two", text)
 }
