@@ -478,7 +478,11 @@ func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T)
 // Mutation-verified, restored byte-identical after each: widening the
 // argVersionFlag arm's guard from "len(args) == 1" to "len(args) >= 1"
 // reddens every row here (nil error, version printed instead of the usage
-// error); changing that arm's run hint from "brief --version" to "brief
+// error) plus json_usage_test.go's "--version extra --json" and "--json
+// --version extra" rows (Test_json_mode_usage_error_message_is_the_text_mode_line),
+// while that table's "--version=x --json" row — a value, not a trailing
+// argument — stays green, proving the guard and the value check are
+// independent; changing that arm's run hint from "brief --version" to "brief
 // help <command>" reddens every row here on the hint text while the sibling
 // table's "--help --version" control row (R8) stays green, proving the two
 // arms report independently.

@@ -506,6 +506,13 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 // this one. A value on "--version" ("--version=<v>") is reported before any
 // trailing argument is even looked at: "--version=x extra" reports the
 // value error, not the trailing-argument one.
+//
+// A sole "--version" under out.json (R5's stripping already puts
+// "--version" and "--json" in either order into this same len(args)==1
+// arm) writes versionDocument instead of versionLine's text line —
+// SCENARIO-12 — before returning; the value and trailing-argument arms
+// above stay text-only errors in both modes (out.usageError renders
+// those itself).
 func runRoot(cmd *cobra.Command, args []string, out reporter, readBuildInfo func() (*debug.BuildInfo, bool)) error {
 	if len(args) == 0 {
 		return out.usageError("brief: no command given; expected one of: " + expectedCommandList(cmd))
@@ -522,6 +529,19 @@ func runRoot(cmd *cobra.Command, args []string, out reporter, readBuildInfo func
 		return out.usageError(takesNoArgumentsMessage(args[0], "brief help <command>"))
 	case argVersionFlag:
 		if len(args) == 1 {
+			if out.json {
+				doc := versionDocument{
+					jsonHeader: out.successHeader(),
+					Version:    versionString(readBuildInfo),
+				}
+
+				if err := writeJSONDocument(out.stdout, doc); err != nil {
+					return fmt.Errorf("brief --version: %w", err)
+				}
+
+				return nil
+			}
+
 			fmt.Fprintln(out.stdout, versionLine(readBuildInfo))
 
 			return nil
@@ -538,17 +558,34 @@ func runRoot(cmd *cobra.Command, args []string, out reporter, readBuildInfo func
 	return out.usageError(fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommandList(cmd)))
 }
 
-// versionLine renders "--version"'s stdout line, prefix included but the
-// trailing newline excluded: "brief " followed by readBuildInfo's
-// Main.Version verbatim, or "brief (devel)" when readBuildInfo reports
-// ok=false or an empty Main.Version — asking for the version never fails.
-func versionLine(readBuildInfo func() (*debug.BuildInfo, bool)) string {
+// versionDocument is "--version --json"'s success document: the common
+// header first, then version, versionString's own value — never
+// versionLine's "brief "-prefixed one. Asking for the version never
+// fails, so this document's exit_code is always 0.
+type versionDocument struct {
+	jsonHeader
+
+	Version string `json:"version"`
+}
+
+// versionString reports readBuildInfo's Main.Version verbatim, or
+// "(devel)" when readBuildInfo reports ok=false or an empty Main.Version
+// — asking for the version never fails. It is the one version rule both
+// versionLine's text line and the JSON "--version" document's "version"
+// field share; neither ever computes its own.
+func versionString(readBuildInfo func() (*debug.BuildInfo, bool)) string {
 	info, ok := readBuildInfo()
 	if !ok || info.Main.Version == "" {
-		return "brief (devel)"
+		return "(devel)"
 	}
 
-	return "brief " + info.Main.Version
+	return info.Main.Version
+}
+
+// versionLine renders "--version"'s stdout line, prefix included but the
+// trailing newline excluded: "brief " followed by versionString's value.
+func versionLine(readBuildInfo func() (*debug.BuildInfo, bool)) string {
+	return "brief " + versionString(readBuildInfo)
 }
 
 // takesNoArgumentsMessage renders root's "takes no arguments" usage copy for

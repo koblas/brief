@@ -129,6 +129,8 @@ func Test_json_mode_usage_error_message_is_the_text_mode_line(t *testing.T) {
 		{name: "--json --bogus", args: []string{"--json", "--bogus"}, textArgs: []string{"--bogus"}, command: "brief"},
 		{name: "--help=x --json", args: []string{"--help=x", "--json"}, textArgs: []string{"--help=x"}, command: "brief"},
 		{name: "--version extra --json", args: []string{"--version", "extra", "--json"}, textArgs: []string{"--version", "extra"}, command: "brief"},
+		{name: "--version=x --json", args: []string{"--version=x", "--json"}, textArgs: []string{"--version=x"}, command: "brief"},
+		{name: "--json --version extra", args: []string{"--json", "--version", "extra"}, textArgs: []string{"--version", "extra"}, command: "brief"},
 		{name: "new -x --json", args: []string{"new", "-x", "--json"}, textArgs: []string{"new", "-x"}, command: "new", filesChanged: new(false)},
 		{name: "help -x --json", args: []string{"help", "-x", "--json"}, textArgs: []string{"help", "-x"}, command: "help"},
 		{name: "status --json --bogus", args: []string{"status", "--json", "--bogus"}, textArgs: []string{"status", "--bogus"}, command: "status"},
@@ -314,9 +316,11 @@ func Test_json_after_double_dash_is_a_positional(t *testing.T) {
 // "--json=<v>", any value including an explicit empty one, is always a
 // text usage error, whichever command it names and even alongside a bare
 // "--json", since this check runs before dispatch and wins over every
-// other usage error on the line. The last row is the "--" control arm:
-// once "--json=x" is itself a positional, it is an ordinary "too many
-// arguments" line, never the takes-no-value one.
+// other usage error on the line — including SCENARIO-12's "--version" arm,
+// which never even sees out.json: "--version --json=x" reports the same
+// bare "--json" value error as any other command. The last row is the "--"
+// control arm: once "--json=x" is itself a positional, it is an ordinary
+// "too many arguments" line, never the takes-no-value one.
 func Test_json_with_a_value_is_a_text_usage_error(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -329,6 +333,7 @@ func Test_json_with_a_value_is_a_text_usage_error(t *testing.T) {
 		{name: "new --json=x", args: []string{"new", "--json=x"}, wantStderr: "brief new: '--json' takes no value; run 'brief new --help'"},
 		{name: "help --json=x", args: []string{"help", "--json=x"}, wantStderr: "brief help: '--json' takes no value; run 'brief help <command>'"},
 		{name: "root --json=x", args: []string{"--json=x"}, wantStderr: "brief: '--json' takes no value; run 'brief --help'"},
+		{name: "--version --json=x", args: []string{"--version", "--json=x"}, wantStderr: "brief: '--json' takes no value; run 'brief --help'"},
 		{name: "status --json --json=x", args: []string{"status", "--json", "--json=x"}, wantStderr: "brief status: '--json' takes no value; run 'brief status'"},
 		{name: "status -- --json=x is a positional, not the flag", args: []string{"status", "--", "--json=x"}, wantStderr: "brief status: too many arguments; run 'brief status'"},
 	}
@@ -380,10 +385,20 @@ func Test_json_stripped_from_help_topic_arguments_runs_the_ordinary_help_path(t 
 // Test_version_with_json_relaxes_the_sole_argument_rule pins R5's
 // consequence of stripping "--json" ahead of dispatch entirely: once
 // "--json" is gone from argv, "--version" is root's only remaining
-// argument in either order, so it prints today's plain version line
-// rather than "takes no arguments" — SCENARIO-12 is the one that gives
-// "--version --json" its own JSON document.
+// argument in either order, so it succeeds rather than reporting "takes
+// no arguments" — and SCENARIO-12 gives that success its own JSON
+// document rather than the plain text line. version is asserted against
+// the value a plain "brief --version" (run in this same test binary, so
+// both share whatever debug.ReadBuildInfo reports here) prints, its
+// "brief " prefix trimmed — a captured value, not a literal, since a go
+// test binary's own build info is not a released tag.
 func Test_version_with_json_relaxes_the_sole_argument_rule(t *testing.T) {
+	wd := t.TempDir()
+	var textStdout, textStderr bytes.Buffer
+	textErr := cli.Run(t.Context(), wd, []string{"--version"}, nil, &textStdout, &textStderr)
+	require.NoError(t, textErr)
+	wantVersion := strings.TrimPrefix(strings.TrimRight(textStdout.String(), "\n"), "brief ")
+
 	tests := []struct {
 		name string
 		args []string
@@ -402,7 +417,30 @@ func Test_version_with_json_relaxes_the_sole_argument_rule(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, 0, cli.ExitCode(err))
 			assert.Empty(t, stderr.String())
-			assert.Equal(t, "brief (devel)\n", stdout.String())
+
+			var doc map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+			assert.ElementsMatch(t, []string{"schema", "command", "ok", "exit_code", "version"}, jsonKeys(t, doc))
+
+			var schema int
+			require.NoError(t, json.Unmarshal(doc["schema"], &schema))
+			assert.Equal(t, 1, schema)
+
+			var command string
+			require.NoError(t, json.Unmarshal(doc["command"], &command))
+			assert.Equal(t, "brief", command)
+
+			var ok bool
+			require.NoError(t, json.Unmarshal(doc["ok"], &ok))
+			assert.True(t, ok)
+
+			var exitCode int
+			require.NoError(t, json.Unmarshal(doc["exit_code"], &exitCode))
+			assert.Equal(t, 0, exitCode)
+
+			var version string
+			require.NoError(t, json.Unmarshal(doc["version"], &version))
+			assert.Equal(t, wantVersion, version)
 		})
 	}
 }

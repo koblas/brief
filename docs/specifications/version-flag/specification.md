@@ -6,8 +6,9 @@
 which build it is: `brief --version` prints one line on stdout and exits 0.
 
 **Out of Scope**: `-v` shorthand; a `brief version` subcommand; `--version` on subcommands;
-`--version --json`; `-ldflags -X` overrides; tags, goreleaser, release workflows (separate
-backlog item); shell completion for `--version`.
+`-ldflags -X` overrides; tags, goreleaser, release workflows (separate backlog item); shell
+completion for `--version`. `--version --json` was originally out of scope (Product Verdict
+below); reversed by `docs/specifications/human-output/` SCENARIO-12.
 
 **Business Rules**: Version comes from Go's build info (`debug.BuildInfo.Main.Version`),
 printed verbatim — Go ≥ 1.24 already stamps the tag, the pseudo-version, and `+dirty`.
@@ -98,7 +99,7 @@ Scenario: SCENARIO-02 A build with no stored version reports (devel)
   Then stdout is exactly "brief (devel)" followed by a newline, and the exit code is 0
 
 Scenario: SCENARIO-03 --version takes no arguments
-  When I run "brief --version extra" or "brief --version --json"
+  When I run "brief --version extra"
   Then stderr is exactly: brief: '--version' takes no arguments; run 'brief --version'
   And stdout is empty and the exit code is 2
 
