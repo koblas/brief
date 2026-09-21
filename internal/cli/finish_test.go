@@ -72,6 +72,19 @@ func Test_finishes_the_step_and_prints_nothing_to_stdout(t *testing.T) {
 	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", stderr.String())
 }
 
+func Test_finishes_the_step_when_the_flags_precede_the_feature_and_step(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "--handoff", handoffPath, "--state", statePath, "demo", "SCENARIO-01"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", stderr.String())
+}
+
 // Test_finishing_an_already_finished_step_a_second_time_prints_the_same_line_and_succeeds
 // pins the user-visible contract of a no-op re-finish: exit 0, nothing on
 // stdout (reserved for R9 findings), the same state-describing stderr

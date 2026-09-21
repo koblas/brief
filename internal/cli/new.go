@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -30,38 +29,19 @@ Scaffolds the next step file for feature and appends its entry to the
 feature's progress list.
 `
 
-// runNew dispatches "brief new <type> ...".
-func runNew(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error {
+// runNew handles "brief new <type> ..." when type names neither feature
+// nor step: nothing at all, or something unknown.
+func runNew(args []string, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief new: no type given; expected one of: feature, step")
 	}
 
-	switch args[0] {
-	case "feature":
-		return runNewFeature(ctx, wd, args[1:], stdout, stderr)
-	case "step":
-		return runNewStep(ctx, wd, args[1:], stdout, stderr)
-	default:
-		return usageError(stderr, fmt.Sprintf("brief new: unknown type %q; expected one of: feature, step", args[0]))
-	}
+	return usageError(stderr, fmt.Sprintf("brief new: unknown type %q; expected one of: feature, step", args[0]))
 }
 
-// runNewFeature implements "brief new feature <name>".
-func runNewFeature(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("new feature", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, newFeatureUsage)
-			return nil
-		}
-
-		return usageError(stderr, fmt.Sprintf("brief new feature: %s; run 'brief new feature <name>'", err))
-	}
-
-	rest := fs.Args()
-
+// runNewFeature implements "brief new feature <name>"; rest is its
+// positional arguments, flags already parsed away.
+func runNewFeature(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
 	switch {
 	case len(rest) == 0:
 		return usageError(stderr, "brief new feature: no name given; run 'brief new feature <name>'")
@@ -106,22 +86,9 @@ func runNewFeature(ctx context.Context, wd string, args []string, stdout, stderr
 	return nil
 }
 
-// runNewStep implements "brief new step <feature>".
-func runNewStep(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("new step", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, newStepUsage)
-			return nil
-		}
-
-		return usageError(stderr, fmt.Sprintf("brief new step: %s; run 'brief new step <feature>'", err))
-	}
-
-	rest := fs.Args()
-
+// runNewStep implements "brief new step <feature>"; rest is its
+// positional arguments, flags already parsed away.
+func runNewStep(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
 	switch {
 	case len(rest) == 0:
 		return usageError(stderr, "brief new step: no feature given; run 'brief new step <feature>'")

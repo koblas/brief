@@ -2,8 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -26,21 +24,10 @@ prints nothing and exits 0, with one line on stderr saying so. brief
 status reads; it never writes.
 `
 
-// runStatus implements "brief status".
-func runStatus(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, statusUsage)
-			return nil
-		}
-
-		return usageError(stderr, fmt.Sprintf("brief status: %s; run 'brief status'", err))
-	}
-
-	if len(fs.Args()) > 0 {
+// runStatus implements "brief status"; rest is its positional arguments,
+// flags already parsed away, and must be empty.
+func runStatus(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
+	if len(rest) > 0 {
 		return usageError(stderr, "brief status: too many arguments; run 'brief status'")
 	}
 

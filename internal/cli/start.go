@@ -2,12 +2,9 @@ package cli
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"path/filepath"
-	"slices"
 
 	"github.com/koblas/brief/internal/assemble"
 	"github.com/koblas/brief/internal/platform/config"
@@ -38,31 +35,10 @@ brief start reads; it never writes.
           <feature>.
 `
 
-// runStart implements "brief start [--json] <feature>".
-func runStart(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("start", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-
-	jsonOut := fs.Bool("json", false, "print the brief as JSON")
-
-	// --json may precede or follow <feature>, so the feature must be
-	// peeled off before Parse ever sees it, the same way finish peels
-	// off its own leading positionals — otherwise flag.FlagSet.Parse
-	// stops at the first non-flag argument and a trailing --json is
-	// left as an unconsumed "too many arguments" positional.
-	leading, flagArgs := splitLeadingPositionals(args)
-
-	if err := fs.Parse(flagArgs); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, startUsage)
-			return nil
-		}
-
-		return usageError(stderr, fmt.Sprintf("brief start: %s; run 'brief start <feature>'", err))
-	}
-
-	rest := slices.Concat(leading, fs.Args())
-
+// runStart implements "brief start [--json] <feature>"; rest is its
+// positional arguments, from either side of --json, flags already parsed
+// away.
+func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, stdout, stderr io.Writer) error {
 	switch {
 	case len(rest) == 0:
 		return usageError(stderr, "brief start: no feature given; run 'brief start <feature>'")
@@ -110,7 +86,7 @@ func runStart(ctx context.Context, wd string, args []string, stdout, stderr io.W
 	// structured caller the same discriminator the stderr notice above
 	// gives a human. RenderText's own nil-Step guard already writes
 	// nothing, so the non-JSON path stays exactly as before.
-	if *jsonOut {
+	if jsonOut {
 		if err := assemble.RenderJSON(stdout, brief); err != nil {
 			return fmt.Errorf("brief start: %w", err)
 		}

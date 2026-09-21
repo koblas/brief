@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -30,30 +29,9 @@ from stdin; it may be given for at most one of --handoff and --state.
 `
 
 // runFinish implements "brief finish <feature> <step> --handoff <path>
-// --state <path>".
-func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("finish", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-
-	handoffPath := fs.String("handoff", "", "path to the handoff body, or - for stdin")
-	statePath := fs.String("state", "", "path to the replacement state body, or - for stdin")
-
-	// flag.FlagSet.Parse stops at the first argument that does not start
-	// with "-", so <feature> and <step> — which precede every flag in
-	// this command's contract — must be peeled off before Parse ever
-	// sees them, or they would swallow --handoff and --state as
-	// leftover positional arguments.
-	rest, flagArgs := splitLeadingPositionals(args)
-
-	if err := fs.Parse(flagArgs); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, finishUsage)
-			return nil
-		}
-
-		return usageError(stderr, fmt.Sprintf("brief finish: %s; run '%s'", err, finishInvocation))
-	}
-
+// --state <path>"; rest is its positional arguments and handoffPath and
+// statePath its flag values, "" when the flag was not given.
+func runFinish(ctx context.Context, wd string, rest []string, handoffPath, statePath string, stdin io.Reader, stderr io.Writer) error {
 	switch {
 	case len(rest) == 0:
 		return usageError(stderr, fmt.Sprintf("brief finish: no feature given; run '%s'", finishInvocation))
@@ -66,20 +44,20 @@ func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, s
 	feature, step := rest[0], rest[1]
 
 	switch {
-	case *handoffPath == "":
+	case handoffPath == "":
 		return usageError(stderr, fmt.Sprintf("brief finish: --handoff is required; run '%s'", finishInvocation))
-	case *statePath == "":
+	case statePath == "":
 		return usageError(stderr, fmt.Sprintf("brief finish: --state is required; run '%s'", finishInvocation))
-	case *handoffPath == "-" && *statePath == "-":
+	case handoffPath == "-" && statePath == "-":
 		return usageError(stderr, "brief finish: - may be given for at most one of --handoff and --state")
 	}
 
-	handoff, err := readSource(*handoffPath, stdin)
+	handoff, err := readSource(handoffPath, stdin)
 	if err != nil {
 		return renderRefusal(stderr, "finish", err)
 	}
 
-	state, err := readSource(*statePath, stdin)
+	state, err := readSource(statePath, stdin)
 	if err != nil {
 		return renderRefusal(stderr, "finish", err)
 	}
@@ -100,9 +78,9 @@ func runFinish(ctx context.Context, wd string, args []string, stdin io.Reader, s
 		if refusal, ok := errors.AsType[*scaffold.RefusalError](err); ok {
 			switch refusal.Path {
 			case scaffold.StateSource:
-				refusal.Path = sourceLocator(*statePath)
+				refusal.Path = sourceLocator(statePath)
 			case scaffold.HandoffSource:
-				refusal.Path = sourceLocator(*handoffPath)
+				refusal.Path = sourceLocator(handoffPath)
 			}
 		}
 

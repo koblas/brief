@@ -5,7 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
+
+	ucli "github.com/urfave/cli/v3"
 )
 
 // ErrUsage marks an error caused by the invocation itself — a missing or
@@ -40,6 +41,103 @@ Run 'brief new feature --help', 'brief new step --help', 'brief start
 // (finish's --handoff/--state); commands that take no such argument never
 // read it.
 func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	root := newRootCommand(wd, stdin, stdout, stderr)
+
+	return root.Run(ctx, append([]string{"brief"}, args...))
+}
+
+// newRootCommand builds brief's command tree for one Run. It is rebuilt on
+// every call rather than held in a package variable: urfave/cli records
+// parse state on the *Command itself, so a shared tree would leak one
+// invocation's flags into the next.
+//
+// The root and "new" skip urfave's flag parsing and handle their first
+// argument themselves, so a missing or unknown command or type — "-x"
+// included — keeps its own one-line usage error instead of urfave's help
+// dump. The leaves let urfave parse flags, which it reports in the stdlib
+// flag package's words ("flag provided but not defined: -x"), and print
+// their own usage constant as help.
+func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *ucli.Command {
+	return &ucli.Command{
+		Name:            "brief",
+		Writer:          stdout,
+		ErrWriter:       stderr,
+		HideHelpCommand: true,
+		SkipFlagParsing: true,
+		// A no-op handler keeps urfave from calling os.Exit on an
+		// ExitCoder error: cmd/brief owns the only exit, via ExitCode.
+		ExitErrHandler: func(context.Context, *ucli.Command, error) {},
+		Action: func(_ context.Context, cmd *ucli.Command) error {
+			return runRoot(cmd.Args().Slice(), stdout, stderr)
+		},
+		Commands: []*ucli.Command{
+			{
+				Name:            "new",
+				HideHelpCommand: true,
+				SkipFlagParsing: true,
+				Action: func(_ context.Context, cmd *ucli.Command) error {
+					return runNew(cmd.Args().Slice(), stderr)
+				},
+				Commands: []*ucli.Command{
+					leafCommand("feature", "new feature", "brief new feature <name>", newFeatureUsage, stderr, nil,
+						func(ctx context.Context, cmd *ucli.Command) error {
+							return runNewFeature(ctx, wd, cmd.Args().Slice(), stdout, stderr)
+						}),
+					leafCommand("step", "new step", "brief new step <feature>", newStepUsage, stderr, nil,
+						func(ctx context.Context, cmd *ucli.Command) error {
+							return runNewStep(ctx, wd, cmd.Args().Slice(), stdout, stderr)
+						}),
+				},
+			},
+			leafCommand("start", "start", "brief start <feature>", startUsage, stderr,
+				[]ucli.Flag{&ucli.BoolFlag{Name: "json"}},
+				func(ctx context.Context, cmd *ucli.Command) error {
+					return runStart(ctx, wd, cmd.Args().Slice(), cmd.Bool("json"), stdout, stderr)
+				}),
+			leafCommand("status", "status", "brief status", statusUsage, stderr, nil,
+				func(ctx context.Context, cmd *ucli.Command) error {
+					return runStatus(ctx, wd, cmd.Args().Slice(), stdout, stderr)
+				}),
+			leafCommand("finish", "finish", finishInvocation, finishUsage, stderr,
+				[]ucli.Flag{&ucli.StringFlag{Name: "handoff"}, &ucli.StringFlag{Name: "state"}},
+				func(ctx context.Context, cmd *ucli.Command) error {
+					return runFinish(ctx, wd, cmd.Args().Slice(), cmd.String("handoff"), cmd.String("state"), stdin, stderr)
+				}),
+			leafCommand("check", "check", "brief check [feature]", checkUsage, stderr, nil,
+				func(ctx context.Context, cmd *ucli.Command) error {
+					return runCheck(ctx, wd, cmd.Args().Slice(), stdout, stderr)
+				}),
+		},
+	}
+}
+
+// leafCommand builds a command that takes flags and positionals but no
+// subcommands. path is its full name after "brief", invocation is the
+// usage line every flag error names as how to fix it, and help is printed
+// to stdout on -h or --help. help is a text/template, so it must not
+// contain "{{".
+//
+// One urfave limitation survives: --help given alongside an undefined
+// flag, help first ("brief start --help --bogus"), prints urfave's
+// generated help rather than help, still exiting 0. That path ignores
+// CustomHelpTemplate and can only be redirected through a package-level
+// urfave variable.
+func leafCommand(name, path, invocation, help string, stderr io.Writer, flags []ucli.Flag, action ucli.ActionFunc) *ucli.Command {
+	return &ucli.Command{
+		Name:               name,
+		Flags:              flags,
+		HideHelpCommand:    true,
+		CustomHelpTemplate: help,
+		OnUsageError: func(_ context.Context, _ *ucli.Command, err error, _ bool) error {
+			return usageError(stderr, fmt.Sprintf("brief %s: %s; run '%s'", path, err, invocation))
+		},
+		Action: action,
+	}
+}
+
+// runRoot handles a top-level invocation that named no known command:
+// help, nothing at all, or something unknown.
+func runRoot(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief: no command given; expected one of: new, start, finish, status, check")
 	}
@@ -48,39 +146,9 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return nil
-	}
-
-	switch args[0] {
-	case "new":
-		return runNew(ctx, wd, args[1:], stdout, stderr)
-	case "start":
-		return runStart(ctx, wd, args[1:], stdout, stderr)
-	case "status":
-		return runStatus(ctx, wd, args[1:], stdout, stderr)
-	case "finish":
-		return runFinish(ctx, wd, args[1:], stdin, stdout, stderr)
-	case "check":
-		return runCheck(ctx, wd, args[1:], stdout, stderr)
 	default:
 		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new, start, finish, status, check", args[0]))
 	}
-}
-
-// splitLeadingPositionals splits args into the leading run of arguments
-// that do not start with "-" and everything from the first "-"-prefixed
-// argument onward, so a flag.FlagSet — which stops parsing at the first
-// non-flag argument — only ever sees flags. finish's feature and step
-// always precede its flags, so its leading run is the whole positional
-// list; start's --json may come before or after its feature, so
-// runStart also merges flag.FlagSet.Args() into the leading run.
-func splitLeadingPositionals(args []string) ([]string, []string) {
-	for i, a := range args {
-		if strings.HasPrefix(a, "-") {
-			return args[:i], args[i:]
-		}
-	}
-
-	return args, nil
 }
 
 // usageError writes msg, followed by a single newline, to stderr and

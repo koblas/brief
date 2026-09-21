@@ -53,7 +53,10 @@ linters:
       #   - singleflight.Group.Do -> fn's error
       #   - refreshcache caches   -> their refresh fn's error, itself the fn
       #                              the cache was constructed with
+      #   - urfave cli.Command.Run -> the Action's or OnUsageError's error,
+      #                              both brief's own usage/refusal errors
       extra-ignore-sigs:
+        - cli/v3.Command).Run(
         - fxsync.Once).Do(
         - singleflight.Group).Do(
         - refreshcache.SFCache

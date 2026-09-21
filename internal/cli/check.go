@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -41,27 +40,16 @@ saying so. brief check reads; it never writes.
 // written by RenderFindings and the stderr summary below it.
 var errCheckFindings = errors.New("check reported an error-severity finding")
 
-// runCheck implements "brief check [feature]".
-func runCheck(ctx context.Context, wd string, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("check", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, checkUsage)
-			return nil
-		}
-
-		return usageError(stderr, fmt.Sprintf("brief check: %s; run 'brief check [feature]'", err))
-	}
-
-	if len(fs.Args()) > 1 {
+// runCheck implements "brief check [feature]"; rest is its positional
+// arguments, flags already parsed away.
+func runCheck(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
+	if len(rest) > 1 {
 		return usageError(stderr, "brief check: too many arguments; run 'brief check [feature]'")
 	}
 
 	var feature string
-	if len(fs.Args()) == 1 {
-		feature = fs.Args()[0]
+	if len(rest) == 1 {
+		feature = rest[0]
 	}
 
 	cfg, source, err := config.Resolve(wd)
