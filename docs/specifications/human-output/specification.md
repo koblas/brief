@@ -222,7 +222,7 @@ Scenario: SCENARIO-14 Every command's help advertises --json
 
 ## BDD Acceptance Progress
 
-- [ ] SCENARIO-01: --json turns usage errors into one JSON document
+- [x] SCENARIO-01: --json turns usage errors into one JSON document
 - [ ] SCENARIO-02: --json turns refusals into the error document
 - [ ] SCENARIO-03: start --json success carries the common header
 - [ ] SCENARIO-04: A malformed feature names the step file at fault

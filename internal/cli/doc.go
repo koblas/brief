@@ -16,6 +16,19 @@
 //
 // Flags and positionals may be given in any order on every command.
 //
+// JSON mode (R5) is on iff an exact "--json" token appears anywhere in
+// argv before the first "--" (pflag's own flag-parsing terminator, never
+// a flag itself): run's own scanJSONFlag detects and strips every such
+// token ahead of cobra entirely, so no command ever sees "--json" in its
+// own args, and a flag error is itself rendered as JSON. A "--json"
+// token at or after "--" is an ordinary positional. "--json=<v>", any
+// value including an empty one, is always a text usage error — "'--json'
+// takes no value" — checked before dispatch, so it wins over every other
+// usage error on the line. reporter (json.go) is the one per-Run output
+// seam every command renders a usage error through: usageError writes one
+// compact JSON document to stdout in JSON mode, or msg to stderr
+// otherwise, both returning the same errors.Is(err, ErrUsage) error.
+//
 // "brief completion <bash|zsh|fish|powershell>" is enabled but Hidden: it
 // carries the listedInHelpAnnotation instead, which keeps it out of every
 // "expected one of:" list while giving it a root-help row and a

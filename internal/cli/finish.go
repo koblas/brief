@@ -19,40 +19,40 @@ from stdin; it may be given for at most one of --handoff and --state.`
 // runFinish implements "brief finish <feature> <step> --handoff <path>
 // --state <path>"; rest is its positional arguments and handoffPath and
 // statePath its flag values, "" when the flag was not given.
-func runFinish(ctx context.Context, wd string, rest []string, handoffPath, statePath string, stdin io.Reader, stderr io.Writer) error {
+func runFinish(ctx context.Context, wd string, rest []string, handoffPath, statePath string, stdin io.Reader, out reporter) error {
 	switch {
 	case len(rest) == 0:
-		return usageError(stderr, fmt.Sprintf("brief finish: no feature given; run '%s'", finishInvocation))
+		return out.usageError(fmt.Sprintf("brief finish: no feature given; run '%s'", finishInvocation))
 	case len(rest) == 1:
-		return usageError(stderr, fmt.Sprintf("brief finish: no step given; run '%s'", finishInvocation))
+		return out.usageError(fmt.Sprintf("brief finish: no step given; run '%s'", finishInvocation))
 	case len(rest) > 2:
-		return usageError(stderr, fmt.Sprintf("brief finish: too many arguments; run '%s'", finishInvocation))
+		return out.usageError(fmt.Sprintf("brief finish: too many arguments; run '%s'", finishInvocation))
 	}
 
 	feature, step := rest[0], rest[1]
 
 	switch {
 	case handoffPath == "":
-		return usageError(stderr, fmt.Sprintf("brief finish: --handoff is required; run '%s'", finishInvocation))
+		return out.usageError(fmt.Sprintf("brief finish: --handoff is required; run '%s'", finishInvocation))
 	case statePath == "":
-		return usageError(stderr, fmt.Sprintf("brief finish: --state is required; run '%s'", finishInvocation))
+		return out.usageError(fmt.Sprintf("brief finish: --state is required; run '%s'", finishInvocation))
 	case handoffPath == "-" && statePath == "-":
-		return usageError(stderr, "brief finish: - may be given for at most one of --handoff and --state")
+		return out.usageError("brief finish: - may be given for at most one of --handoff and --state")
 	}
 
 	handoff, err := readSource(handoffPath, stdin)
 	if err != nil {
-		return renderRefusal(stderr, "finish", err)
+		return renderRefusal(out.stderr, "finish", err)
 	}
 
 	state, err := readSource(statePath, stdin)
 	if err != nil {
-		return renderRefusal(stderr, "finish", err)
+		return renderRefusal(out.stderr, "finish", err)
 	}
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(stderr, "finish", err)
+		return renderRefusal(out.stderr, "finish", err)
 	}
 
 	srv := scaffold.NewServer(cfg, root)
@@ -67,10 +67,10 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 			}
 		}
 
-		return renderRefusal(stderr, "finish", err)
+		return renderRefusal(out.stderr, "finish", err)
 	}
 
-	fmt.Fprintf(stderr, "brief finish: %s is done\n", step)
+	fmt.Fprintf(out.stderr, "brief finish: %s is done\n", step)
 
 	return nil
 }

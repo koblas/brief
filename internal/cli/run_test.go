@@ -452,11 +452,16 @@ func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T)
 // no arguments, pointing at "brief --version" — never as the unknown-flag
 // wording argVersionFlag's msg would otherwise carry (R4).
 //
-// The four rows are one behavior — any trailing argument, whatever its
-// shape — not four independent rules: "extra" and "--json" are the
-// specification's own examples, and "--help"/"--version" pin that args[1]
-// is never classified at all (R8), a shape no mutation in this arm can
-// discriminate. No mutation reddens one row without reddening all four.
+// The three rows are one behavior — any trailing argument, whatever its
+// shape — not three independent rules: "extra" is the specification's own
+// example, and "--help"/"--version" pin that args[1] is never classified
+// at all (R8), a shape no mutation in this arm can discriminate. No
+// mutation reddens one row without reddening all three. "--version
+// --json" is no longer a member of this family: run's own scanJSONFlag
+// strips "--json" ahead of dispatch entirely (R5), so it relaxes the
+// sole-argument rule instead of tripping it — see
+// Test_version_with_json_relaxes_the_sole_argument_rule
+// (json_usage_test.go).
 //
 // Mutation-verified, restored byte-identical after each: widening the
 // argVersionFlag arm's guard from "len(args) == 1" to "len(args) >= 1"
@@ -471,7 +476,6 @@ func Test_reports_a_version_flag_with_trailing_arguments_as_taking_no_arguments(
 		args []string
 	}{
 		{name: "--version extra", args: []string{"--version", "extra"}},
-		{name: "--version --json", args: []string{"--version", "--json"}},
 		{name: "--version --help", args: []string{"--version", "--help"}},
 		{name: "--version --version", args: []string{"--version", "--version"}},
 	}

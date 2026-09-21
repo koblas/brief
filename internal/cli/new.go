@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 
 	"github.com/koblas/brief/internal/scaffold"
@@ -46,43 +45,43 @@ const newStepInvocation = "brief new step <feature>"
 // excluded, since it is pflag's own flag-parsing terminator rather than a
 // flag itself — and otherwise reports type is neither feature nor step —
 // nothing at all, or something unknown.
-func runNew(cmd *cobra.Command, args []string, stderr io.Writer) error {
+func runNew(cmd *cobra.Command, args []string, out reporter) error {
 	if len(args) == 0 {
-		return usageError(stderr, "brief new: no type given; expected one of: feature, step")
+		return out.usageError("brief new: no type given; expected one of: feature, step")
 	}
 
 	switch kind, msg := classifyDashArg(args[0]); kind {
 	case argHelpFlagWithValue:
-		return usageError(stderr, fmt.Sprintf("brief new: '%s' takes no value; run 'brief new --help'", msg))
+		return out.usageError(fmt.Sprintf("brief new: '%s' takes no value; run 'brief new --help'", msg))
 	case argHelpFlag:
 		if len(args) == 1 {
 			return cmd.Help()
 		}
 
-		return usageError(stderr, fmt.Sprintf("brief new: '%s' takes no arguments; run 'brief help new <type>'", args[0]))
+		return out.usageError(fmt.Sprintf("brief new: '%s' takes no arguments; run 'brief help new <type>'", args[0]))
 	case argUnknownFlag, argVersionFlag, argVersionFlagWithValue:
-		return usageError(stderr, fmt.Sprintf("brief new: %s; run 'brief new <type> --help'", msg))
+		return out.usageError(fmt.Sprintf("brief new: %s; run 'brief new <type> --help'", msg))
 	case argNotFlag:
 	}
 
-	return usageError(stderr, fmt.Sprintf("brief new: unknown type %q; expected one of: feature, step", args[0]))
+	return out.usageError(fmt.Sprintf("brief new: unknown type %q; expected one of: feature, step", args[0]))
 }
 
 // runNewFeature implements "brief new feature <name>"; rest is its
 // positional arguments, flags already parsed away.
-func runNewFeature(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
+func runNewFeature(ctx context.Context, wd string, rest []string, out reporter) error {
 	switch {
 	case len(rest) == 0:
-		return usageError(stderr, fmt.Sprintf("brief new feature: no name given; run '%s'", newFeatureInvocation))
+		return out.usageError(fmt.Sprintf("brief new feature: no name given; run '%s'", newFeatureInvocation))
 	case len(rest) > 1:
-		return usageError(stderr, fmt.Sprintf("brief new feature: too many arguments; run '%s'", newFeatureInvocation))
+		return out.usageError(fmt.Sprintf("brief new feature: too many arguments; run '%s'", newFeatureInvocation))
 	}
 
 	name := rest[0]
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(stderr, "new feature", err)
+		return renderRefusal(out.stderr, "new feature", err)
 	}
 
 	srv := scaffold.NewServer(cfg, root)
@@ -91,13 +90,13 @@ func runNewFeature(ctx context.Context, wd string, rest []string, stdout, stderr
 	if err != nil {
 		if errors.Is(err, scaffold.ErrInvalidFeatureName) {
 			if name == "" {
-				return usageError(stderr, fmt.Sprintf("brief new feature: name is empty; run '%s' with a non-empty name", newFeatureInvocation))
+				return out.usageError(fmt.Sprintf("brief new feature: name is empty; run '%s' with a non-empty name", newFeatureInvocation))
 			}
 
-			return usageError(stderr, fmt.Sprintf("brief new feature: name %q contains whitespace; run '%s' with a name containing no whitespace", name, newFeatureInvocation))
+			return out.usageError(fmt.Sprintf("brief new feature: name %q contains whitespace; run '%s' with a name containing no whitespace", name, newFeatureInvocation))
 		}
 
-		return renderRefusal(stderr, "new feature", err)
+		return renderRefusal(out.stderr, "new feature", err)
 	}
 
 	rel, err := filepath.Rel(wd, path)
@@ -105,33 +104,33 @@ func runNewFeature(ctx context.Context, wd string, rest []string, stdout, stderr
 		rel = path
 	}
 
-	fmt.Fprintln(stdout, rel)
+	fmt.Fprintln(out.stdout, rel)
 
 	return nil
 }
 
 // runNewStep implements "brief new step <feature>"; rest is its
 // positional arguments, flags already parsed away.
-func runNewStep(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
+func runNewStep(ctx context.Context, wd string, rest []string, out reporter) error {
 	switch {
 	case len(rest) == 0:
-		return usageError(stderr, fmt.Sprintf("brief new step: no feature given; run '%s'", newStepInvocation))
+		return out.usageError(fmt.Sprintf("brief new step: no feature given; run '%s'", newStepInvocation))
 	case len(rest) > 1:
-		return usageError(stderr, fmt.Sprintf("brief new step: too many arguments; run '%s'", newStepInvocation))
+		return out.usageError(fmt.Sprintf("brief new step: too many arguments; run '%s'", newStepInvocation))
 	}
 
 	feature := rest[0]
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(stderr, "new step", err)
+		return renderRefusal(out.stderr, "new step", err)
 	}
 
 	srv := scaffold.NewServer(cfg, root)
 
 	path, err := srv.NewStep(ctx, feature)
 	if err != nil {
-		return renderRefusal(stderr, "new step", err)
+		return renderRefusal(out.stderr, "new step", err)
 	}
 
 	rel, err := filepath.Rel(wd, path)
@@ -139,7 +138,7 @@ func runNewStep(ctx context.Context, wd string, rest []string, stdout, stderr io
 		rel = path
 	}
 
-	fmt.Fprintln(stdout, rel)
+	fmt.Fprintln(out.stdout, rel)
 
 	return nil
 }

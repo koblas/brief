@@ -336,8 +336,8 @@ func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) 
 		},
 		{
 			name:   "resolved command with a trailing flag",
-			args:   []string{"help", "start", "--json"},
-			stderr: "brief help: unknown command \"start --json\"; expected one of: new, start, finish, status, check\n",
+			args:   []string{"help", "start", "--bogus"},
+			stderr: "brief help: unknown command \"start --bogus\"; expected one of: new, start, finish, status, check\n",
 		},
 		{
 			name:   "hidden command as topic",
@@ -457,8 +457,8 @@ func Test_help_reports_a_non_help_dash_prefixed_topic_as_an_unknown_flag(t *test
 	}{
 		{
 			name:   "long flag before a topic",
-			args:   []string{"help", "--json", "start"},
-			stderr: "brief help: unknown flag: --json; run 'brief help <command>'\n",
+			args:   []string{"help", "--bogus", "start"},
+			stderr: "brief help: unknown flag: --bogus; run 'brief help <command>'\n",
 		},
 		{
 			name:   "single-dash short flag alone",

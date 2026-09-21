@@ -48,12 +48,12 @@ func completionShellList() string {
 // rest is its positional arguments, flags already parsed away. It requires
 // exactly one shell name, generated against cmd.Root() so the script names
 // the whole "brief" program rather than the completion leaf itself.
-func runCompletion(cmd *cobra.Command, rest []string, stdout, stderr io.Writer) error {
+func runCompletion(cmd *cobra.Command, rest []string, out reporter) error {
 	switch {
 	case len(rest) == 0:
-		return usageError(stderr, "brief completion: no shell given; run '"+completionInvocation+"'")
+		return out.usageError("brief completion: no shell given; run '" + completionInvocation + "'")
 	case len(rest) > 1:
-		return usageError(stderr, "brief completion: too many arguments; run '"+completionInvocation+"'")
+		return out.usageError("brief completion: too many arguments; run '" + completionInvocation + "'")
 	}
 
 	shell := rest[0]
@@ -62,8 +62,8 @@ func runCompletion(cmd *cobra.Command, rest []string, stdout, stderr io.Writer) 
 			continue
 		}
 
-		return s.gen(cmd.Root(), stdout)
+		return s.gen(cmd.Root(), out.stdout)
 	}
 
-	return usageError(stderr, fmt.Sprintf("brief completion: unknown shell %q; expected one of: %s", shell, completionShellList()))
+	return out.usageError(fmt.Sprintf("brief completion: unknown shell %q; expected one of: %s", shell, completionShellList()))
 }

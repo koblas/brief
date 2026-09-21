@@ -675,9 +675,11 @@ func Test_start_json_writes_no_bytes_to_stdout_when_it_refuses(t *testing.T) {
 	})
 }
 
-// Test_start_json_still_reports_usage_errors asserts --json does not
-// change usage-error handling: a missing feature, and an undefined flag
-// alongside --json, both still exit 2 with empty stdout.
+// Test_start_json_still_reports_usage_errors asserts --json turns start's
+// own usage errors into R3's error document (SCENARIO-01), not stdout
+// text: a missing feature, and an undefined flag alongside --json, both
+// still exit 2, now with the text-mode line carried as the document's
+// "error.message" and stderr empty.
 func Test_start_json_still_reports_usage_errors(t *testing.T) {
 	t.Run("no feature given", func(t *testing.T) {
 		wd := t.TempDir()
@@ -685,8 +687,12 @@ func Test_start_json_still_reports_usage_errors(t *testing.T) {
 
 		err := cli.Run(t.Context(), wd, []string{"start", "--json"}, nil, &stdout, &stderr)
 
+		require.ErrorIs(t, err, cli.ErrUsage)
 		assert.Equal(t, 2, cli.ExitCode(err))
-		assert.Empty(t, stdout.String())
+		assert.Empty(t, stderr.String())
+
+		message, _ := decodeUsageErrorDocument(t, stdout.Bytes(), "start", nil)
+		assert.Equal(t, "brief start: no feature given; run 'brief start <feature>'", message)
 	})
 
 	t.Run("undefined flag alongside json", func(t *testing.T) {
@@ -695,8 +701,12 @@ func Test_start_json_still_reports_usage_errors(t *testing.T) {
 
 		err := cli.Run(t.Context(), wd, []string{"start", "--bogus", "--json", "demo"}, nil, &stdout, &stderr)
 
+		require.ErrorIs(t, err, cli.ErrUsage)
 		assert.Equal(t, 2, cli.ExitCode(err))
-		assert.Empty(t, stdout.String())
+		assert.Empty(t, stderr.String())
+
+		message, _ := decodeUsageErrorDocument(t, stdout.Bytes(), "start", nil)
+		assert.Equal(t, "brief start: unknown flag: --bogus; run 'brief start <feature>'", message)
 	})
 }
 

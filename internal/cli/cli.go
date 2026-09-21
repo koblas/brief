@@ -213,20 +213,43 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // info without a real binary, including a build info reported with ok=false. It has
 // the same signature as debug.ReadBuildInfo: production passes that
 // function itself.
+//
+// R5's --json detection runs here, ahead of cobra entirely: scanJSONFlag
+// scans args for an exact "--json" token before the first "--", strips
+// every one it finds, and reports whether a "--json=<v>" token was seen.
+// The stripped args are all cobra, and every command below it, ever sees
+// — "--json" never reaches pflag, so a leaf that also registers it (only
+// "start" does, for its help table) never has to read its value. A
+// "--json=<v>" token is always a text usage error (R5), reported here
+// before ExecuteContext ever runs so it wins over every other usage error
+// on the line; root.InitDefaultHelpCmd registers the help stub as a real
+// child so root.Find can resolve "help" the same way ExecuteContext's own
+// dispatch would.
 func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) error {
+	strippedArgs, jsonMode, hasJSONValue := scanJSONFlag(args)
+
+	out := reporter{stdout: stdout, stderr: stderr, json: jsonMode}
+
 	// cobra's RunE has no context.Context parameter; every closure below
 	// reads it via cmd.Context(), which ExecuteContext(ctx) sets on the
 	// resolved command before RunE runs. contextcheck cannot see that
 	// guarantee through cobra's own dispatch and instead flags the
 	// context.Background() fallback inside Command.Context()'s body.
-	root := newRootCommand(wd, stdin, stdout, stderr, readBuildInfo) //nolint:contextcheck
-
-	argsCopy := make([]string, len(args))
-	copy(argsCopy, args)
-	root.SetArgs(argsCopy)
+	root := newRootCommand(wd, stdin, out, readBuildInfo) //nolint:contextcheck
 	root.SetIn(stdin)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+	root.InitDefaultHelpCmd()
+
+	if hasJSONValue {
+		target, _, _ := root.Find(strippedArgs)
+
+		return usageError(stderr, jsonTakesNoValueMessage(target))
+	}
+
+	argsCopy := make([]string, len(strippedArgs))
+	copy(argsCopy, strippedArgs)
+	root.SetArgs(argsCopy)
 
 	return root.ExecuteContext(ctx)
 }
@@ -261,7 +284,7 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // dispatchable, but excluded from expectedCommandList, which filters on
 // IsAvailableCommand alone) and carries listedInHelpAnnotation instead, so
 // it still gets a root-help row and remains a valid "brief help" topic.
-func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) *cobra.Command {
+func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func() (*debug.BuildInfo, bool)) *cobra.Command {
 	root := &cobra.Command{
 		Use:                "brief",
 		Long:               rootShort,
@@ -271,7 +294,7 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer, readBu
 		SilenceUsage:       true,
 		DisableSuggestions: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoot(cmd, args, stdout, stderr, readBuildInfo)
+			return runRoot(cmd, args, out.forCommand(cmd), readBuildInfo)
 		},
 	}
 	root.CompletionOptions.DisableDefaultCmd = true
@@ -284,17 +307,17 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer, readBu
 		Args:               cobra.ArbitraryArgs,
 		Annotations:        map[string]string{commandNounAnnotation: "type"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runNew(cmd, args, stderr)
+			return runNew(cmd, args, out.forCommand(cmd))
 		},
 	}
 	newCmd.AddCommand(
 		leafCommand("feature <name>", "scaffold a new feature's specification and state file", newFeatureInvocation, newFeatureLong, nil,
 			func(cmd *cobra.Command, args []string) error {
-				return runNewFeature(cmd.Context(), wd, args, stdout, stderr)
+				return runNewFeature(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
 		leafCommand("step <feature>", "scaffold the next step file and its progress entry", newStepInvocation, newStepLong, nil,
 			func(cmd *cobra.Command, args []string) error {
-				return runNewStep(cmd.Context(), wd, args, stdout, stderr)
+				return runNewStep(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
 	)
 
@@ -305,9 +328,9 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer, readBu
 				fs.Bool("json", false, jsonFlagUsage)
 			},
 			func(cmd *cobra.Command, args []string) error {
-				jsonOut, _ := cmd.Flags().GetBool("json")
+				forStart := out.forCommand(cmd)
 
-				return runStart(cmd.Context(), wd, args, jsonOut, stdout, stderr)
+				return runStart(cmd.Context(), wd, args, forStart.json, forStart)
 			}),
 		leafCommand("finish <feature> <step> --handoff <path> --state <path>", "close a step: handoff, state, then done", finishInvocation, finishLong,
 			func(fs *pflag.FlagSet) {
@@ -318,15 +341,15 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer, readBu
 				handoffPath, _ := cmd.Flags().GetString("handoff")
 				statePath, _ := cmd.Flags().GetString("state")
 
-				return runFinish(cmd.Context(), wd, args, handoffPath, statePath, stdin, stderr)
+				return runFinish(cmd.Context(), wd, args, handoffPath, statePath, stdin, out.forCommand(cmd))
 			}),
 		leafCommand("status", "print one done/total/next/blocked line per feature", statusInvocation, statusLong, nil,
 			func(cmd *cobra.Command, args []string) error {
-				return runStatus(cmd.Context(), wd, args, stdout, stderr)
+				return runStatus(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
 		leafCommand("check [feature]", "report faults finish would now refuse to write over", checkInvocation, checkLong, nil,
 			func(cmd *cobra.Command, args []string) error {
-				return runCheck(cmd.Context(), wd, args, stdout, stderr)
+				return runCheck(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
 	)
 
@@ -337,17 +360,17 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer, readBu
 		completionLong,
 		nil,
 		func(cmd *cobra.Command, args []string) error {
-			return runCompletion(cmd, args, stdout, stderr)
+			return runCompletion(cmd, args, out.forCommand(cmd))
 		},
 	)
 	completionCmd.Hidden = true
 	completionCmd.Annotations[listedInHelpAnnotation] = "true"
 	root.AddCommand(completionCmd)
 
-	root.SetFlagErrorFunc(newFlagErrorFunc(stderr))
+	root.SetFlagErrorFunc(newFlagErrorFunc(out))
 
 	root.SetHelpTemplate(helpTemplate)
-	root.SetHelpCommand(newHelpCommand(stderr))
+	root.SetHelpCommand(newHelpCommand(out))
 
 	return root
 }
@@ -395,7 +418,7 @@ const helpLong = `Prints help for a command. 'brief help <command>' prints the s
 // runRoot and runNew report for that shape. "--" classifies as argNotFlag,
 // so "brief help --" falls through to Find like any other topic and is
 // rejected as an unresolved one.
-func newHelpCommand(stderr io.Writer) *cobra.Command {
+func newHelpCommand(out reporter) *cobra.Command {
 	return &cobra.Command{
 		Use:                   "help [command]",
 		Short:                 helpShort,
@@ -405,10 +428,12 @@ func newHelpCommand(stderr io.Writer) *cobra.Command {
 		DisableFlagParsing:    true,
 		Args:                  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			reported := out.forCommand(cmd)
+
 			if len(args) > 0 {
 				switch kind, msg := classifyDashArg(args[0]); kind {
 				case argHelpFlagWithValue:
-					return usageError(stderr, fmt.Sprintf("brief help: '%s' takes no value; run 'brief help <command>'", msg))
+					return reported.usageError(fmt.Sprintf("brief help: '%s' takes no value; run 'brief help <command>'", msg))
 				case argHelpFlag:
 					if len(args) == 1 {
 						cmd.InitDefaultHelpFlag()
@@ -416,9 +441,9 @@ func newHelpCommand(stderr io.Writer) *cobra.Command {
 						return cmd.Help()
 					}
 
-					return usageError(stderr, fmt.Sprintf("brief help: '%s' takes no arguments; run 'brief help <command>'", args[0]))
+					return reported.usageError(fmt.Sprintf("brief help: '%s' takes no arguments; run 'brief help <command>'", args[0]))
 				case argUnknownFlag, argVersionFlag, argVersionFlagWithValue:
-					return usageError(stderr, fmt.Sprintf("brief help: %s; run 'brief help <command>'", msg))
+					return reported.usageError(fmt.Sprintf("brief help: %s; run 'brief help <command>'", msg))
 				case argNotFlag:
 				}
 			}
@@ -426,7 +451,7 @@ func newHelpCommand(stderr io.Writer) *cobra.Command {
 			target, residual, _ := cmd.Root().Find(args)
 			listed := target.Annotations[listedInHelpAnnotation] != ""
 			if len(residual) > 0 || (target != cmd.Root() && !target.IsAvailableCommand() && !listed) {
-				return usageError(stderr, fmt.Sprintf("brief help: unknown command %q; expected one of: %s", strings.Join(args, " "), expectedCommandList(cmd)))
+				return reported.usageError(fmt.Sprintf("brief help: unknown command %q; expected one of: %s", strings.Join(args, " "), expectedCommandList(cmd)))
 			}
 
 			target.InitDefaultHelpFlag()
@@ -481,36 +506,36 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 // this one. A value on "--version" ("--version=<v>") is reported before any
 // trailing argument is even looked at: "--version=x extra" reports the
 // value error, not the trailing-argument one.
-func runRoot(cmd *cobra.Command, args []string, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) error {
+func runRoot(cmd *cobra.Command, args []string, out reporter, readBuildInfo func() (*debug.BuildInfo, bool)) error {
 	if len(args) == 0 {
-		return usageError(stderr, "brief: no command given; expected one of: "+expectedCommandList(cmd))
+		return out.usageError("brief: no command given; expected one of: " + expectedCommandList(cmd))
 	}
 
 	switch kind, msg := classifyDashArg(args[0]); kind {
 	case argHelpFlagWithValue:
-		return usageError(stderr, takesNoValueMessage(msg, "brief --help"))
+		return out.usageError(takesNoValueMessage(msg, "brief --help"))
 	case argHelpFlag:
 		if len(args) == 1 {
 			return cmd.Help()
 		}
 
-		return usageError(stderr, takesNoArgumentsMessage(args[0], "brief help <command>"))
+		return out.usageError(takesNoArgumentsMessage(args[0], "brief help <command>"))
 	case argVersionFlag:
 		if len(args) == 1 {
-			fmt.Fprintln(stdout, versionLine(readBuildInfo))
+			fmt.Fprintln(out.stdout, versionLine(readBuildInfo))
 
 			return nil
 		}
 
-		return usageError(stderr, takesNoArgumentsMessage(args[0], "brief --version"))
+		return out.usageError(takesNoArgumentsMessage(args[0], "brief --version"))
 	case argVersionFlagWithValue:
-		return usageError(stderr, takesNoValueMessage("--version", "brief --version"))
+		return out.usageError(takesNoValueMessage("--version", "brief --version"))
 	case argUnknownFlag:
-		return usageError(stderr, fmt.Sprintf("brief: %s; run 'brief <command> --help'", msg))
+		return out.usageError(fmt.Sprintf("brief: %s; run 'brief <command> --help'", msg))
 	case argNotFlag:
 	}
 
-	return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommandList(cmd)))
+	return out.usageError(fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommandList(cmd)))
 }
 
 // versionLine renders "--version"'s stdout line, prefix included but the
@@ -555,10 +580,11 @@ func usageError(stderr io.Writer, msg string) error {
 // newFlagErrorFunc builds the one root SetFlagErrorFunc frame every leaf's
 // pflag.Parse error passes through: boolFlagParseMessage's rewrite when
 // err qualifies, else err's own text, always flattened to one line, named
-// alongside the failing command's path and its invocation.
-func newFlagErrorFunc(stderr io.Writer) func(*cobra.Command, error) error {
+// alongside the failing command's path and its invocation, rendered
+// through out narrowed to the failing command.
+func newFlagErrorFunc(out reporter) func(*cobra.Command, error) error {
 	return func(cmd *cobra.Command, err error) error {
-		path := strings.TrimPrefix(cmd.CommandPath(), "brief ")
+		path := commandName(cmd)
 		invocation := cmd.Annotations[invocationAnnotation]
 
 		msg, ok := boolFlagParseMessage(err)
@@ -566,16 +592,20 @@ func newFlagErrorFunc(stderr io.Writer) func(*cobra.Command, error) error {
 			msg = err.Error()
 		}
 
-		return usageError(stderr, fmt.Sprintf("brief %s: %s; run '%s'", path, flattenOneLine(msg), invocation))
+		return out.forCommand(cmd).usageError(fmt.Sprintf("brief %s: %s; run '%s'", path, flattenOneLine(msg), invocation))
 	}
 }
 
 // boolFlagParseMessage reports whether err is pflag's *InvalidValueError
-// for a bool-typed flag — "--json=maybe", or any other value
-// strconv.ParseBool rejects — and, when it is, brief's own replacement for
-// pflag's raw strconv wording, naming the value exactly as given (including
-// "" for "--json=") and the flag alone, generalized to any bool flag rather
-// than hard-coded to one.
+// for a bool-typed flag — a leaf's auto-registered "--help=maybe", or any
+// other value strconv.ParseBool rejects on a bool flag — and, when it is,
+// brief's own replacement for pflag's raw strconv wording, naming the
+// value exactly as given (including "" for an explicit empty value) and
+// the flag alone, generalized to any bool flag rather than hard-coded to
+// one. "--json" itself never reaches pflag: run's own scanJSONFlag strips
+// every exact "--json" token before ExecuteContext, and reports a
+// "--json=<v>" token as its own, always-text usage error before dispatch
+// even begins.
 func boolFlagParseMessage(err error) (string, bool) {
 	var invalid *pflag.InvalidValueError
 	if !errors.As(err, &invalid) || invalid.GetFlag().Value.Type() != "bool" {

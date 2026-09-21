@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 	"path/filepath"
 
 	"github.com/koblas/brief/internal/assemble"
@@ -29,41 +28,44 @@ const startInvocation = "brief start <feature>"
 
 // runStart implements "brief start [--json] <feature>"; rest is its
 // positional arguments, from either side of --json, flags already parsed
-// away.
-func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, stdout, stderr io.Writer) error {
+// away. jsonOut is out.json, read once at the call site: start's own
+// pflag "json" flag stays registered only so its help table row still
+// renders, since run's own scanJSONFlag strips every "--json" token
+// before pflag ever parses one.
+func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, out reporter) error {
 	switch {
 	case len(rest) == 0:
-		return usageError(stderr, fmt.Sprintf("brief start: no feature given; run '%s'", startInvocation))
+		return out.usageError(fmt.Sprintf("brief start: no feature given; run '%s'", startInvocation))
 	case len(rest) > 1:
-		return usageError(stderr, fmt.Sprintf("brief start: too many arguments; run '%s'", startInvocation))
+		return out.usageError(fmt.Sprintf("brief start: too many arguments; run '%s'", startInvocation))
 	}
 
 	feature := rest[0]
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(stderr, "start", err)
+		return renderRefusal(out.stderr, "start", err)
 	}
 
 	srv := assemble.NewServer(cfg, root)
 
 	brief, err := srv.Start(ctx, feature)
 	if err != nil {
-		return renderRefusal(stderr, "start", err)
+		return renderRefusal(out.stderr, "start", err)
 	}
 
 	for _, s := range brief.Shortfalls {
-		fmt.Fprintf(stderr, "brief start: %s: %s; %s\n", s.Path, flattenOneLine(s.Detail), flattenOneLine(s.Fix))
+		fmt.Fprintf(out.stderr, "brief start: %s: %s; %s\n", s.Path, flattenOneLine(s.Detail), flattenOneLine(s.Fix))
 	}
 
 	if brief.Step == nil {
 		featureDir := filepath.Join(root, cfg.FeatureDirectory, feature)
 
 		if brief.Done+brief.Open > 0 {
-			fmt.Fprintf(stderr, "brief start: %s: feature is complete, %d of %d steps done; run 'brief new step %s' to add the next one\n",
+			fmt.Fprintf(out.stderr, "brief start: %s: feature is complete, %d of %d steps done; run 'brief new step %s' to add the next one\n",
 				featureDir, brief.Done, brief.Done+brief.Open, feature)
 		} else {
-			fmt.Fprintf(stderr, "brief start: %s: no step files yet; run 'brief new step %s' to scaffold the first one\n",
+			fmt.Fprintf(out.stderr, "brief start: %s: no step files yet; run 'brief new step %s' to scaffold the first one\n",
 				featureDir, feature)
 		}
 	}
@@ -73,14 +75,14 @@ func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, stdou
 	// structured caller the same discriminator the stderr notice above
 	// gives a human.
 	if jsonOut {
-		if err := assemble.RenderJSON(stdout, brief); err != nil {
+		if err := assemble.RenderJSON(out.stdout, brief); err != nil {
 			return fmt.Errorf("brief start: %w", err)
 		}
 
 		return nil
 	}
 
-	if err := assemble.RenderText(stdout, brief); err != nil {
+	if err := assemble.RenderText(out.stdout, brief); err != nil {
 		return fmt.Errorf("brief start: %w", err)
 	}
 

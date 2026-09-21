@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/koblas/brief/internal/assemble"
 )
@@ -24,25 +23,25 @@ const statusInvocation = "brief status"
 
 // runStatus implements "brief status"; rest is its positional arguments,
 // flags already parsed away, and must be empty.
-func runStatus(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
+func runStatus(ctx context.Context, wd string, rest []string, out reporter) error {
 	if len(rest) > 0 {
-		return usageError(stderr, fmt.Sprintf("brief status: too many arguments; run '%s'", statusInvocation))
+		return out.usageError(fmt.Sprintf("brief status: too many arguments; run '%s'", statusInvocation))
 	}
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(stderr, "status", err)
+		return renderRefusal(out.stderr, "status", err)
 	}
 
 	srv := assemble.NewServer(cfg, root)
 
 	rows, err := srv.Status(ctx)
 	if err != nil {
-		return renderRefusal(stderr, "status", err)
+		return renderRefusal(out.stderr, "status", err)
 	}
 
 	if len(rows) == 0 {
-		fmt.Fprintf(stderr, "brief status: no features found in %s; run 'brief new feature <name>' to create one\n", cfg.FeatureDirectory)
+		fmt.Fprintf(out.stderr, "brief status: no features found in %s; run 'brief new feature <name>' to create one\n", cfg.FeatureDirectory)
 
 		return nil
 	}
@@ -57,11 +56,11 @@ func runStatus(ctx context.Context, wd string, rest []string, stdout, stderr io.
 			continue
 		}
 
-		fmt.Fprintf(stderr, "brief status: %s: %s; %s\n",
+		fmt.Fprintf(out.stderr, "brief status: %s: %s; %s\n",
 			row.Problem.Path, flattenOneLine(row.Problem.Detail), flattenOneLine(row.Problem.Fix))
 	}
 
-	if err := assemble.RenderStatusText(stdout, rows); err != nil {
+	if err := assemble.RenderStatusText(out.stdout, rows); err != nil {
 		return fmt.Errorf("brief status: %w", err)
 	}
 

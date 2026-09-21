@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 
 	"github.com/koblas/brief/internal/assemble"
 )
@@ -40,9 +39,9 @@ const checkInvocation = "brief check [feature]"
 
 // runCheck implements "brief check [feature]"; rest is its positional
 // arguments, flags already parsed away.
-func runCheck(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
+func runCheck(ctx context.Context, wd string, rest []string, out reporter) error {
 	if len(rest) > 1 {
-		return usageError(stderr, fmt.Sprintf("brief check: too many arguments; run '%s'", checkInvocation))
+		return out.usageError(fmt.Sprintf("brief check: too many arguments; run '%s'", checkInvocation))
 	}
 
 	var feature string
@@ -52,35 +51,35 @@ func runCheck(ctx context.Context, wd string, rest []string, stdout, stderr io.W
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(stderr, "check", err)
+		return renderRefusal(out.stderr, "check", err)
 	}
 
 	srv := assemble.NewServer(cfg, root)
 
 	findings, err := srv.Check(ctx, feature)
 	if err != nil {
-		return renderRefusal(stderr, "check", err)
+		return renderRefusal(out.stderr, "check", err)
 	}
 
 	if len(findings) == 0 {
-		fmt.Fprintln(stderr, "brief check: no findings")
+		fmt.Fprintln(out.stderr, "brief check: no findings")
 
 		return nil
 	}
 
-	if err := assemble.RenderFindings(stdout, findings); err != nil {
+	if err := assemble.RenderFindings(out.stdout, findings); err != nil {
 		return fmt.Errorf("brief check: %w", err)
 	}
 
 	for _, f := range findings {
 		if f.Severity == assemble.SeverityError {
-			fmt.Fprintf(stderr, "brief check: %d finding(s), at least one ERROR\n", len(findings))
+			fmt.Fprintf(out.stderr, "brief check: %d finding(s), at least one ERROR\n", len(findings))
 
 			return errCheckFindings
 		}
 	}
 
-	fmt.Fprintf(stderr, "brief check: %d finding(s), no ERROR\n", len(findings))
+	fmt.Fprintf(out.stderr, "brief check: %d finding(s), no ERROR\n", len(findings))
 
 	return nil
 }
