@@ -407,6 +407,10 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			doc.Commands = []helpCommandJSON{helpEntry(cmd)}
 		}
 
+		// HelpFunc's own signature returns nothing, and cmd.Help() always
+		// returns nil, so a write failure here has no path to become a
+		// non-zero exit — the same limit cobra's own text help renders
+		// under.
 		_ = writeJSONDocument(out.stdout, doc)
 	})
 

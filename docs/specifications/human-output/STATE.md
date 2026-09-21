@@ -20,12 +20,10 @@ Scenarios complete: SCENARIO-01..13. Last updated by SCENARIO-13.
 - Every `run*` writes its full success payload, then stderr, before returning; `--json` always
   runs **before** any text-mode write (R1, mutation-verified). JSON slices are never nil —
   `[]`, not `null`. (S06-S11)
-- `scaffold.NewFeature`/`NewStep` return `Result{Feature, Step, Path, Created}`;
-  `scaffold.Finish` returns `FinishResult{..., Changed, HandoffPath, StatePath, Next}` — same
-  "absolute, verbatim into JSON" convention, different type. (S10, S11)
-- Text-mode success stderr, one line after stdout, per command; see `new.go`/`finish.go`
-  doc comments for exact wording — no-op finish prints only "already done with identical
-  inputs; nothing written". (S10, S11)
+- `scaffold.NewFeature`/`NewStep`/`Finish` result types share one "absolute, verbatim into
+  JSON" convention. (S10, S11)
+- Text-mode success stderr is one line after stdout, per command (see `new.go`/`finish.go`
+  doc comments for wording). (S10, S11)
 - `finish --json`'s `next` is `*string` — null, not omitted, even on the no-op, where the
   *text* line omits it entirely. `changed` false only on the no-op. (S11)
 - `next` = lowest-numbered step file whose status isn't done, **depends-on ignored** —
@@ -59,6 +57,9 @@ Scenarios complete: SCENARIO-01..13. Last updated by SCENARIO-13.
 - A shared platform helper for the "next open step" rule is unbuilt — it lives once in
   `assemble`, once in `scaffold`, tied only by the S11 agreement test.
 - A `blocked` flag in `finish`'s output does not exist; the ruled JSON shape has none.
+- A flag `shorthand` field — not in the ruled help-entry shape.
+- `--version` never appears in the help index — root is not an entry (`DisableFlagParsing`;
+  `--help`/`--version` are hand-classified, not pflags).
 
 ## Traps
 
@@ -86,6 +87,12 @@ Scenarios complete: SCENARIO-01..13. Last updated by SCENARIO-13.
   recurses into itself. A full-index entry's `-h/--help` row depends on `helpEntry`'s own
   `InitDefaultHelpFlag()` call — cobra only calls it on the resolved command; *filtered*-path
   tests alone can't catch this regressing. (S13)
+- `HelpFunc` returns nothing and `cmd.Help()` always returns nil, so the wrapper's
+  `_ = writeJSONDocument(...)` cannot surface a write error as a non-zero exit — same as
+  cobra's own text help today, not a missed error check. (S13)
+- S14 registering `--json` as a real pflag on every command will redden
+  `Test_help_finish_json_is_the_exact_document` (golden) and `status`'s flag count in
+  `Test_help_json_lists_every_listed_command_and_new_itself` — expected, update both. (S13)
 
 ## Open debts
 
