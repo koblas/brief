@@ -18,11 +18,12 @@ import (
 var ErrUsage = errors.New("usage error")
 
 func init() {
-	// Root help lists commands in workflow order — new, start, status,
-	// check, finish, as registered by newRootCommand — rather than
-	// cobra's default alphabetical sort. EnableCommandSorting is a cobra
-	// package global: set once here, never per Run or per call, since a
-	// per-call write would race parallel tests' reads.
+	// Root help and every "expected one of:" list share one order:
+	// registration order, as newRootCommand's root.AddCommand calls lay it
+	// out — new, start, finish, status, check — rather than cobra's default
+	// alphabetical sort. EnableCommandSorting is a cobra package global:
+	// set once here, never per Run or per call, since a per-call write
+	// would race parallel tests' reads.
 	cobra.EnableCommandSorting = false
 }
 
@@ -30,13 +31,23 @@ func init() {
 // root help render.
 const rootShort = "brief manages feature specifications as files in your repository."
 
-// expectedCommands is the "expected one of:" list named by runRoot's usage
-// errors and by the hidden help stub's unknown-topic error. It is today's
-// approved literal, registration order minus "new" (see S07's "new, start,
-// status, check, finish" root listing) — not tree-derived; S11 replaces
-// this with a derivation from the command tree and moves all three
-// messages together.
-const expectedCommands = "new, start, finish, status, check"
+// expectedCommandList names cmd's root's available top-level commands, in
+// registration order, for an "expected one of:" usage message. Cobra adds
+// "help" as a hidden child of root during Execute; IsAvailableCommand
+// excludes it, and any other hidden or deprecated command, without a
+// name-based filter.
+func expectedCommandList(cmd *cobra.Command) string {
+	root := cmd.Root()
+	names := make([]string, 0, len(root.Commands()))
+
+	for _, c := range root.Commands() {
+		if c.IsAvailableCommand() {
+			names = append(names, c.Name())
+		}
+	}
+
+	return strings.Join(names, ", ")
+}
 
 // helpTemplate renders R6's contract for every command in the tree, set
 // once on root via SetHelpTemplate and inherited by every child through
@@ -158,9 +169,11 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // cobra never rejects an argument count itself — every run* function does
 // its own counting and reports brief's own usage error.
 //
-// Commands are added in the order they should list in root help —
-// new, start, status, check, finish — not alphabetically: see this
-// package's init, which turns cobra's default sort off.
+// Commands are added in the order they should list in root help and in
+// every "expected one of:" message — new, start, finish, status, check —
+// not alphabetically: see this package's init, which turns cobra's default
+// sort off, and expectedCommandList, which reads root.Commands() in that
+// same order.
 func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	root := &cobra.Command{
 		Use:                "brief",
@@ -207,14 +220,6 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 
 				return runStart(cmd.Context(), wd, args, jsonOut, stdout, stderr)
 			}),
-		leafCommand("status", "print one done/total/next/blocked line per feature", "brief status", statusLong, nil,
-			func(cmd *cobra.Command, args []string) error {
-				return runStatus(cmd.Context(), wd, args, stdout, stderr)
-			}),
-		leafCommand("check [feature]", "report faults finish would now refuse to write over", "brief check [feature]", checkLong, nil,
-			func(cmd *cobra.Command, args []string) error {
-				return runCheck(cmd.Context(), wd, args, stdout, stderr)
-			}),
 		leafCommand("finish <feature> <step> --handoff <path> --state <path>", "close a step: handoff, state, then done", finishInvocation, finishLong,
 			func(fs *pflag.FlagSet) {
 				fs.String("handoff", "", handoffFlagUsage)
@@ -225,6 +230,14 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 				statePath, _ := cmd.Flags().GetString("state")
 
 				return runFinish(cmd.Context(), wd, args, handoffPath, statePath, stdin, stderr)
+			}),
+		leafCommand("status", "print one done/total/next/blocked line per feature", "brief status", statusLong, nil,
+			func(cmd *cobra.Command, args []string) error {
+				return runStatus(cmd.Context(), wd, args, stdout, stderr)
+			}),
+		leafCommand("check [feature]", "report faults finish would now refuse to write over", "brief check [feature]", checkLong, nil,
+			func(cmd *cobra.Command, args []string) error {
+				return runCheck(cmd.Context(), wd, args, stdout, stderr)
 			}),
 	)
 
@@ -264,7 +277,7 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, residual, _ := cmd.Root().Find(args)
 			if len(residual) > 0 || (target != cmd.Root() && !target.IsAvailableCommand()) {
-				return usageError(stderr, fmt.Sprintf("brief help: unknown command %q; expected one of: %s", strings.Join(args, " "), expectedCommands))
+				return usageError(stderr, fmt.Sprintf("brief help: unknown command %q; expected one of: %s", strings.Join(args, " "), expectedCommandList(cmd)))
 			}
 
 			target.InitDefaultHelpFlag()
@@ -307,14 +320,14 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 // help, nothing at all, or something unknown.
 func runRoot(cmd *cobra.Command, args []string, stderr io.Writer) error {
 	if len(args) == 0 {
-		return usageError(stderr, "brief: no command given; expected one of: "+expectedCommands)
+		return usageError(stderr, "brief: no command given; expected one of: "+expectedCommandList(cmd))
 	}
 
 	switch args[0] {
 	case "-h", "--help", "help":
 		return cmd.Help()
 	default:
-		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommands))
+		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommandList(cmd)))
 	}
 }
 

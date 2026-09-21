@@ -119,15 +119,41 @@ func Test_returns_a_usage_error_when_no_command_is_given(t *testing.T) {
 	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check", oneLine(t, &stderr))
 }
 
+// Test_returns_a_usage_error_when_the_command_is_unknown pins R7's "no Did
+// you mean" clause: a one-edit near-miss of a real command name gets the
+// same one-line error as an unrelated typo, never a cobra suggestion —
+// DisableSuggestions already makes this so, so that row is green on
+// arrival.
 func Test_returns_a_usage_error_when_the_command_is_unknown(t *testing.T) {
-	wd := t.TempDir()
-	var stdout, stderr bytes.Buffer
+	tests := []struct {
+		name    string
+		command string
+		stderr  string
+	}{
+		{
+			name:    "unrelated typo",
+			command: "bogus",
+			stderr:  `brief: unknown command "bogus"; expected one of: new, start, finish, status, check`,
+		},
+		{
+			name:    "near-miss of a real command",
+			command: "startt",
+			stderr:  `brief: unknown command "startt"; expected one of: new, start, finish, status, check`,
+		},
+	}
 
-	err := cli.Run(t.Context(), wd, []string{"bogus"}, nil, &stdout, &stderr)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
 
-	require.ErrorIs(t, err, cli.ErrUsage)
-	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief: unknown command "bogus"; expected one of: new, start, finish, status, check`, oneLine(t, &stderr))
+			err := cli.Run(t.Context(), wd, []string{tc.command}, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tc.stderr, oneLine(t, &stderr))
+		})
+	}
 }
 
 func Test_returns_a_usage_error_when_no_type_is_given(t *testing.T) {

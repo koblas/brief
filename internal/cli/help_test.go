@@ -63,10 +63,10 @@ Usage:
   brief new feature <name>         scaffold a new feature's specification and state file
   brief new step <feature>         scaffold the next step file and its progress entry
   brief start [--json] <feature>   print the next open step's context
-  brief status                     print one done/total/next/blocked line per feature
-  brief check [feature]            report faults finish would now refuse to write over
   brief finish <feature> <step> --handoff <path> --state <path>
                                    close a step: handoff, state, then done
+  brief status                     print one done/total/next/blocked line per feature
+  brief check [feature]            report faults finish would now refuse to write over
 
 Run 'brief <command> --help' for details.
 `
