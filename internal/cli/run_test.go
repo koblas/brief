@@ -160,7 +160,7 @@ func Test_returns_a_usage_error_when_a_flag_is_not_defined(t *testing.T) {
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief new feature: flag provided but not defined: -x; run 'brief new feature <name>'", oneLine(t, &stderr))
+	assert.Equal(t, "brief new feature: unknown shorthand flag: 'x' in -x; run 'brief new feature <name>'", oneLine(t, &stderr))
 }
 
 func Test_returns_a_usage_error_when_there_are_too_many_arguments(t *testing.T) {
@@ -230,4 +230,76 @@ func Test_prints_usage_to_stdout_when_help_is_requested_for_the_subcommand(t *te
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
 	assert.NotEmpty(t, stdout.String())
+}
+
+// Test_returns_a_usage_error_when_args_are_nil guards the cobra port's
+// os.Args fallback: cobra's *Command reads os.Args[1:] itself when
+// SetArgs receives a nil slice, which would parse the test binary's own
+// flags instead of brief's. Run must always hand cobra a non-nil copy, so
+// a nil args slice here still reaches the ordinary no-command usage error.
+func Test_returns_a_usage_error_when_args_are_nil(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, nil, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check", oneLine(t, &stderr))
+}
+
+// Test_prints_root_usage_and_a_nil_error_for_brief_help pins today's
+// dispatch: "brief help" with no topic prints the root usage text, exit 0.
+func Test_prints_root_usage_and_a_nil_error_for_brief_help(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.NotEmpty(t, stdout.String())
+}
+
+// Test_prints_root_usage_and_a_nil_error_for_brief_help_with_an_unknown_topic
+// pins today's dispatch, ahead of SCENARIO-09's rewrite: "brief help
+// bogus" prints the root usage text with a nil error rather than
+// reporting "bogus" as an unknown help topic.
+func Test_prints_root_usage_and_a_nil_error_for_brief_help_with_an_unknown_topic(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"help", "bogus"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.NotEmpty(t, stdout.String())
+}
+
+// Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag
+// pins that "-x" at the root is reported as an unknown command, the same
+// as any other unrecognized first argument, not as an undefined flag.
+func Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"-x"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, `brief: unknown command "-x"; expected one of: new, start, finish, status, check`, oneLine(t, &stderr))
+}
+
+// Test_returns_a_usage_error_when_the_new_type_is_a_single_dash_flag pins
+// that "-x" under "new" is reported as an unknown type, not as an
+// undefined flag.
+func Test_returns_a_usage_error_when_the_new_type_is_a_single_dash_flag(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"new", "-x"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, `brief new: unknown type "-x"; expected one of: feature, step`, oneLine(t, &stderr))
 }

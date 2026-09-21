@@ -451,7 +451,7 @@ func Test_returns_a_usage_error_for_an_unknown_finish_flag(t *testing.T) {
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief finish: flag provided but not defined: -bogus; run 'brief finish <feature> <step> --handoff <path> --state <path>'", oneLine(t, &stderr))
+	assert.Equal(t, "brief finish: unknown flag: --bogus; run 'brief finish <feature> <step> --handoff <path> --state <path>'", oneLine(t, &stderr))
 }
 
 // Test_names_stdin_when_the_piped_state_s_fence_is_unterminated is the

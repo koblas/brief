@@ -459,7 +459,7 @@ func Test_returns_a_usage_error_for_an_unknown_start_flag(t *testing.T) {
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief start: flag provided but not defined: -bogus; run 'brief start <feature>'\n", stderr.String())
+	assert.Equal(t, "brief start: unknown flag: --bogus; run 'brief start <feature>'\n", stderr.String())
 }
 
 func Test_prints_the_start_usage_for_help(t *testing.T) {
@@ -473,18 +473,19 @@ func Test_prints_the_start_usage_for_help(t *testing.T) {
 	assert.Contains(t, stdout.String(), "brief start reads; it never writes.")
 }
 
-// Test_prints_the_start_usage_when_help_precedes_an_undefined_flag and its
-// control arm below differ only in argument order: the first of --help and
-// an undefined flag decides, as with the stdlib flag package.
-func Test_prints_the_start_usage_when_help_precedes_an_undefined_flag(t *testing.T) {
+// Test_returns_a_usage_error_when_help_precedes_an_undefined_flag and its
+// control arm below pin that an undefined flag is a usage error regardless
+// of where --help falls relative to it: flag parsing rejects --bogus before
+// either position of --help is ever considered.
+func Test_returns_a_usage_error_when_help_precedes_an_undefined_flag(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
 	err := cli.Run(t.Context(), wd, []string{"start", "--help", "--bogus"}, nil, &stdout, &stderr)
 
-	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
-	assert.Contains(t, stdout.String(), "brief start reads; it never writes.")
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief start: unknown flag: --bogus; run 'brief start <feature>'\n", stderr.String())
 }
 
 func Test_returns_a_usage_error_when_an_undefined_flag_precedes_help(t *testing.T) {
@@ -495,7 +496,7 @@ func Test_returns_a_usage_error_when_an_undefined_flag_precedes_help(t *testing.
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief start: flag provided but not defined: -bogus; run 'brief start <feature>'\n", stderr.String())
+	assert.Equal(t, "brief start: unknown flag: --bogus; run 'brief start <feature>'\n", stderr.String())
 }
 
 // Test_start_still_refuses_a_feature_with_no_state_file is the control arm
