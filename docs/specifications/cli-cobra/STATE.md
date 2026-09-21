@@ -13,13 +13,10 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
   dispatch. Every leaf sets `Args: cobra.ArbitraryArgs`; every `run*` does its own
   argument-count checking. (SCENARIO-01)
 - R14's invocation frame is one root `SetFlagErrorFunc`: path = `cmd.CommandPath()` minus
-  `"brief "`, invocation = `cmd.Annotations["invocation"]` (set by `leafCommand`'s
-  `invocation` param). pflag's own wording passes through verbatim: `unknown flag: --bogus`,
-  `unknown shorthand flag: 'x' in -x`, `flag needs an argument: --x`. Mutation-verified per
-  moving part (S02: path expression, Annotations lookup, `usageError` wrap, `invocation` arg;
-  S03: shorthand clusters, one leaf at a time; S04: single-dash spellings are
-  letter-sensitive, not generic-failure-sensitive). S05/S06 assert against this same output;
-  do not re-derive it per command. (SCENARIO-01..04)
+  `"brief "`, invocation = `cmd.Annotations["invocation"]`. pflag's own wording passes
+  through verbatim. Mutation-verified per moving part by S02/S03/S04 (see Handoffs for
+  detail). S05/S06 assert against this same output; do not re-derive it per command.
+  (SCENARIO-01..04)
 - `flag_error_test.go` (`cli_test` package) holds one flag-parse-error table per scenario,
   using `run_test.go`'s `oneLine` helper; expected stderr is always a literal, never built
   from a production `invocation` constant. Tables so far: S02 long-flag, S03 shorthand
@@ -85,8 +82,10 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
 
 ## Open debts
 
-- `run_test.go`'s `Test_returns_a_usage_error_when_a_flag_is_not_defined` (`new feature -x p`)
-  and `new_step_test.go`'s `..._for_step` (`new step -x p`) duplicate two rows of S03's
-  shorthand table in `flag_error_test.go`. Deliberately not deleted — they also carry
-  SCENARIO-01 coverage. Unowned — leave to the reviewer pass or a later cleanup; dies unless
-  re-opened.
+- Coverage duplicated between older SCENARIO-01 tests and `flag_error_test.go`'s tables,
+  kept because each old test also carries SCENARIO-01 coverage the shared table doesn't:
+  `run_test.go`'s `..._when_a_flag_is_not_defined` (`new feature -x p`) and
+  `new_step_test.go`'s `..._for_step` (`new step -x p`) duplicate two S03 shorthand rows;
+  `run_test.go`'s `..._for_the_subcommand` (`new feature --help`) duplicates S04's control-arm
+  `--help` row (nil error/empty stderr — a subset of what it already asserts). Unowned — leave
+  to the reviewer pass or a later cleanup; dies unless re-opened.
