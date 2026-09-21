@@ -490,6 +490,56 @@ func Test_reports_a_version_flag_with_trailing_arguments_as_taking_no_arguments(
 	}
 }
 
+// Test_reports_a_version_flag_with_a_value_as_taking_no_value pins that a
+// value attached to "--version" is reported as that flag taking no value,
+// naming the flag itself rather than "--version"'s own unknown-flag wording
+// — and that this fires before any trailing argument is even looked at
+// (R8): "--version=x extra" and "--version= --version" both report the
+// value error, never the trailing-argument error the sibling table above
+// pins.
+//
+// The four rows are one message family — every shape of "a value on
+// --version" reports the identical stderr line — but not one discriminator:
+// "x" and "" (an explicit empty value) pin the value check itself, while
+// the "extra"/"--version" rows additionally pin that a trailing argument
+// never overrides it (R8), as the second mutation below confirms by
+// reddening only that pair.
+//
+// Mutation-verified, restored byte-identical after each: dropping
+// classifyDashArg's "--version=" prefix branch reddens all four rows
+// (classification falls back to today's unknown-flag wording); routing
+// root's argVersionFlagWithValue arm to takesNoArgumentsMessage whenever
+// len(args) > 1 reddens only the two rows with a second argument
+// ("--version=x extra", "--version= --version"), proving the value check
+// runs before any trailing-argument check; changing takesNoValueMessage's
+// wording reddens all four rows, since root's argVersionFlagWithValue arm
+// is that helper's only other caller besides argHelpFlagWithValue.
+func Test_reports_a_version_flag_with_a_value_as_taking_no_value(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "--version=x", args: []string{"--version=x"}},
+		{name: "--version=", args: []string{"--version="}},
+		{name: "--version=x extra", args: []string{"--version=x", "extra"}},
+		{name: "--version= --version", args: []string{"--version=", "--version"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, `brief: '--version' takes no value; run 'brief --version'`, oneLine(t, &stderr))
+		})
+	}
+}
+
 // Test_treats_a_bare_dash_as_a_plain_unknown_command is the control arm
 // for classifyDashArg's argNotFlag case: a standalone "-" is pflag's own
 // convention for stdin, never a flag (parseArgs treats len(s) == 1 the

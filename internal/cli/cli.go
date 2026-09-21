@@ -411,7 +411,7 @@ func newHelpCommand(stderr io.Writer) *cobra.Command {
 					}
 
 					return usageError(stderr, fmt.Sprintf("brief help: '%s' takes no arguments; run 'brief help <command>'", args[0]))
-				case argUnknownFlag, argVersionFlag:
+				case argUnknownFlag, argVersionFlag, argVersionFlagWithValue:
 					return usageError(stderr, fmt.Sprintf("brief help: %s; run 'brief help <command>'", msg))
 				case argNotFlag:
 				}
@@ -472,7 +472,9 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 // and the help stub fold it into) is not used for this branch. Only
 // args[0] decides which flag's "takes no arguments" error fires: a
 // "--version" trailing after "--help" reports "--help"'s error, never
-// this one.
+// this one. A value on "--version" ("--version=<v>") is reported before any
+// trailing argument is even looked at: "--version=x extra" reports the
+// value error, not the trailing-argument one.
 func runRoot(cmd *cobra.Command, args []string, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief: no command given; expected one of: "+expectedCommandList(cmd))
@@ -480,7 +482,7 @@ func runRoot(cmd *cobra.Command, args []string, stdout, stderr io.Writer, readBu
 
 	switch kind, msg := classifyDashArg(args[0]); kind {
 	case argHelpFlagWithValue:
-		return usageError(stderr, fmt.Sprintf("brief: '%s' takes no value; run 'brief --help'", msg))
+		return usageError(stderr, takesNoValueMessage(msg, "brief --help"))
 	case argHelpFlag:
 		if len(args) == 1 {
 			return cmd.Help()
@@ -495,6 +497,8 @@ func runRoot(cmd *cobra.Command, args []string, stdout, stderr io.Writer, readBu
 		}
 
 		return usageError(stderr, takesNoArgumentsMessage(args[0], "brief --version"))
+	case argVersionFlagWithValue:
+		return usageError(stderr, takesNoValueMessage("--version", "brief --version"))
 	case argUnknownFlag:
 		return usageError(stderr, fmt.Sprintf("brief: %s; run 'brief <command> --help'", msg))
 	case argNotFlag:
@@ -524,6 +528,15 @@ func versionLine(readBuildInfo func() (*debug.BuildInfo, bool)) string {
 // and hints (R6).
 func takesNoArgumentsMessage(flag, runHint string) string {
 	return fmt.Sprintf("brief: '%s' takes no arguments; run '%s'", flag, runHint)
+}
+
+// takesNoValueMessage renders root's "takes no value" usage copy for flag
+// — named exactly as typed, never the flag's own unknown-flag wording —
+// pointing the caller at runHint. It backs root's argHelpFlagWithValue and
+// argVersionFlagWithValue arms only: runNew and the help stub build their
+// own "takes no value" copy inline, with their own prefixes and hints (R6).
+func takesNoValueMessage(flag, runHint string) string {
+	return fmt.Sprintf("brief: '%s' takes no value; run '%s'", flag, runHint)
 }
 
 // usageError writes msg, followed by a single newline, to stderr and

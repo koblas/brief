@@ -670,11 +670,17 @@ func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
 // each token's kind is identical at every site — only the invocation named
 // in the "run '...'" tail, and the command-path prefix, differ per site.
 //
-// Mutation-verified: narrowing classifyDashArg's hasEq branch to only
-// single-character all-h names (so "-h=<v>" still classifies as
-// argHelpFlagWithValue but "-hh=<v>"/"-hh=" fall through to the unknown-flag
-// branch instead) reds exactly the six "-hh=x"/"-hh=" rows at root, new and
-// help, and nothing else.
+// Mutation-verified, restored byte-identical after each: narrowing
+// classifyDashArg's hasEq branch to only single-character all-h names (so
+// "-h=<v>" still classifies as argHelpFlagWithValue but "-hh=<v>"/"-hh="
+// fall through to the unknown-flag branch instead) reds exactly the six
+// "-hh=x"/"-hh=" rows at root, new and help, and nothing else. Dropping
+// classifyDashArg's "--version=" prefix branch reds only the two root
+// "--version=*" rows; the "new"/"help" "--version=*" rows stay green,
+// since they already fold argUnknownFlag into the same wording. Routing
+// runNew's (respectively the help stub's) argVersionFlagWithValue case to
+// the bodyless argNotFlag arm reds only that site's two "--version=*"
+// rows, proving each site's fold is independent of the other's.
 func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -725,6 +731,16 @@ func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_s
 		{name: "root ---x", args: []string{"---x"}, wantStderr: "brief: bad flag syntax: ---x; run 'brief <command> --help'"},
 		{name: "new ---x", args: []string{"new", "---x"}, wantStderr: "brief new: bad flag syntax: ---x; run 'brief new <type> --help'"},
 		{name: "help ---x", args: []string{"help", "---x"}, wantStderr: "brief help: bad flag syntax: ---x; run 'brief help <command>'"},
+
+		// "--version=x"
+		{name: "root --version=x", args: []string{"--version=x"}, wantStderr: "brief: '--version' takes no value; run 'brief --version'"},
+		{name: "new --version=x", args: []string{"new", "--version=x"}, wantStderr: "brief new: unknown flag: --version; run 'brief new <type> --help'"},
+		{name: "help --version=x", args: []string{"help", "--version=x"}, wantStderr: "brief help: unknown flag: --version; run 'brief help <command>'"},
+
+		// "--version=" (explicit empty value)
+		{name: "root --version=", args: []string{"--version="}, wantStderr: "brief: '--version' takes no value; run 'brief --version'"},
+		{name: "new --version=", args: []string{"new", "--version="}, wantStderr: "brief new: unknown flag: --version; run 'brief new <type> --help'"},
+		{name: "help --version=", args: []string{"help", "--version="}, wantStderr: "brief help: unknown flag: --version; run 'brief help <command>'"},
 
 		// "--bogus"
 		{name: "root --bogus", args: []string{"--bogus"}, wantStderr: "brief: unknown flag: --bogus; run 'brief <command> --help'"},
