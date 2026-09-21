@@ -174,7 +174,7 @@ Scenario: SCENARIO-13 Completion for an unsupported shell
 ## BDD Acceptance Progress
 
 - [x] SCENARIO-01: Existing command contract holds on cobra
-- [ ] SCENARIO-02: Undefined long flag is a one-line usage error
+- [x] SCENARIO-02: Undefined long flag is a one-line usage error
 - [ ] SCENARIO-03: Undefined short flag is a one-line usage error
 - [ ] SCENARIO-04: Single-dash long flag is rejected
 - [ ] SCENARIO-05: Flag missing its value

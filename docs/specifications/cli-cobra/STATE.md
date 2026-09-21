@@ -1,6 +1,6 @@
 # cli-cobra — current state
 
-Scenarios complete: SCENARIO-01. Last updated by SCENARIO-01.
+Scenarios complete: SCENARIO-01..02. Last updated by SCENARIO-02.
 
 ## Binding decisions
 
@@ -15,9 +15,20 @@ Scenarios complete: SCENARIO-01. Last updated by SCENARIO-01.
 - R14's invocation frame comes from one root `SetFlagErrorFunc`: path =
   `cmd.CommandPath()` minus the `"brief "` prefix, invocation = `cmd.Annotations["invocation"]`
   (set by `leafCommand`'s `invocation` param). pflag's own wording passes through verbatim:
-  `unknown flag: --x`, `unknown shorthand flag: 'x' in -x`, `flag needs an argument: --x`.
-  S02..S06 assert against this output; do not re-derive it differently per command.
-  (SCENARIO-01)
+  `unknown flag: --bogus`, `unknown shorthand flag: 'x' in -x`, `flag needs an argument: --x`.
+  S02 mutation-verified all four moving parts of this frame independently: the path
+  expression (only `new feature`/`new step` discriminate `cmd.Name()` from the trimmed
+  `CommandPath()`), the per-command `Annotations` lookup (vs. `cmd.Root().Annotations`,
+  which reddens every row), the `usageError(...)` wrap (an unwrapped `err` loses `ErrUsage`
+  on every row), and one leaf's `invocation` argument (redddens only that leaf). S03..S06
+  assert against this same output; do not re-derive it differently per command. (SCENARIO-01,
+  SCENARIO-02)
+- `flag_error_test.go` (`cli_test` package) is the home for flag-parse error tables, one
+  table per scenario, using the `oneLine` helper from `run_test.go`. Each row's expected
+  stderr is a literal string, never built from a production `invocation` constant (e.g.
+  `finishInvocation`) — building it from the constant would pin nothing. S03/S04/S05 add
+  their own tables (or rows) there rather than scattering assertions per command file.
+  (SCENARIO-02)
 - Help is one root `SetHelpFunc` printing `cmd.Long` verbatim; each `*Usage` constant sits in
   `Long` unchanged. cobra's own help template is never invoked — S07 is what introduces one.
   (SCENARIO-01)
@@ -46,6 +57,9 @@ Scenarios complete: SCENARIO-01. Last updated by SCENARIO-01.
   hard-coded string until then.
 - `completion` command (`CompletionOptions.DisableDefaultCmd` flips back on) — owned by
   S12/S13.
+- Shorthand (`unknown shorthand flag: 'x' in -x`), single-dash long flag (`-json`), and
+  missing-value (`flag needs an argument: --x`) flag-error tables — owned by S03/S04/S05
+  respectively, added to `flag_error_test.go` alongside S02's long-flag table.
 
 ## Traps
 
@@ -63,17 +77,20 @@ Scenarios complete: SCENARIO-01. Last updated by SCENARIO-01.
   reddened test — a future scenario that makes `Find` fallible (e.g. a real `Args` validator
   somewhere) must re-check this before relying on `SetHelpCommand` alone.
 - `start_test.go:462` and `:498` compare raw `stderr.String()` with a trailing `\n`; the rest
-  of the suite uses the `oneLine` helper (which trims it). Don't "fix" one style into the
-  other without checking both are intentional per-test.
+  of the suite (including `flag_error_test.go`) uses the `oneLine` helper (which trims it).
+  Don't "fix" one style into the other without checking both are intentional per-test.
 - pflag flag values are read with the error discarded (`jsonOut, _ :=
   cmd.Flags().GetBool("json")`) — safe only because the flag is registered on the same
   command immediately above. Any new leaf flag must follow the same
   register-then-read-on-that-command pattern or the discarded error becomes a real bug.
 - `-help`/`-json` (single-dash long flags) now parse as pflag shorthand clusters, not long
-  flags, and are rejected — approved change (R4), pinned by S04. No SCENARIO-01 test uses
-  them, so nothing here proves the exact wording yet.
+  flags, and are rejected — approved change (R4), owned by S04. No test yet proves the exact
+  wording.
+- `new` is `DisableFlagParsing`; `new --bogus` is handled by `runNew`, not the
+  `FlagErrorFunc`, and has a different message than `new feature --bogus` / `new step
+  --bogus`, which do go through the leaf `FlagErrorFunc` frame. (SCENARIO-02)
 
 ## Open debts
 
-None — every item under "Left unbuilt" is owned by a named scenario (S07-S13) already
+None — every item under "Left unbuilt" is owned by a named scenario (S03-S13) already
 listed in `specification.md`'s BDD Acceptance Progress. Nothing here is unowned.
