@@ -235,10 +235,19 @@ func (r reporter) forCommand(cmd *cobra.Command) reporter {
 	return r
 }
 
-// successHeader builds the jsonHeader every success document embeds
+// headerFor builds the jsonHeader a success-shaped document embeds first,
+// at exitCode: command from r.cmd, ok derived from exitCode by
+// newJSONHeader — the one place that derivation happens. A document with
+// findings-as-data (R4), like check --json's, uses this directly at a
+// non-zero exitCode; successHeader is the exitCode-0 special case.
+func (r reporter) headerFor(exitCode int) jsonHeader {
+	return newJSONHeader(commandName(r.cmd), exitCode)
+}
+
+// successHeader builds the jsonHeader every exit-0 success document embeds
 // first: command from r.cmd, exit_code 0, ok true.
 func (r reporter) successHeader() jsonHeader {
-	return newJSONHeader(commandName(r.cmd), 0)
+	return r.headerFor(0)
 }
 
 // usageError renders msg as R3's usage-error document: in JSON mode, one

@@ -438,11 +438,15 @@ func Test_json_mode_refusal_matrix(t *testing.T) {
 }
 
 // Test_json_mode_check_findings_are_not_an_error_document is R4: check
-// still renders its findings and summary as ordinary text under --json,
-// exit 1 via errCheckFindings, never as an error document. The control
-// arm — the same fixture, an unknown feature named instead — proves
-// --json is not silently disabled for check altogether: it still renders
-// a document when the failure is a refusal rather than a findings run.
+// --json renders an ERROR-carrying run as one success-shaped document —
+// ok false, exit_code 1, no "error" key, counts.error greater than zero —
+// never as an error document, and writes zero stderr bytes; the text-mode
+// summary that would otherwise carry this same information lives in the
+// document's own "counts", not on a stream check_json_test.go's golden
+// already pins byte-for-byte. The control arm — the same fixture, an
+// unknown feature named instead — proves --json is not silently disabled
+// for check altogether: it still renders an error document when the
+// failure is a refusal rather than a findings run.
 func Test_json_mode_check_findings_are_not_an_error_document(t *testing.T) {
 	wd := t.TempDir()
 	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
@@ -452,16 +456,29 @@ func Test_json_mode_check_findings_are_not_an_error_document(t *testing.T) {
 	writeCheckStep(t, featureDir, "SCENARIO-01", "open", []string{"- [ ] do the thing"})
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md"), []byte(checkBodyOfLines(61)), 0o600))
 
-	var textStdout, textStderr bytes.Buffer
-	textErr := cli.Run(t.Context(), wd, []string{"check"}, nil, &textStdout, &textStderr)
-
 	var stdout, stderr bytes.Buffer
 	err := cli.Run(t.Context(), wd, []string{"check", "--json"}, nil, &stdout, &stderr)
 
-	assert.Equal(t, cli.ExitCode(textErr), cli.ExitCode(err))
 	assert.Equal(t, 1, cli.ExitCode(err))
-	assert.Equal(t, textStdout.String(), stdout.String())
-	assert.Equal(t, textStderr.String(), stderr.String())
+	assert.Empty(t, stderr.String())
+
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+	assert.NotContains(t, jsonKeys(t, doc), "error")
+
+	var ok bool
+	require.NoError(t, json.Unmarshal(doc["ok"], &ok))
+	assert.False(t, ok)
+
+	var exitCode int
+	require.NoError(t, json.Unmarshal(doc["exit_code"], &exitCode))
+	assert.Equal(t, 1, exitCode)
+
+	var counts struct {
+		Error int `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(doc["counts"], &counts))
+	assert.Positive(t, counts.Error)
 
 	var controlStdout, controlStderr bytes.Buffer
 	controlErr := cli.Run(t.Context(), wd, []string{"check", "--json", "ghost"}, nil, &controlStdout, &controlStderr)

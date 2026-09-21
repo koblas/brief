@@ -230,7 +230,7 @@ Scenario: SCENARIO-14 Every command's help advertises --json
 - [x] SCENARIO-06: status reads as a table for people
 - [x] SCENARIO-07: status --json
 - [x] SCENARIO-08: check groups findings by feature and names each rule
-- [ ] SCENARIO-09: check --json
+- [x] SCENARIO-09: check --json
 - [ ] SCENARIO-10: new feature / new step say what happened and what's next
 - [ ] SCENARIO-11: finish reports what it wrote and what's next
 - [ ] SCENARIO-12: --version --json in either order

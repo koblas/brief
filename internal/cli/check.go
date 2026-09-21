@@ -43,6 +43,103 @@ var errCheckFindings = errors.New("check reported an error-severity finding")
 // names as how to fix it.
 const checkInvocation = "brief check [feature]"
 
+// checkCountsJSON is checkDocument's "counts" member: the same
+// countFindings tally checkSummary's text-mode line and runCheck's own
+// exit decision both use, so exit_code == 1 iff counts.error > 0 by
+// construction.
+type checkCountsJSON struct {
+	Error int `json:"error"`
+	Warn  int `json:"warn"`
+}
+
+// checkFindingJSON is one checkFeatureJSON row's "findings" member:
+// severity, rule, path and detail exactly as assemble.Finding carries
+// them, raw and never flattened — check --json builds from the
+// un-relativized findings Check returned (R6), and detail is never passed
+// through flattenTabwriterField the way the text table's own cell is.
+// Line is nil (JSON null) when Finding.Line == 0 (a whole-file finding),
+// else the integer.
+type checkFindingJSON struct {
+	Severity string `json:"severity"`
+	Rule     string `json:"rule"`
+	Path     string `json:"path"`
+	Line     *int   `json:"line"`
+	Detail   string `json:"detail"`
+}
+
+// checkFeatureJSON is one checkDocument "features" row: name, path and
+// in_flight exactly as assemble.FeatureFindings carries them, plus that
+// group's own findings in within-group order.
+type checkFeatureJSON struct {
+	Name     string             `json:"name"`
+	Path     string             `json:"path"`
+	InFlight bool               `json:"in_flight"`
+	Findings []checkFindingJSON `json:"findings"`
+}
+
+// checkDocument is check's --json success document: the common header
+// first, then counts, then one row per feature with findings — no "data"
+// wrapper (R2). Findings render as this document's payload even when
+// counts.error is greater than zero (R4): check --json never renders an
+// ERROR-carrying run as an error document.
+type checkDocument struct {
+	jsonHeader
+
+	Counts   checkCountsJSON    `json:"counts"`
+	Features []checkFeatureJSON `json:"features"`
+}
+
+// checkFeatures maps groups to checkDocument's "features" array: a sized,
+// non-nil slice so zero groups encode as "[]" rather than "null" (R9's
+// empty discriminator, in JSON form).
+func checkFeatures(groups []assemble.FeatureFindings) []checkFeatureJSON {
+	out := make([]checkFeatureJSON, 0, len(groups))
+
+	for _, g := range groups {
+		findings := make([]checkFindingJSON, 0, len(g.Findings))
+
+		for _, f := range g.Findings {
+			var line *int
+			if f.Line != 0 {
+				l := f.Line
+				line = &l
+			}
+
+			findings = append(findings, checkFindingJSON{
+				Severity: string(f.Severity),
+				Rule:     string(f.Rule),
+				Path:     f.Path,
+				Line:     line,
+				Detail:   f.Detail,
+			})
+		}
+
+		out = append(out, checkFeatureJSON{Name: g.Name, Path: g.Path, InFlight: g.InFlight, Findings: findings})
+	}
+
+	return out
+}
+
+// countFindings tallies groups' findings by severity: the one count
+// checkSummary's text-mode line, checkDocument's "counts" and runCheck's
+// own exit decision all use, so a run's ERROR/WARN totals can never
+// disagree between the text and --json paths.
+func countFindings(groups []assemble.FeatureFindings) (int, int) {
+	var errorCount, warnCount int
+
+	for _, g := range groups {
+		for _, f := range g.Findings {
+			if f.Severity == assemble.SeverityError {
+				errorCount++
+			} else {
+				warnCount++
+			}
+		}
+	}
+
+	return errorCount, warnCount
+}
+
 // runCheck implements "brief check [feature]"; rest is its positional
 // arguments, flags already parsed away.
 func runCheck(ctx context.Context, wd string, rest []string, out reporter) error {
@@ -67,13 +164,37 @@ func runCheck(ctx context.Context, wd string, rest []string, out reporter) error
 		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
 	}
 
+	groups := assemble.GroupByFeature(findings)
+
+	errorCount, warnCount := countFindings(groups)
+
+	var runErr error
+	if errorCount > 0 {
+		runErr = errCheckFindings
+	}
+
+	// R1/R6: --json is decided here, before either the no-findings notice
+	// or displayFindings' relativized copy, so it writes zero stderr bytes
+	// and sees Check's own absolute paths.
+	if out.json {
+		doc := checkDocument{
+			jsonHeader: out.headerFor(ExitCode(runErr)),
+			Counts:     checkCountsJSON{Error: errorCount, Warn: warnCount},
+			Features:   checkFeatures(groups),
+		}
+
+		if err := writeJSONDocument(out.stdout, doc); err != nil {
+			return fmt.Errorf("brief check: %w", err)
+		}
+
+		return runErr
+	}
+
 	if len(findings) == 0 {
 		fmt.Fprintln(out.stderr, "brief check: no findings")
 
 		return nil
 	}
-
-	groups := assemble.GroupByFeature(findings)
 
 	if err := assemble.RenderFindings(out.stdout, displayFindings(wd, groups)); err != nil {
 		return fmt.Errorf("brief check: %w", err)
@@ -81,15 +202,7 @@ func runCheck(ctx context.Context, wd string, rest []string, out reporter) error
 
 	fmt.Fprintf(out.stderr, "brief check: %s\n", checkSummary(groups, feature))
 
-	for _, g := range groups {
-		for _, f := range g.Findings {
-			if f.Severity == assemble.SeverityError {
-				return errCheckFindings
-			}
-		}
-	}
-
-	return nil
+	return runErr
 }
 
 // displayFindings returns a copy of groups with every Finding.Path
@@ -126,19 +239,13 @@ func displayFindings(wd string, groups []assemble.FeatureFindings) []assemble.Fe
 // is ordered by count descending, then rule id ascending — never map
 // iteration order, which would make the summary flaky.
 func checkSummary(groups []assemble.FeatureFindings, featureArg string) string {
-	var errorCount, warnCount int
+	errorCount, warnCount := countFindings(groups)
 
 	tally := make(map[assemble.Rule]int)
 
 	for _, g := range groups {
 		for _, f := range g.Findings {
 			tally[f.Rule]++
-
-			if f.Severity == assemble.SeverityError {
-				errorCount++
-			} else {
-				warnCount++
-			}
 		}
 	}
 
