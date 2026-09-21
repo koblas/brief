@@ -228,7 +228,7 @@ Scenario: SCENARIO-14 Every command's help advertises --json
 - [x] SCENARIO-04: A malformed feature names the step file at fault
 - [x] SCENARIO-05: An unknown feature lists the known ones
 - [x] SCENARIO-06: status reads as a table for people
-- [ ] SCENARIO-07: status --json
+- [x] SCENARIO-07: status --json
 - [ ] SCENARIO-08: check groups findings by feature and names each rule
 - [ ] SCENARIO-09: check --json
 - [ ] SCENARIO-10: new feature / new step say what happened and what's next

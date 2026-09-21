@@ -23,6 +23,79 @@ one line on stderr saying so. brief status reads; it never writes.`
 // error names as how to fix it.
 const statusInvocation = "brief status"
 
+// statusDocument is status's --json success document: the common header
+// first, then one row per feature, no "data" wrapper (R2).
+type statusDocument struct {
+	jsonHeader
+
+	Features []statusFeatureJSON `json:"features"`
+}
+
+// statusFeatureJSON is one row of statusDocument's "features" array: Done,
+// Total and Blocked are nil (JSON null) exactly when Problem is non-nil — a
+// malformed row measured nothing, so it reports no counts rather than
+// zeroes that would look measured. Complete is
+// (assemble.FeatureStatus).Complete(), Next is nil when the row has no open
+// step (including a malformed or a zero-step feature), and Problem is nil
+// on every row that read cleanly.
+type statusFeatureJSON struct {
+	Name     string             `json:"name"`
+	Path     string             `json:"path"`
+	Done     *int               `json:"done"`
+	Total    *int               `json:"total"`
+	Blocked  *int               `json:"blocked"`
+	Complete bool               `json:"complete"`
+	Next     *statusNextJSON    `json:"next"`
+	Problem  *statusProblemJSON `json:"problem"`
+}
+
+// statusNextJSON is a statusFeatureJSON row's "next" member: id, title and
+// path exactly as assemble.NextStep carries them — title is raw, never
+// flattened for a tabwriter column the way the text table's NEXT cell is.
+type statusNextJSON struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Path  string `json:"path"`
+}
+
+// statusProblemJSON is a statusFeatureJSON row's "problem" member: path and
+// detail/fix exactly as assemble.Problem carries them, raw and never
+// flattened. Line is always nil: assemble.Problem carries no line number
+// today, and the key stays present so a future assemble.Problem.Line is
+// additive rather than a schema bump.
+type statusProblemJSON struct {
+	Path   string `json:"path"`
+	Line   *int   `json:"line"`
+	Detail string `json:"detail"`
+	Fix    string `json:"fix"`
+}
+
+// statusFeatures maps rows to statusDocument's "features" array: a sized,
+// non-nil slice so zero rows encode as "[]" rather than "null" (R9's empty
+// discriminator, in JSON form).
+func statusFeatures(rows []assemble.FeatureStatus) []statusFeatureJSON {
+	out := make([]statusFeatureJSON, 0, len(rows))
+
+	for _, row := range rows {
+		f := statusFeatureJSON{Name: row.Name, Path: row.Path, Complete: row.Complete()}
+
+		if row.Problem == nil {
+			done, total, blocked := row.Done, row.Total, row.Blocked
+			f.Done, f.Total, f.Blocked = &done, &total, &blocked
+		} else {
+			f.Problem = &statusProblemJSON{Path: row.Problem.Path, Detail: row.Problem.Detail, Fix: row.Problem.Fix}
+		}
+
+		if row.Next != nil {
+			f.Next = &statusNextJSON{ID: row.Next.ID, Title: row.Next.Title, Path: row.Next.Path}
+		}
+
+		out = append(out, f)
+	}
+
+	return out
+}
+
 // runStatus implements "brief status"; rest is its positional arguments,
 // flags already parsed away, and must be empty.
 func runStatus(ctx context.Context, wd string, rest []string, out reporter) error {
@@ -40,6 +113,19 @@ func runStatus(ctx context.Context, wd string, rest []string, out reporter) erro
 	rows, err := srv.Status(ctx)
 	if err != nil {
 		return out.refusal(err)
+	}
+
+	// R1: --json writes zero stderr bytes on success, including the
+	// zero-rows and malformed-row cases below, so this branch runs before
+	// either ever writes anything.
+	if out.json {
+		doc := statusDocument{jsonHeader: out.successHeader(), Features: statusFeatures(rows)}
+
+		if err := writeJSONDocument(out.stdout, doc); err != nil {
+			return fmt.Errorf("brief status: %w", err)
+		}
+
+		return nil
 	}
 
 	if len(rows) == 0 {

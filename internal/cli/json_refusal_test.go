@@ -471,23 +471,39 @@ func Test_json_mode_check_findings_are_not_an_error_document(t *testing.T) {
 	decodeErrorDocument(t, controlStdout.Bytes(), "check")
 }
 
-// Test_json_mode_status_problem_stays_text_until_its_payload_lands pins
-// the interim rule this scenario leaves in place: status --json with a
-// malformed feature still runs the text path unchanged — SCENARIO-07 owns
-// giving it a document.
-func Test_json_mode_status_problem_stays_text_until_its_payload_lands(t *testing.T) {
+// Test_json_mode_status_with_a_malformed_feature_is_a_success_document is
+// R4: status --json with a malformed feature is still a success document —
+// ok true, exit_code 0, no "error" key — with the fault reported as payload
+// (the row's own "problem" object) instead. The control arm is the same
+// fixture without --json: the text path still writes the malformed line and
+// the summary to stderr, so the --json empty stderr above is the branch,
+// not a coincidence of this fixture.
+func Test_json_mode_status_with_a_malformed_feature_is_a_success_document(t *testing.T) {
 	wd := t.TempDir()
 	writeMalformedStatusFeature(t, wd, "delta")
-
-	var textStdout, textStderr bytes.Buffer
-	textErr := cli.Run(t.Context(), wd, []string{"status"}, nil, &textStdout, &textStderr)
-	require.NoError(t, textErr)
 
 	var stdout, stderr bytes.Buffer
 	err := cli.Run(t.Context(), wd, []string{"status", "--json"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, cli.ExitCode(err))
-	assert.Equal(t, textStdout.String(), stdout.String())
-	assert.Equal(t, textStderr.String(), stderr.String())
+	assert.Empty(t, stderr.String())
+
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+	assert.NotContains(t, jsonKeys(t, doc), "error")
+
+	var ok bool
+	require.NoError(t, json.Unmarshal(doc["ok"], &ok))
+	assert.True(t, ok)
+
+	var exitCode int
+	require.NoError(t, json.Unmarshal(doc["exit_code"], &exitCode))
+	assert.Equal(t, 0, exitCode)
+
+	var textStdout, textStderr bytes.Buffer
+	textErr := cli.Run(t.Context(), wd, []string{"status"}, nil, &textStdout, &textStderr)
+
+	require.NoError(t, textErr)
+	assert.NotEmpty(t, textStderr.String())
 }

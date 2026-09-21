@@ -1,6 +1,6 @@
 # human-output — current state
 
-Scenarios complete: SCENARIO-01..06. Last updated by SCENARIO-06.
+Scenarios complete: SCENARIO-01..07. Last updated by SCENARIO-07.
 
 ## Binding decisions
 
@@ -13,50 +13,51 @@ Scenarios complete: SCENARIO-01..06. Last updated by SCENARIO-06.
   `jsonHeader` first, payload **by value**, via `writeJSONDocument`.
 - `files_changed`: `false` for `new`, `new feature`, `new step`, `finish`; `null` otherwise
   (`filesChangedFor`).
-- `classifyRefusal(err)` is the pure classifier text line and `--json` `message` share.
-  Order: `*config.InvalidConfigError`, `*unknownFeatureError`, `*scaffold.RefusalError`,
-  `*assemble.RefusalError`, generic `errorKindFailure`. Not-found is enriched at the call
-  site (`enrichUnknownFeature` in `start.go`/`check.go`/`finish.go`/`new.go`), never in
-  `classifyRefusal` itself, and `*unknownFeatureError` **must** be checked before
-  `*scaffold.RefusalError` (mutation-verified M7, S05) or `new step`/`finish` silently keep
-  the old path-less copy.
+- `classifyRefusal(err)` order: `*config.InvalidConfigError`, `*unknownFeatureError`,
+  `*scaffold.RefusalError`, `*assemble.RefusalError`, generic `errorKindFailure`.
+  Not-found is enriched at the call site (`enrichUnknownFeature`), never in
+  `classifyRefusal`; `*unknownFeatureError` before `*scaffold.RefusalError` is load-bearing
+  (mutation-verified M7, S05).
 - **Paths: absolute in `assemble`/`scaffold`/JSON, relative in text (R6)** via
   `internal/cli/refusal.go`'s `displayPath(wd, p)`. (S04)
 - A step-file frontmatter parse failure wraps as `*stepFrontmatterError{name, err}`; `newProblem`
   names the step file, fix `run 'brief check <feature>' to list every fault`. (S04)
 - `assemble.FeatureStatus`: `Next *NextStep{ID,Title,Path}` (nil = no open step), `Path`
   absolute feature dir set on **every** row including Problem rows. `Next.Title` is
-  `markdown.Title` of the step body after frontmatter (empty when no `# ` heading — the
-  status table then shows the id alone); `Next.Path` = feature dir joined with
-  `pattern.Name(n)`, the same join `Start` uses. `(FeatureStatus).Complete()` =
-  `Problem == nil && Total > 0 && Done == Total` is the one definition of "complete" — a
-  zero-step feature is NOT complete (DONE `0/0`, NEXT `-`, counted **in progress**). (S06)
+  `markdown.Title` after frontmatter; `Next.Path` = feature dir joined with
+  `pattern.Name(n)`. `(FeatureStatus).Complete()` = `Problem == nil && Total > 0 &&
+  Done == Total` — the one definition of "complete"; zero steps is NOT complete. (S06)
 - `assemble.RenderStatusText` renders the FEATURE/DONE/BLOCKED/NEXT table via
-  `text/tabwriter` (2-space pad, NEXT unpadded/last, header omitted for zero rows per R9);
-  it carries no paths and knows nothing of `wd`. `internal/cli/status.go`'s `runStatus`
-  writes the table to stdout first (flushed), then one stderr line per malformed row —
-  `brief status: <feature>: <rel path>: <detail>; <fix>` — then always (when rows exist)
-  `unexported statusSummary(rows)`: `brief status: N features: A in progress, B complete,
-  C malformed` (`1 feature` singular, all three buckets always printed). (S06)
-- Golden policy: one exact-bytes golden pins key order per document shape; matrix/decode
-  tests check dynamic fields against a captured value, never a literal copied from
-  production.
+  `text/tabwriter` (2-space pad, NEXT unpadded/last, header omitted for zero rows per R9).
+  `runStatus` writes the table first (flushed), then one stderr line per malformed row,
+  then always `statusSummary(rows)`. (S06)
+- `status --json`'s success document is `statusDocument` in `internal/cli/status.go` (same
+  placement as `startDocument`), branched on `out.json` **before** the zero-rows notice and
+  any malformed-row/summary stderr write: zero stderr bytes on every success path (R1/R4).
+  Malformed rows' `done`/`total`/`blocked` are `*int` nil in `statusFeatureJSON` only —
+  `assemble.FeatureStatus` keeps plain ints. `features` is `[]` (never `null`) on zero rows;
+  `next.title`/`problem.detail`/`fix` are raw; `problem.line` is always `null` (key present
+  for an additive future `assemble.Problem.Line`). `features[].name` is the
+  machine-readable "known features" list, narrower than `known:` (see Traps). (S07)
+- Golden policy: one exact-bytes golden pins key order (`assert.Equal`, never `JSONEq` —
+  testifylint's `encoded-compare` doesn't fire when the literal is built into a `want :=`
+  variable first); matrix/decode tests check dynamic fields against a captured value, never
+  a literal copied from production.
 
 ## Left unbuilt
 
-- status/check/new/finish/--version/help JSON documents — S07/09/10/11/12/13; until each
-  lands that command runs its **text** path under `--json`.
-- `completion … --json` usage-error document — S13; today it prints the script regardless.
+- status/check/new/finish/--version/help JSON documents — S09/10/11/12/13 (status done,
+  S07); until each lands that command runs its **text** path under `--json`.
+- `completion … --json` usage-error document — S13.
 - `--json` flag row in every command's help — S14. Only `start` registers it.
 - `check`'s own text/JSON paths (`RenderFindings`) are still absolute, carry no stable
   `rule` id (R8), and print `:0` for a whole-file finding — S08.
 - `new`'s stdout path and `new`/`finish` success stderr are still absolute — S10/S11.
-- `status --json` document (`statusDocument`), `Problem.Line` (still absent — S07's
-  `problem.line` needs it or `null`), status help's "For scripts, use --json; the text
-  layout may change." sentence, and a structured `known` array in the JSON error object —
-  all S07/S14; a `--json` caller needing the known list uses `status --json` (S07).
-- `assemble.RenderJSON` — no production caller now that start builds its own document;
-  removing it is a refactor, **unowned by any scenario**.
+- status help's "For scripts, use --json; the text layout may change." sentence, and a
+  structured `known` array in the JSON error object — S14; a `--json` caller needing the
+  known list uses `status --json`'s `features[].name` (S07).
+- `assemble.Problem.Line` — unowned; no Problem source yields a line today.
+- `assemble.RenderJSON` — no production caller; removing it is unowned.
 
 ## Traps
 
@@ -66,19 +67,18 @@ Scenarios complete: SCENARIO-01..06. Last updated by SCENARIO-06.
 - A reserved-name collision (`schema`, `command`, `ok`, `exit_code`, `error`) in a future
   payload struct is silently resolved by encoding/json's equal-depth rule.
 - `known:` (unknown-feature errors) lists only openable directories via `assemble.Features`
-  — a symlink or an unopenable directory named like a feature appears in `brief status`'s
-  table but never in `known:`, contradictory but pre-existing. S07 must not "reconcile" the
-  two lists into one.
-- `text/tabwriter` pads only tab-terminated cells: NEXT (last column) must never be
-  followed by a tab, or every line gains trailing padding; a tab/newline inside a feature
-  name or step title corrupts the table's columns unless flattened first
-  (`flattenTabwriterField`). S07's JSON payload must not reuse this flattening — JSON needs
-  the raw title.
-- Defining "complete" as `Next == nil` (instead of via `Complete()`) makes a zero-step
-  feature misread as complete; S07's `complete` bool must call `Complete()`, not recompute.
+  — a symlink or unopenable directory named like a feature appears in `status`'s table and
+  `status --json`'s `features[]` but never in `known:`, pre-existing, never reconciled.
+- `flattenTabwriterField`/`flattenOneLine` are text-only; a JSON payload must never reuse
+  them — JSON carries the raw title/detail/fix even though a tab/newline would corrupt the
+  text table unless flattened (mutation-verified, S07).
+- Defining "complete" as `Next == nil` instead of via `Complete()` misreads a zero-step
+  feature as complete (mutation-verified, S07).
+- A `--json` success branch placed after any stderr-writing code lets that write happen in
+  JSON mode too, breaking R1's zero-stderr guarantee — it must run before a success path's
+  first possible stderr write (mutation-verified, S07).
 
 ## Open debts
 
 - `assemble.RenderJSON` (see Left unbuilt) — unowned; dies unless re-opened.
-- `scaffold.noSuchFeatureRefusal`'s dead `Problem`/`Fix` fields — unowned; a future pass
-  touching `internal/scaffold/scaffold.go` should consider deleting them.
+- `scaffold.noSuchFeatureRefusal`'s dead `Problem`/`Fix` fields — unowned.
