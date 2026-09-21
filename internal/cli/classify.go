@@ -37,10 +37,13 @@ const (
 	// value. msg is unknownLongFlagMessage("--version"), the same wording
 	// argUnknownFlag would report for it — so a caller that has no
 	// "--version" contract of its own (runNew, the help stub) can fold this
-	// case into its argUnknownFlag arm byte-for-byte. "--version=<v>" does
-	// not match here: it falls through to argUnknownFlag, since a value on
-	// "--version" is a different rule (root's "takes no value" case) than
-	// this exact-match kind carries.
+	// case into its argUnknownFlag arm byte-for-byte. Root is the one
+	// caller with its own "--version" contract: it prints the version for
+	// a sole "--version" and reports its own "takes no arguments" copy for
+	// a trailing argument, using neither msg for that branch. "--version=<v>"
+	// does not match here: it falls through to argUnknownFlag, since a
+	// value on "--version" is a different rule (root's "takes no value"
+	// case) than this exact-match kind carries.
 	argVersionFlag
 )
 

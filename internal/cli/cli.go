@@ -459,12 +459,20 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 
 // runRoot handles a top-level invocation that named no known command:
 // nothing at all, "--help"/"-h" given a value, a sole "-h"/"--help", a
-// "-h"/"--help" alongside another argument, a sole "--version", some other
-// dash-prefixed token, "--" (pflag's flag-parsing terminator, never a flag
-// itself), or an unknown command name. Cobra intercepts "help" as a
-// dispatch to the tree's own help command (see newRootCommand's
-// SetHelpCommand) before this ever runs, so this function never sees
-// "help" as args[0].
+// "-h"/"--help" alongside another argument, a sole "--version", "--version"
+// alongside another argument, some other dash-prefixed token, "--" (pflag's
+// flag-parsing terminator, never a flag itself), or an unknown command
+// name. Cobra intercepts "help" as a dispatch to the tree's own help
+// command (see newRootCommand's SetHelpCommand) before this ever runs, so
+// this function never sees "help" as args[0].
+//
+// A trailing argument alongside "--version" is reported as that flag taking
+// no arguments, naming it exactly as typed and pointing at "brief
+// --version" — argVersionFlag's own msg (the unknown-flag wording runNew
+// and the help stub fold it into) is not used for this branch. Only
+// args[0] decides which flag's "takes no arguments" error fires: a
+// "--version" trailing after "--help" reports "--help"'s error, never
+// this one.
 func runRoot(cmd *cobra.Command, args []string, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief: no command given; expected one of: "+expectedCommandList(cmd))
@@ -478,7 +486,7 @@ func runRoot(cmd *cobra.Command, args []string, stdout, stderr io.Writer, readBu
 			return cmd.Help()
 		}
 
-		return usageError(stderr, fmt.Sprintf("brief: '%s' takes no arguments; run 'brief help <command>'", args[0]))
+		return usageError(stderr, takesNoArgumentsMessage(args[0], "brief help <command>"))
 	case argVersionFlag:
 		if len(args) == 1 {
 			fmt.Fprintln(stdout, versionLine(readBuildInfo))
@@ -486,7 +494,7 @@ func runRoot(cmd *cobra.Command, args []string, stdout, stderr io.Writer, readBu
 			return nil
 		}
 
-		return usageError(stderr, fmt.Sprintf("brief: %s; run 'brief <command> --help'", msg))
+		return usageError(stderr, takesNoArgumentsMessage(args[0], "brief --version"))
 	case argUnknownFlag:
 		return usageError(stderr, fmt.Sprintf("brief: %s; run 'brief <command> --help'", msg))
 	case argNotFlag:
@@ -507,6 +515,15 @@ func versionLine(readBuildInfo func() (*debug.BuildInfo, bool)) string {
 	}
 
 	return "brief " + info.Main.Version
+}
+
+// takesNoArgumentsMessage renders root's "takes no arguments" usage copy for
+// flag — named exactly as typed — pointing the caller at runHint. It backs
+// root's argHelpFlag and argVersionFlag arms only: runNew and the help stub
+// build their own "takes no arguments" copy inline, with their own prefixes
+// and hints (R6).
+func takesNoArgumentsMessage(flag, runHint string) string {
+	return fmt.Sprintf("brief: '%s' takes no arguments; run '%s'", flag, runHint)
 }
 
 // usageError writes msg, followed by a single newline, to stderr and

@@ -293,7 +293,10 @@ func Test_prints_root_usage_and_a_nil_error_for_brief_help(t *testing.T) {
 // (new.go's runNew) and the help stub's own -h/--help rule: any trailing
 // argument alongside "-h"/"--help" is reported as that flag taking no
 // arguments, naming it exactly as typed and pointing at "brief help
-// <command>" — never as an unknown command naming "-h"/"--help" itself.
+// <command>" — never as an unknown command naming "-h"/"--help" itself. The
+// "--help --version" row pins that the first argument alone decides which
+// flag's error fires (R8): "--version" trailing after "--help" never
+// classifies as the version flag's own trailing-argument error.
 func Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -313,6 +316,11 @@ func Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments(t *
 		{
 			name:    "--help start",
 			args:    []string{"--help", "start"},
+			wantErr: `brief: '--help' takes no arguments; run 'brief help <command>'`,
+		},
+		{
+			name:    "--help --version",
+			args:    []string{"--help", "--version"},
 			wantErr: `brief: '--help' takes no arguments; run 'brief help <command>'`,
 		},
 	}
@@ -434,6 +442,46 @@ func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T)
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
 	assert.Equal(t, "brief (devel)\n", stdout.String())
+}
+
+// Test_reports_a_version_flag_with_trailing_arguments_as_taking_no_arguments
+// pins that root's "--version" sole-argument handling (see
+// version_internal_test.go) applies only when it is the sole argument: any
+// trailing argument alongside "--version" is reported as that flag taking
+// no arguments, pointing at "brief --version" — never as the unknown-flag
+// wording argVersionFlag's msg would otherwise carry (R4).
+//
+// Mutation-verified, restored byte-identical after each: widening the
+// argVersionFlag arm's guard from "len(args) == 1" to "len(args) >= 1"
+// reddens every row here (nil error, version printed instead of the usage
+// error); changing that arm's run hint from "brief --version" to "brief
+// help <command>" reddens every row here on the hint text while the sibling
+// table's "--help --version" control row (R8) stays green, proving the two
+// arms report independently.
+func Test_reports_a_version_flag_with_trailing_arguments_as_taking_no_arguments(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "--version extra", args: []string{"--version", "extra"}},
+		{name: "--version --json", args: []string{"--version", "--json"}},
+		{name: "--version --help", args: []string{"--version", "--help"}},
+		{name: "--version --version", args: []string{"--version", "--version"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, `brief: '--version' takes no arguments; run 'brief --version'`, oneLine(t, &stderr))
+		})
+	}
 }
 
 // Test_treats_a_bare_dash_as_a_plain_unknown_command is the control arm
