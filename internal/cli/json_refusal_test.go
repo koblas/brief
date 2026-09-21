@@ -422,6 +422,12 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 // generic failure's fix is a --json-only fallback that never appears in
 // the text-mode line, so that containment does not hold uniformly across
 // every row.
+//
+// Mutation-verified: closing the fence in the "finish --state relative
+// path fails conformance" row's own state.md fixture reddens exactly that
+// row's subtest (it falls through to a missing-heading refusal instead),
+// leaving every other row green — proving each row's own fixture, not the
+// loop body, is what the assertions actually exercise.
 func Test_json_mode_refusal_matrix(t *testing.T) {
 	falseVal := false
 

@@ -1,6 +1,7 @@
 # human-output — current state
 
-Scenarios complete: SCENARIO-01..14 (all). Last updated by a post-scenario fix round.
+Scenarios complete: SCENARIO-01..14 (all). Last updated by a post-review fix round (NewFeature
+write-site tests).
 
 ## Binding decisions
 
@@ -16,9 +17,12 @@ Scenarios complete: SCENARIO-01..14 (all). Last updated by a post-scenario fix r
   err)`) it is what actually landed: `false` when nothing was written, `true` iff
   `errors.Is(err, scaffold.ErrPartialWrite)`. Set by `scaffold.writeFailure(..., partial bool)`
   for every write in `Finish.applyFinishWrites` after the first, by `markPartial` on `NewStep`'s
-  specification write, and on both of `NewFeature`'s writes (its `Mkdir` already landed) —
-  mutation-verified per site. `partialWriteError.Unwrap() []error` carries the sentinel without
-  changing `Error()`'s text, so `message`/`problem` are unaffected.
+  specification write, and on both of `NewFeature`'s writes — every site mutation-verified
+  individually. `NewFeature`'s `writeExclusive` has no decoy-directory seam
+  (`replaceBytes`/`replaceString`'s trick); its tests force the failure through `cfg` instead: a
+  `specification-file` with a path separator whose parent was never `Mkdir`'d, and a `state-file`
+  equal to `specification-file` so the second `O_CREATE|O_EXCL` collides with the first write.
+  `partialWriteError.Unwrap() []error` carries the sentinel without changing `Error()`'s text.
 - `classifyRefusal(err)` order: `*config.InvalidConfigError`, `*unknownFeatureError`,
   `*scaffold.RefusalError`, `*assemble.RefusalError`, generic `errorKindFailure` — load-bearing
   (mutation-verified). Every refusal-matrix row's `fix` is asserted `Equal`, not just non-empty.
@@ -67,11 +71,6 @@ Scenarios complete: SCENARIO-01..14 (all). Last updated by a post-scenario fix r
 - `os.ReadDir` order is filename order — `nextOpenStep` picks the minimum by `pattern.Number`.
 - pflag sorts a leaf's Flags rows by name: `--json` lands between `--help` and `--state` in
   finish's table — a future flag addition must check where pflag's sort puts it.
-- `scaffold.writeExclusive` (`O_CREATE|O_EXCL`, no atomicfile temp sibling) has no seam to force
-  a mid-sequence write failure the way `replaceBytes`/`replaceString` do via a decoy
-  `.<name>.brief-tmp` directory — `NewFeature`'s two writes are marked `ErrPartialWrite` by
-  reasoning only, not a red/green test; `Finish`'s four sites and `NewStep`'s specification
-  write are the ones actually mutation-verified.
 
 ## Open debts
 
@@ -81,5 +80,7 @@ Scenarios complete: SCENARIO-01..14 (all). Last updated by a post-scenario fix r
   `_ = writeJSONDocument(...)`) — unowned — dies unless re-opened.
 - A success document's own write failure and a text-mode render failure exit with different
   codes/messages for the same underlying I/O fault — unowned asymmetry — dies unless re-opened.
-- `NewFeature`'s write-site test gap above — unowned unless a future change routes its writes
-  through `replaceBytes`/atomicfile, which would also give it the same decoy-directory seam.
+- `writeExclusive` orphaning a file when `WriteString`/`Close` fails after `OpenFile` succeeds
+  (`NewStep` then reports `files_changed` false) — correctness MINOR, not constructible via a
+  returned error — unowned.
+- `reporter.refusal`'s compose-method extraction — refactor MINOR — unowned.

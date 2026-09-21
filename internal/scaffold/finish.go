@@ -331,20 +331,24 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 // by then the handoff file has already landed: cli's files_changed (R3)
 // reads that distinction through errors.Is(err, ErrPartialWrite).
 func applyFinishWrites(root *os.Root, cfg config.Config, feature, step, handoffName string, handoff []byte, stepFileName string, newStepBody []byte, newSpec string, state []byte) error {
+	landed := false
+
 	if err := replaceBytes(root, handoffName, handoff); err != nil {
-		return writeFailure(err, feature, step, false)
+		return writeFailure(err, feature, step, landed)
 	}
 
+	landed = true
+
 	if err := replaceBytes(root, cfg.StateFile, state); err != nil {
-		return writeFailure(err, feature, step, true)
+		return writeFailure(err, feature, step, landed)
 	}
 
 	if err := replaceBytes(root, stepFileName, newStepBody); err != nil {
-		return writeFailure(err, feature, step, true)
+		return writeFailure(err, feature, step, landed)
 	}
 
 	if err := replaceString(root, cfg.SpecificationFile, newSpec); err != nil {
-		return writeFailure(err, feature, step, true)
+		return writeFailure(err, feature, step, landed)
 	}
 
 	return nil

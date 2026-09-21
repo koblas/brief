@@ -243,6 +243,52 @@ func Test_the_byte_identity_probe_sees_a_change_when_the_scaffold_writes_one(t *
 	assert.NotEqual(t, before, after)
 }
 
+// Test_reports_a_specification_write_that_cannot_be_committed_on_new_feature
+// covers NewFeature's own specification-write markPartial site: a
+// configured specification-file carrying a path separator makes
+// writeExclusive's OpenFile fail against a parent directory that was
+// never created — the feature directory itself (Root.Mkdir) has already
+// landed by then, so the failure must be reported as ErrPartialWrite.
+func Test_reports_a_specification_write_that_cannot_be_committed_on_new_feature(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	cfg.SpecificationFile = filepath.Join("sub", "SPEC.md")
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewFeature(context.Background(), "widgets")
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrPartialWrite,
+		"the feature directory already landed via Root.Mkdir before the specification write could fail")
+	assert.DirExists(t, filepath.Join(root, "specs", "widgets"))
+}
+
+// Test_reports_a_state_write_that_cannot_be_committed_on_new_feature covers
+// NewFeature's own state-write markPartial site: configuring the state
+// file with the same name as the specification file makes the
+// specification's writeExclusive land first, then the state write's own
+// O_CREATE|O_EXCL collide with the file the specification write just
+// created. The control arm reads that file back: its bytes are still the
+// specification skeleton, proving the second, failed write never
+// truncated what the first one landed.
+func Test_reports_a_state_write_that_cannot_be_committed_on_new_feature(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	cfg.StateFile = cfg.SpecificationFile
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewFeature(context.Background(), "widgets")
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrPartialWrite,
+		"the specification write already landed before the colliding state write could fail")
+
+	got, readErr := os.ReadFile(filepath.Join(root, "specs", "widgets", cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Equal(t, "# widgets\n\n## Progress\n", string(got),
+		"the specification write must not have been truncated by the failed state write")
+}
+
 // Test_the_scaffolded_files_are_all_created_owner_only pins the mode
 // writeExclusive creates the specification, state and step files with.
 //
