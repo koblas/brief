@@ -1,6 +1,6 @@
 # cli-cobra — current state
 
-Scenarios complete: SCENARIO-01..02. Last updated by SCENARIO-02.
+Scenarios complete: SCENARIO-01..03. Last updated by SCENARIO-03.
 
 ## Binding decisions
 
@@ -17,18 +17,19 @@ Scenarios complete: SCENARIO-01..02. Last updated by SCENARIO-02.
   (set by `leafCommand`'s `invocation` param). pflag's own wording passes through verbatim:
   `unknown flag: --bogus`, `unknown shorthand flag: 'x' in -x`, `flag needs an argument: --x`.
   S02 mutation-verified all four moving parts of this frame independently: the path
-  expression (only `new feature`/`new step` discriminate `cmd.Name()` from the trimmed
-  `CommandPath()`), the per-command `Annotations` lookup (vs. `cmd.Root().Annotations`,
-  which reddens every row), the `usageError(...)` wrap (an unwrapped `err` loses `ErrUsage`
-  on every row), and one leaf's `invocation` argument (redddens only that leaf). S03..S06
-  assert against this same output; do not re-derive it differently per command. (SCENARIO-01,
-  SCENARIO-02)
+  expression, the per-command `Annotations` lookup, the `usageError(...)` wrap, and one
+  leaf's `invocation` argument. S03 mutation-verified the same frame holds for shorthand
+  clusters (registering a colliding `x` shorthand on `new feature` alone reddened exactly
+  that leaf's three shorthand rows, not the other five leaves). S04..S06 assert against this
+  same output; do not re-derive it differently per command. (SCENARIO-01, SCENARIO-02,
+  SCENARIO-03)
 - `flag_error_test.go` (`cli_test` package) is the home for flag-parse error tables, one
   table per scenario, using the `oneLine` helper from `run_test.go`. Each row's expected
-  stderr is a literal string, never built from a production `invocation` constant (e.g.
-  `finishInvocation`) — building it from the constant would pin nothing. S03/S04/S05 add
-  their own tables (or rows) there rather than scattering assertions per command file.
-  (SCENARIO-02)
+  stderr is a literal string, never built from a production `invocation` constant. S02 added
+  the long-flag table; S03 added the shorthand table (`new feature`, `start`, `finish`,
+  `status`, `check`, `new step` single-shorthand rows plus `-xy`/`-hx` cluster rows on `new
+  feature`). S04/S05 add their own tables (or rows) there rather than scattering assertions
+  per command file. (SCENARIO-02, SCENARIO-03)
 - Help is one root `SetHelpFunc` printing `cmd.Long` verbatim; each `*Usage` constant sits in
   `Long` unchanged. cobra's own help template is never invoked — S07 is what introduces one.
   (SCENARIO-01)
@@ -37,14 +38,11 @@ Scenarios complete: SCENARIO-01..02. Last updated by SCENARIO-02.
   help yet, just a swap-in that keeps `os.Exit` out of `internal/cli`. S08/S09 build real
   topic handling on top of it. (SCENARIO-01)
 - `Run`'s `root.SetArgs` always receives a **fresh, non-nil copy** of `args`, never `args`
-  itself — cobra reads `os.Args[1:]` when `c.args == nil`. Mutation-verified: passing `args`
-  directly reddens `Test_returns_a_usage_error_when_args_are_nil` (cobra parses the test
-  binary's own `-test.*` flags as brief's argv). (SCENARIO-01)
+  itself — cobra reads `os.Args[1:]` when `c.args == nil`. (SCENARIO-01)
 - Every `RunE` closure gets its `context.Context` via `cmd.Context()`, never as a threaded
-  parameter — `newRootCommand` and `leafCommand` have no `ctx` parameter. This is
-  `//nolint:contextcheck`'d at the `newRootCommand(...)` call in `Run`; do not remove the
-  nolint or "fix" it by threading ctx through `newRootCommand` — `ExecuteContext(ctx)`
-  guarantees `cmd.Context()` is correct before any `RunE` runs. (SCENARIO-01)
+  parameter — `//nolint:contextcheck`'d at the `newRootCommand(...)` call in `Run`.
+  `ExecuteContext(ctx)` guarantees `cmd.Context()` is correct before any `RunE` runs.
+  (SCENARIO-01)
 
 ## Left unbuilt
 
@@ -57,9 +55,9 @@ Scenarios complete: SCENARIO-01..02. Last updated by SCENARIO-02.
   hard-coded string until then.
 - `completion` command (`CompletionOptions.DisableDefaultCmd` flips back on) — owned by
   S12/S13.
-- Shorthand (`unknown shorthand flag: 'x' in -x`), single-dash long flag (`-json`), and
-  missing-value (`flag needs an argument: --x`) flag-error tables — owned by S03/S04/S05
-  respectively, added to `flag_error_test.go` alongside S02's long-flag table.
+- Single-dash long flag (`-json`, `-help`) and missing-value (`flag needs an argument: --x`)
+  flag-error tables — owned by S04 and S05 respectively, added to `flag_error_test.go`
+  alongside S02's long-flag and S03's shorthand tables.
 
 ## Traps
 
@@ -71,11 +69,10 @@ Scenarios complete: SCENARIO-01..02. Last updated by SCENARIO-02.
   `cobra.CheckErr` → `os.Exit(1)` on an unknown topic — but only when `Command.Find` returns
   a nil command or a non-nil error. Every command in this tree sets `Args:
   cobra.ArbitraryArgs`, so `Find` never errors and never returns nil here; verified by
-  deleting `SetHelpCommand` entirely and confirming the suite stayed green (it fell through
-  to `cmd.Help()` on the root, which coincidentally reproduces today's text via
-  `SetHelpFunc`). The `os.Exit` path is real, confirmed by reading cobra's source, not by a
-  reddened test — a future scenario that makes `Find` fallible (e.g. a real `Args` validator
-  somewhere) must re-check this before relying on `SetHelpCommand` alone.
+  deleting `SetHelpCommand` entirely and confirming the suite stayed green. The `os.Exit`
+  path is real, confirmed by reading cobra's source, not by a reddened test — a future
+  scenario that makes `Find` fallible must re-check this before relying on `SetHelpCommand`
+  alone.
 - `start_test.go:462` and `:498` compare raw `stderr.String()` with a trailing `\n`; the rest
   of the suite (including `flag_error_test.go`) uses the `oneLine` helper (which trims it).
   Don't "fix" one style into the other without checking both are intentional per-test.
@@ -86,11 +83,22 @@ Scenarios complete: SCENARIO-01..02. Last updated by SCENARIO-02.
 - `-help`/`-json` (single-dash long flags) now parse as pflag shorthand clusters, not long
   flags, and are rejected — approved change (R4), owned by S04. No test yet proves the exact
   wording.
-- `new` is `DisableFlagParsing`; `new --bogus` is handled by `runNew`, not the
-  `FlagErrorFunc`, and has a different message than `new feature --bogus` / `new step
-  --bogus`, which do go through the leaf `FlagErrorFunc` frame. (SCENARIO-02)
+- `new` is `DisableFlagParsing`; `new --bogus` / `new -x` are handled by `runNew`, not the
+  `FlagErrorFunc`, and have a different message than the `new feature`/`new step` leaves,
+  which do go through the leaf `FlagErrorFunc` frame. Do not add root/`new`-level rows to the
+  shorthand or long-flag tables. (SCENARIO-02, SCENARIO-03)
+- A shorthand cluster with a defined letter consumed first quotes only the **residual**
+  cluster, not the whole one: `-hx` (defined `-h`, undefined `x`) reports `in -x`, while an
+  all-undefined cluster `-xy` reports the whole thing, `in -xy`. Writing the residual case by
+  analogy with the all-undefined case gets the quoted text wrong. `-h` is presently the only
+  defined shorthand anywhere in the tree (cobra's auto help flag); a future leaf shorthand
+  only collides with S03's `x`/`y` probe letters if it picks those same letters. (SCENARIO-03)
 
 ## Open debts
 
-None — every item under "Left unbuilt" is owned by a named scenario (S03-S13) already
-listed in `specification.md`'s BDD Acceptance Progress. Nothing here is unowned.
+- `run_test.go`'s `Test_returns_a_usage_error_when_a_flag_is_not_defined` (`new feature -x
+  p`) and `new_step_test.go`'s `Test_returns_a_usage_error_when_a_flag_is_not_defined_for_step`
+  (`new step -x p`) now duplicate two rows of S03's shorthand table in
+  `flag_error_test.go`. Deliberately not deleted — removing them would also remove
+  SCENARIO-01 coverage they carry. Unowned — leave to the reviewer pass or a later cleanup;
+  dies unless re-opened.
