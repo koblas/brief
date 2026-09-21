@@ -7,6 +7,61 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// Test_FirstUnchecked_reports_nothing collects every shape that must NOT
+// yield an open item. They are gathered because they share one assertion —
+// found is false — and differ only in the reason, so a table names the
+// seven reasons in one place instead of repeating the same three lines
+// seven times.
+//
+// Each case must fail for its own reason, not by accident of another: every
+// body here carries the configured heading (except the absent-heading case,
+// whose whole point is that it does not), so a bug that stopped finding the
+// section would redden the positive tests below rather than silently making
+// this whole table pass.
+func Test_FirstUnchecked_reports_nothing(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "every item is ticked",
+			body: "## Implementation Plan\n\n- [x] one\n- [x] two\n",
+		},
+		{
+			name: "the section holds no items",
+			body: "## Implementation Plan\n\n## Next Section\n\nprose\n",
+		},
+		{
+			name: "the heading is absent",
+			body: "## Some Other Heading\n\n- [ ] item\n",
+		},
+		{
+			name: "the only unchecked item is inside a fenced block",
+			body: "## Implementation Plan\n\n```\n- [ ] fenced\n```\n",
+		},
+		{
+			name: "the unchecked item belongs to the next section",
+			body: "## Implementation Plan\n\n- [x] one\n\n## Notes\n\n- [ ] not this section's\n",
+		},
+		{
+			name: "a star bullet is prose, not an item",
+			body: "## Implementation Plan\n\n* [ ] not a hyphen bullet\n",
+		},
+		{
+			name: "an uppercase X is ticked",
+			body: "## Implementation Plan\n\n- [X] done\n",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, _, found := markdown.FirstUnchecked(c.body, "## Implementation Plan")
+
+			assert.False(t, found)
+		})
+	}
+}
+
 func Test_finds_the_first_unchecked_item_with_its_line_number_in_the_whole_body(t *testing.T) {
 	body := "---\nid: STEP-01\nstatus: open\ndepends-on: []\n---\n\n# Title\n\n## Implementation Plan\n\n- [x] one\n- [ ] two\n"
 
@@ -17,46 +72,6 @@ func Test_finds_the_first_unchecked_item_with_its_line_number_in_the_whole_body(
 	assert.Equal(t, "two", text)
 }
 
-func Test_reports_no_unchecked_item_when_every_item_is_ticked(t *testing.T) {
-	body := "## Implementation Plan\n\n- [x] one\n- [x] two\n"
-
-	_, _, found := markdown.FirstUnchecked(body, "## Implementation Plan")
-
-	assert.False(t, found)
-}
-
-func Test_reports_no_unchecked_item_when_the_section_holds_no_items(t *testing.T) {
-	body := "## Implementation Plan\n\n## Next Section\n\nprose\n"
-
-	_, _, found := markdown.FirstUnchecked(body, "## Implementation Plan")
-
-	assert.False(t, found)
-}
-
-func Test_reports_no_unchecked_item_when_the_heading_is_absent(t *testing.T) {
-	body := "## Some Other Heading\n\n- [ ] item\n"
-
-	_, _, found := markdown.FirstUnchecked(body, "## Implementation Plan")
-
-	assert.False(t, found)
-}
-
-func Test_ignores_an_unchecked_item_inside_a_fenced_block(t *testing.T) {
-	body := "## Implementation Plan\n\n```\n- [ ] fenced\n```\n"
-
-	_, _, found := markdown.FirstUnchecked(body, "## Implementation Plan")
-
-	assert.False(t, found)
-}
-
-func Test_stops_at_the_next_heading_of_the_same_level(t *testing.T) {
-	body := "## Implementation Plan\n\n- [x] one\n\n## Notes\n\n- [ ] not this section's\n"
-
-	_, _, found := markdown.FirstUnchecked(body, "## Implementation Plan")
-
-	assert.False(t, found)
-}
-
 func Test_counts_an_indented_item(t *testing.T) {
 	body := "## Implementation Plan\n\n    - [ ] indented\n"
 
@@ -65,22 +80,6 @@ func Test_counts_an_indented_item(t *testing.T) {
 	assert.True(t, found)
 	assert.Equal(t, 3, line)
 	assert.Equal(t, "indented", text)
-}
-
-func Test_does_not_treat_a_star_bullet_as_an_item(t *testing.T) {
-	body := "## Implementation Plan\n\n* [ ] not a hyphen bullet\n"
-
-	_, _, found := markdown.FirstUnchecked(body, "## Implementation Plan")
-
-	assert.False(t, found)
-}
-
-func Test_does_not_treat_an_uppercase_X_item_as_unchecked(t *testing.T) {
-	body := "## Implementation Plan\n\n- [X] done\n"
-
-	_, _, found := markdown.FirstUnchecked(body, "## Implementation Plan")
-
-	assert.False(t, found)
 }
 
 func Test_returns_empty_text_for_a_bare_unchecked_item(t *testing.T) {
@@ -100,4 +99,18 @@ func Test_trims_the_carriage_return_from_an_item_in_a_CRLF_body(t *testing.T) {
 
 	assert.True(t, found)
 	assert.Equal(t, "two", text)
+}
+
+// Test_trims_tabs_around_an_items_text pins what the item regexp's own
+// horizontal-whitespace class has to do and nothing else did: the text is
+// returned without the tabs that separate it from the marker or trail it.
+// Before the marker and the text came from one match, a hand-rolled split
+// trimmed " \t" by hand, and nothing covered the tab half of it.
+func Test_trims_tabs_around_an_items_text(t *testing.T) {
+	body := "## Implementation Plan\n\n- [ ]\ttabbed\t\n"
+
+	_, text, found := markdown.FirstUnchecked(body, "## Implementation Plan")
+
+	assert.True(t, found)
+	assert.Equal(t, "tabbed", text)
 }

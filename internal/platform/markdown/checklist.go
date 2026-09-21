@@ -15,7 +15,14 @@ import (
 // widened to match: its tickProgressEntry flips a literal "[ ]" to "[x]"
 // by string replacement, so accepting "[X]" there would report a tick it
 // never performed.
-var checklistItemRe = regexp.MustCompile(`^\s*- \[([ xX])\]`)
+//
+// The second group captures the item's text, so the marker and the text
+// come from one match rather than a match followed by a hand-rolled split:
+// [^\S\r\n] is "horizontal whitespace" (space or tab, never a newline,
+// which matters because the body is split on "\n" but a "\r" can survive),
+// and the lazy (.*?) with a trailing trim group leaves text free of
+// surrounding blanks without a second pass.
+var checklistItemRe = regexp.MustCompile(`^\s*- \[([ xX])\][^\S\r\n]*(.*?)[^\S\r\n]*\r?$`)
 
 // FirstUnchecked returns the first checklist item in the section under
 // heading in body that is not ticked: line is its 1-based line number in
@@ -58,14 +65,7 @@ func FirstUnchecked(body, heading string) (int, string, bool) {
 			continue
 		}
 
-		_, after, cut := strings.Cut(line, "]")
-		if !cut {
-			continue
-		}
-
-		text := strings.TrimRight(strings.TrimLeft(after, " \t"), " \t\r")
-
-		return i + 1, text, true
+		return i + 1, m[2], true
 	}
 
 	return 0, "", false
