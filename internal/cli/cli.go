@@ -222,15 +222,24 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 	// A hidden "help" stub replaces cobra's default help command, which on
 	// an unknown topic calls cobra.CheckErr and os.Exit(1) directly — the
 	// only exit this package allows is ExitCode, called from main. The
-	// stub ignores its topic and renders the root help, matching runRoot's
-	// own "help" handling for a bare "brief help".
+	// stub resolves its topic against the tree with Find and renders that
+	// command's own help, so "help <path…>" is byte-identical to
+	// "<path…> --help". A topic Find cannot resolve — including none at
+	// all — leaves target as root, so this falls back to root help, the
+	// same render as a bare "brief help".
 	root.SetHelpCommand(&cobra.Command{
 		Use:                "help",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Root().Help()
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, _, _ := cmd.Root().Find(args)
+			// Execute() adds this flag as part of dispatching into target
+			// normally; Find alone skips that, so target.Help() would
+			// otherwise render a Flags table missing its own -h/--help row.
+			target.InitDefaultHelpFlag()
+
+			return target.Help()
 		},
 	})
 

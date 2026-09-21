@@ -1,6 +1,6 @@
 # cli-cobra — current state
 
-Scenarios complete: SCENARIO-01..07. Last updated by SCENARIO-07.
+Scenarios complete: SCENARIO-01..08. Last updated by SCENARIO-08.
 
 ## Binding decisions
 
@@ -12,33 +12,31 @@ Scenarios complete: SCENARIO-01..07. Last updated by SCENARIO-07.
 - R14 frame is one root `SetFlagErrorFunc` (path = `CommandPath()` minus `"brief "`,
   invocation = `Annotations["invocation"]`); pflag's wording passes through verbatim,
   mutation-verified per moving part by S02–S06 — do not re-derive it per command. `-h` rows
-  scoped to `start` only (`InitDefaultHelpFlag` identical per leaf); a leaf with its own
-  `-h`/`help` flag must add its own rows. An undefined flag beats `--help`/`-h` in either
-  order — structural (pflag's `ParseFlags` stops at the first bad token before any help
-  check), not brief code; no pre-dispatch "help wins" args scan. (SCENARIO-01..06)
+  scoped to `start` only; a leaf adding its own `-h`/`help` flag must add its own rows. An
+  undefined flag beats `--help`/`-h` in either order — structural (`ParseFlags` stops at the
+  first bad token before any help check); no pre-dispatch "help wins" args scan. (SCENARIO-01..06)
 - `flag_error_test.go` holds one flag-parse-error table per scenario (`oneLine` helper,
-  literal stderr, never built from the `invocation` constant): S02 long-flag, S03 shorthand
-  (+ `-xy`/`-hx` clusters), S04 single-dash-long + `--x` control, S05 missing-value /
-  empty-`=` / next-flag-consumed, S06 `--help`/`-h` next to an undefined flag either order
-  (14 rows) + `-h`-alone control. (SCENARIO-02..06)
+  literal stderr, never built from the `invocation` constant) — see the file for rows; add
+  new flag-error cases as new table rows, not new test functions. (SCENARIO-02..06)
 - Single-dash long flags (`-json`/`-handoff`/`-state`/`-help`) parse as shorthand clusters,
   rejected via R14. No leaf may add shorthand `j`/`s`/`a`/`e`, or a long name defining those
   letters, without updating S04's rows. (SCENARIO-04)
 - `--handoff=`/`--state=` are **not** flag-parse errors (pflag accepts the empty value) —
   they reach `runFinish`'s own `--handoff/--state is required` guard instead.
   `MarkFlagRequired` would change that wording; S05's `=` rows must move with it. (SCENARIO-05)
-- Help renders through one `helpTemplate` set on root via `SetHelpTemplate` — never
-  `SetHelpFunc` anywhere, which short-circuits the template on any ancestor. Every help path
-  calls `cmd.Help()` (root's own `-h`/`--help`/`help` branch and the hidden `help` stub both
-  call it) — S08's `help <cmd…>` byte-identity is `target.Help()`, nothing more. Cobra's
-  default help command stays replaced via `SetHelpCommand` with the hidden stub, keeping
-  `os.Exit` out of `internal/cli`. (SCENARIO-01, SCENARIO-07)
+- Help renders through one `helpTemplate` set on root via `SetHelpTemplate`, never
+  `SetHelpFunc` (short-circuits the template on any ancestor). The hidden `help` stub
+  (replaces cobra's default, keeping `os.Exit` out of `internal/cli`) resolves its topic via
+  `cmd.Root().Find(args)`, calls `target.InitDefaultHelpFlag()` (`Find` skips the flag cobra
+  normally adds during dispatch; omitting the call drops `target`'s own `-h, --help` row),
+  then `target.Help()` — byte-identical to `<path…> --help` for all six leaves, pinned in
+  `help_test.go`. Unresolved topic → `target == root`, root help. (SCENARIO-01, SCENARIO-07,
+  SCENARIO-08)
 - `Long` is prose only; flag paragraphs live in each flag's usage string (finish's carry a
   backquoted `` `path` `` so the table reads `--handoff path`, not `string`). `Use` carries
-  arg syntax (leaves set `DisableFlagsInUseLine`); `Annotations[invocation]` stays a
-  hand-written literal independent of `Use`/`UseLine()` — S02-S06 pin
-  `run 'brief start <feature>'` (no `[--json]`). `-h, --help` is cobra's default
-  `help for <name>`; no leaf registers its own help flag. (SCENARIO-07)
+  arg syntax (leaves set `DisableFlagsInUseLine`); `Annotations[invocation]` is a
+  hand-written literal independent of `Use`/`UseLine()`. `-h, --help` is cobra's default;
+  no leaf registers its own help flag. (SCENARIO-07)
 - Root listing = each available command's `.UseLine` + `Short`, in registration order
   (`new feature, new step, start, status, check, finish`; `cobra.EnableCommandSorting =
   false` at package init, never per-`Run`), `new` expanded to its children in `new`'s place,
@@ -52,10 +50,16 @@ Scenarios complete: SCENARIO-01..07. Last updated by SCENARIO-07.
 
 ## Left unbuilt
 
-- Real `help` command (`help <cmd…>` = `<cmd…> --help`, `help bogus` = usage error) — S08/S09;
-  the stub still renders root help regardless of topic.
-- `new`'s own help (`brief new --help` still a `runNew` usage error; `new` has no `Short`, so
-  no root-listing row of its own) — S10.
+- `help bogus` usage error (exit 2, `expected one of: …`) — S09. Today renders root help,
+  exit 0: `Find` never fails on this `ArbitraryArgs`-everywhere tree, so S09 must key off
+  residual post-`Find` args, not a `Find` error. Same rule covers `help <cmd> <extra>`/
+  `help <cmd> --flag` (e.g. `help start extra`, `help start --json`, `help new bogus`) and
+  `help help` — all currently render some leaf's own help; none pinned. (SCENARIO-08)
+- `new`'s own help (`brief new --help` still a `runNew` usage error; `brief help new` now
+  renders `new`'s bare template output — `"Usage:\n  brief new\n\n\n\nFlags:\n"`, no
+  `Short`/`Long`, empty flag table since `new` is `DisableFlagParsing`; `new` has no `Short`,
+  so no root-listing row of its own) — S10. Not an S10 regression: S08's correct `Find`
+  resolution is what exposes the bare render.
 - Tree-derived `expected one of:` list — S11; `runRoot` keeps a hard-coded literal until then.
 - `completion` command (`CompletionOptions.DisableDefaultCmd` flips back on) — S12/S13.
 - Assertion that a rejected `finish -handoff`/`-state` writes nothing to disk (S04), or a
@@ -70,9 +74,13 @@ Scenarios complete: SCENARIO-01..07. Last updated by SCENARIO-07.
   child too. Any listing built from the tree (S07's root help, S11's future
   `expected one of:`) must filter `IsAvailableCommand`, not exclude by name.
 - Cobra's *default* help command calls `cobra.CheckErr` → `os.Exit(1)` on an unknown topic,
-  only when `Command.Find` returns nil/errors — every command here sets `ArbitraryArgs`, so
-  `Find` never does. A scenario making `Find` fallible must re-check this before relying on
-  `SetHelpCommand` alone.
+  only when `Find` returns nil/errors — every command here sets `ArbitraryArgs`, so `Find`
+  never does; see *Left unbuilt* for the residual-args rule this forces on S09.
+  `Find(["--json","start"])` → root (residual `["--json","start"]`): a leading flag before
+  the topic does not resolve it.
+- `runRoot`'s `case "help"` is unreachable from argv — `Find(["help"])` always returns the
+  hidden stub first. Its `-h`/`--help` cases are live (root is `DisableFlagParsing`). The
+  `rootHelp` golden proves the *output*, not this path; don't delete the branch on that basis.
 - `start_test.go:462,498` compare raw `stderr.String()` (trailing `\n`); the rest of the
   suite uses `oneLine` (trims it) — don't unify without checking both are intentional.
 - pflag flag values are read with the error discarded (e.g. `GetBool("json")`) — safe only

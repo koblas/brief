@@ -139,6 +139,62 @@ func Test_every_command_help_has_a_usage_line_and_a_flag_table(t *testing.T) {
 	}
 }
 
+// Test_help_topic_prints_the_same_bytes_as_the_command_help_flag pins R8:
+// "brief help <path…>" renders exactly what "brief <path…> --help" renders,
+// for every leaf in the tree — both exit nil, both write nothing to
+// stderr, and the two stdouts are byte-identical. The "--help" capture
+// must also be non-empty, so a mutation making both sides render empty
+// cannot pass this table by symmetry alone.
+func Test_help_topic_prints_the_same_bytes_as_the_command_help_flag(t *testing.T) {
+	tests := []struct {
+		name string
+		path []string
+	}{
+		{name: "new feature", path: []string{"new", "feature"}},
+		{name: "new step", path: []string{"new", "step"}},
+		{name: "start", path: []string{"start"}},
+		{name: "status", path: []string{"status"}},
+		{name: "check", path: []string{"check"}},
+		{name: "finish", path: []string{"finish"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+
+			var helpFlagStdout, helpFlagStderr bytes.Buffer
+			helpFlagArgs := append(append([]string{}, tc.path...), "--help")
+			helpFlagErr := cli.Run(t.Context(), wd, helpFlagArgs, nil, &helpFlagStdout, &helpFlagStderr)
+
+			var helpTopicStdout, helpTopicStderr bytes.Buffer
+			helpTopicArgs := append([]string{"help"}, tc.path...)
+			helpTopicErr := cli.Run(t.Context(), wd, helpTopicArgs, nil, &helpTopicStdout, &helpTopicStderr)
+
+			require.NoError(t, helpFlagErr)
+			require.NoError(t, helpTopicErr)
+			assert.Empty(t, helpFlagStderr.String())
+			assert.Empty(t, helpTopicStderr.String())
+			assert.NotEmpty(t, helpFlagStdout.String())
+			assert.Equal(t, helpFlagStdout.String(), helpTopicStdout.String())
+		})
+	}
+}
+
+// Test_help_start_prints_the_literal_start_help anchors R8 against the
+// literal startHelp golden, not just against a live "--help" capture: a
+// mutation that moves both sides of the comparison identically cannot pass
+// this assertion.
+func Test_help_start_prints_the_literal_start_help(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"help", "start"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.Equal(t, startHelp, stdout.String())
+}
+
 // Test_prints_finish_flag_prose_in_its_flag_table pins that finish's
 // --handoff and --state rows show their value as "path" (from the
 // backquoted varname in each flag's usage string), not pflag's default
