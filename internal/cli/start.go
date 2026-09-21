@@ -26,6 +26,15 @@ brief start reads; it never writes.`
 // names as how to fix it.
 const startInvocation = "brief start <feature>"
 
+// startDocument is start's --json success document: the common header
+// first, then assemble.Brief's own fields flattened beside it, no "data"
+// wrapper (R2).
+type startDocument struct {
+	jsonHeader
+
+	assemble.Brief
+}
+
 // runStart implements "brief start [--json] <feature>"; rest is its
 // positional arguments, from either side of --json, flags already parsed
 // away. jsonOut is out.json, read once at the call site: start's own
@@ -54,6 +63,21 @@ func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, out r
 		return out.refusal(err)
 	}
 
+	// In --json mode a successful run writes nothing to stderr (R1): every
+	// shortfall is already payload (brief.Shortfalls), and the "complete"
+	// / "no step files yet" notices are payload-derivable from step:null
+	// plus done/open, so the document alone is the discriminator a
+	// structured caller reads.
+	if jsonOut {
+		doc := startDocument{jsonHeader: out.successHeader(), Brief: brief}
+
+		if err := writeJSONDocument(out.stdout, doc); err != nil {
+			return fmt.Errorf("brief start: %w", err)
+		}
+
+		return nil
+	}
+
 	for _, s := range brief.Shortfalls {
 		fmt.Fprintf(out.stderr, "brief start: %s: %s; %s\n", s.Path, flattenOneLine(s.Detail), flattenOneLine(s.Fix))
 	}
@@ -68,18 +92,6 @@ func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, out r
 			fmt.Fprintf(out.stderr, "brief start: %s: no step files yet; run 'brief new step %s' to scaffold the first one\n",
 				featureDir, feature)
 		}
-	}
-
-	// --json always writes a document, even with no open step: "step"
-	// marshals to null rather than the document being omitted, giving a
-	// structured caller the same discriminator the stderr notice above
-	// gives a human.
-	if jsonOut {
-		if err := assemble.RenderJSON(out.stdout, brief); err != nil {
-			return fmt.Errorf("brief start: %w", err)
-		}
-
-		return nil
 	}
 
 	if err := assemble.RenderText(out.stdout, brief); err != nil {

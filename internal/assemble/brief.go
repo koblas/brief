@@ -48,9 +48,11 @@ type Brief struct {
 // the briefed step, or an absent heading in the state file. Path is the
 // absolute path of the file the convention belongs to, Detail is what is
 // missing, and Fix is the one-line remedy. Unlike Problem, a Shortfall
-// never stops Start from returning a Brief — cli/start.go writes one
-// stderr line per entry and still prints the brief on stdout. The
-// lowercase field names are RenderJSON's wire contract.
+// never stops Start from returning a Brief — in text mode cli/start.go
+// writes one stderr line per entry and still prints the brief on stdout;
+// in --json mode the entry is the only place a shortfall is reported, and
+// the brief still prints on stdout. The lowercase field names are
+// RenderJSON's wire contract.
 type Shortfall struct {
 	Path   string `json:"path"`
 	Detail string `json:"detail"`

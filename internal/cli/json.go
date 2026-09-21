@@ -235,6 +235,12 @@ func (r reporter) forCommand(cmd *cobra.Command) reporter {
 	return r
 }
 
+// successHeader builds the jsonHeader every success document embeds
+// first: command from r.cmd, exit_code 0, ok true.
+func (r reporter) successHeader() jsonHeader {
+	return newJSONHeader(commandName(r.cmd), 0)
+}
+
 // usageError renders msg as R3's usage-error document: in JSON mode, one
 // compact document on stdout (kind "usage", exit_code 2, message msg,
 // path/line/problem null, fix from usageFix, files_changed from

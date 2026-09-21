@@ -537,10 +537,55 @@ func Test_returns_an_error_for_an_unknown_feature_on_start(t *testing.T) {
 	assert.NotEmpty(t, stderr.String())
 }
 
-// Test_start_prints_the_brief_as_json_when_asked is 15's core case:
-// --json against newStartFixture's open-step feature decodes to the same
-// fields RenderText already proves through Test_prints_the_brief_and_writes_nothing_to_stderr,
-// with stderr still empty and the command still succeeding.
+// startJSONDocument is start's --json success document, decoded field by
+// field in the tests below: the common header (schema, command, ok,
+// exit_code) precedes assemble.Brief's own fields, flattened by embedding.
+type startJSONDocument struct {
+	assemble.Brief
+
+	Schema   int    `json:"schema"`
+	Command  string `json:"command"`
+	OK       bool   `json:"ok"`
+	ExitCode int    `json:"exit_code"`
+}
+
+// Test_start_json_success_document_golden is SCENARIO-03's exact-bytes
+// proof: the open-step fixture with no shortfalls, decoded as nothing more
+// than the header's four fields prepended to the same payload
+// Test_start_without_json_is_byte_identical_to_the_text_brief's control arm
+// renders as markdown, key order pinned so a later field reordering in
+// either jsonHeader or assemble.Brief is caught here rather than by an
+// unmarshal that would silently accept it.
+func Test_start_json_success_document_golden(t *testing.T) {
+	wd := newStartFixture(t, "open")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	want := `{"schema":1,"command":"start","ok":true,"exit_code":0,` +
+		`"done":0,"open":1,` +
+		`"step":{"id":"SCENARIO-01","title":"SCENARIO-01 Demo step",` +
+		`"acceptance":{"heading":"## Scenario","body":"the acceptance criteria","found":true},` +
+		`"checklist":{"heading":"## Implementation Plan","body":"- [ ] do the thing","found":true}},` +
+		`"inherited":[` +
+		`{"heading":"## Binding decisions","body":"some decision","found":true},` +
+		`{"heading":"## Left unbuilt","body":"something left","found":true},` +
+		`{"heading":"## Traps","body":"a trap","found":true},` +
+		`{"heading":"## Open debts","body":"a debt","found":true}],` +
+		`"shortfalls":null}` + "\n"
+
+	assert.Equal(t, want, stdout.String())
+}
+
+// Test_start_prints_the_brief_as_json_when_asked is SCENARIO-03's core
+// case: --json against newStartFixture's open-step feature decodes to the
+// common header (schema 1, command "start", ok true, exit_code 0) plus the
+// same Brief fields RenderText already proves through
+// Test_prints_the_brief_and_writes_nothing_to_stderr, with stderr still
+// empty and the command still succeeding.
 func Test_start_prints_the_brief_as_json_when_asked(t *testing.T) {
 	wd := newStartFixture(t, "open")
 	var stdout, stderr bytes.Buffer
@@ -550,8 +595,13 @@ func Test_start_prints_the_brief_as_json_when_asked(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
 
-	var got assemble.Brief
+	var got startJSONDocument
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got))
+
+	assert.Equal(t, 1, got.Schema)
+	assert.Equal(t, "start", got.Command)
+	assert.True(t, got.OK)
+	assert.Equal(t, 0, got.ExitCode)
 
 	require.NotNil(t, got.Step)
 	assert.Equal(t, 0, got.Done)
@@ -565,8 +615,10 @@ func Test_start_prints_the_brief_as_json_when_asked(t *testing.T) {
 // Test_start_json_emits_a_null_step_for_a_completed_feature asserts the
 // raw stdout bytes carry "step":null and a non-zero "done" for a feature
 // whose only step is done — unmarshalling would collapse null and absent
-// into the same value, so the claim is made on bytes. The SCENARIO-12
-// "feature is complete" notice still lands on stderr.
+// into the same value, so the claim is made on bytes. Under --json the
+// text-mode "feature is complete" notice is not written anywhere (R1):
+// step:null plus a non-zero done is the document's own discriminator, so
+// stderr stays empty.
 func Test_start_json_emits_a_null_step_for_a_completed_feature(t *testing.T) {
 	wd := newStartFixture(t, "done")
 	var stdout, stderr bytes.Buffer
@@ -574,16 +626,22 @@ func Test_start_json_emits_a_null_step_for_a_completed_feature(t *testing.T) {
 	err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
 	assert.Contains(t, stdout.String(), `"step":null`)
 	assert.Contains(t, stdout.String(), `"done":1`)
-	assert.Contains(t, stderr.String(), "feature is complete")
+
+	var got startJSONDocument
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got))
+	assert.Equal(t, "start", got.Command)
+	assert.True(t, got.OK)
 }
 
 // Test_start_json_emits_zero_counts_for_a_feature_with_no_step_files is
 // R14's second discriminated case under --json: a feature directory with
 // no step files at all still writes a document, with "done" and "open"
 // both zero so a structured caller can tell it apart from a completed
-// feature — both share "step":null.
+// feature — both share "step":null. Under --json the text-mode "no step
+// files yet" notice is not written anywhere (R1): stderr stays empty.
 func Test_start_json_emits_zero_counts_for_a_feature_with_no_step_files(t *testing.T) {
 	wd := t.TempDir()
 	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
@@ -600,16 +658,22 @@ func Test_start_json_emits_zero_counts_for_a_feature_with_no_step_files(t *testi
 	err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
 	assert.Contains(t, stdout.String(), `"step":null`)
 	assert.Contains(t, stdout.String(), `"done":0`)
 	assert.Contains(t, stdout.String(), `"open":0`)
-	assert.Contains(t, stderr.String(), "no step files yet")
+
+	var got startJSONDocument
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got))
+	assert.Equal(t, "start", got.Command)
+	assert.True(t, got.OK)
 }
 
 // Test_start_json_keeps_stdout_parseable_when_a_convention_is_missing is
-// SCENARIO-14's shortfall case under --json: the shortfall line still
-// lands on stderr, stdout stays a single parseable document that also
-// carries the shortfall.
+// SCENARIO-03's shortfall case under --json: the shortfall is already
+// payload (Brief.Shortfalls), so the text-mode stderr line for it is
+// dropped rather than duplicated — stderr is empty, stdout stays a single
+// parseable document carrying the shortfall with an absolute path (R6).
 func Test_start_json_keeps_stdout_parseable_when_a_convention_is_missing(t *testing.T) {
 	wd := newStartFixture(t, "open")
 	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
@@ -628,9 +692,7 @@ func Test_start_json_keeps_stdout_parseable_when_a_convention_is_missing(t *test
 	err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
-	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
-	require.Len(t, lines, 1)
-	assert.Contains(t, lines[0], "## Scenario")
+	assert.Empty(t, stderr.String())
 
 	stdoutLines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
 	require.Len(t, stdoutLines, 1)
@@ -640,6 +702,7 @@ func Test_start_json_keeps_stdout_parseable_when_a_convention_is_missing(t *test
 	assert.False(t, got.Step.Acceptance.Found)
 	require.Len(t, got.Shortfalls, 1)
 	assert.Contains(t, got.Shortfalls[0].Path, "SCENARIO-01.md")
+	assert.True(t, filepath.IsAbs(got.Shortfalls[0].Path))
 }
 
 // Test_start_json_writes_the_error_document_when_it_refuses asserts a
