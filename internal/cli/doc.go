@@ -5,7 +5,8 @@
 //
 // Dispatch and flag parsing are delegated to github.com/spf13/cobra, but
 // exit codes, usage text and error copy stay owned here: every command's
-// help is its own constant printed verbatim, every pflag error is
+// behavioral prose is its own constant, rendered by one help template into
+// cobra's generated Usage line and flag table, every pflag error is
 // rewritten into this package's one-line usage error, and cobra never
 // prints its own output or calls os.Exit — ExitCode, called from main,
 // remains the only thing that decides how the process exits. The root

@@ -11,11 +11,8 @@ import (
 	"github.com/koblas/brief/internal/platform/config"
 )
 
-// checkUsage is "brief check"'s help text.
-const checkUsage = `Usage:
-  brief check [feature]
-
-Reports every fault in a feature's on-disk layout that finish would now
+// checkLong is "brief check"'s help prose.
+const checkLong = `Reports every fault in a feature's on-disk layout that finish would now
 refuse to write over: caps, an unclosed fence, a missing heading, an
 unticked checklist item on a done step, or a broken dependency, on a tree
 that predates the tool or a raised cap. With no feature given, checks
@@ -30,8 +27,7 @@ unreadable); WARN marks the same fault on a feature whose every step is
 done. brief check exits 1 when it prints any ERROR finding, 0 otherwise —
 including a run that prints WARN findings only. A conforming repository,
 or feature, prints nothing on stdout and exits 0, with one line on stderr
-saying so. brief check reads; it never writes.
-`
+saying so. brief check reads; it never writes.`
 
 // errCheckFindings marks a run of runCheck that printed at least one
 // ERROR-severity finding: ExitCode's default branch maps any non-nil,

@@ -10,11 +10,8 @@ import (
 	"github.com/koblas/brief/internal/platform/config"
 )
 
-// startUsage is "brief start"'s help text.
-const startUsage = `Usage:
-  brief start [--json] <feature>
-
-Prints the next open step's id, title, acceptance criteria and checklist,
+// startLong is "brief start"'s help prose.
+const startLong = `Prints the next open step's id, title, acceptance criteria and checklist,
 and the decisions and constraints inherited from the feature's state
 file. A feature whose steps are all done, or that has no step files yet,
 prints nothing and says so on stderr instead, still exiting 0.
@@ -25,15 +22,7 @@ heading, or a next step whose frontmatter has no id or no checklist. A
 missing optional convention — the step's acceptance heading, or a state
 file heading — is named on stderr instead, one line each, and the brief
 still prints on stdout, still exiting 0.
-brief start reads; it never writes.
-
-  --json  print the brief as a single JSON document instead of markdown.
-          Every exit-0 run writes one, even when there is no open step:
-          "step" is null rather than the document being omitted, so a
-          structured caller detects completion the same way a human
-          reads the stderr notice. --json may be given before or after
-          <feature>.
-`
+brief start reads; it never writes.`
 
 // runStart implements "brief start [--json] <feature>"; rest is its
 // positional arguments, from either side of --json, flags already parsed

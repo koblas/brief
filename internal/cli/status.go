@@ -10,19 +10,15 @@ import (
 	"github.com/koblas/brief/internal/platform/config"
 )
 
-// statusUsage is "brief status"'s help text.
-const statusUsage = `Usage:
-  brief status
-
-Prints one line per feature: name, steps done over total, the next open
+// statusLong is "brief status"'s help prose.
+const statusLong = `Prints one line per feature: name, steps done over total, the next open
 step's id (or "-" when there is none), and how many steps are blocked on
 an unfinished dependency. A feature whose step files cannot be read or
 parsed prints "<name> ! ! !" and names the reason on stderr, one line per
 malformed feature — brief status still exits 0, because check (not
 status) is where that becomes a failure. A repository with no features
 prints nothing and exits 0, with one line on stderr saying so. brief
-status reads; it never writes.
-`
+status reads; it never writes.`
 
 // runStatus implements "brief status"; rest is its positional arguments,
 // flags already parsed away, and must be empty.

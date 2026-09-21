@@ -12,21 +12,11 @@ import (
 	"github.com/koblas/brief/internal/scaffold"
 )
 
-// finishUsage is "brief finish"'s help text.
-const finishUsage = `Usage:
-  brief finish <feature> <step> --handoff <path> --state <path>
-
-Closes step in feature: writes the body at --handoff to the step's own
+// finishLong is "brief finish"'s help prose.
+const finishLong = `Closes step in feature: writes the body at --handoff to the step's own
 handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
-from stdin; it may be given for at most one of --handoff and --state.
-
-  --handoff <path>  the step's handoff body, written to its own file
-  --state <path>    the COMPLETE replacement body for the state file; it
-                     replaces the file, it is never appended to; it must
-                     carry the configured state headings, though a section
-                     may be empty
-`
+from stdin; it may be given for at most one of --handoff and --state.`
 
 // runFinish implements "brief finish <feature> <step> --handoff <path>
 // --state <path>"; rest is its positional arguments and handoffPath and

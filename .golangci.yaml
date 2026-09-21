@@ -56,8 +56,12 @@ linters:
       #   - cobra Command.ExecuteContext -> the resolved command's RunE or
       #                              FlagErrorFunc error, both brief's own
       #                              usage/refusal errors already
+      #   - cobra Command.Help      -> always nil; Help renders through
+      #                              HelpFunc and never returns the render
+      #                              error itself (cobra prints it instead)
       extra-ignore-sigs:
         - cobra.Command).ExecuteContext(
+        - cobra.Command).Help(
         - fxsync.Once).Do(
         - singleflight.Group).Do(
         - refreshcache.SFCache

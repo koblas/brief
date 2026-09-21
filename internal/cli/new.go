@@ -11,23 +11,15 @@ import (
 	"github.com/koblas/brief/internal/scaffold"
 )
 
-// newFeatureUsage is "brief new feature"'s help text.
-const newFeatureUsage = `Usage:
-  brief new feature <name>
-
-Scaffolds docs/specifications/<name> (or the configured feature directory)
+// newFeatureLong is "brief new feature"'s help prose.
+const newFeatureLong = `Scaffolds docs/specifications/<name> (or the configured feature directory)
 with an empty specification skeleton and an empty state file.
 
-A name may not be empty or contain whitespace.
-`
+A name may not be empty or contain whitespace.`
 
-// newStepUsage is "brief new step"'s help text.
-const newStepUsage = `Usage:
-  brief new step <feature>
-
-Scaffolds the next step file for feature and appends its entry to the
-feature's progress list.
-`
+// newStepLong is "brief new step"'s help prose.
+const newStepLong = `Scaffolds the next step file for feature and appends its entry to the
+feature's progress list.`
 
 // runNew handles "brief new <type> ..." when type names neither feature
 // nor step: nothing at all, or something unknown.

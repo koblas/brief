@@ -719,8 +719,8 @@ func Test_start_accepts_the_json_flag_after_the_feature(t *testing.T) {
 }
 
 // Test_start_json_help_prints_usage_not_json asserts --json --help prints
-// startUsage to stdout rather than a JSON document — help wins regardless
-// of --json's position or value.
+// start's help to stdout rather than a JSON document — help wins
+// regardless of --json's position or value.
 func Test_start_json_help_prints_usage_not_json(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
