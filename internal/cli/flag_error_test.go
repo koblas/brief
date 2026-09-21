@@ -602,32 +602,13 @@ func Test_accepts_the_double_dash_handoff_and_state_flags(t *testing.T) {
 	assert.Equal(t, 0, cli.ExitCode(err))
 }
 
-// Test_rejects_the_hh_cluster_under_help_since_it_has_no_sole_argument_case
-// pins the one row the cross-site table
-// (Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites)
-// does not cover: unlike root's and "new"'s sole-argument case
-// (Test_prints_help_for_the_hh_cluster_alone), the help stub has no case
-// that prints help at all, so an all-'h' cluster under "help" is itself a
-// usage error rather than argHelpFlag's other two call sites' success path.
-func Test_rejects_the_hh_cluster_under_help_since_it_has_no_sole_argument_case(t *testing.T) {
-	wd := t.TempDir()
-	var stdout, stderr bytes.Buffer
-
-	err := cli.Run(t.Context(), wd, []string{"help", "-hh"}, nil, &stdout, &stderr)
-
-	require.ErrorIs(t, err, cli.ErrUsage)
-	assert.Equal(t, 2, cli.ExitCode(err))
-	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief help: '-hh' takes no arguments; run 'brief help <command>'", oneLine(t, &stderr))
-}
-
 // Test_prints_help_for_the_hh_cluster_alone is the "-hh" shape of
 // Test_prints_help_for_the_h_shorthand_alone's control arm: a shorthand
 // cluster made entirely of "h" characters parses exactly like a single
-// "-h" does for pflag's own shorthand-cluster parser, so it stays root's
-// and "new"'s sole-argument "print help" case, not an error — unlike under
-// the help stub, which has no such case at all (see
-// Test_rejects_the_hh_cluster_under_help_since_it_has_no_sole_argument_case).
+// "-h" does for pflag's own shorthand-cluster parser, so it stays root's,
+// "new"'s and the help stub's own sole-argument "print help" case (see
+// Test_help_flag_as_the_sole_argument_prints_the_help_stubs_own_usage,
+// help_test.go, for the help stub's pinned golden of that same case).
 func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -636,6 +617,7 @@ func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
 	}{
 		{name: "root", helpArgs: []string{"--help"}, clusterArg: []string{"-hh"}},
 		{name: "new", helpArgs: []string{"new", "--help"}, clusterArg: []string{"new", "-hh"}},
+		{name: "help", helpArgs: []string{"help", "--help"}, clusterArg: []string{"help", "-hh"}},
 	}
 
 	for _, tt := range tests {

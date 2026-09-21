@@ -333,6 +333,17 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 	return root
 }
 
+// helpShort is the help stub's own one-line description, used only for
+// go doc: the stub is Hidden and carries no listedInHelpAnnotation, so it
+// never gets a root-help row and this Short never renders.
+const helpShort = "print help for a command"
+
+// helpLong is the help stub's own prose, rendered by helpTemplate's leaf
+// branch when "brief help" is asked for its own help — see
+// newHelpCommand's sole-argument case.
+const helpLong = `Prints help for a command. 'brief help <command>' prints the same text as
+'brief <command> --help'; with no command it prints the overview.`
+
 // newHelpCommand builds the hidden "help" stub that replaces cobra's
 // default help command, which on an unknown topic calls cobra.CheckErr and
 // os.Exit(1) directly — the only exit this package allows is ExitCode,
@@ -353,25 +364,39 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 // would otherwise add during ordinary dispatch, which Find alone skips.
 //
 // A leading "-h"/"--help" (with or without an attached value) or any other
-// dash-prefixed topic is never resolved against the tree at all: unlike
-// runRoot and runNew, the help stub has no sole-argument case that means
-// anything — asking "brief help" for help on "--help" is never valid — so
-// args[0] is classified the same way runRoot and runNew classify theirs
-// before Find ever runs. "--" classifies as argNotFlag, so "brief help --"
-// falls through to Find like any other topic and is rejected as an
-// unresolved one.
+// dash-prefixed topic is never resolved against the tree at all: args[0]
+// is classified the same way runRoot and runNew classify theirs, before
+// Find ever runs. Unlike runRoot and runNew, a sole "-h"/"--help" (or an
+// all-'h' cluster, "-hh" and so on) prints the help stub's own usage —
+// its Use, Long and Flags table, set via helpShort/helpLong below — rather
+// than routing to some topic's help; asking "brief help" for help on
+// itself is exactly the sole-argument case a bare "brief help" already
+// answers, so "help -h" is that same answer, not an error. Alongside any
+// other argument the help flag still takes no arguments, the same as
+// runRoot and runNew report for that shape. "--" classifies as argNotFlag,
+// so "brief help --" falls through to Find like any other topic and is
+// rejected as an unresolved one.
 func newHelpCommand(stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:                "help",
-		Hidden:             true,
-		DisableFlagParsing: true,
-		Args:               cobra.ArbitraryArgs,
+		Use:                   "help [command]",
+		Short:                 helpShort,
+		Long:                  helpLong,
+		Hidden:                true,
+		DisableFlagsInUseLine: true,
+		DisableFlagParsing:    true,
+		Args:                  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				switch kind, msg := classifyDashArg(args[0]); kind {
 				case argHelpFlagWithValue:
 					return usageError(stderr, fmt.Sprintf("brief help: '%s' takes no value; run 'brief help <command>'", msg))
 				case argHelpFlag:
+					if len(args) == 1 {
+						cmd.InitDefaultHelpFlag()
+
+						return cmd.Help()
+					}
+
 					return usageError(stderr, fmt.Sprintf("brief help: '%s' takes no arguments; run 'brief help <command>'", args[0]))
 				case argUnknownFlag:
 					return usageError(stderr, fmt.Sprintf("brief help: %s; run 'brief help <command>'", msg))

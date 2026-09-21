@@ -359,26 +359,17 @@ func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) 
 
 // Test_help_flag_as_the_topic_argument_takes_no_arguments pins that "brief
 // help" checks its first argument for "-h"/"--help" before ever calling
-// Find: unlike runRoot and runNew, the help stub has no sole-argument case
-// that means anything, so both a bare "-h"/"--help" and one followed by a
-// trailing topic report the same "takes no arguments" wording, naming
-// whichever spelling was typed.
+// Find: a sole "-h"/"--help" is its own case (see
+// Test_help_flag_as_the_sole_argument_prints_the_help_stubs_own_usage), but
+// that flag alongside another argument is never valid — reported as taking
+// no arguments, naming whichever spelling was typed, the same wording
+// runRoot and runNew report for the same shape.
 func Test_help_flag_as_the_topic_argument_takes_no_arguments(t *testing.T) {
 	tests := []struct {
 		name   string
 		args   []string
 		stderr string
 	}{
-		{
-			name:   "--help alone",
-			args:   []string{"help", "--help"},
-			stderr: "brief help: '--help' takes no arguments; run 'brief help <command>'\n",
-		},
-		{
-			name:   "-h alone",
-			args:   []string{"help", "-h"},
-			stderr: "brief help: '-h' takes no arguments; run 'brief help <command>'\n",
-		},
 		{
 			name:   "--help with a trailing topic",
 			args:   []string{"help", "--help", "start"},
@@ -397,6 +388,54 @@ func Test_help_flag_as_the_topic_argument_takes_no_arguments(t *testing.T) {
 			assert.Equal(t, 2, cli.ExitCode(err))
 			assert.Empty(t, stdout.String())
 			assert.Equal(t, tc.stderr, stderr.String())
+		})
+	}
+}
+
+// helpHelp is "brief help -h"'s exact stdout: the help stub's own generated
+// Usage line ("brief help [command]", no "[flags]" suffix since
+// newHelpCommand sets DisableFlagsInUseLine), its own Long prose, and a
+// Flags table with only the auto-registered -h/--help — the same leaf
+// shape every other command's own "--help" renders.
+const helpHelp = `Usage:
+  brief help [command]
+
+Prints help for a command. 'brief help <command>' prints the same text as
+'brief <command> --help'; with no command it prints the overview.
+
+Flags:
+  -h, --help   help for help
+`
+
+// Test_help_flag_as_the_sole_argument_prints_the_help_stubs_own_usage pins
+// that "-h", "--help" and the all-'h' cluster "-hh", each as help's one and
+// only argument, print the help stub's own usage rather than erroring: a
+// bare "brief help" already answers "help me use help" by printing root's
+// own help, so asking "brief help" for help on "--help" is that exact
+// sole-argument case, not the "takes no arguments" wording
+// Test_help_flag_as_the_topic_argument_takes_no_arguments pins for the
+// flag alongside another argument.
+func Test_help_flag_as_the_sole_argument_prints_the_help_stubs_own_usage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "-h", args: []string{"help", "-h"}},
+		{name: "--help", args: []string{"help", "--help"}},
+		{name: "-hh", args: []string{"help", "-hh"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			assert.Equal(t, 0, cli.ExitCode(err))
+			assert.Empty(t, stderr.String())
+			assert.Equal(t, helpHelp, stdout.String())
 		})
 	}
 }
@@ -486,8 +525,10 @@ func Test_prints_finish_flag_prose_in_its_flag_table(t *testing.T) {
 // and handoffFlagUsage/stateFlagUsage do. Root and "new" are out of scope
 // here: their cmdList rows are fixed-column-padded, not wrapped to a
 // terminal width, an existing and separately reviewed layout (rootHelp,
-// newHelp) this fix does not touch. require.NotEmpty on stdout guards the
-// loop below from passing vacuously against an empty or truncated render.
+// newHelp) this fix does not touch. The help stub's own sole-argument "-h"
+// render is a leaf shape too, covered here alongside the rest.
+// require.NotEmpty on stdout guards the loop below from passing vacuously
+// against an empty or truncated render.
 func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 	tests := []struct {
 		name string
@@ -500,6 +541,7 @@ func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 		{name: "status", args: []string{"status", "--help"}},
 		{name: "check", args: []string{"check", "--help"}},
 		{name: "completion", args: []string{"completion", "--help"}},
+		{name: "help", args: []string{"help", "-h"}},
 	}
 
 	for _, tc := range tests {
