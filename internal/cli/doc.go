@@ -16,6 +16,11 @@
 //
 // Flags and positionals may be given in any order on every command.
 //
+// "brief completion <bash|zsh|fish|powershell>" is enabled but Hidden: it
+// carries the listedInHelpAnnotation instead, which keeps it out of every
+// "expected one of:" list while giving it a root-help row and a
+// "brief help completion" topic.
+//
 // "brief new feature <name>" and "brief new step <feature>" share one
 // refusal template: a *scaffold.RefusalError (or a
 // *config.InvalidConfigError, for a bad ".brief.yaml") renders as one line

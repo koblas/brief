@@ -1,6 +1,6 @@
 # cli-cobra — current state
 
-Scenarios complete: SCENARIO-01..11. Last updated by SCENARIO-11.
+Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
 
 ## Binding decisions
 
@@ -12,48 +12,55 @@ Scenarios complete: SCENARIO-01..11. Last updated by SCENARIO-11.
   invocation = `Annotations["invocation"]`); pflag's wording passes through verbatim. An
   undefined flag beats `--help`/`-h` in either order — structural, no pre-dispatch scan.
   Single-dash long flags are shorthand clusters, rejected via R14; `--handoff=`/`--state=`
-  reach `runFinish`'s own required-flag guard instead. (SCENARIO-01..06)
-- Help renders through one `helpTemplate` set on root via `SetHelpTemplate` (never
-  `SetHelpFunc`). Two shapes: a `cmdList` group body for any command with available
-  subcommands (root, `new`), selected by `HasAvailableSubCommands` not `HasParent`, and a
-  leaf body for the rest. Group trailer is `Run '{{.CommandPath}} <command> --help' for
-  details.` A hidden `help` stub (replaces cobra's default, keeping `os.Exit` out of
+  reach `runFinish`'s own required-flag guard instead. (SCENARIO-01..06, 12)
+- Help renders through one `helpTemplate` (now a `var`, built with `fmt.Sprintf` so the
+  `listedInHelpAnnotation` constant and the template's `index .Annotations %q` stay in
+  sync) set on root via `SetHelpTemplate` (never `SetHelpFunc`). Two shapes: a `cmdList`
+  group body for any command with available subcommands (root, `new`), and a leaf body for
+  the rest. The `cmdList` outer row loop admits a command when `.IsAvailableCommand` OR it
+  carries `listedInHelpAnnotation` — the one place besides the help stub that reads that
+  annotation. A hidden `help` stub (replaces cobra's default, keeping `os.Exit` out of
   `internal/cli`) resolves via `cmd.Root().Find(args)`, calls `target.InitDefaultHelpFlag()`,
-  then `target.Help()` — byte-identical to `<path…> --help` for every command.
-  `rootHelp`/`startHelp`/`newHelp` goldens guard it. Topic accepted iff `Find`'s residual is
-  empty AND (target is root OR `IsAvailableCommand()`); else `brief help: unknown command
-  "<topic>"; expected one of: <list>`, exit 2, `<topic>` every arg **as typed** joined by
-  spaces. (SCENARIO-01, 07, 08, 09, 10)
+  then `target.Help()` — byte-identical to `<path…> --help` for every command. Topic
+  accepted iff `Find`'s residual is empty AND (target is root, OR `IsAvailableCommand()`, OR
+  carries `listedInHelpAnnotation`); else `brief help: unknown command "<topic>"; expected
+  one of: <list>`, exit 2. `rootHelp`/`startHelp`/`newHelp` goldens guard the template; all
+  three stayed byte-identical through the SCENARIO-12 template edit. (SCENARIO-01, 07, 08,
+  09, 10, 12)
 - R7: `expectedCommandList(cmd)` (`cli.go`) is the single source for every "expected one of:"
   list — `cmd.Root().Commands()` filtered by `IsAvailableCommand`, names joined `", "`, in
-  registration order. Called at message time from all three sites (`runRoot`'s no-command and
-  unknown-command branches, the help stub's unknown-topic branch), never precomputed in
-  `newRootCommand` — cobra adds `help` as a hidden child only during `Execute`. No hard-coded
-  literal remains anywhere in production. `DisableSuggestions: true` stays on root; root's
-  `Args`-set dispatch never reaches cobra's suggestion code, so there is no "Did you mean"
-  branch to disable further. (SCENARIO-11)
-- Root commands register `new, start, finish, status, check` — one order drives both root
-  help and every "expected one of:" list. `EnableCommandSorting` stays false (cobra package
-  global, set once in `init`). Adding a command means choosing its position in
-  `root.AddCommand`; that single choice moves both surfaces at once. (SCENARIO-07, 11)
+  registration order. `completion` is `Hidden` so it never appears here even though it is
+  dispatchable — R7's filter stays `IsAvailableCommand`-only, never a name check.
+  (SCENARIO-11, 12)
+- Root commands register `new, start, finish, status, check, completion` — one order drives
+  both root help and every "expected one of:" list; `completion` registers **last** and is
+  `Hidden` with `listedInHelpAnnotation` set, so it gets a root-help row (the wrapped/finish
+  shape — its UseLine is 43 cols) and a `brief help completion` topic without ever joining
+  an "expected one of:" list. `EnableCommandSorting` stays false. (SCENARIO-07, 11, 12)
 - `new` keeps `DisableFlagParsing` and owns its `-h`/`--help` routing inside `runNew`, as the
-  **sole** argument only — S06/S09 strictness; run_test.go:281 (`new -x`) depends on flag
-  parsing staying off. `newCmd` has no `invocation` annotation; R14 never fires for it.
-  `new`'s own `UseLine` renders nowhere, so it needs neither `DisableFlagsInUseLine` nor
-  `Short`. (SCENARIO-02, 03, 10)
+  **sole** argument only. `new`'s children carry no `listedInHelpAnnotation`; `newHelp` is
+  unaffected by that annotation's introduction. (SCENARIO-02, 03, 10)
+- `completion` (`internal/cli/completion.go`): brief's own leaf, not cobra's default —
+  `CompletionOptions.DisableDefaultCmd` stays `true`. Dispatch is a small ordered
+  `[]completionShell{name, gen}` table (bash, zsh, fish, powershell); any shell-list message
+  (arg-count errors' invocation string aside) derives from it. `runCompletion` generates
+  against `cmd.Root()`, never the leaf, so the script names "brief". Arg-count errors reuse
+  R2's `start` shapes (`no shell given` / `too many arguments`). An unmatched single shell
+  name is SCENARIO-13's to pin; the miss branch is already implemented. (SCENARIO-12)
 
 ## Left unbuilt
 
-- `completion` command — S12/S13; `DisableDefaultCmd` (currently true) flips back on. Must be
-  `Hidden` (`HiddenDefaultCmd`) so `expectedCommandList` drops it with no name check; if S12
-  wants `help completion` to render despite `Hidden: true` it must carve that out of S09's
-  hidden-target rule explicitly.
 - `new`'s type list in `new.go` (`expected one of: feature, step`, lines ~36/43) stays a
   literal — it is a type list, not R7's command list. Unowned.
-- Per-level help errors for `new` — deliberately not built (S09's one format string covers
-  every topic; `brief new help` stays `unknown type "help"`, not a help alias); nor is a
-  `new` row in `Test_every_command_help_has_a_usage_line_and_a_flag_table` — its group shape
-  has no `Usage:` prefix or Flags table.
+- Per-level help errors for `new` — deliberately not built; `brief new help` stays `unknown
+  type "help"`, not a help alias.
+- A test pinning `brief completion tcsh` →
+  `brief completion: unknown shell "tcsh"; expected one of: bash, zsh, fish, powershell`,
+  exit 2 — SCENARIO-13. The branch exists in `runCompletion`; S13 adds the row and
+  mutation-verifies it.
+- Feature-name completion (`ValidArgsFunction`) — named follow-up in ADR-002, out of scope.
+- No golden of any generated completion script's full bytes — deliberately; cobra owns them.
+  `completion_test.go` asserts only each shell's header-line marker.
 - Unowned, flagged for the final product-vision pass: `<command>` vs `<type>` wording between
   `new`'s errors and the group trailer; `start demo --json=`'s Go-internal `strconv.ParseBool`
   wording reaching the user through R14 (S05); a rejected `finish -handoff`/`-state` writing
@@ -62,36 +69,33 @@ Scenarios complete: SCENARIO-01..11. Last updated by SCENARIO-11.
 
 ## Traps
 
-- Cobra always registers hidden `__complete`/`__completeNoDescriptions`, and `help` is a real
-  hidden child too — filter listings by `IsAvailableCommand`, not by name. `Find`'s residual
-  is unstripped and `Find` never errors on this `ArbitraryArgs`-everywhere tree — the help
-  stub keys off `len(residual) > 0`, never a `Find` error. `runRoot`'s `case "help"` is
-  unreachable from argv (`Find(["help"])` always returns the hidden stub first) — don't
-  delete it on the strength of `rootHelp` alone.
+- Cobra always registers hidden `__complete`/`__completeNoDescriptions` regardless of
+  `CompletionOptions.DisableDefaultCmd`, and `help` is a real hidden child too — filter
+  listings by `IsAvailableCommand` (or `listedInHelpAnnotation` where that's the deliberate
+  exception), not by name. `__complete` writes "Completion ended with directive: …" to
+  stderr on every run — asserting stderr empty on it is wrong.
 - `new` is `DisableFlagParsing`; `new --bogus`/`-x`/`--help` all go through `runNew`, not
   `FlagErrorFunc` or cobra's help check. `new --help feature` does NOT reach `feature`'s
-  help: at `Find` time `new` has no `help` flag registered yet, so `stripFlags` takes
-  `feature` as `--help`'s value, and dispatch stays on `new`. Only `new feature --help`
-  reaches it. (SCENARIO-02, 03, 10)
+  help — `stripFlags` takes `feature` as `--help`'s value at `Find` time. Only
+  `new feature --help` reaches it. (SCENARIO-02, 03, 10)
 - `helpTemplate`'s `define` blocks encode newlines via `-}}`/`{{-` trim markers; adding or
   moving a `define`, or changing which branch a command falls into, shifts whitespace
   silently — prove `rootHelp`/`startHelp`/`newHelp` byte-identical after any template edit.
-  `finish ... --handoff --state s.md` reports `too many arguments`: pflag takes `--state` as
-  `--handoff`'s value; a `Changed("help")` guard in `SetFlagErrorFunc` would spill into
-  S03/S04's rows — don't add one. (SCENARIO-05, 06, 07, 10)
-- `Commands()` returns registration order only because `EnableCommandSorting` is false — it
-  is a cobra package global set once at init, not per-tree. pflag `FlagUsages()` re-indents a
-  usage string's embedded newlines to the description column — golden indentation is pflag's,
-  not the constant's; test literals for user-facing stderr/stdout are the contract, never
-  built from a const or `fmt.Sprintf`, in production **or in a test** — a table row that
-  formats its own expected string with the same verb (`%q`) production uses stops
-  independently pinning the quoting. Each table row carries its own full literal.
-  (SCENARIO-07, 09, 11)
-- `initCompleteCmd` adds `__complete` (alias `__completeNoDescriptions`) to root on every
-  `Execute`, then immediately `RemoveCommand`s it unless that is the command actually being
-  invoked — it is never present in the tree at the moment any "expected one of:" message is
-  built. `expectedCommandList` filters by `IsAvailableCommand` anyway, not by name, so this is
-  self-defending; don't add a name-based exclusion for it. (SCENARIO-11)
+  `helpTemplate` is a `var` built with `fmt.Sprintf(..., listedInHelpAnnotation)`: any other
+  `%` in the template body needs escaping to `%%` or Sprintf misparses it. `finish ... --handoff
+  --state s.md` reports `too many arguments`: pflag takes `--state` as `--handoff`'s value; a
+  `Changed("help")` guard in `SetFlagErrorFunc` would spill into S03/S04's rows — don't add
+  one. (SCENARIO-05, 06, 07, 10)
+- `Commands()` returns registration order only because `EnableCommandSorting` is false (a
+  cobra package global set once at init). Test literals for user-facing stderr/stdout are the
+  contract, never built from a const or `fmt.Sprintf` in production **or in test**. Each table
+  row carries its own full literal. (SCENARIO-07, 09, 11)
+- Cobra's `GenZshCompletion`/`GenFishCompletion`/`GenBashCompletionV2`/
+  `GenPowerShellCompletionWithDesc` read the tree from whichever `*cobra.Command` they're
+  called on — call them on `cmd.Root()`, never the leaf, or the script names the wrong
+  program.
+- `completion` is `ArbitraryArgs` (via `leafCommand`) — cobra never counts its args;
+  `runCompletion`'s own guards are the only ones.
 
 ## Open debts
 

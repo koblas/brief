@@ -67,6 +67,8 @@ Usage:
                                    close a step: handoff, state, then done
   brief status                     print one done/total/next/blocked line per feature
   brief check [feature]            report faults finish would now refuse to write over
+  brief completion <bash|zsh|fish|powershell>
+                                   print a shell completion script
 
 Run 'brief <command> --help' for details.
 `
@@ -213,6 +215,7 @@ func Test_every_command_help_has_a_usage_line_and_a_flag_table(t *testing.T) {
 		{name: "status", args: []string{"status", "--help"}, path: "brief status"},
 		{name: "check", args: []string{"check", "--help"}, path: "brief check"},
 		{name: "finish", args: []string{"finish", "--help"}, path: "brief finish"},
+		{name: "completion", args: []string{"completion", "--help"}, path: "brief completion"},
 	}
 
 	for _, tc := range tests {
@@ -253,6 +256,7 @@ func Test_help_topic_prints_the_same_bytes_as_the_command_help_flag(t *testing.T
 		{name: "status", path: []string{"status"}},
 		{name: "check", path: []string{"check"}},
 		{name: "finish", path: []string{"finish"}},
+		{name: "completion", path: []string{"completion"}},
 	}
 
 	for _, tc := range tests {

@@ -51,6 +51,11 @@ func Test_reports_an_undefined_long_flag_as_one_usage_line_naming_the_command_in
 			args:       []string{"new", "step", "--bogus", "demo"},
 			wantStderr: "brief new step: unknown flag: --bogus; run 'brief new step <feature>'",
 		},
+		{
+			name:       "completion",
+			args:       []string{"completion", "--bogus"},
+			wantStderr: "brief completion: unknown flag: --bogus; run 'brief completion <bash|zsh|fish|powershell>'",
+		},
 	}
 
 	for _, tt := range tests {

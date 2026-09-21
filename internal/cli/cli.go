@@ -60,17 +60,19 @@ func expectedCommandList(cmd *cobra.Command) string {
 //
 // A command with available subcommands (root, and "new") renders the
 // "cmdList" group body instead: its one-sentence Long, then one row per
-// available command under "Usage:" — a child with its own available
-// subcommands contributes its children's rows instead of its own, so
-// "new feature" and "new step" list in "new"'s place under root, and under
-// "new" itself the same two rows are its entire listing — each row is that
-// command's UseLine padded to a fixed column, wrapped to its own line
-// first when UseLine would overrun that column, followed by its Short;
-// then a "Run '<command path> <command> --help' for details." trailer
-// scoped to that command's own path. Only cobra's built-in template funcs
-// (rpad, trim, trimTrailingWhitespaces) and text/template builtins are
-// used — no package-global AddTemplateFunc.
-const helpTemplate = `{{- define "cmdRow" -}}
+// available command — or per command carrying listedInHelpAnnotation, so a
+// Hidden-but-listed command such as "completion" still gets a row even
+// though IsAvailableCommand is false for it — under "Usage:". A child with
+// its own available subcommands contributes its children's rows instead of
+// its own, so "new feature" and "new step" list in "new"'s place under
+// root, and under "new" itself the same two rows are its entire listing —
+// each row is that command's UseLine padded to a fixed column, wrapped to
+// its own line first when UseLine would overrun that column, followed by
+// its Short; then a "Run '<command path> <command> --help' for details."
+// trailer scoped to that command's own path. Only cobra's built-in
+// template funcs (rpad, trim, trimTrailingWhitespaces, index) and
+// text/template builtins are used — no package-global AddTemplateFunc.
+var helpTemplate = fmt.Sprintf(`{{- define "cmdRow" -}}
 {{if gt (len .UseLine) 33}}  {{.UseLine}}
 {{rpad "" 35}}{{else}}  {{rpad .UseLine 33}}{{end}}{{.Short}}
 {{end -}}
@@ -78,7 +80,7 @@ const helpTemplate = `{{- define "cmdRow" -}}
 {{.Long}}
 
 Usage:
-{{range .Commands}}{{if .IsAvailableCommand}}
+{{range .Commands}}{{if or .IsAvailableCommand (index .Annotations %q)}}
 {{- if .HasAvailableSubCommands}}
 {{- range .Commands}}{{if .IsAvailableCommand}}{{template "cmdRow" .}}{{end}}{{end}}
 {{- else}}{{template "cmdRow" .}}
@@ -94,12 +96,21 @@ Run '{{.CommandPath}} <command> --help' for details.
 
 Flags:
 {{.LocalFlags.FlagUsages}}{{- end -}}
-`
+`, listedInHelpAnnotation)
 
 // invocationAnnotation is the cobra.Command.Annotations key holding the
 // invocation string the root FlagErrorFunc names in "run '<invocation>'"
 // when that command's flag parsing fails.
 const invocationAnnotation = "invocation"
+
+// listedInHelpAnnotation is the cobra.Command.Annotations key marking a
+// Hidden command that still belongs in root help and as a "brief help"
+// topic — currently only "completion" (R9): enabled and dispatchable, but
+// excluded from every "expected one of:" list. helpTemplate's outer
+// cmdList row loop and the help stub's topic-acceptance check both widen
+// on this one annotation, so any command shown in root help is always a
+// valid "brief help" topic.
+const listedInHelpAnnotation = "listedInHelp"
 
 // jsonFlagUsage is start's --json flag's usage string, shown in its Flags
 // table. Its embedded newlines are pflag's own wrapping cue: FlagUsages
@@ -173,7 +184,10 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // every "expected one of:" message — new, start, finish, status, check —
 // not alphabetically: see this package's init, which turns cobra's default
 // sort off, and expectedCommandList, which reads root.Commands() in that
-// same order.
+// same order. "completion" registers last: it is Hidden (R9 — enabled and
+// dispatchable, but excluded from expectedCommandList, which filters on
+// IsAvailableCommand alone) and carries listedInHelpAnnotation instead, so
+// it still gets a root-help row and remains a valid "brief help" topic.
 func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	root := &cobra.Command{
 		Use:                "brief",
@@ -241,6 +255,20 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 			}),
 	)
 
+	completionCmd := leafCommand(
+		"completion <bash|zsh|fish|powershell>",
+		"print a shell completion script",
+		completionInvocation,
+		completionLong,
+		nil,
+		func(cmd *cobra.Command, args []string) error {
+			return runCompletion(cmd, args, stdout, stderr)
+		},
+	)
+	completionCmd.Hidden = true
+	completionCmd.Annotations[listedInHelpAnnotation] = "true"
+	root.AddCommand(completionCmd)
+
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		path := strings.TrimPrefix(cmd.CommandPath(), "brief ")
 		invocation := cmd.Annotations[invocationAnnotation]
@@ -257,11 +285,12 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 	// errors on this ArbitraryArgs-everywhere tree and returns the
 	// unstripped residual as its second value. A topic is accepted only
 	// when that residual is empty and the resolved target is root itself
-	// (a bare "brief help") or IsAvailableCommand — so a leftover
-	// positional, a flag left after the topic, a flag ahead of it (Find
-	// stops at root, treating the topic as that flag's value) and a
-	// hidden command such as "help" itself are all rejected, not
-	// silently routed to some leaf's help. A rejected topic is brief's
+	// (a bare "brief help"), IsAvailableCommand, or carries
+	// listedInHelpAnnotation — so a leftover positional, a flag left after
+	// the topic, a flag ahead of it (Find stops at root, treating the
+	// topic as that flag's value) and a hidden-and-unlisted command such
+	// as "help" itself are all rejected, not silently routed to some
+	// leaf's help. A rejected topic is brief's
 	// own usage error naming the whole topic as typed — every argument
 	// joined by a space, not just the unresolved residual — so
 	// "help new bogus" names "new bogus", not a false top-level command
@@ -276,7 +305,8 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 		Args:               cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, residual, _ := cmd.Root().Find(args)
-			if len(residual) > 0 || (target != cmd.Root() && !target.IsAvailableCommand()) {
+			listed := target.Annotations[listedInHelpAnnotation] != ""
+			if len(residual) > 0 || (target != cmd.Root() && !target.IsAvailableCommand() && !listed) {
 				return usageError(stderr, fmt.Sprintf("brief help: unknown command %q; expected one of: %s", strings.Join(args, " "), expectedCommandList(cmd)))
 			}
 
