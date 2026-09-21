@@ -1,7 +1,6 @@
 # version-flag — current state
 
-Scenarios complete: SCENARIO-01, SCENARIO-02, SCENARIO-03, SCENARIO-04, SCENARIO-05. Last
-updated by SCENARIO-05.
+Scenarios complete: SCENARIO-01..06. Last updated by SCENARIO-06.
 
 ## Binding decisions
 
@@ -35,17 +34,19 @@ updated by SCENARIO-05.
   `internal/version` package. (SCENARIO-01)
 - `-v` (and clusters `-v=x`, `-vh`, `-hv`) is not a `--version` alias at any site —
   `classifyDashArg` sends it through `argUnknownFlag`/`unknownShortFlagMessage`, unchanged;
-  `-v` is reserved for a future `--verbose` (R5). Pinned in the cross-site table in
+  reserved for a future `--verbose` (R5). Pinned in the cross-site table in
   `flag_error_test.go`. No single mutation guards it: a "`-v` prefix → `argVersionFlag`"
-  mutation reds `-v`/`-v=x`/`-vh` at all three sites but never `-hv`; widening `isAllH` to
-  accept `'v'` is the only mutation that reaches `-hv`. A future R5 guard needs both proofs.
-  (SCENARIO-05)
+  mutation reaches `-v`/`-v=x`/`-vh` but never `-hv`; widening `isAllH` to accept `'v'` is
+  the only mutation that reaches `-hv`. A future R5 guard needs both proofs. (SCENARIO-05)
+- R6, --version outside root: every leaf's `--version` is an ordinary pflag unknown-flag
+  error — no leaf registers a `version` flag, no persistent flags exist in `internal/cli`,
+  so only the `start` rows are mutation-proven, the rest behavior pins. Pinned in
+  `Test_reports_the_version_flag_as_unknown_outside_the_root` (`flag_error_test.go`); `new
+  --version` stays standalone, `new`/`help` `--version=*` stay in the cross-site table.
+  (SCENARIO-06)
 
 ## Left unbuilt
 
-- Full `new`/`help`/leaf byte-identity table for `--version`/`--version=<v>`: SCENARIO-06.
-  `help --version` and leaf `--version` are unpinned; `new`/`help` `--version=x`/`=` are
-  pinned as of SCENARIO-04.
 - Root-help trailer `Run 'brief --version' to print the installed version.`: SCENARIO-07
   (`helpTemplate` unchanged so far).
 - Leaf `-v` (e.g. `brief start -v`): unpinned, goes through real pflag not
@@ -66,11 +67,15 @@ updated by SCENARIO-05.
   is the literal `"--version"`.
 - `strings.HasPrefix(arg, "--version")` without the `=` catches `--versionx`/`--version-foo`
   too; the classify table's `--versionx` row is the only guard against this.
-- The `"(devel)"` fallback row, the `--help --version` row (R8), and `new`/`help`
-  `--version=*` rows are behavior pins green on arrival, not guard evidence — each has its
-  own mutation elsewhere proving the guard exists.
+- The `"(devel)"` fallback row, the `--help --version` row (R8), `new`/`help`
+  `--version=*` rows, and the six non-`start` leaf `--version` rows (SCENARIO-06) are all
+  behavior pins green on arrival, not guard evidence — no guard in this package sits behind
+  them to break.
+- `brief help start --version` does not reach a leaf: the help stub treats the joined
+  remainder as a command name (`unknown command "start --version"`). Not usable as a leaf
+  row. (SCENARIO-06)
 
 ## Open debts
 
-- None open. Every remaining gap is assigned to SCENARIO-06 and SCENARIO-07, both still
+- None open. The remaining gap (root-help trailer) is assigned to SCENARIO-07, still
   pending in `specification.md`'s `## BDD Acceptance Progress`.

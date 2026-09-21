@@ -77,8 +77,7 @@ func Test_reports_an_undefined_long_flag_as_one_usage_line_naming_the_command_in
 // Test_new_reports_the_version_flag_as_unknown pins that "--version" is
 // root-only (R6): a bare "new --version" (no subtype) is reported byte-
 // identical to today's argUnknownFlag wording, through runNew's own
-// argVersionFlag arm. S06 owns the full new/help/leaf byte-identity table
-// this belongs to.
+// argVersionFlag arm.
 //
 // Mutation-verified: routing runNew's argVersionFlag case to argNotFlag's
 // bodyless arm instead of the argUnknownFlag one reds this test — "new
@@ -93,6 +92,110 @@ func Test_new_reports_the_version_flag_as_unknown(t *testing.T) {
 	assert.Equal(t, 2, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 	assert.Equal(t, "brief new: unknown flag: --version; run 'brief new <type> --help'", oneLine(t, &stderr))
+}
+
+// Test_reports_the_version_flag_as_unknown_outside_the_root is SCENARIO-06's
+// table (R6): "--version" is root-only, so "help --version" and every
+// leaf's "--version" are reported byte-identical to today's pre-feature
+// bytes — the help stub's own argUnknownFlag/argVersionFlag/
+// argVersionFlagWithValue fold for "help --version", and pflag's own
+// unknown-flag path for every leaf, since no leaf registers a "version"
+// flag and internal/cli has no persistent flags. "new --version" stays in
+// its own standalone test above; "new"/"help" "--version=x"/"--version="
+// stay in the cross-site table
+// (Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites).
+// This table owns only "help --version" (bare) and the seven leaves, one
+// pin per line.
+//
+// Mutation-verified, restored byte-identical after each:
+//   - help stub (cli.go, newHelpCommand's switch): moving argVersionFlag out
+//     of "case argUnknownFlag, argVersionFlag, argVersionFlagWithValue:" into
+//     the bodyless "case argNotFlag, argVersionFlag:" arm reds only the
+//     "help --version" row — it then falls through to cmd.Root().Find(args)
+//     and reports `brief help: unknown command "--version"; expected one
+//     of: ...` — and nothing else in this table or the cross-site table's
+//     "help --version=x"/"help --version=" rows, proving the bare-flag and
+//     value arms are independently guarded.
+//   - leaf control arm: registering a "version" bool flag on "start"'s own
+//     flag set reds exactly the two "start" rows in this table ("start
+//     --version demo", "start --version=x demo"), proving those two rows
+//     are falsifiable, plus start's help goldens
+//     (Test_prints_start_help_as_usage_line_prose_and_flag_table,
+//     Test_help_start_prints_the_literal_start_help), which render start's
+//     flag table and are expected to move when a real flag is registered.
+//
+// The other six leaf rows (finish, status, check, new feature, new step,
+// completion) are behavior pins, not guard evidence: no flag registration
+// or classifyDashArg call sits between pflag and those bytes at a leaf, so
+// there is no guard in this package to break — pflag's own unknown-flag
+// path produces them unconditionally, the same as any other undefined long
+// flag on those commands.
+func Test_reports_the_version_flag_as_unknown_outside_the_root(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "help --version",
+			args:       []string{"help", "--version"},
+			wantStderr: "brief help: unknown flag: --version; run 'brief help <command>'",
+		},
+		{
+			name:       "start --version",
+			args:       []string{"start", "--version", "demo"},
+			wantStderr: "brief start: unknown flag: --version; run 'brief start <feature>'",
+		},
+		{
+			name:       "finish --version",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--version"},
+			wantStderr: "brief finish: unknown flag: --version; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "status --version",
+			args:       []string{"status", "--version"},
+			wantStderr: "brief status: unknown flag: --version; run 'brief status'",
+		},
+		{
+			name:       "check --version",
+			args:       []string{"check", "--version"},
+			wantStderr: "brief check: unknown flag: --version; run 'brief check [feature]'",
+		},
+		{
+			name:       "new feature --version",
+			args:       []string{"new", "feature", "--version", "payments"},
+			wantStderr: "brief new feature: unknown flag: --version; run 'brief new feature <name>'",
+		},
+		{
+			name:       "new step --version",
+			args:       []string{"new", "step", "--version", "demo"},
+			wantStderr: "brief new step: unknown flag: --version; run 'brief new step <feature>'",
+		},
+		{
+			name:       "completion --version",
+			args:       []string{"completion", "--version"},
+			wantStderr: "brief completion: unknown flag: --version; run 'brief completion <bash|zsh|fish|powershell>'",
+		},
+		{
+			name:       "start --version=x, pflag strips the value",
+			args:       []string{"start", "--version=x", "demo"},
+			wantStderr: "brief start: unknown flag: --version; run 'brief start <feature>'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
 }
 
 // Test_reports_an_undefined_short_flag_as_one_usage_line_naming_the_command_invocation

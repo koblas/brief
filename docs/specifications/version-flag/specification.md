@@ -129,5 +129,5 @@ Scenario: SCENARIO-07 Root help points to --version
 - [x] SCENARIO-03: --version takes no arguments
 - [x] SCENARIO-04: --version takes no value
 - [x] SCENARIO-05: -v stays an unknown shorthand
-- [ ] SCENARIO-06: --version outside the root is unchanged
+- [x] SCENARIO-06: --version outside the root is unchanged
 - [ ] SCENARIO-07: Root help points to --version
