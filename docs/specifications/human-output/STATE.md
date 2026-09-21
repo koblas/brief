@@ -23,19 +23,13 @@ Scenarios complete: SCENARIO-01. Last updated by SCENARIO-01.
 - `files_changed`: `false` for `new`, `new feature`, `new step`, `finish`; `null` otherwise
   (`filesChangedFor`).
 - Usage `fix` = the line's own `"; run '<hint>'"` clause when the line **ends** with one
-  (`usageFix` requires both `strings.LastIndex(msg, "; run '")` and `HasSuffix(msg, "'")`),
-  else a per-level fallback (`usageHint`: leaf's own invocation annotation, `"brief new
-  --help"`, `"brief help <command>"`, or `"brief --help"`). A line that carries the clause
-  followed by more prose (`new feature`'s empty/whitespace-name lines) also falls back — it
-  agrees with the clause only because the leaf's own invocation happens to be what the clause
-  names, not because `usageFix` parses the clause out of trailing text. `path`/`line`/`problem`
-  stay `null` for a usage error.
+  (`usageFix` requires both the marker and a trailing quote — a clause followed by more
+  prose also falls back), else a per-level fallback (`usageHint`: leaf's own invocation
+  annotation, `"brief new --help"`, `"brief help <command>"`, or `"brief --help"`).
+  `path`/`line`/`problem` stay `null` for a usage error.
 - `--json=<v>` (any value, including empty) is **always** a text usage error, checked in
   `run()` via `scanJSONFlag`'s `hasValue` return — before `ExecuteContext`, so it wins over
-  every other usage error on the line, even a bare `--json` alongside it. `run()` calls
-  `root.InitDefaultHelpCmd()` right after building `root` (needed so `root.Find` can resolve
-  `"help"` as a real child before cobra's own dispatch would normally register it) — do not
-  remove this call, it is not dead code.
+  every other usage error on the line, even a bare `--json` alongside it.
 - Golden policy: one exact-bytes golden pins key order; matrix tests compare structurally and
   always check `error.message` against the same argv's no-`--json` stderr, never a literal
   copied from production.
