@@ -427,12 +427,13 @@ func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new(t *tes
 	assert.Equal(t, "brief new: unknown flag: --bogus; run 'brief new <type> --help'", oneLine(t, &stderr))
 }
 
-// Test_version_flag_through_Run_prints_one_brief_line_to_stdout is the only
-// test proving cli.Run wires debug.ReadBuildInfo into "--version" — see
-// version_internal_test.go for the fallback and pass-through tables against
-// fake readers. A go test binary's own debug.ReadBuildInfo reports
-// Main.Version as "(devel)", so the exact stdout line is assertable here
-// too, by way of R2's fallback rather than R1's pass-through.
+// Test_version_flag_through_Run_prints_one_brief_line_to_stdout pins
+// cli.Run's public "--version" surface end to end: exit 0, empty stderr, and
+// one exact stdout line. A go test binary's own debug.ReadBuildInfo reports
+// Main.Version as "(devel)", which prints the same bytes as the fallback for
+// a missing build info, so this test cannot tell the real reader from a
+// stub; the pass-through and fallback rules are pinned against fake readers
+// in version_internal_test.go.
 func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer

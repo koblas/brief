@@ -203,14 +203,14 @@ section may be empty`
 // never calls os.Getwd. stdin backs "-" arguments on commands that read one
 // (finish's --handoff/--state); commands that take no such argument never
 // read it. Run delegates to run, passing debug.ReadBuildInfo as the source
-// "--version" reads (R3).
+// "--version" reads.
 func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	return run(ctx, wd, args, stdin, stdout, stderr, debug.ReadBuildInfo)
 }
 
 // run is Run's implementation, taking readBuildInfo as an explicit
 // dependency so a test can pin "--version"'s output against a fake build
-// info without a real binary (R3, R2's guard against a false ok). It has
+// info without a real binary, including a build info reported with ok=false. It has
 // the same signature as debug.ReadBuildInfo: production passes that
 // function itself.
 func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) error {
@@ -515,9 +515,8 @@ func runRoot(cmd *cobra.Command, args []string, stdout, stderr io.Writer, readBu
 
 // versionLine renders "--version"'s stdout line, prefix included but the
 // trailing newline excluded: "brief " followed by readBuildInfo's
-// Main.Version verbatim (R1), or "brief (devel)" when readBuildInfo reports
-// ok=false or an empty Main.Version — asking for the version never fails
-// (R2).
+// Main.Version verbatim, or "brief (devel)" when readBuildInfo reports
+// ok=false or an empty Main.Version — asking for the version never fails.
 func versionLine(readBuildInfo func() (*debug.BuildInfo, bool)) string {
 	info, ok := readBuildInfo()
 	if !ok || info.Main.Version == "" {
@@ -531,7 +530,7 @@ func versionLine(readBuildInfo func() (*debug.BuildInfo, bool)) string {
 // flag — named exactly as typed — pointing the caller at runHint. It backs
 // root's argHelpFlag and argVersionFlag arms only: runNew and the help stub
 // build their own "takes no arguments" copy inline, with their own prefixes
-// and hints (R6).
+// and hints.
 func takesNoArgumentsMessage(flag, runHint string) string {
 	return fmt.Sprintf("brief: '%s' takes no arguments; run '%s'", flag, runHint)
 }
@@ -540,7 +539,7 @@ func takesNoArgumentsMessage(flag, runHint string) string {
 // — named exactly as typed, never the flag's own unknown-flag wording —
 // pointing the caller at runHint. It backs root's argHelpFlagWithValue and
 // argVersionFlagWithValue arms only: runNew and the help stub build their
-// own "takes no value" copy inline, with their own prefixes and hints (R6).
+// own "takes no value" copy inline, with their own prefixes and hints.
 func takesNoValueMessage(flag, runHint string) string {
 	return fmt.Sprintf("brief: '%s' takes no value; run '%s'", flag, runHint)
 }

@@ -52,10 +52,10 @@ const (
 	// own msg since that function already drops the "=value" part — so
 	// runNew and the help stub fold this case into their existing
 	// argUnknownFlag, argVersionFlag arm with no wording change of their
-	// own (R6). Root is the one caller with its own "--version" contract:
+	// own. Root is the one caller with its own "--version" contract:
 	// it reports its own "takes no value" copy, using neither msg nor
 	// args[0] for that branch, and never checks for a trailing argument —
-	// a value on "--version" always wins over one (R8).
+	// a value on "--version" always wins over one.
 	argVersionFlagWithValue
 )
 
