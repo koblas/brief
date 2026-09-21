@@ -626,8 +626,8 @@ func Test_rejects_the_hh_cluster_under_help_since_it_has_no_sole_argument_case(t
 // cluster made entirely of "h" characters parses exactly like a single
 // "-h" does for pflag's own shorthand-cluster parser, so it stays root's
 // and "new"'s sole-argument "print help" case, not an error — unlike under
-// the help stub, which has no such case at all (see the "help, -hh" row in
-// Test_handles_flag_shaped_and_terminator_tokens_at_disabled_parsing_sites).
+// the help stub, which has no such case at all (see
+// Test_rejects_the_hh_cluster_under_help_since_it_has_no_sole_argument_case).
 func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -762,6 +762,10 @@ func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_s
 // segment between "brief <path>: " and "; run '" alone, since that segment
 // is the one classifyDashArg's callers all build from the same
 // unknownShortFlagMessage call.
+//
+// Mutation-verified: quoting rune(residual[0]) instead of pflag's
+// round-tripped byte reds only the "outside the Latin-1 Supplement block"
+// row; the two Latin-1 rows stay green, since both forms agree there.
 func Test_quotes_a_multibyte_unknown_shorthand_flag_byte_identically_across_leaf_root_and_new(t *testing.T) {
 	tests := []struct {
 		name     string

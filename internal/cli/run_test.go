@@ -424,6 +424,9 @@ func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new(t *tes
 // same as no "-" prefix at all), so it keeps the ordinary
 // unknown-command/unknown-type wording rather than the flag-shaped wording
 // above.
+//
+// Mutation-verified: making classifyDashArg return argUnknownFlag for "-"
+// reds all three rows, the help row included.
 func Test_treats_a_bare_dash_as_a_plain_unknown_command(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -439,6 +442,11 @@ func Test_treats_a_bare_dash_as_a_plain_unknown_command(t *testing.T) {
 			name:    "new",
 			args:    []string{"new", "-"},
 			wantErr: `brief new: unknown type "-"; expected one of: feature, step`,
+		},
+		{
+			name:    "help",
+			args:    []string{"help", "-"},
+			wantErr: `brief help: unknown command "-"; expected one of: new, start, finish, status, check`,
 		},
 	}
 
