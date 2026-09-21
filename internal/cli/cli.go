@@ -284,6 +284,21 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // dispatchable, but excluded from expectedCommandList, which filters on
 // IsAvailableCommand alone) and carries listedInHelpAnnotation instead, so
 // it still gets a root-help row and remains a valid "brief help" topic.
+//
+// One root.SetHelpFunc wrapper backs every help document: root --help, the
+// help stub, runNew's sole-help arm and every leaf's own --help all reach
+// cmd.Help(), which walks up an unset per-command helpFunc to whichever
+// ancestor last called SetHelpFunc — root, here — so no other call site
+// ever renders help on its own. In text mode the wrapper defers to
+// defaultHelpFunc, captured from root.HelpFunc() before SetHelpFunc
+// replaces it (capturing after would recurse into the wrapper itself); in
+// JSON mode it writes helpIndex(root) when cmd is root itself, else
+// helpEntry(cmd) alone — the index-membership predicate (listedForHelp) and
+// "the command asked about" are two different questions, so a target that
+// fails the former (the help stub itself, under "help -h --json") still
+// gets its own one-entry document. Every help document's own "command"
+// field is the literal "help", never the described command's path: see
+// newHelpDocument.
 func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func() (*debug.BuildInfo, bool)) *cobra.Command {
 	root := &cobra.Command{
 		Use:                "brief",
@@ -300,12 +315,13 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 	root.CompletionOptions.DisableDefaultCmd = true
 
 	newCmd := &cobra.Command{
-		Use:                "new",
-		Short:              newShort,
-		Long:               newLong,
-		DisableFlagParsing: true,
-		Args:               cobra.ArbitraryArgs,
-		Annotations:        map[string]string{commandNounAnnotation: "type"},
+		Use:                   "new",
+		Short:                 newShort,
+		Long:                  newLong,
+		DisableFlagParsing:    true,
+		DisableFlagsInUseLine: true,
+		Args:                  cobra.ArbitraryArgs,
+		Annotations:           map[string]string{commandNounAnnotation: "type"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runNew(cmd, args, out.forCommand(cmd))
 		},
@@ -370,6 +386,30 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 	root.SetFlagErrorFunc(newFlagErrorFunc(out))
 
 	root.SetHelpTemplate(helpTemplate)
+
+	// Captured before SetHelpFunc: root.HelpFunc(), with no helpFunc set on
+	// any command yet, returns cobra's own default closure, which renders
+	// whichever *Command it is handed rather than being bound to root —
+	// calling root.HelpFunc() again from inside the wrapper below would
+	// instead return the wrapper itself and recurse forever.
+	defaultHelpFunc := root.HelpFunc()
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if !out.json {
+			defaultHelpFunc(cmd, args)
+
+			return
+		}
+
+		doc := newHelpDocument()
+		if cmd == root {
+			doc.Commands = helpIndex(root)
+		} else {
+			doc.Commands = []helpCommandJSON{helpEntry(cmd)}
+		}
+
+		_ = writeJSONDocument(out.stdout, doc)
+	})
+
 	root.SetHelpCommand(newHelpCommand(out))
 
 	return root
@@ -418,6 +458,11 @@ const helpLong = `Prints help for a command. 'brief help <command>' prints the s
 // runRoot and runNew report for that shape. "--" classifies as argNotFlag,
 // so "brief help --" falls through to Find like any other topic and is
 // rejected as an unresolved one.
+//
+// Every accepted topic's target.Help() call, and the sole-argument "-h"
+// case's own cmd.Help(), reach newRootCommand's one root.SetHelpFunc
+// wrapper — under --json this renders the resolved command's own help
+// document instead of its text help, target unchanged either way.
 func newHelpCommand(out reporter) *cobra.Command {
 	return &cobra.Command{
 		Use:                   "help [command]",

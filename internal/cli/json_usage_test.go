@@ -353,35 +353,6 @@ func Test_json_with_a_value_is_a_text_usage_error(t *testing.T) {
 	}
 }
 
-// Test_json_stripped_from_help_topic_arguments_runs_the_ordinary_help_path
-// pins the "Unchanged in this scenario" rule for "help": once "--json" is
-// stripped from argv entirely, "help start --json" and "help --json
-// start" are byte-identical to "help start" — printing start's help text,
-// not a usage error and not a JSON document. SCENARIO-13 is the one that
-// gives "help --json" its own document.
-func Test_json_stripped_from_help_topic_arguments_runs_the_ordinary_help_path(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{name: "help topic --json", args: []string{"help", "start", "--json"}},
-		{name: "help --json topic", args: []string{"help", "--json", "start"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			wd := t.TempDir()
-			var stdout, stderr bytes.Buffer
-
-			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
-
-			require.NoError(t, err)
-			assert.Empty(t, stderr.String())
-			assert.Equal(t, startHelp, stdout.String())
-		})
-	}
-}
-
 // Test_version_with_json_relaxes_the_sole_argument_rule pins R5's
 // consequence of stripping "--json" ahead of dispatch entirely: once
 // "--json" is gone from argv, "--version" is root's only remaining

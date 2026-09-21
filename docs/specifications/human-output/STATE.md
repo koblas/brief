@@ -1,56 +1,60 @@
 # human-output — current state
 
-Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
+Scenarios complete: SCENARIO-01..13. Last updated by SCENARIO-13.
 
 ## Binding decisions
 
 - JSON mode = exact `--json` token before the first `--`, **stripped** by `scanJSONFlag` in
   `run()` ahead of cobra parsing. `--json=<v>` is always a text usage error. (S01)
-- `reporter` (`internal/cli/json.go`) is the one per-Run output seam. `usageError`/
-  `refusal(err)` render R3's error document; success documents are a per-command
-  `<cmd>Document` embedding `jsonHeader` first, by value. `successHeader()` is `headerFor(0)`;
-  a non-zero-exit success doc (check --json with an ERROR) uses `headerFor` directly. (S09)
+- `reporter` (`internal/cli/json.go`) is the one per-Run output seam: `usageError`/`refusal`
+  render R3's error document; success is a per-command `<cmd>Document` embedding `jsonHeader`
+  first, by value. `successHeader()` is `headerFor(0)`. (S09)
 - `files_changed` (`filesChangedFor`): `false` for `new`, `new feature`, `new step`, `finish`;
   `null` otherwise.
 - `classifyRefusal(err)` order: `*config.InvalidConfigError`, `*unknownFeatureError`,
-  `*scaffold.RefusalError`, `*assemble.RefusalError`, generic `errorKindFailure` —
-  `*unknownFeatureError` before `*scaffold.RefusalError` is load-bearing (mutation-verified).
+  `*scaffold.RefusalError`, `*assemble.RefusalError`, generic `errorKindFailure` — that order
+  is load-bearing (mutation-verified).
 - **Paths: absolute in `assemble`/`scaffold`/JSON, relative in text (R6)** via
   `displayPath(wd, p)` — every command goes through it, no private `filepath.Rel` copies.
   (S04, S08-S11)
 - Every `run*` writes its full success payload, then stderr, before returning; `--json` always
   runs **before** any text-mode write (R1, mutation-verified). JSON slices are never nil —
   `[]`, not `null`. (S06-S11)
-- `scaffold.NewFeature`/`NewStep` return `Result{Feature, Step, Path, Created}`; `scaffold.
-  Finish` returns `FinishResult{Feature, Step, Changed, HandoffPath, StatePath, Next}` — same
+- `scaffold.NewFeature`/`NewStep` return `Result{Feature, Step, Path, Created}`;
+  `scaffold.Finish` returns `FinishResult{..., Changed, HandoffPath, StatePath, Next}` — same
   "absolute, verbatim into JSON" convention, different type. (S10, S11)
 - Text-mode success stderr, one line after stdout, per command; see `new.go`/`finish.go`
-  doc comments for the exact wording — no-op finish prints only "already done with identical
+  doc comments for exact wording — no-op finish prints only "already done with identical
   inputs; nothing written". (S10, S11)
-- `finish --json`: `{header, feature, step, changed, handoff_path, state_path, next}`. `next`
-  is `*string` — null, not omitted, even on the no-op, where the *text* line omits it entirely
-  (deliberate asymmetry). `changed` false only on the no-op; `state_path` is the replaced file,
-  never the `--state` input source. (S11)
+- `finish --json`'s `next` is `*string` — null, not omitted, even on the no-op, where the
+  *text* line omits it entirely. `changed` false only on the no-op. (S11)
 - `next` = lowest-numbered step file whose status isn't done, **depends-on ignored** —
-  `assemble.Start`'s rule, duplicated in `scaffold.nextOpenStep` (they may not import each
-  other); `Test_finish_next_agrees_with_start` pins the two in agreement. Computed before any
-  write, from the `[]os.DirEntry` already read — no second `ReadDir`. (S11)
+  `assemble.Start`'s rule, duplicated in `scaffold.nextOpenStep` (may not import each other);
+  `Test_finish_next_agrees_with_start` pins agreement. (S11)
 - Golden policy: one exact-bytes golden pins key order (`assert.Equal`, never `JSONEq`);
   decode tables check dynamic fields against a captured value, never a literal.
-- `versionString(readBuildInfo)` is the one version rule; `versionLine` = `"brief " +
-  versionString`, and `--version --json`'s `versionDocument{header, version}` field is the
-  bare `versionString` — never disagree on the `(devel)` fallback. Always exits 0. The
-  sole-argument relaxation is `scanJSONFlag` stripping, not a special case in `runRoot`:
-  `runRoot` still requires `len(args) == 1` after stripping, so any other trailing token is
-  still "takes no arguments"; a value on `--version` still wins over a trailing argument. (S12)
+- `versionString(readBuildInfo)` is the one version rule (`"(devel)"` fallback), shared by
+  `versionLine` and `--version --json`'s `versionDocument`. Sole-argument relaxation is
+  `scanJSONFlag` stripping, not a special case in `runRoot`. (S12)
+- Every help document (full index at root, or filtered to one command — `help <cmd> --json` ≡
+  `<cmd> --help --json` ≡ `<cmd> -h --json`) comes from one `root.SetHelpFunc` wrapper
+  (`help_json.go`) — every `cmd.Help()`/`HelpFunc()` call site reaches it. `command` is always
+  the literal `"help"`. Index membership (`listedForHelp` = `IsAvailableCommand() ||
+  listedInHelpAnnotation`) and "the command asked about" (the filter) differ — `help -h
+  --json` yields one `help` entry though the stub is never an index member. `flags` via
+  `cmd.LocalFlags().VisitAll`/`pflag.UnquoteUsage`; `InitDefaultHelpFlag()` runs explicitly per
+  entry — cobra only calls it on the resolved command. `new` needed `DisableFlagsInUseLine:
+  true` so `UseLine()` reads `"brief new"`, not `"...[flags]"`. (S13)
+- R11: `brief completion <shell> --json` (a recognized shell) is a usage error
+  (`completionJSONUnsupportedMessage`), guarded only on `runCompletion`'s resolved-shell
+  branch — `completion --json`/`completion nosh --json` keep their own S01 errors. (S13)
 
 ## Left unbuilt
 
-- `help`/`completion --json` documents — S13; those commands run their **text** path under
-  `--json` until then.
 - `brief new --json` (bare `new`, no type) success document — it only ever errors.
-- `--json` help row on every command, and status/check's "For scripts, use --json…" sentence
-  — S14. Only `start` registers `--json` in help today.
+- `--json` help row on every command (only `start` registers it today), and status/check's
+  "For scripts, use --json…" sentence — S14, via a real pflag per command so the S13 help
+  index picks it up automatically. `root`/`new` need their rows some other way.
 - `assemble.Problem.Line` and `assemble.RenderJSON` — both unowned.
 - A shared platform helper for the "next open step" rule is unbuilt — it lives once in
   `assemble`, once in `scaffold`, tied only by the S11 agreement test.
@@ -76,9 +80,12 @@ Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
 - `scaffold.Finish` sits right at golangci-lint's `maintidx` budget (already extracted into
   `applyFinishWrites`); a future addition should extract another helper, not inline more.
 - A go test binary's own `debug.ReadBuildInfo` reports `(devel)`, byte-identical to
-  `versionString`'s fallback — a black-box `cli.Run` test cannot tell pass-through from
-  fallback. Pin either only through unexported `run` with a fake reader, or against a value
-  captured from `--version` in the same binary, never a literal. (S12)
+  `versionString`'s fallback — pin either only through unexported `run` with a fake reader, or
+  against a value captured from `--version` in the same binary, never a literal. (S12)
+- `root.HelpFunc()` must be captured **before** `SetHelpFunc` replaces it, or the wrapper
+  recurses into itself. A full-index entry's `-h/--help` row depends on `helpEntry`'s own
+  `InitDefaultHelpFlag()` call — cobra only calls it on the resolved command; *filtered*-path
+  tests alone can't catch this regressing. (S13)
 
 ## Open debts
 

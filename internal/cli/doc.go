@@ -34,6 +34,14 @@
 // "expected one of:" list while giving it a root-help row and a
 // "brief help completion" topic.
 //
+// "brief help [command] --json", "brief --help --json" and every leaf's
+// own "<command> --help --json" render a help document instead of text:
+// commands[] full index (root's own help) or filtered to the one command
+// asked about, built by newRootCommand's single root.SetHelpFunc wrapper
+// (help_json.go). Every help document's own "command" field is the
+// literal "help", not the described command's path. "brief completion
+// <shell> --json" is a usage error (R11), never the script.
+//
 // "brief new feature <name>" and "brief new step <feature>" share one
 // refusal template: a *scaffold.RefusalError (or a
 // *config.InvalidConfigError, for a bad ".brief.yaml") renders as one line
