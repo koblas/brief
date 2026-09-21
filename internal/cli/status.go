@@ -8,7 +8,7 @@ import (
 )
 
 // statusLong is "brief status"'s help prose.
-const statusLong = `Prints a table of every feature: name, steps done over total, how many
+var statusLong = `Prints a table of every feature: name, steps done over total, how many
 steps are blocked on an unfinished dependency, and the next open step's id
 and title — "(complete)" once every step is done, "-" when there are no
 step files at all. A feature whose step files cannot be read or parsed
@@ -17,7 +17,9 @@ and the reason, one line per malformed feature, then a summary line
 counting features in progress, complete and malformed — brief status
 still exits 0, because check (not status) is where that becomes a
 failure. A repository with no features prints nothing and exits 0, with
-one line on stderr saying so. brief status reads; it never writes.`
+one line on stderr saying so. brief status reads; it never writes.
+
+` + jsonFieldsParagraph("features") + " " + jsonScriptHint
 
 // statusInvocation is the invocation string every "brief status" usage
 // error names as how to fix it.

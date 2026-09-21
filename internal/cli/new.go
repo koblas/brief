@@ -19,14 +19,18 @@ const newShort = "scaffold a feature or its next step"
 const newLong = "Scaffolds a new feature, or the next step of an existing feature."
 
 // newFeatureLong is "brief new feature"'s help prose.
-const newFeatureLong = `Scaffolds docs/specifications/<name> (or the configured feature directory)
+var newFeatureLong = `Scaffolds docs/specifications/<name> (or the configured feature directory)
 with an empty specification skeleton and an empty state file.
 
-A name may not be empty or contain whitespace.`
+A name may not be empty or contain whitespace.
+
+` + jsonFieldsParagraph("feature", "step", "path", "created")
 
 // newStepLong is "brief new step"'s help prose.
-const newStepLong = `Scaffolds the next step file for feature and appends its entry to the
-feature's progress list.`
+var newStepLong = `Scaffolds the next step file for feature and appends its entry to the
+feature's progress list.
+
+` + jsonFieldsParagraph("feature", "step", "path", "created")
 
 // newFeatureInvocation is the invocation string every "brief new feature"
 // usage error names as how to fix it.

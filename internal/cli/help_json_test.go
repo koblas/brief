@@ -85,8 +85,9 @@ func Test_help_json_lists_every_listed_command_and_new_itself(t *testing.T) {
 
 	// "brief help --json" dispatches to the help stub itself, so cobra's
 	// own Execute() never calls InitDefaultHelpFlag on any index entry —
-	// "status" (never the resolved command, and no flags of its own) only
-	// carries a "help" row here because helpEntry calls it itself.
+	// "status" (never the resolved command) only carries a "help" row here
+	// because helpEntry calls it itself; "json" is status's own registered
+	// pflag (S14), sorted after "help".
 	var status helpCommandJSONDecode
 	for _, c := range doc.Commands {
 		if c.Name == "status" {
@@ -94,8 +95,9 @@ func Test_help_json_lists_every_listed_command_and_new_itself(t *testing.T) {
 		}
 	}
 	require.Equal(t, "status", status.Name)
-	require.Len(t, status.Flags, 1)
+	require.Len(t, status.Flags, 2)
 	assert.Equal(t, helpFlagJSONDecode{Name: "help", Type: "bool", Usage: "help for status"}, status.Flags[0])
+	assert.Equal(t, helpFlagJSONDecode{Name: "json", Type: "bool", Usage: "print one JSON document on stdout"}, status.Flags[1])
 }
 
 // usageLineRE extracts a leaf's own generated "Usage:" line from its text
@@ -357,7 +359,11 @@ func Test_help_finish_json_is_the_exact_document(t *testing.T) {
 	description := "Closes step in feature: writes the body at --handoff to the step's own\n" +
 		"handoff file, replaces the feature's state file with the body at --state,\n" +
 		"and marks the step done in the progress list. \"-\" reads a flag's body\n" +
-		"from stdin; it may be given for at most one of --handoff and --state."
+		"from stdin; it may be given for at most one of --handoff and --state.\n\n" +
+		"With --json, this command writes one JSON document on stdout: the common header\n" +
+		"(`schema`, `command`, `ok`, `exit_code`; on a usage error or refusal an `error`\n" +
+		"object carries the failure), then its own top-level fields, in document order:\n" +
+		"`feature`, `step`, `changed`, `handoff_path`, `state_path`, `next`."
 	handoffUsage := "the path to the step's handoff body,\nwritten to its own file"
 	stateUsage := "the path to the COMPLETE replacement body for the state\n" +
 		"file; it replaces the file, it is never appended to; it\n" +
@@ -370,6 +376,7 @@ func Test_help_finish_json_is_the_exact_document(t *testing.T) {
 		`"flags":[` +
 		`{"name":"handoff","type":"string","usage":` + jsonString(t, handoffUsage) + `},` +
 		`{"name":"help","type":"bool","usage":"help for finish"},` +
+		`{"name":"json","type":"bool","usage":"print one JSON document on stdout"},` +
 		`{"name":"state","type":"string","usage":` + jsonString(t, stateUsage) + `}` +
 		`]}]}` + "\n"
 

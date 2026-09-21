@@ -1,65 +1,60 @@
 # human-output — current state
 
-Scenarios complete: SCENARIO-01..13. Last updated by SCENARIO-13.
+Scenarios complete: SCENARIO-01..14 (all). Last updated by SCENARIO-14.
 
 ## Binding decisions
 
 - JSON mode = exact `--json` token before the first `--`, **stripped** by `scanJSONFlag` in
-  `run()` ahead of cobra parsing. `--json=<v>` is always a text usage error. (S01)
+  `run()` ahead of cobra parsing. `--json=<v>` is always a text usage error.
 - `reporter` (`internal/cli/json.go`) is the one per-Run output seam: `usageError`/`refusal`
   render R3's error document; success is a per-command `<cmd>Document` embedding `jsonHeader`
-  first, by value. `successHeader()` is `headerFor(0)`. (S09)
-- `files_changed` (`filesChangedFor`): `false` for `new`, `new feature`, `new step`, `finish`;
-  `null` otherwise.
+  first, by value, never nil slices (`[]` not `null`). `--json` always writes before any
+  text-mode write (R1, mutation-verified).
+- `files_changed`: `false` for `new`, `new feature`, `new step`, `finish`; `null` otherwise.
 - `classifyRefusal(err)` order: `*config.InvalidConfigError`, `*unknownFeatureError`,
-  `*scaffold.RefusalError`, `*assemble.RefusalError`, generic `errorKindFailure` — that order
-  is load-bearing (mutation-verified).
+  `*scaffold.RefusalError`, `*assemble.RefusalError`, generic `errorKindFailure` — load-bearing
+  (mutation-verified).
 - **Paths: absolute in `assemble`/`scaffold`/JSON, relative in text (R6)** via
-  `displayPath(wd, p)` — every command goes through it, no private `filepath.Rel` copies.
-  (S04, S08-S11)
-- Every `run*` writes its full success payload, then stderr, before returning; `--json` always
-  runs **before** any text-mode write (R1, mutation-verified). JSON slices are never nil —
-  `[]`, not `null`. (S06-S11)
-- `scaffold.NewFeature`/`NewStep`/`Finish` result types share one "absolute, verbatim into
-  JSON" convention. (S10, S11)
-- Text-mode success stderr is one line after stdout, per command (see `new.go`/`finish.go`
-  doc comments for wording). (S10, S11)
-- `finish --json`'s `next` is `*string` — null, not omitted, even on the no-op, where the
-  *text* line omits it entirely. `changed` false only on the no-op. (S11)
-- `next` = lowest-numbered step file whose status isn't done, **depends-on ignored** —
-  `assemble.Start`'s rule, duplicated in `scaffold.nextOpenStep` (may not import each other);
-  `Test_finish_next_agrees_with_start` pins agreement. (S11)
+  `displayPath(wd, p)` — every command goes through it.
+- `finish --json`'s `next` is `*string` — null, not omitted, on the no-op; `changed` false
+  only on the no-op. `next` = lowest-numbered step whose status isn't done, **depends-on
+  ignored** — duplicated in `assemble.Start` and `scaffold.nextOpenStep` (may not import each
+  other), agreement pinned by test.
 - Golden policy: one exact-bytes golden pins key order (`assert.Equal`, never `JSONEq`);
   decode tables check dynamic fields against a captured value, never a literal.
-- `versionString(readBuildInfo)` is the one version rule (`"(devel)"` fallback), shared by
-  `versionLine` and `--version --json`'s `versionDocument`. Sole-argument relaxation is
-  `scanJSONFlag` stripping, not a special case in `runRoot`. (S12)
-- Every help document (full index at root, or filtered to one command — `help <cmd> --json` ≡
-  `<cmd> --help --json` ≡ `<cmd> -h --json`) comes from one `root.SetHelpFunc` wrapper
-  (`help_json.go`) — every `cmd.Help()`/`HelpFunc()` call site reaches it. `command` is always
-  the literal `"help"`. Index membership (`listedForHelp` = `IsAvailableCommand() ||
-  listedInHelpAnnotation`) and "the command asked about" (the filter) differ — `help -h
-  --json` yields one `help` entry though the stub is never an index member. `flags` via
-  `cmd.LocalFlags().VisitAll`/`pflag.UnquoteUsage`; `InitDefaultHelpFlag()` runs explicitly per
-  entry — cobra only calls it on the resolved command. `new` needed `DisableFlagsInUseLine:
-  true` so `UseLine()` reads `"brief new"`, not `"...[flags]"`. (S13)
-- R11: `brief completion <shell> --json` (a recognized shell) is a usage error
-  (`completionJSONUnsupportedMessage`), guarded only on `runCompletion`'s resolved-shell
-  branch — `completion --json`/`completion nosh --json` keep their own S01 errors. (S13)
+- `versionString(readBuildInfo)` is the one version rule (`"(devel)"` fallback), shared text
+  and JSON.
+- Every help document comes from one `root.SetHelpFunc` wrapper (`help_json.go`); `command` is
+  always the literal `"help"`; `flags` via `cmd.LocalFlags().VisitAll`/`pflag.UnquoteUsage`,
+  `InitDefaultHelpFlag()` called explicitly per entry.
+- R11: `brief completion <shell> --json` (recognized shell) is a usage error, guarded only on
+  `runCompletion`'s resolved-shell branch.
+- **`--json` is a real pflag on every JSON-capable leaf** (`new feature`, `new step`, `start`,
+  `finish`, `status`, `check`) and the help stub, via one helper `addJSONFlag` (`cli.go`)
+  sharing one usage const `jsonFlagUsage` = `"print one JSON document on stdout"`.
+  `leafCommand` does not call it itself — `completion`'s own call still passes `nil` (R11).
+  Registration is display-only: `scanJSONFlag` still strips every `--json` before pflag runs.
+- Every JSON-capable command's `Long` ends with a JSON paragraph built from one shared trio in
+  `cli.go`: `jsonParagraphHeaderClause` (common-header sentence, wrapped once, reused
+  verbatim), `jsonFieldsParagraph(keys...)` (that command's own top-level keys, wrapped
+  separately from the header clause), `wrapWords` (mechanical greedy wrap). `startLong` also
+  carries the "step is null" / "`--json` before or after `<feature>`" facts, no longer in
+  `jsonFlagUsage` itself. `status`/`check` additionally end with `jsonScriptHint` ("For
+  scripts, use --json; the text layout may change.") — no other command carries it. Root and
+  bare `new` get neither row nor paragraph (`rootHelp`/`newHelp` unchanged). `Long` is the
+  help-document `description`, so every paragraph is JSON-visible too.
 
 ## Left unbuilt
 
 - `brief new --json` (bare `new`, no type) success document — it only ever errors.
-- `--json` help row on every command (only `start` registers it today), and status/check's
-  "For scripts, use --json…" sentence — S14, via a real pflag per command so the S13 help
-  index picks it up automatically. `root`/`new` need their rows some other way.
 - `assemble.Problem.Line` and `assemble.RenderJSON` — both unowned.
-- A shared platform helper for the "next open step" rule is unbuilt — it lives once in
-  `assemble`, once in `scaffold`, tied only by the S11 agreement test.
-- A `blocked` flag in `finish`'s output does not exist; the ruled JSON shape has none.
-- A flag `shorthand` field — not in the ruled help-entry shape.
-- `--version` never appears in the help index — root is not an entry (`DisableFlagParsing`;
-  `--help`/`--version` are hand-classified, not pflags).
+- A shared platform helper for the "next open step" rule — lives once in `assemble`, once in
+  `scaffold`, tied only by an agreement test.
+- A `blocked` flag in `finish`'s output, and a flag `shorthand` field in help entries — neither
+  is in the ruled shape.
+- `--version` never appears in the help index — root is not an entry.
+- A JSON-mode hint in root's or `new`'s own group help — nobody owns it; neither renders a
+  Flags table, so a future owner needs a mechanism other than `addJSONFlag`.
 
 ## Traps
 
@@ -68,33 +63,28 @@ Scenarios complete: SCENARIO-01..13. Last updated by SCENARIO-13.
   the user's own relative `--state`/`--handoff` argument.
 - A reserved-name collision (`schema`, `command`, `ok`, `exit_code`, `error`) in a future
   payload struct is silently resolved by encoding/json's equal-depth rule.
-- `known:` lists only openable dirs — an unopenable dir appears in `status` but never
-  `known:`. A zero-step feature with findings is `InFlight == false` → `(complete)` in
-  `check`, though `status.Complete()` says otherwise. Both pre-existing.
+- `known:` lists only openable dirs. A zero-step feature with findings is `InFlight == false`
+  → `(complete)` in `check`, though `status.Complete()` disagrees. Both pre-existing.
 - A new feature-level `Finding` producer must stamp its own `Feature`/`FeaturePath`/
   `InFlight`/`Rule` itself, at every `Finding{...}` site (mutation-verified).
-- On macOS `t.TempDir()` sits under a symlinked `/var`; build expected absolute paths from the
-  same `wd` passed to `cli.Run`, never `filepath.EvalSymlinks`.
-- `os.ReadDir` order is filename order — `nextOpenStep` picks the minimum by `pattern.Number`
-  itself; a sibling with unparseable frontmatter counts as not done and can be named `next`,
-  even though `brief start` then refuses the whole feature — truthful, but the two disagree.
-- `scaffold.Finish` sits right at golangci-lint's `maintidx` budget (already extracted into
-  `applyFinishWrites`); a future addition should extract another helper, not inline more.
-- A go test binary's own `debug.ReadBuildInfo` reports `(devel)`, byte-identical to
-  `versionString`'s fallback — pin either only through unexported `run` with a fake reader, or
-  against a value captured from `--version` in the same binary, never a literal. (S12)
+- `os.ReadDir` order is filename order — `nextOpenStep` picks the minimum by `pattern.Number`;
+  a sibling with unparseable frontmatter counts as not done and can be named `next`, though
+  `brief start` then refuses the whole feature.
 - `root.HelpFunc()` must be captured **before** `SetHelpFunc` replaces it, or the wrapper
-  recurses into itself. A full-index entry's `-h/--help` row depends on `helpEntry`'s own
-  `InitDefaultHelpFlag()` call — cobra only calls it on the resolved command; *filtered*-path
-  tests alone can't catch this regressing. (S13)
-- `HelpFunc` returns nothing and `cmd.Help()` always returns nil, so the wrapper's
-  `_ = writeJSONDocument(...)` cannot surface a write error as a non-zero exit — same as
-  cobra's own text help today, not a missed error check. (S13)
-- S14 registering `--json` as a real pflag on every command will redden
-  `Test_help_finish_json_is_the_exact_document` (golden) and `status`'s flag count in
-  `Test_help_json_lists_every_listed_command_and_new_itself` — expected, update both. (S13)
+  recurses into itself. `HelpFunc`/`cmd.Help()` never return an error, so a write failure in
+  the JSON wrapper can't become a non-zero exit — same limit as cobra's own text help.
+- pflag sorts a leaf's Flags rows by name: `--json` lands between `--help` and `--state` in
+  finish's table and its help-JSON `flags[]` — a future flag addition must check where pflag's
+  sort puts it, not assume append order.
+- A word-coverage assertion over a whole help text can pass vacuously: short keys (`step`,
+  `path`, `open`, `next`) already appear elsewhere in several commands' prose, and
+  `features`/`feature` are substrings of each other — search only the slice starting at
+  `jsonParagraphMarker`, whole words only, when adding a future field key.
+- The 80-column sweep (`Test_every_leaf_help_line_fits_in_80_columns`) checks `Long` prose
+  too; pflag never wraps `Long` — hand-wrap, or route through `wrapWords`.
 
 ## Open debts
 
-- `assemble.RenderJSON` (see Left unbuilt) — unowned; dies unless re-opened.
+- `assemble.RenderJSON`, `brief new --json`'s success document, and a JSON-mode hint in
+  root's/`new`'s own group help (see Left unbuilt) — all unowned, all die unless re-opened.
 - `scaffold.noSuchFeatureRefusal`'s dead `Problem`/`Fix` fields — unowned.

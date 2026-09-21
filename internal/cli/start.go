@@ -9,7 +9,7 @@ import (
 )
 
 // startLong is "brief start"'s help prose.
-const startLong = `Prints the next open step's id, title, acceptance criteria and checklist,
+var startLong = `Prints the next open step's id, title, acceptance criteria and checklist,
 and the decisions and constraints inherited from the feature's state
 file. A feature whose steps are all done, or that has no step files yet,
 prints nothing and says so on stderr instead, still exiting 0.
@@ -20,7 +20,10 @@ heading, or a next step whose frontmatter has no id or no checklist. A
 missing optional convention — the step's acceptance heading, or a state
 file heading — is named on stderr instead, one line each, and the brief
 still prints on stdout, still exiting 0.
-brief start reads; it never writes.`
+brief start reads; it never writes.
+
+` + jsonFieldsParagraph("done", "open", "step", "inherited", "shortfalls") + "\n" +
+	wrapWords(`"step" is null when there is no open step, and --json may be given before or after <feature>.`, jsonParagraphWidth)
 
 // startInvocation is the invocation string every "brief start" usage error
 // names as how to fix it.
@@ -37,10 +40,10 @@ type startDocument struct {
 
 // runStart implements "brief start [--json] <feature>"; rest is its
 // positional arguments, from either side of --json, flags already parsed
-// away. jsonOut is out.json, read once at the call site: start's own
-// pflag "json" flag stays registered only so its help table row still
-// renders, since run's own scanJSONFlag strips every "--json" token
-// before pflag ever parses one.
+// away. jsonOut is out.json, read once at the call site: every
+// JSON-capable leaf's own pflag "json" flag stays registered only so its
+// help table row still renders, since run's own scanJSONFlag strips every
+// "--json" token before pflag ever parses one.
 func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, out reporter) error {
 	switch {
 	case len(rest) == 0:

@@ -169,23 +169,97 @@ const listedInHelpAnnotation = "listedInHelp"
 // root carries none, so helpTemplate falls back to the literal "command".
 const commandNounAnnotation = "commandNoun"
 
-// jsonFlagUsage is start's --json flag's usage string, shown in its Flags
-// table. Its embedded newlines are pflag's own wrapping cue: FlagUsages
-// re-indents them to the table's description column.
-const jsonFlagUsage = `print the brief as a single JSON document instead of markdown.
-Every exit-0 run writes one, even when there is no open step:
-"step" is null rather than the document being omitted, so a
-structured caller detects completion the same way a human
-reads the stderr notice. --json may be given before or after
-<feature>.`
+// jsonFlagUsage is every JSON-capable command's own --json flag's usage
+// string, shown in its Flags table: one ruled line, the same wording on
+// every command so the help index's own "usage" field can never drift
+// from what a command's rendered text carries.
+const jsonFlagUsage = "print one JSON document on stdout"
+
+// addJSONFlag registers --json, with jsonFlagUsage's ruled wording, on fs
+// — the one call every JSON-capable leaf's addFlags makes, so the flag
+// renders identically in every Flags table and every help-index entry
+// (S13 reads flags from pflag). leafCommand itself does not call this:
+// completion is built through it, and R11 forbids advertising --json
+// there.
+func addJSONFlag(fs *pflag.FlagSet) {
+	fs.Bool("json", false, jsonFlagUsage)
+}
+
+// jsonParagraphWidth is the column every JSON-capable command's trailing
+// JSON paragraph is hand-wrapped to, the same 80-column budget every other
+// hand-wrapped usage string in this package already keeps.
+const jsonParagraphWidth = 80
+
+// jsonParagraphHeaderClause is every JSON-capable command's own opening
+// clause, wrapped once and reused verbatim: it names the common header —
+// schema, command, ok, exit_code; on a usage error or refusal an error
+// object carries the failure — the same way in every command, so only the
+// field-key sentence jsonFieldsParagraph appends ever varies per command.
+// Test_every_command_help_names_its_json_documents_top_level_fields slices
+// from this clause's own first line to isolate a command's field-key
+// sentence from the rest of that command's prose.
+var jsonParagraphHeaderClause = wrapWords(
+	"With --json, this command writes one JSON document on stdout: the common header "+
+		"(`schema`, `command`, `ok`, `exit_code`; on a usage error or refusal an `error` "+
+		"object carries the failure), then its own top-level fields, in document order:",
+	jsonParagraphWidth,
+)
+
+// jsonFieldsParagraph builds one command's trailing JSON paragraph:
+// jsonParagraphHeaderClause, then keys — that command's own top-level
+// fields, in document order — backquoted, comma-joined and wrapped
+// separately from the header clause, so the header clause's own line
+// breaks never depend on what follows it.
+func jsonFieldsParagraph(keys ...string) string {
+	quoted := make([]string, len(keys))
+	for i, k := range keys {
+		quoted[i] = "`" + k + "`"
+	}
+
+	return jsonParagraphHeaderClause + "\n" + wrapWords(strings.Join(quoted, ", ")+".", jsonParagraphWidth)
+}
+
+// jsonScriptHint is the sentence status and check's own Long end with,
+// right after their JSON paragraph — no other command carries it, since
+// only their text-mode output's own layout is unstable release to
+// release.
+const jsonScriptHint = "For scripts, use --json; the text layout may change."
+
+// wrapWords greedily wraps text's whitespace-separated words onto lines no
+// longer than width, never splitting a word itself — the one mechanical
+// wrap this package uses instead of guessing break points by hand or by
+// regex.
+func wrapWords(text string, width int) string {
+	words := strings.Fields(text)
+	lines := make([]string, 0, len(words))
+
+	var cur string
+
+	for _, w := range words {
+		switch {
+		case cur == "":
+			cur = w
+		case len(cur)+1+len(w) <= width:
+			cur += " " + w
+		default:
+			lines = append(lines, cur)
+			cur = w
+		}
+	}
+
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+
+	return strings.Join(lines, "\n")
+}
 
 // handoffFlagUsage is finish's --handoff flag's usage string. The
 // backquoted "path" is pflag's own convention (UnquoteUsage): it names the
 // flag's value in its Flags table row ("--handoff path") instead of
 // pflag's default type name ("string"). Its embedded newline is pflag's
-// own wrapping cue, the same convention jsonFlagUsage uses: FlagUsages
-// re-indents it to the table's description column, so every rendered line
-// stays within 80 columns.
+// own wrapping cue: FlagUsages re-indents it to the table's description
+// column, so every rendered line stays within 80 columns.
 const handoffFlagUsage = `the ` + "`path`" + ` to the step's handoff body,
 written to its own file`
 
@@ -327,11 +401,11 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		},
 	}
 	newCmd.AddCommand(
-		leafCommand("feature <name>", "scaffold a new feature's specification and state file", newFeatureInvocation, newFeatureLong, nil,
+		leafCommand("feature <name>", "scaffold a new feature's specification and state file", newFeatureInvocation, newFeatureLong, addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
 				return runNewFeature(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
-		leafCommand("step <feature>", "scaffold the next step file and its progress entry", newStepInvocation, newStepLong, nil,
+		leafCommand("step <feature>", "scaffold the next step file and its progress entry", newStepInvocation, newStepLong, addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
 				return runNewStep(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
@@ -340,9 +414,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 	root.AddCommand(
 		newCmd,
 		leafCommand("start [--json] <feature>", "print the next open step's context", startInvocation, startLong,
-			func(fs *pflag.FlagSet) {
-				fs.Bool("json", false, jsonFlagUsage)
-			},
+			addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
 				forStart := out.forCommand(cmd)
 
@@ -352,6 +424,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			func(fs *pflag.FlagSet) {
 				fs.String("handoff", "", handoffFlagUsage)
 				fs.String("state", "", stateFlagUsage)
+				addJSONFlag(fs)
 			},
 			func(cmd *cobra.Command, args []string) error {
 				handoffPath, _ := cmd.Flags().GetString("handoff")
@@ -359,11 +432,11 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 
 				return runFinish(cmd.Context(), wd, args, handoffPath, statePath, stdin, out.forCommand(cmd))
 			}),
-		leafCommand("status", "print a FEATURE/DONE/BLOCKED/NEXT table of every feature", statusInvocation, statusLong, nil,
+		leafCommand("status", "print a FEATURE/DONE/BLOCKED/NEXT table of every feature", statusInvocation, statusLong, addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
 				return runStatus(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
-		leafCommand("check [feature]", "report faults finish would now refuse to write over", checkInvocation, checkLong, nil,
+		leafCommand("check [feature]", "report faults finish would now refuse to write over", checkInvocation, checkLong, addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
 				return runCheck(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
@@ -427,8 +500,10 @@ const helpShort = "print help for a command"
 // helpLong is the help stub's own prose, rendered by helpTemplate's leaf
 // branch when "brief help" is asked for its own help — see
 // newHelpCommand's sole-argument case.
-const helpLong = `Prints help for a command. 'brief help <command>' prints the same text as
-'brief <command> --help'; with no command it prints the overview.`
+var helpLong = `Prints help for a command. 'brief help <command>' prints the same text as
+'brief <command> --help'; with no command it prints the overview.
+
+` + jsonFieldsParagraph("commands")
 
 // newHelpCommand builds the hidden "help" stub that replaces cobra's
 // default help command, which on an unknown topic calls cobra.CheckErr and
@@ -468,7 +543,7 @@ const helpLong = `Prints help for a command. 'brief help <command>' prints the s
 // wrapper — under --json this renders the resolved command's own help
 // document instead of its text help, target unchanged either way.
 func newHelpCommand(out reporter) *cobra.Command {
-	return &cobra.Command{
+	helpCmd := &cobra.Command{
 		Use:                   "help [command]",
 		Short:                 helpShort,
 		Long:                  helpLong,
@@ -508,6 +583,13 @@ func newHelpCommand(out reporter) *cobra.Command {
 			return target.Help()
 		},
 	}
+
+	// Registered only for the stub's own help table row — DisableFlagParsing
+	// means the stub's dispatch never reads this flag's value; run's own
+	// scanJSONFlag strips every "--json" token before RunE ever runs.
+	addJSONFlag(helpCmd.Flags())
+
+	return helpCmd
 }
 
 // leafCommand builds a command that takes flags and positionals but no

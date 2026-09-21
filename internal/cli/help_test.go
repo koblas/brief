@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -11,8 +13,8 @@ import (
 )
 
 // startHelp is "brief start --help"'s exact stdout: a generated Usage
-// line, start's prose verbatim, and pflag's own flag table for -h/--help
-// and --json — nothing else.
+// line, start's prose verbatim, its trailing JSON paragraph, and pflag's
+// own flag table for -h/--help and --json — nothing else.
 const startHelp = `Usage:
   brief start [--json] <feature>
 
@@ -29,14 +31,16 @@ file heading — is named on stderr instead, one line each, and the brief
 still prints on stdout, still exiting 0.
 brief start reads; it never writes.
 
+With --json, this command writes one JSON document on stdout: the common header
+(` + "`schema`, `command`, `ok`, `exit_code`" + `; on a usage error or refusal an ` + "`error`" + `
+object carries the failure), then its own top-level fields, in document order:
+` + "`done`, `open`, `step`, `inherited`, `shortfalls`" + `.
+"step" is null when there is no open step, and --json may be given before or
+after <feature>.
+
 Flags:
   -h, --help   help for start
-      --json   print the brief as a single JSON document instead of markdown.
-               Every exit-0 run writes one, even when there is no open step:
-               "step" is null rather than the document being omitted, so a
-               structured caller detects completion the same way a human
-               reads the stderr notice. --json may be given before or after
-               <feature>.
+      --json   print one JSON document on stdout
 `
 
 // Test_prints_start_help_as_usage_line_prose_and_flag_table pins R6 for one
@@ -398,17 +402,24 @@ func Test_help_flag_as_the_topic_argument_takes_no_arguments(t *testing.T) {
 
 // helpHelp is "brief help -h"'s exact stdout: the help stub's own generated
 // Usage line ("brief help [command]", no "[flags]" suffix since
-// newHelpCommand sets DisableFlagsInUseLine), its own Long prose, and a
-// Flags table with only the auto-registered -h/--help — the same leaf
-// shape every other command's own "--help" renders.
+// newHelpCommand sets DisableFlagsInUseLine), its own Long prose plus its
+// trailing JSON paragraph, and a Flags table with the auto-registered
+// -h/--help and --json — the same leaf shape every other command's own
+// "--help" renders.
 const helpHelp = `Usage:
   brief help [command]
 
 Prints help for a command. 'brief help <command>' prints the same text as
 'brief <command> --help'; with no command it prints the overview.
 
+With --json, this command writes one JSON document on stdout: the common header
+(` + "`schema`, `command`, `ok`, `exit_code`" + `; on a usage error or refusal an ` + "`error`" + `
+object carries the failure), then its own top-level fields, in document order:
+` + "`commands`" + `.
+
 Flags:
   -h, --help   help for help
+      --json   print one JSON document on stdout
 `
 
 // Test_help_flag_as_the_sole_argument_prints_the_help_stubs_own_usage pins
@@ -484,10 +495,10 @@ func Test_help_reports_a_non_help_dash_prefixed_topic_as_an_unknown_flag(t *test
 
 // finishHelp is "brief finish --help"'s exact stdout: --handoff and
 // --state show their value as "path" (from the backquoted varname in each
-// flag's usage string), not pflag's default "string", and each usage
-// string's own embedded newline wraps it to the description column the
-// same way jsonFlagUsage wraps start's --json — every line at or under 80
-// columns.
+// flag's usage string), not pflag's default "string", each usage string's
+// own embedded newline wraps it to the description column — every line at
+// or under 80 columns — and pflag's own sort order puts --json between
+// --help and --state.
 const finishHelp = `Usage:
   brief finish <feature> <step> --handoff <path> --state <path>
 
@@ -496,10 +507,16 @@ handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
 from stdin; it may be given for at most one of --handoff and --state.
 
+With --json, this command writes one JSON document on stdout: the common header
+(` + "`schema`, `command`, `ok`, `exit_code`" + `; on a usage error or refusal an ` + "`error`" + `
+object carries the failure), then its own top-level fields, in document order:
+` + "`feature`, `step`, `changed`, `handoff_path`, `state_path`, `next`" + `.
+
 Flags:
       --handoff path   the path to the step's handoff body,
                        written to its own file
   -h, --help           help for finish
+      --json           print one JSON document on stdout
       --state path     the path to the COMPLETE replacement body for the state
                        file; it replaces the file, it is never appended to; it
                        must carry the configured state headings, though a
@@ -559,6 +576,261 @@ func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 			require.NotEmpty(t, stdout.String())
 			for line := range strings.SplitSeq(stdout.String(), "\n") {
 				assert.LessOrEqual(t, len(line), 80, "line %q of %q help must fit in 80 columns", line, tc.name)
+			}
+		})
+	}
+}
+
+// jsonFlagRowRE matches the ruled --json row every JSON-capable leaf's
+// Flags table must carry, whitespace-tolerant between the flag name and
+// its usage so a column-width change elsewhere in the table can never
+// spuriously break this assertion.
+var jsonFlagRowRE = regexp.MustCompile(`(?m)^\s*--json\s+print one JSON document on stdout\s*$`)
+
+// Test_every_command_help_lists_the_json_flag_row pins SCENARIO-14: every
+// JSON-capable leaf's own "--help" carries one --json row with the ruled
+// usage line. completion is the control arm: R11 forbids advertising
+// --json there, so its own "--help" must not mention "--json" at all.
+func Test_every_command_help_lists_the_json_flag_row(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "new feature", args: []string{"new", "feature", "--help"}},
+		{name: "new step", args: []string{"new", "step", "--help"}},
+		{name: "start", args: []string{"start", "--help"}},
+		{name: "finish", args: []string{"finish", "--help"}},
+		{name: "status", args: []string{"status", "--help"}},
+		{name: "check", args: []string{"check", "--help"}},
+		{name: "help", args: []string{"help", "-h"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			assert.Empty(t, stderr.String())
+			assert.Regexp(t, jsonFlagRowRE, stdout.String())
+		})
+	}
+
+	t.Run("completion carries no --json row", func(t *testing.T) {
+		wd := t.TempDir()
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"completion", "--help"}, nil, &stdout, &stderr)
+
+		require.NoError(t, err)
+		assert.Empty(t, stderr.String())
+		assert.NotContains(t, stdout.String(), "--json")
+	})
+}
+
+// jsonParagraphMarker is the first line of every JSON-capable command's
+// own JSON paragraph — jsonParagraphHeaderClause's own first wrapped line
+// in production — copied here as a literal so this test can slice a
+// command's own field-key sentence out of the rest of its prose without
+// reaching into cli's unexported symbols.
+const jsonParagraphMarker = "With --json, this command writes one JSON document on stdout: the common header"
+
+// headerJSONKeys are the header keys every --json document carries,
+// dropped before checking a document's own top-level fields against its
+// help text: they are never named in a command's own JSON paragraph, only
+// jsonParagraphMarker's shared header clause covers them.
+var headerJSONKeys = map[string]bool{"schema": true, "command": true, "ok": true, "exit_code": true}
+
+// wholeWordPresent reports whether word appears in text as a whole word:
+// not as a substring of a longer word (so "feature" does not match inside
+// "features", and "step" does not match inside a longer identifier).
+func wholeWordPresent(t *testing.T, text, word string) bool {
+	t.Helper()
+
+	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(word) + `\b`)
+
+	return re.MatchString(text)
+}
+
+// jsonFieldsCase is one row of
+// Test_every_command_help_names_its_json_documents_top_level_fields: run
+// produces the command's own --json stdout and error, plus the same
+// command's own "--help" text to check the fields against; wantExit is
+// this row's own expected ExitCode, since check --json exits 1 on this
+// fixture's own ERROR finding (R4) while every other row exits 0.
+type jsonFieldsCase struct {
+	name     string
+	run      func(t *testing.T) (jsonStdout []byte, helpText string, err error)
+	wantExit int
+}
+
+// runJSONAndHelp runs jsonArgs and helpArgs against the same wd, in that
+// order, and returns jsonArgs' own stdout/error and helpArgs' own stdout —
+// the shared shape every jsonFieldsCase.run in the table below builds on.
+func runJSONAndHelp(t *testing.T, wd string, jsonArgs, helpArgs []string) ([]byte, string, error) {
+	t.Helper()
+
+	var jsonStdout, jsonStderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, jsonArgs, nil, &jsonStdout, &jsonStderr)
+	require.Empty(t, jsonStderr.String())
+
+	var helpStdout, helpStderr bytes.Buffer
+	require.NoError(t, cli.Run(t.Context(), wd, helpArgs, nil, &helpStdout, &helpStderr))
+	require.Empty(t, helpStderr.String())
+
+	return jsonStdout.Bytes(), helpStdout.String(), err
+}
+
+// Test_every_command_help_names_its_json_documents_top_level_fields pins
+// SCENARIO-14's own key-coverage clause: each command's own JSON
+// paragraph, in its "--help" text, names every one of that command's own
+// top-level --json fields (the live document's own keys, header keys
+// dropped, never a literal list) as a whole word.
+func Test_every_command_help_names_its_json_documents_top_level_fields(t *testing.T) {
+	tests := []jsonFieldsCase{
+		{
+			name: "new feature",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := t.TempDir()
+
+				return runJSONAndHelp(t, wd, []string{"new", "feature", "demo", "--json"}, []string{"new", "feature", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
+			name: "new step",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := t.TempDir()
+				var featStdout, featStderr bytes.Buffer
+				require.NoError(t, cli.Run(t.Context(), wd, []string{"new", "feature", "demo"}, nil, &featStdout, &featStderr))
+
+				return runJSONAndHelp(t, wd, []string{"new", "step", "demo", "--json"}, []string{"new", "step", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
+			name: "start",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := newStartFixture(t, "open")
+
+				return runJSONAndHelp(t, wd, []string{"start", "--json", "demo"}, []string{"start", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
+			name: "finish",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := newFinishCLIFixture(t)
+				handoffPath := writeInput(t, "handoff.md", "HANDOFF\n")
+				statePath := writeInput(t, "state.md", "## Binding decisions\n\nd\n\n## Left unbuilt\n\nn\n\n## Traps\n\nn\n\n## Open debts\n\nn\n")
+
+				return runJSONAndHelp(t, wd,
+					[]string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath, "--json"},
+					[]string{"finish", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
+			name: "status",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := newStatusJSONFixture(t)
+
+				return runJSONAndHelp(t, wd, []string{"status", "--json"}, []string{"status", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
+			name: "check",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := newCheckJSONFixture(t)
+
+				return runJSONAndHelp(t, wd, []string{"check", "--json"}, []string{"check", "--help"})
+			},
+			wantExit: 1,
+		},
+		{
+			name: "help",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := t.TempDir()
+
+				return runJSONAndHelp(t, wd, []string{"help", "--json"}, []string{"help", "-h"})
+			},
+			wantExit: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			jsonStdout, helpText, err := tc.run(t)
+
+			assert.Equal(t, tc.wantExit, cli.ExitCode(err))
+
+			var doc map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(jsonStdout, &doc))
+
+			idx := strings.Index(helpText, jsonParagraphMarker)
+			require.GreaterOrEqual(t, idx, 0, "no JSON paragraph found in %q help text %q", tc.name, helpText)
+			paragraph := helpText[idx:]
+
+			for key := range doc {
+				if headerJSONKeys[key] {
+					continue
+				}
+
+				assert.True(t, wholeWordPresent(t, paragraph, key), "%q help paragraph %q must name key %q as a whole word", tc.name, paragraph, key)
+			}
+		})
+	}
+}
+
+// Test_status_and_check_help_say_the_text_layout_may_change pins the
+// exact sentence status and check's own Long end with, after their JSON
+// paragraph; start and finish are the control arm, since no other command
+// carries it.
+func Test_status_and_check_help_say_the_text_layout_may_change(t *testing.T) {
+	const sentence = "For scripts, use --json; the text layout may change."
+
+	tests := []struct {
+		name    string
+		args    []string
+		carries bool
+	}{
+		{name: "status", args: []string{"status", "--help"}, carries: true},
+		{name: "check", args: []string{"check", "--help"}, carries: true},
+		{name: "start", args: []string{"start", "--help"}, carries: false},
+		{name: "finish", args: []string{"finish", "--help"}, carries: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			assert.Empty(t, stderr.String())
+
+			if tc.carries {
+				assert.Contains(t, stdout.String(), sentence)
+			} else {
+				assert.NotContains(t, stdout.String(), sentence)
 			}
 		})
 	}

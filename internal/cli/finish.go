@@ -11,10 +11,12 @@ import (
 )
 
 // finishLong is "brief finish"'s help prose.
-const finishLong = `Closes step in feature: writes the body at --handoff to the step's own
+var finishLong = `Closes step in feature: writes the body at --handoff to the step's own
 handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
-from stdin; it may be given for at most one of --handoff and --state.`
+from stdin; it may be given for at most one of --handoff and --state.
+
+` + jsonFieldsParagraph("feature", "step", "changed", "handoff_path", "state_path", "next")
 
 // finishDocument is finish's --json success document: the common header
 // first, then scaffold.FinishResult's own fields, both paths absolute and

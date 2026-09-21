@@ -11,7 +11,7 @@ import (
 )
 
 // checkLong is "brief check"'s help prose.
-const checkLong = `Reports every fault in a feature's on-disk layout that finish would now
+var checkLong = `Reports every fault in a feature's on-disk layout that finish would now
 refuse to write over: caps, an unclosed fence, a missing heading, an
 unticked checklist item on a done step, or a broken dependency, on a tree
 that predates the tool or a raised cap. With no feature given, checks
@@ -30,7 +30,9 @@ that naming one feature narrows the report. brief check exits 1 when it
 prints any ERROR finding, 0 otherwise — including a run that prints WARN
 findings only. A conforming repository, or feature, prints nothing on
 stdout and exits 0, with one line on stderr saying so. brief check reads;
-it never writes.`
+it never writes.
+
+` + jsonFieldsParagraph("counts", "features") + " " + jsonScriptHint
 
 // errCheckFindings marks a run of runCheck that printed at least one
 // ERROR-severity finding: ExitCode's default branch maps any non-nil,
