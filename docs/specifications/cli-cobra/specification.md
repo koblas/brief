@@ -182,7 +182,7 @@ Scenario: SCENARIO-13 Completion for an unsupported shell
 - [x] SCENARIO-07: Command help keeps its prose inside generated structure
 - [x] SCENARIO-08: "brief help <command>" matches "<command> --help"
 - [x] SCENARIO-09: "brief help" with an unknown topic
-- [ ] SCENARIO-10: "new" has its own help
+- [x] SCENARIO-10: "new" has its own help
 - [ ] SCENARIO-11: Unknown command stays one line, list built from the command tree
 - [ ] SCENARIO-12: Shell completion script
 - [ ] SCENARIO-13: Completion for an unsupported shell

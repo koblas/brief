@@ -42,30 +42,29 @@ const expectedCommands = "new, start, finish, status, check"
 // once on root via SetHelpTemplate and inherited by every child through
 // HelpTemplate()'s parent walk.
 //
-// A leaf (HasParent) renders its generated Usage line, its Long prose
-// trimmed, and pflag's own flag table — nothing else, so no "Global
-// Flags:", "Additional help topics:" or cobra trailer ever appears.
+// A command with no available subcommands (every leaf) renders its
+// generated Usage line, its Long prose trimmed, and pflag's own flag
+// table — nothing else, so no "Global Flags:", "Additional help topics:"
+// or cobra trailer ever appears.
 //
-// Root renders its one-sentence Long, then one row per available command
-// under "Usage:" — a command with its own available subcommands (only
-// "new" today) contributes its children's rows instead of its own, so
-// "new feature" and "new step" list in "new"'s place — each row is that
+// A command with available subcommands (root, and "new") renders the
+// "cmdList" group body instead: its one-sentence Long, then one row per
+// available command under "Usage:" — a child with its own available
+// subcommands contributes its children's rows instead of its own, so
+// "new feature" and "new step" list in "new"'s place under root, and under
+// "new" itself the same two rows are its entire listing — each row is that
 // command's UseLine padded to a fixed column, wrapped to its own line
 // first when UseLine would overrun that column, followed by its Short;
-// then the "Run '...' for details." trailer. Only cobra's built-in
-// template funcs (rpad, trim, trimTrailingWhitespaces) and text/template
-// builtins are used — no package-global AddTemplateFunc.
+// then a "Run '<command path> <command> --help' for details." trailer
+// scoped to that command's own path. Only cobra's built-in template funcs
+// (rpad, trim, trimTrailingWhitespaces) and text/template builtins are
+// used — no package-global AddTemplateFunc.
 const helpTemplate = `{{- define "cmdRow" -}}
 {{if gt (len .UseLine) 33}}  {{.UseLine}}
 {{rpad "" 35}}{{else}}  {{rpad .UseLine 33}}{{end}}{{.Short}}
 {{end -}}
-{{- if .HasParent}}Usage:
-  {{.UseLine}}
-
-{{.Long | trimTrailingWhitespaces}}
-
-Flags:
-{{.LocalFlags.FlagUsages}}{{- else}}{{.Long}}
+{{- define "cmdList" -}}
+{{.Long}}
 
 Usage:
 {{range .Commands}}{{if .IsAvailableCommand}}
@@ -75,8 +74,15 @@ Usage:
 {{- end}}
 {{- end}}
 {{- end}}
-Run 'brief <command> --help' for details.
+Run '{{.CommandPath}} <command> --help' for details.
 {{end -}}
+{{- if .HasAvailableSubCommands}}{{template "cmdList" .}}{{- else}}Usage:
+  {{.UseLine}}
+
+{{.Long | trimTrailingWhitespaces}}
+
+Flags:
+{{.LocalFlags.FlagUsages}}{{- end -}}
 `
 
 // invocationAnnotation is the cobra.Command.Annotations key holding the
@@ -138,12 +144,15 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // leak one invocation's flags into the next.
 //
 // The root and "new" disable cobra's flag parsing and resolve their first
-// argument themselves, via the unchanged runRoot and runNew, so a missing
-// or unknown command or type — "-x" included — keeps its own one-line
-// usage error instead of cobra's default dispatch. The leaves let cobra
-// (via pflag) parse flags and report an undefined one in pflag's own
-// words; the root FlagErrorFunc rewrites that into brief's one-line usage
-// error, naming the invocation carried in the leaf's Annotations.
+// argument themselves, via runRoot and runNew, so a missing or unknown
+// command or type — "-x" included — keeps its own one-line usage error
+// instead of cobra's default dispatch. runNew routes a sole "-h"/"--help"
+// argument to cmd.Help() itself, since cobra's own help check never runs
+// under disabled flag parsing; alongside any other argument it falls
+// through to the unknown-type error. The leaves let cobra (via pflag)
+// parse flags and report an undefined one in pflag's own words; the root
+// FlagErrorFunc rewrites that into brief's one-line usage error, naming
+// the invocation carried in the leaf's Annotations.
 //
 // Every command in the tree is Runnable with Args: cobra.ArbitraryArgs, so
 // cobra never rejects an argument count itself — every run* function does
@@ -169,10 +178,11 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 
 	newCmd := &cobra.Command{
 		Use:                "new",
+		Long:               newLong,
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
-		RunE: func(_ *cobra.Command, args []string) error {
-			return runNew(args, stderr)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runNew(cmd, args, stderr)
 		},
 	}
 	newCmd.AddCommand(

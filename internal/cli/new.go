@@ -9,7 +9,12 @@ import (
 
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/scaffold"
+	"github.com/spf13/cobra"
 )
+
+// newLong is "brief new"'s one-sentence help prose, rendered above its two
+// children's rows in the "cmdList" group body.
+const newLong = "Scaffolds a new feature, or the next step of an existing feature."
 
 // newFeatureLong is "brief new feature"'s help prose.
 const newFeatureLong = `Scaffolds docs/specifications/<name> (or the configured feature directory)
@@ -21,11 +26,18 @@ A name may not be empty or contain whitespace.`
 const newStepLong = `Scaffolds the next step file for feature and appends its entry to the
 feature's progress list.`
 
-// runNew handles "brief new <type> ..." when type names neither feature
-// nor step: nothing at all, or something unknown.
-func runNew(args []string, stderr io.Writer) error {
+// runNew handles "brief new <type> ...": routes a sole "-h"/"--help"
+// argument to cmd.Help() (new's flag parsing is disabled, so cobra's own
+// help check never sees it), and otherwise reports type is neither
+// feature nor step — nothing at all, or something unknown, including a
+// "-h"/"--help" alongside any other argument.
+func runNew(cmd *cobra.Command, args []string, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief new: no type given; expected one of: feature, step")
+	}
+
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+		return cmd.Help()
 	}
 
 	return usageError(stderr, fmt.Sprintf("brief new: unknown type %q; expected one of: feature, step", args[0]))

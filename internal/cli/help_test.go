@@ -71,6 +71,102 @@ Usage:
 Run 'brief <command> --help' for details.
 `
 
+// newHelp is "brief new --help"'s exact stdout: new's group body, listing
+// its two children's rows (copied from rootHelp's own "new feature"/"new
+// step" rows, same cmdRow padding), and the "new"-scoped trailer — no
+// Usage line and no Flags table, since new's own UseLine is rendered
+// nowhere.
+const newHelp = `Scaffolds a new feature, or the next step of an existing feature.
+
+Usage:
+  brief new feature <name>         scaffold a new feature's specification and state file
+  brief new step <feature>         scaffold the next step file and its progress entry
+
+Run 'brief new <command> --help' for details.
+`
+
+// Test_prints_new_help_listing_its_two_types pins SCENARIO-10: "new
+// --help", "new -h" and "help new" all render newHelp byte-identical, exit
+// 0, stderr empty.
+func Test_prints_new_help_listing_its_two_types(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "new --help", args: []string{"new", "--help"}},
+		{name: "new -h", args: []string{"new", "-h"}},
+		{name: "help new", args: []string{"help", "new"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			assert.Empty(t, stderr.String())
+			assert.Equal(t, newHelp, stdout.String())
+		})
+	}
+}
+
+// Test_new_help_flag_is_help_only_as_the_sole_argument pins that runNew's
+// "-h"/"--help" routing to cmd.Help() fires only when that flag is new's
+// one and only argument. Any other argument alongside it, in either order,
+// falls through to runNew's existing unknown-type usage error naming
+// whichever argument came first — matching S06's and S09's strictness. A
+// bare "new --help feature" does NOT reach feature's own help: cobra's Find
+// has not yet registered new's help flag when it walks this argv, so it
+// treats "feature" as --help's value and dispatch never leaves new.
+func Test_new_help_flag_is_help_only_as_the_sole_argument(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		stderr string
+	}{
+		{
+			name:   "--help widget",
+			args:   []string{"new", "--help", "widget"},
+			stderr: `brief new: unknown type "--help"; expected one of: feature, step` + "\n",
+		},
+		{
+			name:   "--help -x",
+			args:   []string{"new", "--help", "-x"},
+			stderr: `brief new: unknown type "--help"; expected one of: feature, step` + "\n",
+		},
+		{
+			name:   "-h widget",
+			args:   []string{"new", "-h", "widget"},
+			stderr: `brief new: unknown type "-h"; expected one of: feature, step` + "\n",
+		},
+		{
+			name:   "--help feature",
+			args:   []string{"new", "--help", "feature"},
+			stderr: `brief new: unknown type "--help"; expected one of: feature, step` + "\n",
+		},
+		{
+			name:   "-x --help",
+			args:   []string{"new", "-x", "--help"},
+			stderr: `brief new: unknown type "-x"; expected one of: feature, step` + "\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tc.stderr, stderr.String())
+		})
+	}
+}
+
 // Test_prints_the_root_help_with_one_line_per_command pins R6/R8 for root:
 // "brief --help" produces rootHelp exactly, and "brief -h" and "brief
 // help" are byte-identical to it — every root-help path renders through
@@ -150,6 +246,7 @@ func Test_help_topic_prints_the_same_bytes_as_the_command_help_flag(t *testing.T
 		name string
 		path []string
 	}{
+		{name: "new", path: []string{"new"}},
 		{name: "new feature", path: []string{"new", "feature"}},
 		{name: "new step", path: []string{"new", "step"}},
 		{name: "start", path: []string{"start"}},
