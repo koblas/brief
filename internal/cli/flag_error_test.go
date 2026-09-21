@@ -681,6 +681,18 @@ func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
 // runNew's (respectively the help stub's) argVersionFlagWithValue case to
 // the bodyless argNotFlag arm reds only that site's two "--version=*"
 // rows, proving each site's fold is independent of the other's.
+//
+// The "-v"/"-v=x"/"-vh"/"-hv" group pins R5: -v stays an unknown shorthand
+// at every site, never a --version alias. Mutation-verified against the
+// whole package, restored byte-identical after each: routing
+// classifyDashArg's final argUnknownFlag return to argVersionFlag (with msg
+// unknownLongFlagMessage(arg)) whenever arg has a "-v" prefix reds exactly
+// the "-v"/"-v=x"/"-vh" rows at all three sites and nothing else in the
+// package; it does not reach the "-hv" rows, since that arg starts "-h"
+// rather than "-v". Widening isAllH to also accept 'v' reds exactly the
+// "-hv" rows (and "-v"/"-vh") at all three sites and nothing else instead,
+// since they then classify as argHelpFlag; of the two mutations, only this
+// one reaches "-hv".
 func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -751,6 +763,26 @@ func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_s
 		{name: "root -x", args: []string{"-x"}, wantStderr: "brief: unknown shorthand flag: 'x' in -x; run 'brief <command> --help'"},
 		{name: "new -x", args: []string{"new", "-x"}, wantStderr: "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'"},
 		{name: "help -x", args: []string{"help", "-x"}, wantStderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'"},
+
+		// "-v" (R5: -v is reserved for a future --verbose, never a --version alias)
+		{name: "root -v", args: []string{"-v"}, wantStderr: "brief: unknown shorthand flag: 'v' in -v; run 'brief <command> --help'"},
+		{name: "new -v", args: []string{"new", "-v"}, wantStderr: "brief new: unknown shorthand flag: 'v' in -v; run 'brief new <type> --help'"},
+		{name: "help -v", args: []string{"help", "-v"}, wantStderr: "brief help: unknown shorthand flag: 'v' in -v; run 'brief help <command>'"},
+
+		// "-v=x"
+		{name: "root -v=x", args: []string{"-v=x"}, wantStderr: "brief: unknown shorthand flag: 'v' in -v=x; run 'brief <command> --help'"},
+		{name: "new -v=x", args: []string{"new", "-v=x"}, wantStderr: "brief new: unknown shorthand flag: 'v' in -v=x; run 'brief new <type> --help'"},
+		{name: "help -v=x", args: []string{"help", "-v=x"}, wantStderr: "brief help: unknown shorthand flag: 'v' in -v=x; run 'brief help <command>'"},
+
+		// "-vh"
+		{name: "root -vh", args: []string{"-vh"}, wantStderr: "brief: unknown shorthand flag: 'v' in -vh; run 'brief <command> --help'"},
+		{name: "new -vh", args: []string{"new", "-vh"}, wantStderr: "brief new: unknown shorthand flag: 'v' in -vh; run 'brief new <type> --help'"},
+		{name: "help -vh", args: []string{"help", "-vh"}, wantStderr: "brief help: unknown shorthand flag: 'v' in -vh; run 'brief help <command>'"},
+
+		// "-hv" (leading defined -h is consumed first, same skip rule as "-hx")
+		{name: "root -hv", args: []string{"-hv"}, wantStderr: "brief: unknown shorthand flag: 'v' in -v; run 'brief <command> --help'"},
+		{name: "new -hv", args: []string{"new", "-hv"}, wantStderr: "brief new: unknown shorthand flag: 'v' in -v; run 'brief new <type> --help'"},
+		{name: "help -hv", args: []string{"help", "-hv"}, wantStderr: "brief help: unknown shorthand flag: 'v' in -v; run 'brief help <command>'"},
 	}
 
 	for _, tt := range tests {
