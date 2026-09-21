@@ -130,4 +130,4 @@ Scenario: SCENARIO-07 Root help points to --version
 - [x] SCENARIO-04: --version takes no value
 - [x] SCENARIO-05: -v stays an unknown shorthand
 - [x] SCENARIO-06: --version outside the root is unchanged
-- [ ] SCENARIO-07: Root help points to --version
+- [x] SCENARIO-07: Root help points to --version

@@ -102,9 +102,13 @@ func expectedCommandList(cmd *cobra.Command) string {
 // by its Short; then a "Run '<command path> <noun> --help' for details."
 // trailer scoped to that command's own path, where <noun> is that
 // command's own commandNounAnnotation ("type" for "new") or the literal
-// "command" when the command carries none (root). Only cobra's built-in
-// template funcs (rpad, trim, trimTrailingWhitespaces, index) and
-// text/template builtins (or) are used — no package-global AddTemplateFunc.
+// "command" when the command carries none (root). Root's group body — and
+// only root's, gated on HasParent being false — ends with one further
+// line, "Run '<command path> --version' to print the installed version.":
+// "new"'s group body and every leaf's Flags-table body end at the trailer
+// above instead. Only cobra's built-in template funcs (rpad, trim,
+// trimTrailingWhitespaces, index) and text/template builtins (or, if) are
+// used — no package-global AddTemplateFunc.
 var helpTemplate = fmt.Sprintf(`{{- define "cmdRow" -}}
 {{if gt (len .UseLine) %[3]d}}  {{.UseLine}}
 {{rpad "" %[4]d}}{{else}}  {{rpad .UseLine %[3]d}}{{end}}{{.Short}}
@@ -121,6 +125,8 @@ Usage:
 {{- end}}
 {{- end}}
 Run '{{.CommandPath}} <{{or (index .Annotations %[2]q) "command"}}> --help' for details.
+{{if not .HasParent}}Run '{{.CommandPath}} --version' to print the installed version.
+{{end -}}
 {{end -}}
 {{- if .HasAvailableSubCommands}}{{template "cmdList" .}}{{- else}}Usage:
   {{.UseLine}}
