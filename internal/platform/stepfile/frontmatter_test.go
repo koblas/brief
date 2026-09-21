@@ -35,34 +35,33 @@ func Test_ParseFrontmatter_returns_an_error_for_malformed_yaml(t *testing.T) {
 	require.Error(t, err)
 }
 
-func Test_Frontmatter_Done_is_true_for_done(t *testing.T) {
-	fm := stepfile.Frontmatter{Status: "done"}
+// Test_Frontmatter_Done collects what counts as a finished step. One
+// assertion, one rule: Done trims surrounding whitespace and compares
+// case-insensitively against "done", and nothing else is finished.
+func Test_Frontmatter_Done(t *testing.T) {
+	cases := []struct {
+		name   string
+		status string
+		want   bool
+	}{
+		{name: "done", status: "done", want: true},
+		// Whitespace and case are separate cases on purpose: one fixture
+		// carrying both would redden for either mutation, so neither rule
+		// would be pinned on its own.
+		{name: "done with surrounding whitespace", status: " done ", want: true},
+		{name: "done in mixed case", status: "Done", want: true},
+		{name: "open", status: "open", want: false},
+		{name: "blocked", status: "blocked", want: false},
+		{name: "an empty status", status: "", want: false},
+	}
 
-	assert.True(t, fm.Done())
-}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fm := stepfile.Frontmatter{Status: c.status}
 
-func Test_Frontmatter_Done_is_true_for_done_with_surrounding_whitespace_and_case(t *testing.T) {
-	fm := stepfile.Frontmatter{Status: " Done "}
-
-	assert.True(t, fm.Done())
-}
-
-func Test_Frontmatter_Done_is_false_for_open(t *testing.T) {
-	fm := stepfile.Frontmatter{Status: "open"}
-
-	assert.False(t, fm.Done())
-}
-
-func Test_Frontmatter_Done_is_false_for_blocked(t *testing.T) {
-	fm := stepfile.Frontmatter{Status: "blocked"}
-
-	assert.False(t, fm.Done())
-}
-
-func Test_Frontmatter_Done_is_false_for_empty_status(t *testing.T) {
-	fm := stepfile.Frontmatter{Status: ""}
-
-	assert.False(t, fm.Done())
+			assert.Equal(t, c.want, fm.Done())
+		})
+	}
 }
 
 func Test_SetStatus_replaces_the_status_line_and_leaves_every_other_byte_identical(t *testing.T) {

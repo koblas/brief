@@ -7,66 +7,51 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test_Compile_refuses_an_empty_pattern(t *testing.T) {
-	_, err := stepfile.Compile("")
+// Test_Compile_refuses collects the patterns Compile must reject. They
+// share one assertion and one behaviour family: a step-file-pattern that
+// cannot round-trip — either it does not name exactly one step number, or
+// it renders a name Pattern.Number can never read back.
+func Test_Compile_refuses(t *testing.T) {
+	cases := []struct {
+		name    string
+		pattern string
+	}{
+		{name: "an empty pattern", pattern: ""},
+		{name: "a pattern with no verb", pattern: "SCENARIO.md"},
+		{name: "a pattern with two verbs", pattern: "%d-%d.md"},
+		{name: "a pattern with the wrong verb", pattern: "SCENARIO-%s.md"},
+		{name: "a pattern carrying a percent escape", pattern: "100%%-%d.md"},
+		{name: "a pattern with a path separator", pattern: "steps/%d.md"},
+		{
+			// "%3d" renders Name(1) as "SCENARIO-  1.md", space-padded, and
+			// Number only accepts digits in the verb's place — so it could
+			// never read back its own Name output, making a feature's
+			// second step unaddressable.
+			name:    "an unpadded width verb",
+			pattern: "SCENARIO-%3d.md",
+		},
+		{
+			// The "-" flag left-justifies with spaces on the right, which
+			// Number's digits-only scan cannot read back either.
+			name:    "a left-justified verb",
+			pattern: "SCENARIO-%-4d.md",
+		},
+	}
 
-	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := stepfile.Compile(c.pattern)
+
+			require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
+		})
+	}
 }
 
-func Test_Compile_refuses_a_pattern_with_no_verb(t *testing.T) {
-	_, err := stepfile.Compile("SCENARIO.md")
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
-}
-
-func Test_Compile_refuses_a_pattern_with_two_verbs(t *testing.T) {
-	_, err := stepfile.Compile("%d-%d.md")
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
-}
-
-func Test_Compile_refuses_a_pattern_with_the_wrong_verb(t *testing.T) {
-	_, err := stepfile.Compile("SCENARIO-%s.md")
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
-}
-
-func Test_Compile_refuses_a_pattern_carrying_a_percent_escape(t *testing.T) {
-	_, err := stepfile.Compile("100%%-%d.md")
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
-}
-
-func Test_Compile_refuses_a_pattern_with_a_path_separator(t *testing.T) {
-	_, err := stepfile.Compile("steps/%d.md")
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
-}
-
-// Test_Compile_refuses_an_unpadded_width_verb reproduces the reviewer's
-// finding: "%3d" renders Name(1) as "SCENARIO-  1.md" (space-padded), but
-// Number can never read a space back out of the verb's place, since it
-// only accepts digits there. A pattern Compile accepts but Number can
-// never recognize its own Name output for makes a feature's second step
-// unaddressable.
-func Test_Compile_refuses_an_unpadded_width_verb(t *testing.T) {
-	_, err := stepfile.Compile("SCENARIO-%3d.md")
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
-}
-
-// Test_Compile_refuses_a_left_justified_verb is the "%-4d" half of the
-// same finding: the "-" flag left-justifies with spaces on the right,
-// which Number's digits-only scan can never read back either.
-func Test_Compile_refuses_a_left_justified_verb(t *testing.T) {
-	_, err := stepfile.Compile("SCENARIO-%-4d.md")
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
-}
-
-// Test_Compile_accepts_a_zero_padded_width_verb is the positive control
-// for the two refusals above: "%02d" pads with zeros, which Number reads
-// back as ordinary digits, so Compile must keep accepting it.
+// Test_Compile_accepts_a_zero_padded_width_verb is the positive control for
+// the width refusals above: "%02d" pads with zeros, which Number reads back
+// as ordinary digits, so Compile must keep accepting it. It is not in the
+// table above because it asserts a different tuple — no error AND a
+// rendered name.
 func Test_Compile_accepts_a_zero_padded_width_verb(t *testing.T) {
 	p, err := stepfile.Compile("SCENARIO-%02d.md")
 
@@ -74,11 +59,10 @@ func Test_Compile_accepts_a_zero_padded_width_verb(t *testing.T) {
 	require.Equal(t, "SCENARIO-03.md", p.Name(3))
 }
 
-// Test_Compile_accepts_a_zero_width_zero_padded_verb reproduces the
-// reviewer's finding directly: "%0d" renders and round-trips identically
-// to plain "%d", so it must be accepted the same as "%00d" — verbRe's
-// group used to require at least one digit after the leading "0",
-// rejecting "%0d" while accepting "%00d" for no behavioral reason.
+// Test_Compile_accepts_a_zero_width_zero_padded_verb pins that "%0d"
+// renders and round-trips identically to plain "%d": verbRe's group once
+// required at least one digit after the leading "0", rejecting "%0d" while
+// accepting "%00d" for no behavioural reason.
 func Test_Compile_accepts_a_zero_width_zero_padded_verb(t *testing.T) {
 	p, err := stepfile.Compile("SCENARIO-%0d.md")
 
@@ -120,40 +104,40 @@ func Test_Number_round_trips_a_number_wider_than_the_verbs_padding(t *testing.T)
 	require.Equal(t, 100, n)
 }
 
-func Test_Number_refuses_an_unpadded_near_miss(t *testing.T) {
-	p, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
+// Test_Number_refuses collects the filenames Number must not recognize as a
+// step of the pattern "SCENARIO-%02d.md". One assertion, one family: a name
+// that does not round-trip through this pattern. The positive cases above
+// stay separate because each asserts a number as well as a bool.
+func Test_Number_refuses(t *testing.T) {
+	cases := []struct {
+		name     string
+		filename string
+	}{
+		{name: "an unpadded near miss", filename: "SCENARIO-7.md"},
+		{name: "non-numeric text in the verb's place", filename: "SCENARIO-XX.md"},
+		{
+			// The one filename only the digits-only scan rejects. Atoi
+			// parses "-5" happily, and Name(-5) renders "SCENARIO--5.md"
+			// right back, so the round-trip check at the end of Number
+			// agrees too — without the scan, a negative step number would
+			// be a recognized step.
+			name:     "a negative number in the verb's place",
+			filename: "SCENARIO--5.md",
+		},
+		{name: "the wrong extension", filename: "SCENARIO-03.markdown"},
+		{name: "a filename that does not match the pattern at all", filename: "STATE.md"},
+	}
 
-	_, ok := p.Number("SCENARIO-7.md")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, err := stepfile.Compile("SCENARIO-%02d.md")
+			require.NoError(t, err)
 
-	require.False(t, ok)
-}
+			_, ok := p.Number(c.filename)
 
-func Test_Number_refuses_non_numeric_text_in_the_verbs_place(t *testing.T) {
-	p, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, ok := p.Number("SCENARIO-XX.md")
-
-	require.False(t, ok)
-}
-
-func Test_Number_refuses_a_filename_with_the_wrong_extension(t *testing.T) {
-	p, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, ok := p.Number("SCENARIO-03.markdown")
-
-	require.False(t, ok)
-}
-
-func Test_Number_refuses_a_filename_that_does_not_match_the_pattern_at_all(t *testing.T) {
-	p, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, ok := p.Number("STATE.md")
-
-	require.False(t, ok)
+			require.False(t, ok)
+		})
+	}
 }
 
 func Test_Name_and_ID_on_a_non_default_pattern(t *testing.T) {
