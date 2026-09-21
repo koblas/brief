@@ -66,3 +66,30 @@ pop` — the stash stack is shared across worktrees and sessions.
   go red.
 - `completion` is `ArbitraryArgs`; `runCompletion`'s guards are the only arg checks, so an
   empty-string positional reaches the table loop rather than being dropped by cobra.
+
+## Fix pass (post-review, `/run-reviewers`)
+
+Two MAJOR findings landed after all 13 scenarios shipped, both fixed with a red test first:
+
+- **correctness** (`cli.go` root `SetFlagErrorFunc`): pflag's error text reached stderr raw,
+  so a flag name carrying a literal newline (e.g. `brief start $'--fo\no' x`) produced two
+  stderr lines. Fixed by running it through the existing `flattenOneLine` (already used by
+  `renderRefusal`) before embedding it. Test: `flag_error_test.go`
+  `Test_flattens_a_flag_error_that_embeds_a_newline_to_one_stderr_line`.
+- **test/correctness** (`cli.go` `runRoot`): `--help`/`-h` was recognized as help regardless
+  of trailing arguments, so `brief --help bogus` printed root help instead of an unknown-
+  command error. Fixed to match `runNew`'s existing sole-argument rule. The now-dead
+  `case "help":` arm (cobra's `help` stub intercepts `"help"` before `runRoot` ever runs) was
+  removed in the same pass. Tests: `run_test.go`
+  `Test_treats_a_help_flag_with_trailing_arguments_as_an_unknown_command` (mutation-verified
+  red) and its control arm `Test_still_prints_root_help_for_a_bare_help_flag`.
+
+Cheap MINOR/NIT folded in: `cobra.MousetrapHelpText = ""`; named invocation constants for
+every leaf; `resolveRoot` extracted for the six copied `config.Resolve`→root blocks (added
+`config.Resolve` to wrapcheck's `extra-ignore-sigs` — its errors are already wrapped, so a
+bare pass-through needed the same treatment as the pre-existing cobra entries);
+`newHelpCommand` extracted from `newRootCommand`; dropped requirement-ID narrative from
+comments (`R6`, `R9`, `R14`, `R14a`, `R18`); split the double-dash control-arm test into
+three per-shape functions with its doc comment restored to its own function;
+`.golangci.yaml`'s dead `fxsync`/`singleflight`/`refreshcache` wrapcheck entries and the
+`services/publicapi/oidcas` testpackage exclusion removed (neither exists in this module).

@@ -49,23 +49,21 @@ linters:
       # Every entry here is a pass-through that returns the error from a
       # caller-supplied fn verbatim, and that fn already wraps. Re-wrapping at
       # the call site would double-wrap.
-      #   - fxsync.Once.Do        -> fn's error (e.g. checkCreateTable)
-      #   - singleflight.Group.Do -> fn's error
-      #   - refreshcache caches   -> their refresh fn's error, itself the fn
-      #                              the cache was constructed with
       #   - cobra Command.ExecuteContext -> the resolved command's RunE or
       #                              FlagErrorFunc error, both brief's own
       #                              usage/refusal errors already
       #   - cobra Command.Help      -> always nil; Help renders through
       #                              HelpFunc and never returns the render
       #                              error itself (cobra prints it instead)
+      #   - config.Resolve          -> every error it returns is already
+      #                              wrapped, either as *InvalidConfigError
+      #                              or with "resolve config: " context;
+      #                              re-wrapping at the call site would
+      #                              double that prefix
       extra-ignore-sigs:
         - cobra.Command).ExecuteContext(
         - cobra.Command).Help(
-        - fxsync.Once).Do(
-        - singleflight.Group).Do(
-        - refreshcache.SFCache
-        - refreshcache.SFLazyCache
+        - config.Resolve(
   exclusions:
     generated: lax
     presets:
@@ -77,13 +75,6 @@ linters:
       - linters:
           - wrapcheck
         path: _test.go
-      # The oidcas service tests are white-box by design: they construct
-      # *Server with unexported fields and exercise unexported doXxx
-      # decision methods. They were package-internal (package main) before
-      # the service extraction and must stay in-package (package oidcas).
-      - linters:
-          - testpackage
-        path: services/publicapi/oidcas/.+_test\.go
       - linters:
           - lll
         source: "^//go:generate "

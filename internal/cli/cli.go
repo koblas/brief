@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
+	"github.com/koblas/brief/internal/platform/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -25,11 +27,38 @@ func init() {
 	// set once here, never per Run or per call, since a per-call write
 	// would race parallel tests' reads.
 	cobra.EnableCommandSorting = false
+
+	// Cobra's mousetrap check (Windows only: was brief launched by
+	// double-clicking it in Explorer, rather than from a shell) prints its
+	// own message and calls os.Exit(1) directly, bypassing every exit this
+	// package returns through ExitCode. Clearing MousetrapHelpText disables
+	// that check so Run's caller stays the only place that calls os.Exit.
+	cobra.MousetrapHelpText = ""
 }
 
 // rootShort is root's one-sentence description: the first line of every
 // root help render.
 const rootShort = "brief manages feature specifications as files in your repository."
+
+// resolveRoot resolves wd's configuration and the directory every path in
+// that configuration is relative to: source's directory when a config file
+// was found, wd itself otherwise. Every command that touches configuration
+// or the repository tree shares this pattern; the caller still renders its
+// own renderRefusal(stderr, "<command>", err) on a non-nil error, since the
+// command name in that refusal differs per caller.
+func resolveRoot(wd string) (config.Config, string, error) {
+	cfg, source, err := config.Resolve(wd)
+	if err != nil {
+		return config.Config{}, "", err
+	}
+
+	root := wd
+	if source != "" {
+		root = filepath.Dir(source)
+	}
+
+	return cfg, root, nil
+}
 
 // expectedCommandList names cmd's root's available top-level commands, in
 // registration order, for an "expected one of:" usage message. Cobra adds
@@ -49,8 +78,8 @@ func expectedCommandList(cmd *cobra.Command) string {
 	return strings.Join(names, ", ")
 }
 
-// helpTemplate renders R6's contract for every command in the tree, set
-// once on root via SetHelpTemplate and inherited by every child through
+// helpTemplate renders every command's help text in the tree, set once on
+// root via SetHelpTemplate and inherited by every child through
 // HelpTemplate()'s parent walk.
 //
 // A command with no available subcommands (every leaf) renders its
@@ -105,7 +134,7 @@ const invocationAnnotation = "invocation"
 
 // listedInHelpAnnotation is the cobra.Command.Annotations key marking a
 // Hidden command that still belongs in root help and as a "brief help"
-// topic — currently only "completion" (R9): enabled and dispatchable, but
+// topic — currently only "completion": enabled and dispatchable, but
 // excluded from every "expected one of:" list. helpTemplate's outer
 // cmdList row loop and the help stub's topic-acceptance check both widen
 // on this one annotation, so any command shown in root help is always a
@@ -184,7 +213,7 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // every "expected one of:" message — new, start, finish, status, check —
 // not alphabetically: see this package's init, which turns cobra's default
 // sort off, and expectedCommandList, which reads root.Commands() in that
-// same order. "completion" registers last: it is Hidden (R9 — enabled and
+// same order. "completion" registers last: it is Hidden (enabled and
 // dispatchable, but excluded from expectedCommandList, which filters on
 // IsAvailableCommand alone) and carries listedInHelpAnnotation instead, so
 // it still gets a root-help row and remains a valid "brief help" topic.
@@ -213,11 +242,11 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 		},
 	}
 	newCmd.AddCommand(
-		leafCommand("feature <name>", "scaffold a new feature's specification and state file", "brief new feature <name>", newFeatureLong, nil,
+		leafCommand("feature <name>", "scaffold a new feature's specification and state file", newFeatureInvocation, newFeatureLong, nil,
 			func(cmd *cobra.Command, args []string) error {
 				return runNewFeature(cmd.Context(), wd, args, stdout, stderr)
 			}),
-		leafCommand("step <feature>", "scaffold the next step file and its progress entry", "brief new step <feature>", newStepLong, nil,
+		leafCommand("step <feature>", "scaffold the next step file and its progress entry", newStepInvocation, newStepLong, nil,
 			func(cmd *cobra.Command, args []string) error {
 				return runNewStep(cmd.Context(), wd, args, stdout, stderr)
 			}),
@@ -225,7 +254,7 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 
 	root.AddCommand(
 		newCmd,
-		leafCommand("start [--json] <feature>", "print the next open step's context", "brief start <feature>", startLong,
+		leafCommand("start [--json] <feature>", "print the next open step's context", startInvocation, startLong,
 			func(fs *pflag.FlagSet) {
 				fs.Bool("json", false, jsonFlagUsage)
 			},
@@ -245,11 +274,11 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 
 				return runFinish(cmd.Context(), wd, args, handoffPath, statePath, stdin, stderr)
 			}),
-		leafCommand("status", "print one done/total/next/blocked line per feature", "brief status", statusLong, nil,
+		leafCommand("status", "print one done/total/next/blocked line per feature", statusInvocation, statusLong, nil,
 			func(cmd *cobra.Command, args []string) error {
 				return runStatus(cmd.Context(), wd, args, stdout, stderr)
 			}),
-		leafCommand("check [feature]", "report faults finish would now refuse to write over", "brief check [feature]", checkLong, nil,
+		leafCommand("check [feature]", "report faults finish would now refuse to write over", checkInvocation, checkLong, nil,
 			func(cmd *cobra.Command, args []string) error {
 				return runCheck(cmd.Context(), wd, args, stdout, stderr)
 			}),
@@ -273,32 +302,35 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 		path := strings.TrimPrefix(cmd.CommandPath(), "brief ")
 		invocation := cmd.Annotations[invocationAnnotation]
 
-		return usageError(stderr, fmt.Sprintf("brief %s: %s; run '%s'", path, err, invocation))
+		return usageError(stderr, fmt.Sprintf("brief %s: %s; run '%s'", path, flattenOneLine(err.Error()), invocation))
 	})
 
 	root.SetHelpTemplate(helpTemplate)
+	root.SetHelpCommand(newHelpCommand(stderr))
 
-	// A hidden "help" stub replaces cobra's default help command, which on
-	// an unknown topic calls cobra.CheckErr and os.Exit(1) directly — the
-	// only exit this package allows is ExitCode, called from main. The
-	// stub resolves its topic against the tree with Find, which never
-	// errors on this ArbitraryArgs-everywhere tree and returns the
-	// unstripped residual as its second value. A topic is accepted only
-	// when that residual is empty and the resolved target is root itself
-	// (a bare "brief help"), IsAvailableCommand, or carries
-	// listedInHelpAnnotation — so a leftover positional, a flag left after
-	// the topic, a flag ahead of it (Find stops at root, treating the
-	// topic as that flag's value) and a hidden-and-unlisted command such
-	// as "help" itself are all rejected, not silently routed to some
-	// leaf's help. A rejected topic is brief's
-	// own usage error naming the whole topic as typed — every argument
-	// joined by a space, not just the unresolved residual — so
-	// "help new bogus" names "new bogus", not a false top-level command
-	// "bogus". An accepted topic renders byte-identical to
-	// "<path…> --help": InitDefaultHelpFlag backfills the -h/--help row
-	// that Execute() would otherwise add during ordinary dispatch, which
-	// Find alone skips.
-	root.SetHelpCommand(&cobra.Command{
+	return root
+}
+
+// newHelpCommand builds the hidden "help" stub that replaces cobra's
+// default help command, which on an unknown topic calls cobra.CheckErr and
+// os.Exit(1) directly — the only exit this package allows is ExitCode,
+// called from main. The stub resolves its topic against the tree with
+// Find, which never errors on this ArbitraryArgs-everywhere tree and
+// returns the unstripped residual as its second value. A topic is accepted
+// only when that residual is empty and the resolved target is root itself
+// (a bare "brief help"), IsAvailableCommand, or carries
+// listedInHelpAnnotation — so a leftover positional, a flag left after the
+// topic, a flag ahead of it (Find stops at root, treating the topic as
+// that flag's value) and a hidden-and-unlisted command such as "help"
+// itself are all rejected, not silently routed to some leaf's help. A
+// rejected topic is brief's own usage error naming the whole topic as
+// typed — every argument joined by a space, not just the unresolved
+// residual — so "help new bogus" names "new bogus", not a false top-level
+// command "bogus". An accepted topic renders byte-identical to "<path…>
+// --help": InitDefaultHelpFlag backfills the -h/--help row that Execute()
+// would otherwise add during ordinary dispatch, which Find alone skips.
+func newHelpCommand(stderr io.Writer) *cobra.Command {
+	return &cobra.Command{
 		Use:                "help",
 		Hidden:             true,
 		DisableFlagParsing: true,
@@ -314,9 +346,7 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 
 			return target.Help()
 		},
-	})
-
-	return root
+	}
 }
 
 // leafCommand builds a command that takes flags and positionals but no
@@ -347,18 +377,20 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 }
 
 // runRoot handles a top-level invocation that named no known command:
-// help, nothing at all, or something unknown.
+// nothing at all, a sole "-h"/"--help", or something unknown. Cobra
+// intercepts "help" as a dispatch to the tree's own help command (see
+// newRootCommand's SetHelpCommand) before this ever runs, so this function
+// never sees "help" as args[0].
 func runRoot(cmd *cobra.Command, args []string, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief: no command given; expected one of: "+expectedCommandList(cmd))
 	}
 
-	switch args[0] {
-	case "-h", "--help", "help":
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
 		return cmd.Help()
-	default:
-		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommandList(cmd)))
 	}
+
+	return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommandList(cmd)))
 }
 
 // usageError writes msg, followed by a single newline, to stderr and

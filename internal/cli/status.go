@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"github.com/koblas/brief/internal/assemble"
-	"github.com/koblas/brief/internal/platform/config"
 )
 
 // statusLong is "brief status"'s help prose.
@@ -20,21 +18,20 @@ status) is where that becomes a failure. A repository with no features
 prints nothing and exits 0, with one line on stderr saying so. brief
 status reads; it never writes.`
 
+// statusInvocation is the invocation string every "brief status" usage
+// error names as how to fix it.
+const statusInvocation = "brief status"
+
 // runStatus implements "brief status"; rest is its positional arguments,
 // flags already parsed away, and must be empty.
 func runStatus(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
 	if len(rest) > 0 {
-		return usageError(stderr, "brief status: too many arguments; run 'brief status'")
+		return usageError(stderr, fmt.Sprintf("brief status: too many arguments; run '%s'", statusInvocation))
 	}
 
-	cfg, source, err := config.Resolve(wd)
+	cfg, root, err := resolveRoot(wd)
 	if err != nil {
 		return renderRefusal(stderr, "status", err)
-	}
-
-	root := wd
-	if source != "" {
-		root = filepath.Dir(source)
 	}
 
 	srv := assemble.NewServer(cfg, root)
@@ -52,10 +49,9 @@ func runStatus(ctx context.Context, wd string, rest []string, stdout, stderr io.
 
 	// A malformed feature always yields a row, never dropped, so this loop
 	// and the len(rows) == 0 notice above are mutually exclusive by
-	// construction. renderRefusal is not used here:
-	// it returns err for ExitCode to classify, and a malformed feature
-	// must not drive a non-zero exit — R18 gives that failing role to
-	// check, not status.
+	// construction. renderRefusal is not used here: it returns err for
+	// ExitCode to classify, and a malformed feature must not drive a
+	// non-zero exit from status — that failing role belongs to check.
 	for _, row := range rows {
 		if row.Problem == nil {
 			continue

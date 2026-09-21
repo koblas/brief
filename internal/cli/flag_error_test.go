@@ -220,6 +220,44 @@ func Test_rejects_a_single_dash_long_flag_as_one_usage_line_naming_the_command_i
 	}
 }
 
+// Test_flattens_a_flag_error_that_embeds_a_newline_to_one_stderr_line pins
+// that the root FlagErrorFunc frame runs pflag's own error text through
+// flattenOneLine before embedding it: a flag name carrying a literal
+// newline (shell-quoted, e.g. $'--fo\no') would otherwise make pflag's
+// error itself span two lines, breaking R14's one-line contract.
+func Test_flattens_a_flag_error_that_embeds_a_newline_to_one_stderr_line(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "start, undefined long flag with an embedded newline",
+			args:       []string{"start", "--fo\no", "x"},
+			wantStderr: "brief start: unknown flag: --fo o; run 'brief start <feature>'",
+		},
+		{
+			name:       "status, undefined shorthand flag with an embedded newline",
+			args:       []string{"status", "-z\nq"},
+			wantStderr: "brief status: unknown shorthand flag: 'z' in -z q; run 'brief status'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
+}
+
 // Test_reports_a_flag_missing_its_value_as_one_usage_line_naming_the_command_invocation
 // is SCENARIO-05's table: "finish" is the only leaf with a value-taking flag
 // (--handoff, --state, both String); a bare --json can never be "missing its
@@ -349,19 +387,6 @@ func Test_takes_the_next_flag_as_the_value_of_a_flag_missing_its_value(t *testin
 	}
 }
 
-// Test_accepts_the_double_dash_spelling_of_each_single_dash_flag_rejected_above
-// is the control arm for the table above: every row differs from a
-// rejected row only in the flag's dash count ("-x" -> "--x") and succeeds,
-// proving the rejection above is specific to the single-dash spelling
-// rather than to the flag or command itself. Each row asserts nil error
-// and exit 0, the observable every row shares; stderr is not asserted
-// uniformly because a successful "finish" writes its own completion line
-// there (pinned by Test_finishes_the_step_and_prints_nothing_to_stdout),
-// unlike the --json and --help rows. JSON body, finish disk effects and
-// help text are already pinned in start_test.go/finish_test.go. Each
-// subtest builds its own fixture — finish mutates its (marks the step
-// done, rewrites STATE.md), so a fixture shared across rows would hit the
-// re-finish refusal on a later row.
 // Test_reports_an_undefined_flag_as_a_usage_error_whichever_side_of_help_it_is_on
 // is SCENARIO-06's table: pflag's ParseFlags stops at the first bad token,
 // so an undefined flag is a usage error through the same root
@@ -489,31 +514,45 @@ func Test_prints_help_for_the_h_shorthand_alone(t *testing.T) {
 	assert.Equal(t, helpStdout.String(), shortStdout.String())
 }
 
-func Test_accepts_the_double_dash_spelling_of_each_single_dash_flag_rejected_above(t *testing.T) {
-	t.Run("start --json", func(t *testing.T) {
-		wd := newStartFixture(t, "open")
-		var stdout, stderr bytes.Buffer
+// Test_accepts_the_double_dash_json_flag is one shape of the control arm
+// for the tables above: "--json" differs from a rejected row only in the
+// flag's dash count ("-json" -> "--json") and succeeds, proving the
+// rejection above is specific to the single-dash spelling rather than to
+// the flag or command itself. JSON body is already pinned in
+// start_test.go.
+func Test_accepts_the_double_dash_json_flag(t *testing.T) {
+	wd := newStartFixture(t, "open")
+	var stdout, stderr bytes.Buffer
 
-		err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
 
-		require.NoError(t, err)
-		assert.Equal(t, 0, cli.ExitCode(err))
-		assert.Empty(t, stderr.String())
-	})
+	require.NoError(t, err)
+	assert.Equal(t, 0, cli.ExitCode(err))
+	assert.Empty(t, stderr.String())
+}
 
-	t.Run("finish --handoff --state", func(t *testing.T) {
-		wd := newFinishCLIFixture(t)
-		handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
-		statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
-		var stdout, stderr bytes.Buffer
+// Test_accepts_the_double_dash_handoff_and_state_flags is the
+// --handoff/--state shape of the control arm: finish's disk effects are
+// already pinned in finish_test.go, so this asserts only the observable
+// this file's rejected rows share, nil error and exit 0.
+func Test_accepts_the_double_dash_handoff_and_state_flags(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
+	var stdout, stderr bytes.Buffer
 
-		err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
 
-		require.NoError(t, err)
-		assert.Equal(t, 0, cli.ExitCode(err))
-	})
+	require.NoError(t, err)
+	assert.Equal(t, 0, cli.ExitCode(err))
+}
 
-	helpRows := []struct {
+// Test_accepts_the_double_dash_help_flag_on_every_leaf is the --help shape
+// of the control arm, one row per leaf: help text is already pinned in
+// help_test.go's goldens, so each row asserts only nil error, exit 0, and
+// empty stderr.
+func Test_accepts_the_double_dash_help_flag_on_every_leaf(t *testing.T) {
+	tests := []struct {
 		name string
 		args []string
 	}{
@@ -525,7 +564,7 @@ func Test_accepts_the_double_dash_spelling_of_each_single_dash_flag_rejected_abo
 		{name: "new step --help", args: []string{"new", "step", "--help"}},
 	}
 
-	for _, tt := range helpRows {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			wd := t.TempDir()
 			var stdout, stderr bytes.Buffer

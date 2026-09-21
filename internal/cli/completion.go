@@ -13,8 +13,7 @@ const completionLong = `Prints a shell completion script for the named shell to 
 be sourced directly or written to your shell's completion directory.`
 
 // completionInvocation is the usage line every completion error names,
-// including its own R14 flag-error frame via leafCommand's invocation
-// argument.
+// including a flag error, via leafCommand's invocation argument.
 const completionInvocation = "brief completion <bash|zsh|fish|powershell>"
 
 // completionShell names one supported shell and the cobra generator that

@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
-	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/scaffold"
 )
 
@@ -52,14 +50,9 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 		return renderRefusal(stderr, "finish", err)
 	}
 
-	cfg, source, err := config.Resolve(wd)
+	cfg, root, err := resolveRoot(wd)
 	if err != nil {
 		return renderRefusal(stderr, "finish", err)
-	}
-
-	root := wd
-	if source != "" {
-		root = filepath.Dir(source)
 	}
 
 	srv := scaffold.NewServer(cfg, root)
@@ -86,9 +79,9 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 // error names as how to fix it.
 const finishInvocation = "brief finish <feature> <step> --handoff <path> --state <path>"
 
-// sourceLocator returns the R14a locator for one of finish's --handoff or
-// --state arguments: path unchanged, or "<stdin>" when path is "-", so a
-// refusal about piped input never names an empty or misleading path.
+// sourceLocator returns the refusal locator for one of finish's --handoff
+// or --state arguments: path unchanged, or "<stdin>" when path is "-", so
+// a refusal about piped input never names an empty or misleading path.
 func sourceLocator(path string) string {
 	if path == "-" {
 		return "<stdin>"

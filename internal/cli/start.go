@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/koblas/brief/internal/assemble"
-	"github.com/koblas/brief/internal/platform/config"
 )
 
 // startLong is "brief start"'s help prose.
@@ -24,27 +23,26 @@ file heading — is named on stderr instead, one line each, and the brief
 still prints on stdout, still exiting 0.
 brief start reads; it never writes.`
 
+// startInvocation is the invocation string every "brief start" usage error
+// names as how to fix it.
+const startInvocation = "brief start <feature>"
+
 // runStart implements "brief start [--json] <feature>"; rest is its
 // positional arguments, from either side of --json, flags already parsed
 // away.
 func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, stdout, stderr io.Writer) error {
 	switch {
 	case len(rest) == 0:
-		return usageError(stderr, "brief start: no feature given; run 'brief start <feature>'")
+		return usageError(stderr, fmt.Sprintf("brief start: no feature given; run '%s'", startInvocation))
 	case len(rest) > 1:
-		return usageError(stderr, "brief start: too many arguments; run 'brief start <feature>'")
+		return usageError(stderr, fmt.Sprintf("brief start: too many arguments; run '%s'", startInvocation))
 	}
 
 	feature := rest[0]
 
-	cfg, source, err := config.Resolve(wd)
+	cfg, root, err := resolveRoot(wd)
 	if err != nil {
 		return renderRefusal(stderr, "start", err)
-	}
-
-	root := wd
-	if source != "" {
-		root = filepath.Dir(source)
 	}
 
 	srv := assemble.NewServer(cfg, root)
@@ -73,8 +71,7 @@ func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, stdou
 	// --json always writes a document, even with no open step: "step"
 	// marshals to null rather than the document being omitted, giving a
 	// structured caller the same discriminator the stderr notice above
-	// gives a human. RenderText's own nil-Step guard already writes
-	// nothing, so the non-JSON path stays exactly as before.
+	// gives a human.
 	if jsonOut {
 		if err := assemble.RenderJSON(stdout, brief); err != nil {
 			return fmt.Errorf("brief start: %w", err)

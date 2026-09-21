@@ -7,7 +7,6 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +24,14 @@ A name may not be empty or contain whitespace.`
 // newStepLong is "brief new step"'s help prose.
 const newStepLong = `Scaffolds the next step file for feature and appends its entry to the
 feature's progress list.`
+
+// newFeatureInvocation is the invocation string every "brief new feature"
+// usage error names as how to fix it.
+const newFeatureInvocation = "brief new feature <name>"
+
+// newStepInvocation is the invocation string every "brief new step" usage
+// error names as how to fix it.
+const newStepInvocation = "brief new step <feature>"
 
 // runNew handles "brief new <type> ...": routes a sole "-h"/"--help"
 // argument to cmd.Help() (new's flag parsing is disabled, so cobra's own
@@ -48,21 +55,16 @@ func runNew(cmd *cobra.Command, args []string, stderr io.Writer) error {
 func runNewFeature(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
 	switch {
 	case len(rest) == 0:
-		return usageError(stderr, "brief new feature: no name given; run 'brief new feature <name>'")
+		return usageError(stderr, fmt.Sprintf("brief new feature: no name given; run '%s'", newFeatureInvocation))
 	case len(rest) > 1:
-		return usageError(stderr, "brief new feature: too many arguments; run 'brief new feature <name>'")
+		return usageError(stderr, fmt.Sprintf("brief new feature: too many arguments; run '%s'", newFeatureInvocation))
 	}
 
 	name := rest[0]
 
-	cfg, source, err := config.Resolve(wd)
+	cfg, root, err := resolveRoot(wd)
 	if err != nil {
 		return renderRefusal(stderr, "new feature", err)
-	}
-
-	root := wd
-	if source != "" {
-		root = filepath.Dir(source)
 	}
 
 	srv := scaffold.NewServer(cfg, root)
@@ -71,10 +73,10 @@ func runNewFeature(ctx context.Context, wd string, rest []string, stdout, stderr
 	if err != nil {
 		if errors.Is(err, scaffold.ErrInvalidFeatureName) {
 			if name == "" {
-				return usageError(stderr, "brief new feature: name is empty; run 'brief new feature <name>' with a non-empty name")
+				return usageError(stderr, fmt.Sprintf("brief new feature: name is empty; run '%s' with a non-empty name", newFeatureInvocation))
 			}
 
-			return usageError(stderr, fmt.Sprintf("brief new feature: name %q contains whitespace; run 'brief new feature <name>' with a name containing no whitespace", name))
+			return usageError(stderr, fmt.Sprintf("brief new feature: name %q contains whitespace; run '%s' with a name containing no whitespace", name, newFeatureInvocation))
 		}
 
 		return renderRefusal(stderr, "new feature", err)
@@ -95,21 +97,16 @@ func runNewFeature(ctx context.Context, wd string, rest []string, stdout, stderr
 func runNewStep(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
 	switch {
 	case len(rest) == 0:
-		return usageError(stderr, "brief new step: no feature given; run 'brief new step <feature>'")
+		return usageError(stderr, fmt.Sprintf("brief new step: no feature given; run '%s'", newStepInvocation))
 	case len(rest) > 1:
-		return usageError(stderr, "brief new step: too many arguments; run 'brief new step <feature>'")
+		return usageError(stderr, fmt.Sprintf("brief new step: too many arguments; run '%s'", newStepInvocation))
 	}
 
 	feature := rest[0]
 
-	cfg, source, err := config.Resolve(wd)
+	cfg, root, err := resolveRoot(wd)
 	if err != nil {
 		return renderRefusal(stderr, "new step", err)
-	}
-
-	root := wd
-	if source != "" {
-		root = filepath.Dir(source)
 	}
 
 	srv := scaffold.NewServer(cfg, root)

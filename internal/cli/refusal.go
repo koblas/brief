@@ -13,15 +13,14 @@ import (
 
 // flattenOneLine collapses s to a single line: embedded newlines and runs
 // of whitespace become one space each. yaml.v3 reports an unknown-key
-// failure as "yaml: unmarshal errors:\n  line N: …", and R14's one-line
-// contract requires every refusal to survive that unchanged.
+// failure as "yaml: unmarshal errors:\n  line N: …", and every refusal's
+// one-line contract requires that to survive unchanged.
 func flattenOneLine(s string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
 }
 
-// renderRefusal writes the R14a one-line refusal for err, prefixed by the
-// failing command, to stderr, and returns err unchanged for ExitCode to
-// classify.
+// renderRefusal writes err's one-line refusal, prefixed by the failing
+// command, to stderr, and returns err unchanged for ExitCode to classify.
 //
 // A *config.InvalidConfigError names the offending path and tells the user
 // this refusal changed nothing on disk:
@@ -30,7 +29,7 @@ func flattenOneLine(s string) string {
 //
 // A *scaffold.RefusalError renders the same "nothing changed" promise
 // around its own path, problem and fix, naming a line within the path
-// when the refusal has one (R14a's "<path>[:<line>]"):
+// when the refusal has one ("<path>[:<line>]"):
 //
 //	brief <command>: <path>[:<line>]: <problem>; <fix> (no files changed)
 //

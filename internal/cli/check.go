@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"github.com/koblas/brief/internal/assemble"
-	"github.com/koblas/brief/internal/platform/config"
 )
 
 // checkLong is "brief check"'s help prose.
@@ -36,11 +34,15 @@ saying so. brief check reads; it never writes.`
 // written by RenderFindings and the stderr summary below it.
 var errCheckFindings = errors.New("check reported an error-severity finding")
 
+// checkInvocation is the invocation string every "brief check" usage error
+// names as how to fix it.
+const checkInvocation = "brief check [feature]"
+
 // runCheck implements "brief check [feature]"; rest is its positional
 // arguments, flags already parsed away.
 func runCheck(ctx context.Context, wd string, rest []string, stdout, stderr io.Writer) error {
 	if len(rest) > 1 {
-		return usageError(stderr, "brief check: too many arguments; run 'brief check [feature]'")
+		return usageError(stderr, fmt.Sprintf("brief check: too many arguments; run '%s'", checkInvocation))
 	}
 
 	var feature string
@@ -48,14 +50,9 @@ func runCheck(ctx context.Context, wd string, rest []string, stdout, stderr io.W
 		feature = rest[0]
 	}
 
-	cfg, source, err := config.Resolve(wd)
+	cfg, root, err := resolveRoot(wd)
 	if err != nil {
 		return renderRefusal(stderr, "check", err)
-	}
-
-	root := wd
-	if source != "" {
-		root = filepath.Dir(source)
 	}
 
 	srv := assemble.NewServer(cfg, root)

@@ -287,6 +287,78 @@ func Test_prints_root_usage_and_a_nil_error_for_brief_help(t *testing.T) {
 	assert.NotEmpty(t, stdout.String())
 }
 
+// Test_treats_a_help_flag_with_trailing_arguments_as_an_unknown_command
+// pins that root's "-h"/"--help" routing to cmd.Help() applies only when
+// it is the sole argument, matching runNew's own sole-argument rule
+// (new.go's runNew) and the help stub's leftover-args rule: any trailing
+// argument means the whole invocation is reported as an unknown command
+// naming args[0], not as a help request.
+func Test_treats_a_help_flag_with_trailing_arguments_as_an_unknown_command(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "--help bogus",
+			args:    []string{"--help", "bogus"},
+			wantErr: `brief: unknown command "--help"; expected one of: new, start, finish, status, check`,
+		},
+		{
+			name:    "-h bogus",
+			args:    []string{"-h", "bogus"},
+			wantErr: `brief: unknown command "-h"; expected one of: new, start, finish, status, check`,
+		},
+		{
+			name:    "--help start",
+			args:    []string{"--help", "start"},
+			wantErr: `brief: unknown command "--help"; expected one of: new, start, finish, status, check`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantErr, oneLine(t, &stderr))
+		})
+	}
+}
+
+// Test_still_prints_root_help_for_a_bare_help_flag is the control arm for
+// the table above: "--help"/"-h" alone, with no trailing argument, still
+// routes to root help — nil error, exit 0, non-empty stdout — proving the
+// rejection above is about trailing arguments, not about the flag itself.
+func Test_still_prints_root_help_for_a_bare_help_flag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "--help", args: []string{"--help"}},
+		{name: "-h", args: []string{"-h"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			assert.Equal(t, 0, cli.ExitCode(err))
+			assert.Empty(t, stderr.String())
+			assert.NotEmpty(t, stdout.String())
+		})
+	}
+}
+
 // Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag
 // pins that "-x" at the root is reported as an unknown command, the same
 // as any other unrecognized first argument, not as an undefined flag.
