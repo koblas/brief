@@ -1,6 +1,7 @@
 package stepfile_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/stepfile"
@@ -26,174 +27,173 @@ func Test_CompileHandoff_names_the_handoff_file_from_the_step_id_and_the_suffix(
 	require.Equal(t, "SCENARIO-01-HANDOFF.md", handoff.Name(1))
 }
 
-// Test_CompileHandoff_refuses_a_suffix_containing_a_digit reproduces the
-// architect's collision directly: suffix "1.md" against step pattern
-// "STEP-%d.md" would render step 1's handoff as "STEP-1" + "1.md" =
-// "STEP-11.md", which Pattern.Number recognizes as step 11 — a handoff
-// file a directory scan would read as a step.
-func Test_CompileHandoff_refuses_a_suffix_containing_a_digit(t *testing.T) {
-	step, err := stepfile.Compile("STEP-%d.md")
-	require.NoError(t, err)
+// Test_CompileHandoff_refuses collects every suffix-and-pattern combination
+// CompileHandoff must reject. They share one assertion and one behaviour
+// family — a handoff filename that collides with something else the feature
+// directory holds, or that cannot be told apart from a step file — so the
+// reason lives in each case's name and comment rather than in eleven
+// function names repeating the same four lines.
+//
+// Every case supplies all four inputs. Three of them vary something other
+// than the suffix (the step pattern, the state filename, the specification
+// filename), which is why those are fields rather than constants: a case
+// that had to special-case its setup would belong outside this table.
+func Test_CompileHandoff_refuses(t *testing.T) {
+	cases := []struct {
+		name    string
+		pattern string
+		suffix  string
+		state   string
+		spec    string
+	}{
+		{
+			// Suffix "1.md" against "STEP-%d.md" renders step 1's handoff as
+			// "STEP-1" + "1.md" = "STEP-11.md", which Pattern.Number reads
+			// back as step 11 — a handoff a directory scan takes for a step.
+			name:    "a suffix containing a digit",
+			pattern: "STEP-%d.md",
+			suffix:  "1.md",
+			state:   testStateFile,
+			spec:    testSpecificationFile,
+		},
+		{
+			name:    "an empty suffix",
+			pattern: "SCENARIO-%02d.md",
+			suffix:  "",
+			state:   testStateFile,
+			spec:    testSpecificationFile,
+		},
+		{
+			name:    "a suffix with a forward slash",
+			pattern: "SCENARIO-%02d.md",
+			suffix:  "sub/HANDOFF.md",
+			state:   testStateFile,
+			spec:    testSpecificationFile,
+		},
+		{
+			name:    "a suffix with a backslash",
+			pattern: "SCENARIO-%02d.md",
+			suffix:  `sub\HANDOFF.md`,
+			state:   testStateFile,
+			spec:    testSpecificationFile,
+		},
+		{
+			name:    "a suffix carrying a percent",
+			pattern: "SCENARIO-%02d.md",
+			suffix:  "-HANDOFF%s.md",
+			state:   testStateFile,
+			spec:    testSpecificationFile,
+		},
+		{
+			// A suffix identical to the step filename's own extension names
+			// the step file itself, writing the handoff body over it.
+			name:    "a suffix equal to the step file's extension",
+			pattern: "SCENARIO-%02d.md",
+			suffix:  ".md",
+			state:   testStateFile,
+			spec:    testSpecificationFile,
+		},
+		{
+			// The collision a literal suffix comparison misses: against
+			// "SCENARIO-%02d.step.md", Pattern.ID strips only the final
+			// ".md", leaving ID(n) == "SCENARIO-01.step". A ".md" suffix is
+			// therefore not equal to the pattern's literal suffix
+			// (".step.md") yet still renders the exact step filename.
+			name:    "a suffix rendering the step file's name through a multi-dot pattern",
+			pattern: "SCENARIO-%02d.step.md",
+			suffix:  ".md",
+			state:   testStateFile,
+			spec:    testSpecificationFile,
+		},
+		{
+			// ".MD" differs from the pattern's ".md" by case alone, but both
+			// name one file on the filesystems this repository targets.
+			name:    "a suffix differing from the step file's extension only by case",
+			pattern: "SCENARIO-%02d.md",
+			suffix:  ".MD",
+			state:   testStateFile,
+			spec:    testSpecificationFile,
+		},
+		{
+			// A rendered handoff name equal to the configured state
+			// filename would make finish's handoff write land on the state
+			// file it also reads.
+			name:    "a suffix rendering the configured state file's name",
+			pattern: "SCENARIO-%02d.md",
+			suffix:  "-HANDOFF.md",
+			state:   "SCENARIO-01-HANDOFF.md",
+			spec:    testSpecificationFile,
+		},
+		{
+			name:    "a suffix rendering the configured specification file's name",
+			pattern: "SCENARIO-%02d.md",
+			suffix:  "-HANDOFF.md",
+			state:   testStateFile,
+			spec:    "SCENARIO-01-HANDOFF.md",
+		},
+		{
+			// With pattern ".%d", filepath.Ext(".1") is ".1" — the whole
+			// rendered name — so Pattern.ID renders "" for every step
+			// number and every step's handoff aliases onto one file. The
+			// reserved filenames here are chosen not to collide with the
+			// suffix, so a failure is unambiguously the ID-varies rule.
+			name:    "a step pattern whose id is the same for every step number",
+			pattern: ".%d",
+			suffix:  "-HANDOFF.md",
+			state:   testStateFile,
+			spec:    testSpecificationFile,
+		},
+	}
 
-	_, err = stepfile.CompileHandoff(step, "1.md", testStateFile, testSpecificationFile)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			step, err := stepfile.Compile(c.pattern)
+			require.NoError(t, err)
 
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
-}
+			_, err = stepfile.CompileHandoff(step, c.suffix, c.state, c.spec)
 
-func Test_CompileHandoff_refuses_an_empty_suffix(t *testing.T) {
-	step, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, err = stepfile.CompileHandoff(step, "", testStateFile, testSpecificationFile)
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
-}
-
-func Test_CompileHandoff_refuses_a_suffix_with_a_forward_slash(t *testing.T) {
-	step, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, err = stepfile.CompileHandoff(step, "sub/HANDOFF.md", testStateFile, testSpecificationFile)
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
-}
-
-func Test_CompileHandoff_refuses_a_suffix_with_a_backslash(t *testing.T) {
-	step, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, err = stepfile.CompileHandoff(step, `sub\HANDOFF.md`, testStateFile, testSpecificationFile)
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
-}
-
-func Test_CompileHandoff_refuses_a_suffix_carrying_a_percent(t *testing.T) {
-	step, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, err = stepfile.CompileHandoff(step, "-HANDOFF%s.md", testStateFile, testSpecificationFile)
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
-}
-
-// Test_CompileHandoff_refuses_a_suffix_equal_to_the_step_files_extension
-// pins the other collision the architect named: a suffix identical to the
-// step filename's own extension would name the step file itself, writing
-// the handoff body over it.
-func Test_CompileHandoff_refuses_a_suffix_equal_to_the_step_files_extension(t *testing.T) {
-	step, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, err = stepfile.CompileHandoff(step, ".md", testStateFile, testSpecificationFile)
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
-}
-
-// Test_CompileHandoff_refuses_a_suffix_that_renders_the_same_name_as_the_step_file_through_a_multi_dot_pattern
-// pins the collision a literal suffix comparison misses: against
-// "SCENARIO-%02d.step.md", Pattern.ID strips only the final ".md"
-// (filepath.Ext), leaving ID(n) == "SCENARIO-01.step" rather than
-// "SCENARIO-01" — so a handoff suffix of ".md" is not equal to the
-// pattern's whole literal suffix (".step.md") but still renders the exact
-// step filename once appended to that ID.
-func Test_CompileHandoff_refuses_a_suffix_that_renders_the_same_name_as_the_step_file_through_a_multi_dot_pattern(t *testing.T) {
-	step, err := stepfile.Compile("SCENARIO-%02d.step.md")
-	require.NoError(t, err)
-
-	_, err = stepfile.CompileHandoff(step, ".md", testStateFile, testSpecificationFile)
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
-}
-
-// Test_CompileHandoff_refuses_a_suffix_that_differs_from_the_step_files_extension_only_by_case
-// reproduces the collision on a case-insensitive filesystem: ".MD" differs
-// from step pattern "SCENARIO-%02d.md"'s ".md" extension by case alone, but
-// both name the same file on the filesystems this repository targets.
-func Test_CompileHandoff_refuses_a_suffix_that_differs_from_the_step_files_extension_only_by_case(t *testing.T) {
-	step, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, err = stepfile.CompileHandoff(step, ".MD", testStateFile, testSpecificationFile)
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
-}
-
-// Test_CompileHandoff_refuses_a_suffix_that_renders_the_configured_state_file_name
-// pins the collision named separately from the step file's own name: a
-// rendered handoff filename identical to the configured state filename
-// would make finish's handoff write overwrite the state file it also
-// reads.
-func Test_CompileHandoff_refuses_a_suffix_that_renders_the_configured_state_file_name(t *testing.T) {
-	step, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, err = stepfile.CompileHandoff(step, "-HANDOFF.md", "SCENARIO-01-HANDOFF.md", testSpecificationFile)
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
-}
-
-// Test_CompileHandoff_refuses_a_suffix_that_renders_the_configured_specification_file_name
-// mirrors the state-file case for the specification filename.
-func Test_CompileHandoff_refuses_a_suffix_that_renders_the_configured_specification_file_name(t *testing.T) {
-	step, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-
-	_, err = stepfile.CompileHandoff(step, "-HANDOFF.md", testStateFile, "SCENARIO-01-HANDOFF.md")
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
-}
-
-// Test_CompileHandoff_refuses_a_step_pattern_whose_id_is_the_same_for_every_step_number
-// pins the pattern this plan's rendered-name checks cannot see coming: with
-// step-file-pattern ".%d", filepath.Ext(".1") is ".1" — the entire rendered
-// name — so Pattern.ID renders "" for every step number, and every step's
-// handoff would alias onto the one file this suffix names. The reserved
-// filenames are chosen to not collide with the suffix, so a failure here
-// is unambiguously the ID-varies rule, not a rendered-name collision.
-func Test_CompileHandoff_refuses_a_step_pattern_whose_id_is_the_same_for_every_step_number(t *testing.T) {
-	step, err := stepfile.Compile(".%d")
-	require.NoError(t, err)
-
-	_, err = stepfile.CompileHandoff(step, "-HANDOFF.md", testStateFile, testSpecificationFile)
-
-	require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
+			require.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
+		})
+	}
 }
 
 // Test_a_handoff_file_name_is_never_recognized_as_a_step_file pins the
-// property Test_CompileHandoff_refuses_a_suffix_containing_a_digit and the
-// extension-collision refusal protect: with no digit in the suffix and the
-// extension case refused, the rendered handoff name can never round-trip
-// through Pattern.Number, at every step number this scans.
+// property the digit and extension refusals above exist to protect: with no
+// digit in the suffix and the extension collision refused, a rendered
+// handoff name can never round-trip through Pattern.Number.
+//
+// Two dimensions, so two loops: the accepted pattern/suffix pairs, and the
+// step numbers that straddle the padding width where a round-trip is most
+// likely to succeed by accident. Neither loop makes a decision — each
+// combination is one subtest, named, so a failure says which pair and which
+// number rather than leaving a bare "n=99" label on one of ten assertions.
 func Test_a_handoff_file_name_is_never_recognized_as_a_step_file(t *testing.T) {
-	scenario, err := stepfile.Compile("SCENARIO-%02d.md")
-	require.NoError(t, err)
-	scenarioHandoff, err := stepfile.CompileHandoff(scenario, "-HANDOFF.md", testStateFile, testSpecificationFile)
-	require.NoError(t, err)
+	pairs := []struct {
+		name    string
+		pattern string
+		suffix  string
+	}{
+		{name: "zero-padded pattern", pattern: "SCENARIO-%02d.md", suffix: "-HANDOFF.md"},
+		{name: "unpadded pattern", pattern: "STEP-%d.md", suffix: ".handoff.md"},
+	}
 
-	_, ok := scenario.Number(scenarioHandoff.Name(1))
-	assert.False(t, ok, "n=1")
-	_, ok = scenario.Number(scenarioHandoff.Name(9))
-	assert.False(t, ok, "n=9")
-	_, ok = scenario.Number(scenarioHandoff.Name(10))
-	assert.False(t, ok, "n=10")
-	_, ok = scenario.Number(scenarioHandoff.Name(99))
-	assert.False(t, ok, "n=99")
-	_, ok = scenario.Number(scenarioHandoff.Name(100))
-	assert.False(t, ok, "n=100")
+	// 9/10 and 99/100 straddle the zero-padded pattern's width, where a
+	// rendered handoff name is likeliest to collide with a step filename.
+	stepNumbers := []int{1, 9, 10, 99, 100}
 
-	step, err := stepfile.Compile("STEP-%d.md")
-	require.NoError(t, err)
-	stepHandoff, err := stepfile.CompileHandoff(step, ".handoff.md", testStateFile, testSpecificationFile)
-	require.NoError(t, err)
+	for _, p := range pairs {
+		for _, n := range stepNumbers {
+			t.Run(fmt.Sprintf("%s/n=%d", p.name, n), func(t *testing.T) {
+				step, err := stepfile.Compile(p.pattern)
+				require.NoError(t, err)
 
-	_, ok = step.Number(stepHandoff.Name(1))
-	assert.False(t, ok, "n=1")
-	_, ok = step.Number(stepHandoff.Name(9))
-	assert.False(t, ok, "n=9")
-	_, ok = step.Number(stepHandoff.Name(10))
-	assert.False(t, ok, "n=10")
-	_, ok = step.Number(stepHandoff.Name(99))
-	assert.False(t, ok, "n=99")
-	_, ok = step.Number(stepHandoff.Name(100))
-	assert.False(t, ok, "n=100")
+				handoff, err := stepfile.CompileHandoff(step, p.suffix, testStateFile, testSpecificationFile)
+				require.NoError(t, err)
+
+				_, ok := step.Number(handoff.Name(n))
+
+				assert.False(t, ok)
+			})
+		}
+	}
 }
