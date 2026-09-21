@@ -419,10 +419,11 @@ func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new(t *tes
 }
 
 // Test_treats_a_bare_dash_as_a_plain_unknown_command is the control arm
-// for isFlagLike: a standalone "-" is pflag's own convention for stdin,
-// never a flag (parseArgs treats len(s) == 1 the same as no "-" prefix at
-// all), so it keeps the ordinary unknown-command/unknown-type wording
-// rather than the flag-shaped wording above.
+// for classifyDashArg's argNotFlag case: a standalone "-" is pflag's own
+// convention for stdin, never a flag (parseArgs treats len(s) == 1 the
+// same as no "-" prefix at all), so it keeps the ordinary
+// unknown-command/unknown-type wording rather than the flag-shaped wording
+// above.
 func Test_treats_a_bare_dash_as_a_plain_unknown_command(t *testing.T) {
 	tests := []struct {
 		name    string

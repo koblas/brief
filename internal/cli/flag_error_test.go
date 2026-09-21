@@ -604,25 +604,25 @@ func Test_accepts_the_double_dash_handoff_and_state_flags(t *testing.T) {
 // own end-of-flags terminator, never a flag, so it falls through to the
 // plain unknown-command/unknown-type wording; "--help=<v>"/"-h=<v>" is the
 // help flag given an explicit value, which these three sites reject
-// outright rather than parse, unlike a leaf's real pflag.Parse (proven by
-// the "-hh" row below: a cluster made entirely of "h" characters parses
-// exactly like a single "-h" for pflag's own shorthand-cluster parser, so
-// it stays a sole-argument "print help" case, not an error); "-hx" is the
-// residual-cluster shape SCENARIO-03 pinned, now generalized to skip any
-// number of leading "h" characters, not just one; "--=x"/"---x" are
-// pflag's own bad-flag-syntax case.
+// outright rather than parse, unlike a leaf's real pflag.Parse; "-hx" is
+// the residual-cluster shape SCENARIO-03 pinned, now generalized to skip
+// any number of leading "h" characters, not just one; "--=x"/"---x" are
+// pflag's own bad-flag-syntax case. Every row here is an error: the help
+// stub has no sole-argument case that prints help at all (its own "-hh"
+// row below reports "takes no arguments", unlike root's and "new"'s —
+// see Test_prints_help_for_the_hh_cluster_alone for those two).
 //
-// Mutation-verified: reverting isFlagLike's "arg != \"--\"" exclusion reds
-// the root/new/help "--" rows above (each starts reporting a flag-shaped
-// message instead of falling through to the plain unknown-command
-// wording); reverting unknownFlagMessage's leading-'h' skip reds the "-hx"
-// rows (each reports "in -hx" instead of "in -x").
+// Mutation-verified: reverting classifyDashArg's "arg == \"--\"" exclusion
+// reds the root/new/help "--" rows above (each starts reporting a
+// flag-shaped message instead of falling through to the plain
+// unknown-command wording); reverting unknownShortFlagMessage's
+// leading-'h' skip reds the "-hx" rows (each reports "in -hx" instead of
+// "in -x").
 func Test_handles_flag_shaped_and_terminator_tokens_at_disabled_parsing_sites(t *testing.T) {
 	tests := []struct {
 		name       string
 		args       []string
 		wantStderr string
-		wantHelp   bool
 	}{
 		{
 			name:       "root, a bare -- is not flag-like",
@@ -643,11 +643,6 @@ func Test_handles_flag_shaped_and_terminator_tokens_at_disabled_parsing_sites(t 
 			name:       "root, -hx is an unknown shorthand after a leading defined -h",
 			args:       []string{"-hx"},
 			wantStderr: "brief: unknown shorthand flag: 'x' in -x; run 'brief <command> --help'",
-		},
-		{
-			name:     "root, -hh is a cluster of only the defined -h",
-			args:     []string{"-hh"},
-			wantHelp: true,
 		},
 		{
 			name:       "root, --=x is bad flag syntax",
@@ -689,6 +684,11 @@ func Test_handles_flag_shaped_and_terminator_tokens_at_disabled_parsing_sites(t 
 			args:       []string{"help", "-hx"},
 			wantStderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'",
 		},
+		{
+			name:       "help, -hh is a cluster of only the defined -h, still an error under help",
+			args:       []string{"help", "-hh"},
+			wantStderr: "brief help: '-hh' takes no arguments; run 'brief help <command>'",
+		},
 	}
 
 	for _, tt := range tests {
@@ -698,14 +698,131 @@ func Test_handles_flag_shaped_and_terminator_tokens_at_disabled_parsing_sites(t 
 
 			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
 
-			if tt.wantHelp {
-				require.NoError(t, err)
-				assert.Equal(t, 0, cli.ExitCode(err))
-				assert.Empty(t, stderr.String())
-				assert.Contains(t, stdout.String(), "brief manages feature specifications as files in your repository.")
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
+}
 
-				return
-			}
+// Test_prints_help_for_the_hh_cluster_alone is the "-hh" shape of
+// Test_prints_help_for_the_h_shorthand_alone's control arm: a shorthand
+// cluster made entirely of "h" characters parses exactly like a single
+// "-h" does for pflag's own shorthand-cluster parser, so it stays root's
+// and "new"'s sole-argument "print help" case, not an error — unlike under
+// the help stub, which has no such case at all (see the "help, -hh" row in
+// Test_handles_flag_shaped_and_terminator_tokens_at_disabled_parsing_sites).
+func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
+	tests := []struct {
+		name       string
+		helpArgs   []string
+		clusterArg []string
+	}{
+		{name: "root", helpArgs: []string{"--help"}, clusterArg: []string{"-hh"}},
+		{name: "new", helpArgs: []string{"new", "--help"}, clusterArg: []string{"new", "-hh"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var helpStdout, helpStderr bytes.Buffer
+
+			helpErr := cli.Run(t.Context(), wd, tt.helpArgs, nil, &helpStdout, &helpStderr)
+
+			require.NoError(t, helpErr)
+
+			var clusterStdout, clusterStderr bytes.Buffer
+
+			clusterErr := cli.Run(t.Context(), wd, tt.clusterArg, nil, &clusterStdout, &clusterStderr)
+
+			require.NoError(t, clusterErr)
+			assert.Equal(t, 0, cli.ExitCode(clusterErr))
+			assert.Empty(t, clusterStderr.String())
+			assert.Equal(t, helpStdout.String(), clusterStdout.String())
+		})
+	}
+}
+
+// Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites
+// crosses root, "new" and the help stub against one shared list of
+// dash-prefixed tokens: the same classifyDashArg call backs all three, so
+// each token's kind is identical at every site — only the invocation named
+// in the "run '...'" tail, and the command-path prefix, differ per site.
+//
+// Mutation-verified: narrowing classifyDashArg's hasEq branch to only
+// single-character all-h names (so "-h=<v>" still classifies as
+// argHelpFlagWithValue but "-hh=<v>"/"-hh=" fall through to the unknown-flag
+// branch instead) reds exactly the six "-hh=x"/"-hh=" rows at root, new and
+// help, and nothing else.
+func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		// "--"
+		{name: "root --", args: []string{"--"}, wantStderr: `brief: unknown command "--"; expected one of: new, start, finish, status, check`},
+		{name: "new --", args: []string{"new", "--"}, wantStderr: `brief new: unknown type "--"; expected one of: feature, step`},
+		{name: "help --", args: []string{"help", "--"}, wantStderr: `brief help: unknown command "--"; expected one of: new, start, finish, status, check`},
+
+		// "--help=true"
+		{name: "root --help=true", args: []string{"--help=true"}, wantStderr: "brief: '--help' takes no value; run 'brief --help'"},
+		{name: "new --help=true", args: []string{"new", "--help=true"}, wantStderr: "brief new: '--help' takes no value; run 'brief new --help'"},
+		{name: "help --help=true", args: []string{"help", "--help=true"}, wantStderr: "brief help: '--help' takes no value; run 'brief help <command>'"},
+
+		// "-h=x"
+		{name: "root -h=x", args: []string{"-h=x"}, wantStderr: "brief: '-h' takes no value; run 'brief --help'"},
+		{name: "new -h=x", args: []string{"new", "-h=x"}, wantStderr: "brief new: '-h' takes no value; run 'brief new --help'"},
+		{name: "help -h=x", args: []string{"help", "-h=x"}, wantStderr: "brief help: '-h' takes no value; run 'brief help <command>'"},
+
+		// "-hh=x"
+		{name: "root -hh=x", args: []string{"-hh=x"}, wantStderr: "brief: '-hh' takes no value; run 'brief --help'"},
+		{name: "new -hh=x", args: []string{"new", "-hh=x"}, wantStderr: "brief new: '-hh' takes no value; run 'brief new --help'"},
+		{name: "help -hh=x", args: []string{"help", "-hh=x"}, wantStderr: "brief help: '-hh' takes no value; run 'brief help <command>'"},
+
+		// "-hh=" (explicit empty value)
+		{name: "root -hh=", args: []string{"-hh="}, wantStderr: "brief: '-hh' takes no value; run 'brief --help'"},
+		{name: "new -hh=", args: []string{"new", "-hh="}, wantStderr: "brief new: '-hh' takes no value; run 'brief new --help'"},
+		{name: "help -hh=", args: []string{"help", "-hh="}, wantStderr: "brief help: '-hh' takes no value; run 'brief help <command>'"},
+
+		// "-hx"
+		{name: "root -hx", args: []string{"-hx"}, wantStderr: "brief: unknown shorthand flag: 'x' in -x; run 'brief <command> --help'"},
+		{name: "new -hx", args: []string{"new", "-hx"}, wantStderr: "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'"},
+		{name: "help -hx", args: []string{"help", "-hx"}, wantStderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'"},
+
+		// "-hhx"
+		{name: "root -hhx", args: []string{"-hhx"}, wantStderr: "brief: unknown shorthand flag: 'x' in -x; run 'brief <command> --help'"},
+		{name: "new -hhx", args: []string{"new", "-hhx"}, wantStderr: "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'"},
+		{name: "help -hhx", args: []string{"help", "-hhx"}, wantStderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'"},
+
+		// "--=x"
+		{name: "root --=x", args: []string{"--=x"}, wantStderr: "brief: bad flag syntax: --=x; run 'brief <command> --help'"},
+		{name: "new --=x", args: []string{"new", "--=x"}, wantStderr: "brief new: bad flag syntax: --=x; run 'brief new <type> --help'"},
+		{name: "help --=x", args: []string{"help", "--=x"}, wantStderr: "brief help: bad flag syntax: --=x; run 'brief help <command>'"},
+
+		// "---x"
+		{name: "root ---x", args: []string{"---x"}, wantStderr: "brief: bad flag syntax: ---x; run 'brief <command> --help'"},
+		{name: "new ---x", args: []string{"new", "---x"}, wantStderr: "brief new: bad flag syntax: ---x; run 'brief new <type> --help'"},
+		{name: "help ---x", args: []string{"help", "---x"}, wantStderr: "brief help: bad flag syntax: ---x; run 'brief help <command>'"},
+
+		// "--bogus"
+		{name: "root --bogus", args: []string{"--bogus"}, wantStderr: "brief: unknown flag: --bogus; run 'brief <command> --help'"},
+		{name: "new --bogus", args: []string{"new", "--bogus"}, wantStderr: "brief new: unknown flag: --bogus; run 'brief new <type> --help'"},
+		{name: "help --bogus", args: []string{"help", "--bogus"}, wantStderr: "brief help: unknown flag: --bogus; run 'brief help <command>'"},
+
+		// "-x"
+		{name: "root -x", args: []string{"-x"}, wantStderr: "brief: unknown shorthand flag: 'x' in -x; run 'brief <command> --help'"},
+		{name: "new -x", args: []string{"new", "-x"}, wantStderr: "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'"},
+		{name: "help -x", args: []string{"help", "-x"}, wantStderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
 
 			require.ErrorIs(t, err, cli.ErrUsage)
 			assert.Equal(t, 2, cli.ExitCode(err))

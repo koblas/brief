@@ -51,20 +51,18 @@ func runNew(cmd *cobra.Command, args []string, stderr io.Writer) error {
 		return usageError(stderr, "brief new: no type given; expected one of: feature, step")
 	}
 
-	if flag, ok := helpFlagWithValue(args[0]); ok {
-		return usageError(stderr, fmt.Sprintf("brief new: '%s' takes no value; run 'brief new --help'", flag))
-	}
-
-	if isHelpFlag(args[0]) {
+	switch kind, msg := classifyDashArg(args[0]); kind {
+	case argHelpFlagWithValue:
+		return usageError(stderr, fmt.Sprintf("brief new: '%s' takes no value; run 'brief new --help'", msg))
+	case argHelpFlag:
 		if len(args) == 1 {
 			return cmd.Help()
 		}
 
 		return usageError(stderr, fmt.Sprintf("brief new: '%s' takes no arguments; run 'brief help new <type>'", args[0]))
-	}
-
-	if isFlagLike(args[0]) {
-		return usageError(stderr, fmt.Sprintf("brief new: %s; run 'brief new <type> --help'", unknownFlagMessage(args[0])))
+	case argUnknownFlag:
+		return usageError(stderr, fmt.Sprintf("brief new: %s; run 'brief new <type> --help'", msg))
+	case argNotFlag:
 	}
 
 	return usageError(stderr, fmt.Sprintf("brief new: unknown type %q; expected one of: feature, step", args[0]))
