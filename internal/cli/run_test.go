@@ -293,7 +293,10 @@ func Test_prints_root_usage_and_a_nil_error_for_brief_help(t *testing.T) {
 // (new.go's runNew) and the help stub's own -h/--help rule: any trailing
 // argument alongside "-h"/"--help" is reported as that flag taking no
 // arguments, naming it exactly as typed and pointing at "brief help
-// <command>" — never as an unknown command naming "-h"/"--help" itself.
+// <command>" — never as an unknown command naming "-h"/"--help" itself. The
+// "--help --version" row pins that the first argument alone decides which
+// flag's error fires (R8): "--version" trailing after "--help" never
+// classifies as the version flag's own trailing-argument error.
 func Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -313,6 +316,11 @@ func Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments(t *
 		{
 			name:    "--help start",
 			args:    []string{"--help", "start"},
+			wantErr: `brief: '--help' takes no arguments; run 'brief help <command>'`,
+		},
+		{
+			name:    "--help --version",
+			args:    []string{"--help", "--version"},
 			wantErr: `brief: '--help' takes no arguments; run 'brief help <command>'`,
 		},
 	}
@@ -392,17 +400,18 @@ func Test_returns_a_usage_error_when_the_new_type_is_a_single_dash_flag(t *testi
 
 // Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root
 // pins the double-dash shape of the same rule, using a plausible-looking
-// flag ("--version") that brief does not define, to prove the wording is
-// generic rather than specific to any one bogus name.
+// flag ("--bogus") that brief does not define, to prove the wording is
+// generic rather than specific to any one bogus name. "--version" is not
+// used here since it is now its own argKind (see version_internal_test.go).
 func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"--version"}, nil, &stdout, &stderr)
+	err := cli.Run(t.Context(), wd, []string{"--bogus"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief: unknown flag: --version; run 'brief <command> --help'", oneLine(t, &stderr))
+	assert.Equal(t, "brief: unknown flag: --bogus; run 'brief <command> --help'", oneLine(t, &stderr))
 }
 
 // Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new is
@@ -416,6 +425,120 @@ func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new(t *tes
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
 	assert.Equal(t, "brief new: unknown flag: --bogus; run 'brief new <type> --help'", oneLine(t, &stderr))
+}
+
+// Test_version_flag_through_Run_prints_one_brief_line_to_stdout pins
+// cli.Run's public "--version" surface end to end: exit 0, empty stderr, and
+// one exact stdout line. A go test binary's own debug.ReadBuildInfo reports
+// Main.Version as "(devel)", which prints the same bytes as the fallback for
+// a missing build info, so this test cannot tell the real reader from a
+// stub; the pass-through and fallback rules are pinned against fake readers
+// in version_internal_test.go.
+func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"--version"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.Equal(t, "brief (devel)\n", stdout.String())
+}
+
+// Test_reports_a_version_flag_with_trailing_arguments_as_taking_no_arguments
+// pins that root's "--version" sole-argument handling (see
+// version_internal_test.go) applies only when it is the sole argument: any
+// trailing argument alongside "--version" is reported as that flag taking
+// no arguments, pointing at "brief --version" — never as the unknown-flag
+// wording argVersionFlag's msg would otherwise carry (R4).
+//
+// The four rows are one behavior — any trailing argument, whatever its
+// shape — not four independent rules: "extra" and "--json" are the
+// specification's own examples, and "--help"/"--version" pin that args[1]
+// is never classified at all (R8), a shape no mutation in this arm can
+// discriminate. No mutation reddens one row without reddening all four.
+//
+// Mutation-verified, restored byte-identical after each: widening the
+// argVersionFlag arm's guard from "len(args) == 1" to "len(args) >= 1"
+// reddens every row here (nil error, version printed instead of the usage
+// error); changing that arm's run hint from "brief --version" to "brief
+// help <command>" reddens every row here on the hint text while the sibling
+// table's "--help --version" control row (R8) stays green, proving the two
+// arms report independently.
+func Test_reports_a_version_flag_with_trailing_arguments_as_taking_no_arguments(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "--version extra", args: []string{"--version", "extra"}},
+		{name: "--version --json", args: []string{"--version", "--json"}},
+		{name: "--version --help", args: []string{"--version", "--help"}},
+		{name: "--version --version", args: []string{"--version", "--version"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, `brief: '--version' takes no arguments; run 'brief --version'`, oneLine(t, &stderr))
+		})
+	}
+}
+
+// Test_reports_a_version_flag_with_a_value_as_taking_no_value pins that a
+// value attached to "--version" is reported as that flag taking no value,
+// naming the flag itself rather than "--version"'s own unknown-flag wording
+// — and that this fires before any trailing argument is even looked at
+// (R8): "--version=x extra" and "--version= --version" both report the
+// value error, never the trailing-argument error the sibling table above
+// pins.
+//
+// The four rows are one message family — every shape of "a value on
+// --version" reports the identical stderr line — but not one discriminator:
+// "x" and "" (an explicit empty value) pin the value check itself, while
+// the "extra"/"--version" rows additionally pin that a trailing argument
+// never overrides it (R8), as the second mutation below confirms by
+// reddening only that pair.
+//
+// Mutation-verified, restored byte-identical after each: dropping
+// classifyDashArg's "--version=" prefix branch reddens all four rows
+// (classification falls back to today's unknown-flag wording); routing
+// root's argVersionFlagWithValue arm to takesNoArgumentsMessage whenever
+// len(args) > 1 reddens only the two rows with a second argument
+// ("--version=x extra", "--version= --version"), proving the value check
+// runs before any trailing-argument check; changing takesNoValueMessage's
+// wording reddens all four rows, since root's argVersionFlagWithValue arm
+// is that helper's only other caller besides argHelpFlagWithValue.
+func Test_reports_a_version_flag_with_a_value_as_taking_no_value(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "--version=x", args: []string{"--version=x"}},
+		{name: "--version=", args: []string{"--version="}},
+		{name: "--version=x extra", args: []string{"--version=x", "extra"}},
+		{name: "--version= --version", args: []string{"--version=", "--version"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, `brief: '--version' takes no value; run 'brief --version'`, oneLine(t, &stderr))
+		})
+	}
 }
 
 // Test_treats_a_bare_dash_as_a_plain_unknown_command is the control arm

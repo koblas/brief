@@ -60,7 +60,7 @@ func runNew(cmd *cobra.Command, args []string, stderr io.Writer) error {
 		}
 
 		return usageError(stderr, fmt.Sprintf("brief new: '%s' takes no arguments; run 'brief help new <type>'", args[0]))
-	case argUnknownFlag:
+	case argUnknownFlag, argVersionFlag, argVersionFlagWithValue:
 		return usageError(stderr, fmt.Sprintf("brief new: %s; run 'brief new <type> --help'", msg))
 	case argNotFlag:
 	}

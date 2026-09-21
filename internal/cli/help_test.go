@@ -56,7 +56,9 @@ func Test_prints_start_help_as_usage_line_prose_and_flag_table(t *testing.T) {
 // rootHelp is root's exact stdout for "brief --help", "brief -h" and
 // "brief help": the one-sentence description, one row per available
 // command (new's two children in new's place, in registration order),
-// finish's overlong row wrapped to its own line, and the trailer.
+// finish's overlong row wrapped to its own line, and the two trailers —
+// "Run 'brief <command> --help' for details." then, as the render's last
+// line, "Run 'brief --version' to print the installed version." (R7).
 const rootHelp = `brief manages feature specifications as files in your repository.
 
 Usage:
@@ -71,6 +73,7 @@ Usage:
                                    print a shell completion script
 
 Run 'brief <command> --help' for details.
+Run 'brief --version' to print the installed version.
 `
 
 // newHelp is "brief new --help"'s exact stdout: new's group body, listing
@@ -173,10 +176,10 @@ func Test_new_help_flag_is_help_only_as_the_sole_argument(t *testing.T) {
 	}
 }
 
-// Test_prints_the_root_help_with_one_line_per_command pins R6/R8 for root:
-// "brief --help" produces rootHelp exactly, and "brief -h" and "brief
-// help" are byte-identical to it — every root-help path renders through
-// the same cmd.Help() call.
+// Test_prints_the_root_help_with_one_line_per_command pins R6/R7/R8 for
+// root: "brief --help" produces rootHelp exactly — trailers included — and
+// "brief -h", "brief -hh" and "brief help" are byte-identical to it — every
+// root-help path renders through the same cmd.Help() call.
 func Test_prints_the_root_help_with_one_line_per_command(t *testing.T) {
 	tests := []struct {
 		name string
@@ -184,6 +187,7 @@ func Test_prints_the_root_help_with_one_line_per_command(t *testing.T) {
 	}{
 		{name: "--help", args: []string{"--help"}},
 		{name: "-h", args: []string{"-h"}},
+		{name: "-hh", args: []string{"-hh"}},
 		{name: "help", args: []string{"help"}},
 	}
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// argKind is classifyDashArg's result: which of the four shapes root,
+// argKind is classifyDashArg's result: which of the six shapes root,
 // "new" and the help stub need to tell apart in their first argument,
 // since all three disable cobra's own flag parsing.
 type argKind int
@@ -32,11 +32,36 @@ const (
 	// argUnknownFlag is any other dash-prefixed token. msg is the
 	// pflag-shaped, single-line message the caller reports verbatim.
 	argUnknownFlag
+
+	// argVersionFlag is exactly "--version", spelled with no attached
+	// value. msg is unknownLongFlagMessage("--version"), the same wording
+	// argUnknownFlag would report for it — so a caller that has no
+	// "--version" contract of its own (runNew, the help stub) can fold this
+	// case into its argUnknownFlag arm byte-for-byte. Root is the one
+	// caller with its own "--version" contract: it prints the version for
+	// a sole "--version" and reports its own "takes no arguments" copy for
+	// a trailing argument, using neither msg for that branch. "--version=<v>"
+	// does not match here: it classifies as argVersionFlagWithValue instead,
+	// since a value on "--version" is a different rule (root's "takes no
+	// value" case) than this exact-match kind carries.
+	argVersionFlag
+
+	// argVersionFlagWithValue is "--version" given an explicit value:
+	// "--version=<v>", including an empty value ("--version="). msg is
+	// unknownLongFlagMessage(arg), which is identical to argVersionFlag's
+	// own msg since that function already drops the "=value" part — so
+	// runNew and the help stub fold this case into their existing
+	// argUnknownFlag, argVersionFlag arm with no wording change of their
+	// own. Root is the one caller with its own "--version" contract:
+	// it reports its own "takes no value" copy, using neither msg nor
+	// args[0] for that branch, and never checks for a trailing argument —
+	// a value on "--version" always wins over one.
+	argVersionFlagWithValue
 )
 
 // classifyDashArg classifies arg the way root, "new" and the help stub
 // each need to. It has no precondition on arg: every input, including "",
-// "-", and any dash-prefixed garbage, resolves to one of the four argKind
+// "-", and any dash-prefixed garbage, resolves to one of the six argKind
 // values above without panicking.
 func classifyDashArg(arg string) (argKind, string) {
 	if len(arg) < 2 || arg[0] != '-' || arg == "--" {
@@ -49,6 +74,14 @@ func classifyDashArg(arg string) (argKind, string) {
 
 	if strings.HasPrefix(arg, "--help=") {
 		return argHelpFlagWithValue, "--help"
+	}
+
+	if arg == "--version" {
+		return argVersionFlag, unknownLongFlagMessage(arg)
+	}
+
+	if strings.HasPrefix(arg, "--version=") {
+		return argVersionFlagWithValue, unknownLongFlagMessage(arg)
 	}
 
 	if strings.HasPrefix(arg, "--") {

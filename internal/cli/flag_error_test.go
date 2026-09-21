@@ -74,6 +74,130 @@ func Test_reports_an_undefined_long_flag_as_one_usage_line_naming_the_command_in
 	}
 }
 
+// Test_new_reports_the_version_flag_as_unknown pins that "--version" is
+// root-only (R6): a bare "new --version" (no subtype) is reported byte-
+// identical to today's argUnknownFlag wording, through runNew's own
+// argVersionFlag arm.
+//
+// Mutation-verified: routing runNew's argVersionFlag case to argNotFlag's
+// bodyless arm instead of the argUnknownFlag one reds this test — "new
+// --version" would then report "unknown type "--version"" instead.
+func Test_new_reports_the_version_flag_as_unknown(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"new", "--version"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Equal(t, 2, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief new: unknown flag: --version; run 'brief new <type> --help'", oneLine(t, &stderr))
+}
+
+// Test_reports_the_version_flag_as_unknown_outside_the_root is SCENARIO-06's
+// table (R6): "--version" is root-only, so "help --version" and every
+// leaf's "--version" are reported byte-identical to today's pre-feature
+// bytes — the help stub's own argUnknownFlag/argVersionFlag/
+// argVersionFlagWithValue fold for "help --version", and pflag's own
+// unknown-flag path for every leaf, since no leaf registers a "version"
+// flag and internal/cli has no persistent flags. "new --version" stays in
+// its own standalone test above; "new"/"help" "--version=x"/"--version="
+// stay in the cross-site table
+// (Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites).
+// This table owns only "help --version" (bare) and the seven leaves, one
+// pin per line.
+//
+// Mutation-verified, restored byte-identical after each:
+//   - help stub (cli.go, newHelpCommand's switch): moving argVersionFlag out
+//     of "case argUnknownFlag, argVersionFlag, argVersionFlagWithValue:" into
+//     the bodyless "case argNotFlag, argVersionFlag:" arm reds only the
+//     "help --version" row — it then falls through to cmd.Root().Find(args)
+//     and reports `brief help: unknown command "--version"; expected one
+//     of: ...` — and nothing else in this table or the cross-site table's
+//     "help --version=x"/"help --version=" rows, proving the bare-flag and
+//     value arms are independently guarded.
+//   - leaf control arm: registering a "version" bool flag on "start"'s own
+//     flag set reds exactly the two "start" rows in this table ("start
+//     --version demo", "start --version=x demo"), proving those two rows
+//     are falsifiable, plus start's help goldens
+//     (Test_prints_start_help_as_usage_line_prose_and_flag_table,
+//     Test_help_start_prints_the_literal_start_help), which render start's
+//     flag table and are expected to move when a real flag is registered.
+//
+// The other six leaf rows (finish, status, check, new feature, new step,
+// completion) are behavior pins, not guard evidence: no flag registration
+// or classifyDashArg call sits between pflag and those bytes at a leaf, so
+// there is no guard in this package to break — pflag's own unknown-flag
+// path produces them unconditionally, the same as any other undefined long
+// flag on those commands.
+func Test_reports_the_version_flag_as_unknown_outside_the_root(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "help --version",
+			args:       []string{"help", "--version"},
+			wantStderr: "brief help: unknown flag: --version; run 'brief help <command>'",
+		},
+		{
+			name:       "start --version",
+			args:       []string{"start", "--version", "demo"},
+			wantStderr: "brief start: unknown flag: --version; run 'brief start <feature>'",
+		},
+		{
+			name:       "finish --version",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--version"},
+			wantStderr: "brief finish: unknown flag: --version; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "status --version",
+			args:       []string{"status", "--version"},
+			wantStderr: "brief status: unknown flag: --version; run 'brief status'",
+		},
+		{
+			name:       "check --version",
+			args:       []string{"check", "--version"},
+			wantStderr: "brief check: unknown flag: --version; run 'brief check [feature]'",
+		},
+		{
+			name:       "new feature --version",
+			args:       []string{"new", "feature", "--version", "payments"},
+			wantStderr: "brief new feature: unknown flag: --version; run 'brief new feature <name>'",
+		},
+		{
+			name:       "new step --version",
+			args:       []string{"new", "step", "--version", "demo"},
+			wantStderr: "brief new step: unknown flag: --version; run 'brief new step <feature>'",
+		},
+		{
+			name:       "completion --version",
+			args:       []string{"completion", "--version"},
+			wantStderr: "brief completion: unknown flag: --version; run 'brief completion <bash|zsh|fish|powershell>'",
+		},
+		{
+			name:       "start --version=x, pflag strips the value",
+			args:       []string{"start", "--version=x", "demo"},
+			wantStderr: "brief start: unknown flag: --version; run 'brief start <feature>'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
+}
+
 // Test_reports_an_undefined_short_flag_as_one_usage_line_naming_the_command_invocation
 // is SCENARIO-03's table: every leaf reports an undefined shorthand flag
 // through the same root SetFlagErrorFunc frame as SCENARIO-02's long-flag
@@ -649,11 +773,29 @@ func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
 // each token's kind is identical at every site — only the invocation named
 // in the "run '...'" tail, and the command-path prefix, differ per site.
 //
-// Mutation-verified: narrowing classifyDashArg's hasEq branch to only
-// single-character all-h names (so "-h=<v>" still classifies as
-// argHelpFlagWithValue but "-hh=<v>"/"-hh=" fall through to the unknown-flag
-// branch instead) reds exactly the six "-hh=x"/"-hh=" rows at root, new and
-// help, and nothing else.
+// Mutation-verified, restored byte-identical after each: narrowing
+// classifyDashArg's hasEq branch to only single-character all-h names (so
+// "-h=<v>" still classifies as argHelpFlagWithValue but "-hh=<v>"/"-hh="
+// fall through to the unknown-flag branch instead) reds exactly the six
+// "-hh=x"/"-hh=" rows at root, new and help, and nothing else. Dropping
+// classifyDashArg's "--version=" prefix branch reds only the two root
+// "--version=*" rows; the "new"/"help" "--version=*" rows stay green,
+// since they already fold argUnknownFlag into the same wording. Routing
+// runNew's (respectively the help stub's) argVersionFlagWithValue case to
+// the bodyless argNotFlag arm reds only that site's two "--version=*"
+// rows, proving each site's fold is independent of the other's.
+//
+// The "-v"/"-v=x"/"-vh"/"-hv" group pins R5: -v stays an unknown shorthand
+// at every site, never a --version alias. Mutation-verified against the
+// whole package, restored byte-identical after each: routing
+// classifyDashArg's final argUnknownFlag return to argVersionFlag (with msg
+// unknownLongFlagMessage(arg)) whenever arg has a "-v" prefix reds exactly
+// the "-v"/"-v=x"/"-vh" rows at all three sites and nothing else in the
+// package; it does not reach the "-hv" rows, since that arg starts "-h"
+// rather than "-v". Widening isAllH to also accept 'v' reds exactly the
+// "-hv" rows (and "-v"/"-vh") at all three sites and nothing else instead,
+// since they then classify as argHelpFlag; of the two mutations, only this
+// one reaches "-hv".
 func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -705,6 +847,16 @@ func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_s
 		{name: "new ---x", args: []string{"new", "---x"}, wantStderr: "brief new: bad flag syntax: ---x; run 'brief new <type> --help'"},
 		{name: "help ---x", args: []string{"help", "---x"}, wantStderr: "brief help: bad flag syntax: ---x; run 'brief help <command>'"},
 
+		// "--version=x"
+		{name: "root --version=x", args: []string{"--version=x"}, wantStderr: "brief: '--version' takes no value; run 'brief --version'"},
+		{name: "new --version=x", args: []string{"new", "--version=x"}, wantStderr: "brief new: unknown flag: --version; run 'brief new <type> --help'"},
+		{name: "help --version=x", args: []string{"help", "--version=x"}, wantStderr: "brief help: unknown flag: --version; run 'brief help <command>'"},
+
+		// "--version=" (explicit empty value)
+		{name: "root --version=", args: []string{"--version="}, wantStderr: "brief: '--version' takes no value; run 'brief --version'"},
+		{name: "new --version=", args: []string{"new", "--version="}, wantStderr: "brief new: unknown flag: --version; run 'brief new <type> --help'"},
+		{name: "help --version=", args: []string{"help", "--version="}, wantStderr: "brief help: unknown flag: --version; run 'brief help <command>'"},
+
 		// "--bogus"
 		{name: "root --bogus", args: []string{"--bogus"}, wantStderr: "brief: unknown flag: --bogus; run 'brief <command> --help'"},
 		{name: "new --bogus", args: []string{"new", "--bogus"}, wantStderr: "brief new: unknown flag: --bogus; run 'brief new <type> --help'"},
@@ -714,6 +866,26 @@ func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_s
 		{name: "root -x", args: []string{"-x"}, wantStderr: "brief: unknown shorthand flag: 'x' in -x; run 'brief <command> --help'"},
 		{name: "new -x", args: []string{"new", "-x"}, wantStderr: "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'"},
 		{name: "help -x", args: []string{"help", "-x"}, wantStderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'"},
+
+		// "-v" (R5: -v is reserved for a future --verbose, never a --version alias)
+		{name: "root -v", args: []string{"-v"}, wantStderr: "brief: unknown shorthand flag: 'v' in -v; run 'brief <command> --help'"},
+		{name: "new -v", args: []string{"new", "-v"}, wantStderr: "brief new: unknown shorthand flag: 'v' in -v; run 'brief new <type> --help'"},
+		{name: "help -v", args: []string{"help", "-v"}, wantStderr: "brief help: unknown shorthand flag: 'v' in -v; run 'brief help <command>'"},
+
+		// "-v=x"
+		{name: "root -v=x", args: []string{"-v=x"}, wantStderr: "brief: unknown shorthand flag: 'v' in -v=x; run 'brief <command> --help'"},
+		{name: "new -v=x", args: []string{"new", "-v=x"}, wantStderr: "brief new: unknown shorthand flag: 'v' in -v=x; run 'brief new <type> --help'"},
+		{name: "help -v=x", args: []string{"help", "-v=x"}, wantStderr: "brief help: unknown shorthand flag: 'v' in -v=x; run 'brief help <command>'"},
+
+		// "-vh"
+		{name: "root -vh", args: []string{"-vh"}, wantStderr: "brief: unknown shorthand flag: 'v' in -vh; run 'brief <command> --help'"},
+		{name: "new -vh", args: []string{"new", "-vh"}, wantStderr: "brief new: unknown shorthand flag: 'v' in -vh; run 'brief new <type> --help'"},
+		{name: "help -vh", args: []string{"help", "-vh"}, wantStderr: "brief help: unknown shorthand flag: 'v' in -vh; run 'brief help <command>'"},
+
+		// "-hv" (leading defined -h is consumed first, same skip rule as "-hx")
+		{name: "root -hv", args: []string{"-hv"}, wantStderr: "brief: unknown shorthand flag: 'v' in -v; run 'brief <command> --help'"},
+		{name: "new -hv", args: []string{"new", "-hv"}, wantStderr: "brief new: unknown shorthand flag: 'v' in -v; run 'brief new <type> --help'"},
+		{name: "help -hv", args: []string{"help", "-hv"}, wantStderr: "brief help: unknown shorthand flag: 'v' in -v; run 'brief help <command>'"},
 	}
 
 	for _, tt := range tests {
