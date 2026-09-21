@@ -1,11 +1,12 @@
 # cli-cobra — current state
 
-Scenarios complete: SCENARIO-01..13, plus four fix passes: `/run-reviewers` findings
+Scenarios complete: SCENARIO-01..13, plus five fix passes: `/run-reviewers` findings
 (correctness + test, both MAJOR), product-vision's final SHIP WITH CHANGES verdict
-(4 MAJOR findings), a correctness pass on token-classification edge cases, then a
-structural fix pass that replaced the three per-site classification ladders
-(`helpFlagWithValue`/`isHelpFlag`/`isFlagLike`/`unknownFlagMessage`) with one shared
-`classifyDashArg` (`classify.go`). Last updated by that fourth fix pass.
+(4 MAJOR findings), a correctness pass on token-classification edge cases, a structural
+fix pass that replaced the three per-site classification ladders with one shared
+`classifyDashArg` (`classify.go`), then a test pass that fixed a genuine multibyte
+parity bug in `unknownShortFlagMessage` and trimmed duplicated coverage in
+`classify_internal_test.go`/`flag_error_test.go`. Last updated by that fifth pass.
 
 ## Binding decisions
 
@@ -56,6 +57,15 @@ structural fix pass that replaced the three per-site classification ladders
   `Hidden`, carries `listedInHelpAnnotation` instead). (SCENARIO-07, 11, 12)
 - `completion`: brief's own leaf, dispatch off an ordered `[]completionShell` table,
   generated against `cmd.Root()`. (SCENARIO-12, 13)
+- `unknownShortFlagMessage`'s quoted rune is `rune(string(residual[0])[0])`, not
+  `rune(residual[0])`: pflag's `NotExistError` widens the failing byte to a rune,
+  UTF-8-encodes it, then widens *that* encoding's own first byte to a rune again — the
+  identity for ASCII, but every multi-byte UTF-8 lead byte collapses to one constant,
+  `'Ã'` (U+00C3). The single-widen version only coincidentally matched pflag for lead
+  byte `0xC3` (Latin-1 Supplement, e.g. `é`); it diverged for every other lead byte
+  until this pass. Pinned by
+  `Test_quotes_a_multibyte_unknown_shorthand_flag_byte_identically_across_leaf_root_and_new`
+  (flag_error_test.go). (fix pass)
 
 ## Left unbuilt
 
@@ -84,12 +94,16 @@ structural fix pass that replaced the three per-site classification ladders
   flags (`status -hh=x`, `new feature -hh`) still go through real `pflag.Parse` and
   `newFlagErrorFunc`, never `classifyDashArg` — leaf-level `-hh`/`-hh=x` is pflag's own
   behavior, out of scope for this package.
+- `gosmopolitan` (golangci-lint, `default: all`, no test-path exclusion) flags any
+  Han-script rune in a string literal anywhere, `_test.go` included — a non-Latin-1
+  multibyte test fixture should use a non-Han script instead (e.g. Cyrillic `Ж`).
 
 ## Open debts
 
-- Coverage duplicated across older SCENARIO-01 tests, `flag_error_test.go`'s per-rule
-  tables, and the newer cross-site classification table
-  (`Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites`).
+- Coverage still duplicated across older SCENARIO-01/03/04/06 leaf tables in
+  `flag_error_test.go` versus the cross-site classification table; this pass trimmed
+  `classify_internal_test.go`'s white-box table (19 rows to 4 anchors) and deleted the
+  black-box table it fully superseded, but the leaf-level duplication remains.
   Unowned — dies unless re-opened.
 - Accepted as-is by product-vision, no code change: every leaf accepts `--help` with extra
   trailing args (cobra's own default; only root/`new`/`help` enforce strictness);

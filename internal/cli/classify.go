@@ -35,10 +35,8 @@ const (
 )
 
 // classifyDashArg classifies arg the way root, "new" and the help stub
-// each need to, in place of their former per-site ladder of
-// helpFlagWithValue -> isHelpFlag -> isFlagLike -> unknownFlagMessage
-// checks. It has no precondition on arg: every input, including "", "-",
-// and any dash-prefixed garbage, resolves to one of the four argKind
+// each need to. It has no precondition on arg: every input, including "",
+// "-", and any dash-prefixed garbage, resolves to one of the four argKind
 // values above without panicking.
 func classifyDashArg(arg string) (argKind, string) {
 	if len(arg) < 2 || arg[0] != '-' || arg == "--" {
@@ -122,5 +120,12 @@ func unknownShortFlagMessage(cluster string) string {
 
 	residual := cluster[i:]
 
-	return flattenOneLine(fmt.Sprintf("unknown shorthand flag: %q in -%s", rune(residual[0]), residual))
+	// pflag's own NotExistError quotes a raw byte, not residual's real
+	// UTF-8 rune: it widens the byte to a rune, re-encodes that as UTF-8,
+	// then widens that encoding's own first byte to a rune again. For any
+	// ASCII byte the round trip is the identity; for any multi-byte UTF-8
+	// lead byte it collapses to a single constant, 'Ã' (U+00C3) — pflag's
+	// own quirk, mirrored here byte-for-byte rather than decoded to the
+	// character actually typed.
+	return flattenOneLine(fmt.Sprintf("unknown shorthand flag: %q in -%s", rune(string(residual[0])[0]), residual))
 }

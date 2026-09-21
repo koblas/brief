@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/koblas/brief/internal/cli"
@@ -81,9 +82,12 @@ func Test_reports_an_undefined_long_flag_as_one_usage_line_naming_the_command_in
 // undefined ("-xy" -> "in -xy") but quotes only the residual cluster once a
 // leading defined shorthand ("-h") has been consumed ("-hx" -> "in -x").
 //
-// Mutation-verified: removing unknownFlagMessage's leading-'h'-skip loop
-// reds the "residual cluster after a defined -h" row ("in -x" becomes
-// "in -hx").
+// The "residual cluster after a defined -h" row pins pflag's own
+// leading-shorthand-skip behavior at a leaf's real pflag.Parse — pflag's
+// own parseSingleShortArg loop, not any function this package owns (see
+// unknownShortFlagMessage in classify.go for the same skip reimplemented
+// for root/new/help's hand-classified args[0]) — so it is a golden
+// literal pinned here, not mutation-verifiable against our own code.
 func Test_reports_an_undefined_short_flag_as_one_usage_line_naming_the_command_invocation(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -598,112 +602,23 @@ func Test_accepts_the_double_dash_handoff_and_state_flags(t *testing.T) {
 	assert.Equal(t, 0, cli.ExitCode(err))
 }
 
-// Test_handles_flag_shaped_and_terminator_tokens_at_disabled_parsing_sites
-// covers the token shapes root, "new" and the help stub must each classify
-// by hand, since all three disable cobra's flag parsing: "--" is pflag's
-// own end-of-flags terminator, never a flag, so it falls through to the
-// plain unknown-command/unknown-type wording; "--help=<v>"/"-h=<v>" is the
-// help flag given an explicit value, which these three sites reject
-// outright rather than parse, unlike a leaf's real pflag.Parse; "-hx" is
-// the residual-cluster shape SCENARIO-03 pinned, now generalized to skip
-// any number of leading "h" characters, not just one; "--=x"/"---x" are
-// pflag's own bad-flag-syntax case. Every row here is an error: the help
-// stub has no sole-argument case that prints help at all (its own "-hh"
-// row below reports "takes no arguments", unlike root's and "new"'s —
-// see Test_prints_help_for_the_hh_cluster_alone for those two).
-//
-// Mutation-verified: reverting classifyDashArg's "arg == \"--\"" exclusion
-// reds the root/new/help "--" rows above (each starts reporting a
-// flag-shaped message instead of falling through to the plain
-// unknown-command wording); reverting unknownShortFlagMessage's
-// leading-'h' skip reds the "-hx" rows (each reports "in -hx" instead of
-// "in -x").
-func Test_handles_flag_shaped_and_terminator_tokens_at_disabled_parsing_sites(t *testing.T) {
-	tests := []struct {
-		name       string
-		args       []string
-		wantStderr string
-	}{
-		{
-			name:       "root, a bare -- is not flag-like",
-			args:       []string{"--"},
-			wantStderr: `brief: unknown command "--"; expected one of: new, start, finish, status, check`,
-		},
-		{
-			name:       "root, --help given a value",
-			args:       []string{"--help=true"},
-			wantStderr: "brief: '--help' takes no value; run 'brief --help'",
-		},
-		{
-			name:       "root, -h given a value",
-			args:       []string{"-h=x"},
-			wantStderr: "brief: '-h' takes no value; run 'brief --help'",
-		},
-		{
-			name:       "root, -hx is an unknown shorthand after a leading defined -h",
-			args:       []string{"-hx"},
-			wantStderr: "brief: unknown shorthand flag: 'x' in -x; run 'brief <command> --help'",
-		},
-		{
-			name:       "root, --=x is bad flag syntax",
-			args:       []string{"--=x"},
-			wantStderr: "brief: bad flag syntax: --=x; run 'brief <command> --help'",
-		},
-		{
-			name:       "root, ---x is bad flag syntax",
-			args:       []string{"---x"},
-			wantStderr: "brief: bad flag syntax: ---x; run 'brief <command> --help'",
-		},
-		{
-			name:       "new, a bare -- is not flag-like",
-			args:       []string{"new", "--"},
-			wantStderr: `brief new: unknown type "--"; expected one of: feature, step`,
-		},
-		{
-			name:       "new, --help given a value",
-			args:       []string{"new", "--help=true"},
-			wantStderr: "brief new: '--help' takes no value; run 'brief new --help'",
-		},
-		{
-			name:       "new, -hx is an unknown shorthand after a leading defined -h",
-			args:       []string{"new", "-hx"},
-			wantStderr: "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'",
-		},
-		{
-			name:       "help, a bare -- is not flag-like",
-			args:       []string{"help", "--"},
-			wantStderr: `brief help: unknown command "--"; expected one of: new, start, finish, status, check`,
-		},
-		{
-			name:       "help, --help given a value",
-			args:       []string{"help", "--help=true"},
-			wantStderr: "brief help: '--help' takes no value; run 'brief help <command>'",
-		},
-		{
-			name:       "help, -hx is an unknown shorthand after a leading defined -h",
-			args:       []string{"help", "-hx"},
-			wantStderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'",
-		},
-		{
-			name:       "help, -hh is a cluster of only the defined -h, still an error under help",
-			args:       []string{"help", "-hh"},
-			wantStderr: "brief help: '-hh' takes no arguments; run 'brief help <command>'",
-		},
-	}
+// Test_rejects_the_hh_cluster_under_help_since_it_has_no_sole_argument_case
+// pins the one row the cross-site table
+// (Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites)
+// does not cover: unlike root's and "new"'s sole-argument case
+// (Test_prints_help_for_the_hh_cluster_alone), the help stub has no case
+// that prints help at all, so an all-'h' cluster under "help" is itself a
+// usage error rather than argHelpFlag's other two call sites' success path.
+func Test_rejects_the_hh_cluster_under_help_since_it_has_no_sole_argument_case(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			wd := t.TempDir()
-			var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"help", "-hh"}, nil, &stdout, &stderr)
 
-			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
-
-			require.ErrorIs(t, err, cli.ErrUsage)
-			assert.Equal(t, 2, cli.ExitCode(err))
-			assert.Empty(t, stdout.String())
-			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
-		})
-	}
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Equal(t, 2, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief help: '-hh' takes no arguments; run 'brief help <command>'", oneLine(t, &stderr))
 }
 
 // Test_prints_help_for_the_hh_cluster_alone is the "-hh" shape of
@@ -731,6 +646,7 @@ func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
 			helpErr := cli.Run(t.Context(), wd, tt.helpArgs, nil, &helpStdout, &helpStderr)
 
 			require.NoError(t, helpErr)
+			assert.Contains(t, helpStdout.String(), "Usage:")
 
 			var clusterStdout, clusterStderr bytes.Buffer
 
@@ -739,6 +655,7 @@ func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
 			require.NoError(t, clusterErr)
 			assert.Equal(t, 0, cli.ExitCode(clusterErr))
 			assert.Empty(t, clusterStderr.String())
+			assert.NotEmpty(t, clusterStdout.String())
 			assert.Equal(t, helpStdout.String(), clusterStdout.String())
 		})
 	}
@@ -830,6 +747,104 @@ func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_s
 			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
 		})
 	}
+}
+
+// Test_quotes_a_multibyte_unknown_shorthand_flag_byte_identically_across_leaf_root_and_new
+// pins that classify.go's unknownShortFlagMessage (backing root, "new" and
+// the help stub) quotes a non-ASCII residual byte exactly the way pflag's
+// own NotExistError does for the same token at a leaf's real pflag.Parse:
+// both take the residual's first byte, not its real UTF-8 rune, so every
+// row's quoted character is pflag's own quirk ('Ã', U+00C3) rather than
+// the character actually typed — pinned deliberately, not "fixed" to show
+// the real one. wantLeaf is pflag's own message, observed directly rather
+// than derived from any production constant; wantRoot/wantNew are asserted
+// equal to it both as full literals and, explicitly, on the message
+// segment between "brief <path>: " and "; run '" alone, since that segment
+// is the one classifyDashArg's callers all build from the same
+// unknownShortFlagMessage call.
+func Test_quotes_a_multibyte_unknown_shorthand_flag_byte_identically_across_leaf_root_and_new(t *testing.T) {
+	tests := []struct {
+		name     string
+		arg      string
+		wantLeaf string
+		wantRoot string
+		wantNew  string
+	}{
+		{
+			name:     "an accented character in the Latin-1 Supplement block",
+			arg:      "-é",
+			wantLeaf: "brief start: unknown shorthand flag: 'Ã' in -é; run 'brief start <feature>'",
+			wantRoot: "brief: unknown shorthand flag: 'Ã' in -é; run 'brief <command> --help'",
+			wantNew:  "brief new: unknown shorthand flag: 'Ã' in -é; run 'brief new <type> --help'",
+		},
+		{
+			name:     "a character outside the Latin-1 Supplement block",
+			arg:      "-Ж",
+			wantLeaf: "brief start: unknown shorthand flag: 'Ã' in -Ж; run 'brief start <feature>'",
+			wantRoot: "brief: unknown shorthand flag: 'Ã' in -Ж; run 'brief <command> --help'",
+			wantNew:  "brief new: unknown shorthand flag: 'Ã' in -Ж; run 'brief new <type> --help'",
+		},
+		{
+			name:     "the accented character again, after a leading defined -h",
+			arg:      "-hé",
+			wantLeaf: "brief start: unknown shorthand flag: 'Ã' in -é; run 'brief start <feature>'",
+			wantRoot: "brief: unknown shorthand flag: 'Ã' in -é; run 'brief <command> --help'",
+			wantNew:  "brief new: unknown shorthand flag: 'Ã' in -é; run 'brief new <type> --help'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+
+			var leafStdout, leafStderr bytes.Buffer
+			leafErr := cli.Run(t.Context(), wd, []string{"start", tt.arg, "demo"}, nil, &leafStdout, &leafStderr)
+			require.ErrorIs(t, leafErr, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(leafErr))
+			assert.Empty(t, leafStdout.String())
+			leafLine := oneLine(t, &leafStderr)
+			assert.Equal(t, tt.wantLeaf, leafLine)
+
+			var rootStdout, rootStderr bytes.Buffer
+			rootErr := cli.Run(t.Context(), wd, []string{tt.arg}, nil, &rootStdout, &rootStderr)
+			require.ErrorIs(t, rootErr, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(rootErr))
+			assert.Empty(t, rootStdout.String())
+			rootLine := oneLine(t, &rootStderr)
+			assert.Equal(t, tt.wantRoot, rootLine)
+
+			var newStdout, newStderr bytes.Buffer
+			newErr := cli.Run(t.Context(), wd, []string{"new", tt.arg}, nil, &newStdout, &newStderr)
+			require.ErrorIs(t, newErr, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(newErr))
+			assert.Empty(t, newStdout.String())
+			newLine := oneLine(t, &newStderr)
+			assert.Equal(t, tt.wantNew, newLine)
+
+			leafMsg := flagMessagePart(t, leafLine, "brief start: ")
+			rootMsg := flagMessagePart(t, rootLine, "brief: ")
+			newMsg := flagMessagePart(t, newLine, "brief new: ")
+
+			assert.Equal(t, leafMsg, rootMsg)
+			assert.Equal(t, leafMsg, newMsg)
+		})
+	}
+}
+
+// flagMessagePart extracts the message segment between "brief <path>: "
+// and the trailing "; run '<invocation>'" every usage error in this file
+// shares, so a test can compare that segment alone across sites whose
+// path and invocation differ.
+func flagMessagePart(t *testing.T, line, prefix string) string {
+	t.Helper()
+
+	rest, ok := strings.CutPrefix(line, prefix)
+	require.True(t, ok, "expected %q to start with %q", line, prefix)
+
+	msg, _, ok := strings.Cut(rest, "; run '")
+	require.True(t, ok, "expected %q to contain \"; run '\"", rest)
+
+	return msg
 }
 
 // Test_accepts_the_double_dash_help_flag_on_every_leaf is the --help shape
