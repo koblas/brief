@@ -36,14 +36,15 @@ it never calls `os.Exit`.
 
 `internal/cli` uses urfave/cli v3. The command tree is rebuilt on every `Run` call. The root
 and `new` set `SkipFlagParsing`, so their own Actions produce the "no/unknown command" and
-"no/unknown type" errors. Leaf commands let urfave parse flags. They print their existing
-usage constant through `CustomHelpTemplate`, and `OnUsageError` wraps urfave's message in
-brief's usage-error line. `ExitCode` in `main` is still the only place that sets the exit
+"no/unknown type" errors. Leaf commands let urfave parse flags. They hide urfave's help flag,
+so `-h` and `--help` show up as undefined flags in `OnUsageError`. That hook prints the
+command's existing usage constant for those two flags and wraps every other urfave message
+in brief's usage-error line. `ExitCode` in `main` is still the only place that sets the exit
 code.
 
 The deciding evidence: all 483 existing tests passed with no test file changed. A
 differential run of the old and new binaries over 33 invocations gave byte-identical
-stdout, stderr and exit codes for 30 of them. The other 3 are listed below.
+stdout, stderr and exit codes for 31 of them. The other 2 are listed below.
 
 ## Consequences
 
@@ -54,12 +55,14 @@ stdout, stderr and exit codes for 30 of them. The other 3 are listed below.
 - **Trade-off:** `finish` now accepts flags before or between its positionals. Before, that
   was a usage error ("no feature given"). This is looser, not stricter, and
   `Test_finishes_the_step_when_the_flags_precede_the_feature_and_step` now pins it.
-- **Negative:** If `--help` comes before an undefined flag on the same command
-  (`brief start --help --bogus`), urfave prints its own generated help instead of brief's,
-  still exiting 0. That path ignores `CustomHelpTemplate`. The only way around it is to set
-  urfave's package-level `ShowSubcommandHelp`, and we chose not to change global state. The
-  reverse order (`--bogus --help`) still gives brief's usage error.
 - **Negative:** A missing flag value is now reported as `flag needs an argument: --handoff`
   (with two dashes) instead of `-handoff`. No test pins this line.
-- **Negative:** This adds a third-party dependency. Help constants now pass through
-  `text/template`, so they must never contain `{{`.
+- **Negative:** This adds a third-party dependency. We could not use urfave's own help
+  flag: when `--help` comes with a flag error, urfave prints its generated help and ignores
+  `CustomHelpTemplate`. So `isHelpRequest` checks urfave's undefined-flag message for
+  `-h`/`-help`. urfave exports only that string, not a typed error. If upstream rewords it,
+  the help tests go red.
+- **Negative:** `.golangci.yaml` exempts `Command.Run` from wrapcheck because it passes
+  brief's own errors through. That stays true only while every leaf defines
+  `OnUsageError`. Otherwise an error created by urfave would reach `ExitCode` with no
+  `brief …:` line on stderr.

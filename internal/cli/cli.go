@@ -79,31 +79,31 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *ucli.
 					return runNew(cmd.Args().Slice(), stderr)
 				},
 				Commands: []*ucli.Command{
-					leafCommand("feature", "new feature", "brief new feature <name>", newFeatureUsage, stderr, nil,
+					leafCommand("feature", "new feature", "brief new feature <name>", newFeatureUsage, stdout, stderr, nil,
 						func(ctx context.Context, cmd *ucli.Command) error {
 							return runNewFeature(ctx, wd, cmd.Args().Slice(), stdout, stderr)
 						}),
-					leafCommand("step", "new step", "brief new step <feature>", newStepUsage, stderr, nil,
+					leafCommand("step", "new step", "brief new step <feature>", newStepUsage, stdout, stderr, nil,
 						func(ctx context.Context, cmd *ucli.Command) error {
 							return runNewStep(ctx, wd, cmd.Args().Slice(), stdout, stderr)
 						}),
 				},
 			},
-			leafCommand("start", "start", "brief start <feature>", startUsage, stderr,
+			leafCommand("start", "start", "brief start <feature>", startUsage, stdout, stderr,
 				[]ucli.Flag{&ucli.BoolFlag{Name: "json"}},
 				func(ctx context.Context, cmd *ucli.Command) error {
 					return runStart(ctx, wd, cmd.Args().Slice(), cmd.Bool("json"), stdout, stderr)
 				}),
-			leafCommand("status", "status", "brief status", statusUsage, stderr, nil,
+			leafCommand("status", "status", "brief status", statusUsage, stdout, stderr, nil,
 				func(ctx context.Context, cmd *ucli.Command) error {
 					return runStatus(ctx, wd, cmd.Args().Slice(), stdout, stderr)
 				}),
-			leafCommand("finish", "finish", finishInvocation, finishUsage, stderr,
+			leafCommand("finish", "finish", finishInvocation, finishUsage, stdout, stderr,
 				[]ucli.Flag{&ucli.StringFlag{Name: "handoff"}, &ucli.StringFlag{Name: "state"}},
 				func(ctx context.Context, cmd *ucli.Command) error {
 					return runFinish(ctx, wd, cmd.Args().Slice(), cmd.String("handoff"), cmd.String("state"), stdin, stderr)
 				}),
-			leafCommand("check", "check", "brief check [feature]", checkUsage, stderr, nil,
+			leafCommand("check", "check", "brief check [feature]", checkUsage, stdout, stderr, nil,
 				func(ctx context.Context, cmd *ucli.Command) error {
 					return runCheck(ctx, wd, cmd.Args().Slice(), stdout, stderr)
 				}),
@@ -114,24 +114,42 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *ucli.
 // leafCommand builds a command that takes flags and positionals but no
 // subcommands. path is its full name after "brief", invocation is the
 // usage line every flag error names as how to fix it, and help is printed
-// to stdout on -h or --help. help is a text/template, so it must not
-// contain "{{".
+// verbatim to stdout on -h, -help or --help.
 //
-// One urfave limitation survives: --help given alongside an undefined
-// flag, help first ("brief start --help --bogus"), prints urfave's
-// generated help rather than help, still exiting 0. That path ignores
-// CustomHelpTemplate and can only be redirected through a package-level
-// urfave variable.
-func leafCommand(name, path, invocation, help string, stderr io.Writer, flags []ucli.Flag, action ucli.ActionFunc) *ucli.Command {
+// urfave's own help flag is hidden, not reused: with it defined, urfave
+// prints its generated help — ignoring any template — whenever --help
+// arrives alongside a flag error. Without it, -h and --help are undefined
+// flags, and isHelpRequest spots them in OnUsageError. Because urfave
+// parses left to right and stops at the first undefined flag, this keeps
+// the stdlib flag package's order semantics: "--help --bogus" prints help,
+// "--bogus --help" is a usage error.
+func leafCommand(name, path, invocation, help string, stdout, stderr io.Writer, flags []ucli.Flag, action ucli.ActionFunc) *ucli.Command {
 	return &ucli.Command{
-		Name:               name,
-		Flags:              flags,
-		HideHelpCommand:    true,
-		CustomHelpTemplate: help,
+		Name:            name,
+		Flags:           flags,
+		HideHelp:        true,
+		HideHelpCommand: true,
 		OnUsageError: func(_ context.Context, _ *ucli.Command, err error, _ bool) error {
+			if isHelpRequest(err) {
+				fmt.Fprint(stdout, help)
+				return nil
+			}
+
 			return usageError(stderr, fmt.Sprintf("brief %s: %s; run '%s'", path, err, invocation))
 		},
 		Action: action,
+	}
+}
+
+// isHelpRequest reports whether err is urfave's undefined-flag error for
+// -h or -help. urfave exports no type for it, only this message, which it
+// words exactly as the stdlib flag package does.
+func isHelpRequest(err error) bool {
+	switch err.Error() {
+	case "flag provided but not defined: -h", "flag provided but not defined: -help":
+		return true
+	default:
+		return false
 	}
 }
 

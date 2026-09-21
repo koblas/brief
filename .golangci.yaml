@@ -54,7 +54,9 @@ linters:
       #   - refreshcache caches   -> their refresh fn's error, itself the fn
       #                              the cache was constructed with
       #   - urfave cli.Command.Run -> the Action's or OnUsageError's error,
-      #                              both brief's own usage/refusal errors
+      #                              both brief's own usage/refusal errors;
+      #                              holds only while every leaf command in
+      #                              internal/cli defines OnUsageError
       extra-ignore-sigs:
         - cli/v3.Command).Run(
         - fxsync.Once).Do(
