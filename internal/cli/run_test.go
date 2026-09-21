@@ -261,21 +261,6 @@ func Test_prints_root_usage_and_a_nil_error_for_brief_help(t *testing.T) {
 	assert.NotEmpty(t, stdout.String())
 }
 
-// Test_prints_root_usage_and_a_nil_error_for_brief_help_with_an_unknown_topic
-// pins today's dispatch, ahead of SCENARIO-09's rewrite: "brief help
-// bogus" prints the root usage text with a nil error rather than
-// reporting "bogus" as an unknown help topic.
-func Test_prints_root_usage_and_a_nil_error_for_brief_help_with_an_unknown_topic(t *testing.T) {
-	wd := t.TempDir()
-	var stdout, stderr bytes.Buffer
-
-	err := cli.Run(t.Context(), wd, []string{"help", "bogus"}, nil, &stdout, &stderr)
-
-	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
-	assert.NotEmpty(t, stdout.String())
-}
-
 // Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag
 // pins that "-x" at the root is reported as an unknown command, the same
 // as any other unrecognized first argument, not as an undefined flag.

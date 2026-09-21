@@ -30,6 +30,14 @@ func init() {
 // root help render.
 const rootShort = "brief manages feature specifications as files in your repository."
 
+// expectedCommands is the "expected one of:" list named by runRoot's usage
+// errors and by the hidden help stub's unknown-topic error. It is today's
+// approved literal, registration order minus "new" (see S07's "new, start,
+// status, check, finish" root listing) — not tree-derived; S11 replaces
+// this with a derivation from the command tree and moves all three
+// messages together.
+const expectedCommands = "new, start, finish, status, check"
+
 // helpTemplate renders R6's contract for every command in the tree, set
 // once on root via SetHelpTemplate and inherited by every child through
 // HelpTemplate()'s parent walk.
@@ -222,21 +230,33 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 	// A hidden "help" stub replaces cobra's default help command, which on
 	// an unknown topic calls cobra.CheckErr and os.Exit(1) directly — the
 	// only exit this package allows is ExitCode, called from main. The
-	// stub resolves its topic against the tree with Find and renders that
-	// command's own help, so "help <path…>" is byte-identical to
-	// "<path…> --help". A topic Find cannot resolve — including none at
-	// all — leaves target as root, so this falls back to root help, the
-	// same render as a bare "brief help".
+	// stub resolves its topic against the tree with Find, which never
+	// errors on this ArbitraryArgs-everywhere tree and returns the
+	// unstripped residual as its second value. A topic is accepted only
+	// when that residual is empty and the resolved target is root itself
+	// (a bare "brief help") or IsAvailableCommand — so a leftover
+	// positional, a flag left after the topic, a flag ahead of it (Find
+	// stops at root, treating the topic as that flag's value) and a
+	// hidden command such as "help" itself are all rejected, not
+	// silently routed to some leaf's help. A rejected topic is brief's
+	// own usage error naming the whole topic as typed — every argument
+	// joined by a space, not just the unresolved residual — so
+	// "help new bogus" names "new bogus", not a false top-level command
+	// "bogus". An accepted topic renders byte-identical to
+	// "<path…> --help": InitDefaultHelpFlag backfills the -h/--help row
+	// that Execute() would otherwise add during ordinary dispatch, which
+	// Find alone skips.
 	root.SetHelpCommand(&cobra.Command{
 		Use:                "help",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target, _, _ := cmd.Root().Find(args)
-			// Execute() adds this flag as part of dispatching into target
-			// normally; Find alone skips that, so target.Help() would
-			// otherwise render a Flags table missing its own -h/--help row.
+			target, residual, _ := cmd.Root().Find(args)
+			if len(residual) > 0 || (target != cmd.Root() && !target.IsAvailableCommand()) {
+				return usageError(stderr, fmt.Sprintf("brief help: unknown command %q; expected one of: %s", strings.Join(args, " "), expectedCommands))
+			}
+
 			target.InitDefaultHelpFlag()
 
 			return target.Help()
@@ -277,14 +297,14 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 // help, nothing at all, or something unknown.
 func runRoot(cmd *cobra.Command, args []string, stderr io.Writer) error {
 	if len(args) == 0 {
-		return usageError(stderr, "brief: no command given; expected one of: new, start, finish, status, check")
+		return usageError(stderr, "brief: no command given; expected one of: "+expectedCommands)
 	}
 
 	switch args[0] {
 	case "-h", "--help", "help":
 		return cmd.Help()
 	default:
-		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: new, start, finish, status, check", args[0]))
+		return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommands))
 	}
 }
 

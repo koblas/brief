@@ -195,6 +195,65 @@ func Test_help_start_prints_the_literal_start_help(t *testing.T) {
 	assert.Equal(t, startHelp, stdout.String())
 }
 
+// Test_help_with_an_unresolved_topic_is_a_one_line_usage_error pins
+// SCENARIO-09: a help topic is accepted only when Find's residual is
+// empty and the resolved target is root or IsAvailableCommand. Anything
+// else — extra positionals, a flag after the topic, a leading flag before
+// it, or a hidden command like "help" itself — is a usage error naming
+// the whole topic as typed, never just the unresolved residual.
+func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		stderr string
+	}{
+		{
+			name:   "unknown top-level topic",
+			args:   []string{"help", "bogus"},
+			stderr: "brief help: unknown command \"bogus\"; expected one of: new, start, finish, status, check\n",
+		},
+		{
+			name:   "resolved command with an unresolved trailing word",
+			args:   []string{"help", "new", "bogus"},
+			stderr: "brief help: unknown command \"new bogus\"; expected one of: new, start, finish, status, check\n",
+		},
+		{
+			name:   "resolved command with an extra positional",
+			args:   []string{"help", "start", "extra"},
+			stderr: "brief help: unknown command \"start extra\"; expected one of: new, start, finish, status, check\n",
+		},
+		{
+			name:   "resolved command with a trailing flag",
+			args:   []string{"help", "start", "--json"},
+			stderr: "brief help: unknown command \"start --json\"; expected one of: new, start, finish, status, check\n",
+		},
+		{
+			name:   "leading flag before the topic",
+			args:   []string{"help", "--json", "start"},
+			stderr: "brief help: unknown command \"--json start\"; expected one of: new, start, finish, status, check\n",
+		},
+		{
+			name:   "hidden command as topic",
+			args:   []string{"help", "help"},
+			stderr: "brief help: unknown command \"help\"; expected one of: new, start, finish, status, check\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tc.stderr, stderr.String())
+		})
+	}
+}
+
 // Test_prints_finish_flag_prose_in_its_flag_table pins that finish's
 // --handoff and --state rows show their value as "path" (from the
 // backquoted varname in each flag's usage string), not pflag's default
