@@ -79,11 +79,11 @@ func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, out r
 	}
 
 	for _, s := range brief.Shortfalls {
-		fmt.Fprintf(out.stderr, "brief start: %s: %s; %s\n", s.Path, flattenOneLine(s.Detail), flattenOneLine(s.Fix))
+		fmt.Fprintf(out.stderr, "brief start: %s: %s; %s\n", displayPath(wd, s.Path), flattenOneLine(s.Detail), flattenOneLine(s.Fix))
 	}
 
 	if brief.Step == nil {
-		featureDir := filepath.Join(root, cfg.FeatureDirectory, feature)
+		featureDir := displayPath(wd, filepath.Join(root, cfg.FeatureDirectory, feature))
 
 		if brief.Done+brief.Open > 0 {
 			fmt.Fprintf(out.stderr, "brief start: %s: feature is complete, %d of %d steps done; run 'brief new step %s' to add the next one\n",

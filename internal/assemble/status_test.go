@@ -240,9 +240,9 @@ func Test_status_marks_a_feature_whose_step_frontmatter_does_not_parse(t *testin
 	assert.Equal(t, 0, delta.Total)
 	assert.Empty(t, delta.Next)
 	assert.Equal(t, 0, delta.Blocked)
-	assert.Equal(t, deltaDir, delta.Problem.Path)
+	assert.Equal(t, filepath.Join(deltaDir, "STEP-01.md"), delta.Problem.Path)
 	assert.Equal(t, "no frontmatter found", delta.Problem.Detail)
-	assert.NotEmpty(t, delta.Problem.Fix)
+	assert.Equal(t, "run 'brief check delta' to list every fault", delta.Problem.Fix)
 }
 
 // Test_status_reports_one_problem_per_feature_not_one_per_file bounds
@@ -265,6 +265,7 @@ func Test_status_reports_one_problem_per_feature_not_one_per_file(t *testing.T) 
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), rows[0].Problem.Path)
 }
 
 // Test_status_marks_a_feature_whose_step_file_cannot_be_read uses a step

@@ -225,7 +225,7 @@ Scenario: SCENARIO-14 Every command's help advertises --json
 - [x] SCENARIO-01: --json turns usage errors into one JSON document
 - [x] SCENARIO-02: --json turns refusals into the error document
 - [x] SCENARIO-03: start --json success carries the common header
-- [ ] SCENARIO-04: A malformed feature names the step file at fault
+- [x] SCENARIO-04: A malformed feature names the step file at fault
 - [ ] SCENARIO-05: An unknown feature lists the known ones
 - [ ] SCENARIO-06: status reads as a table for people
 - [ ] SCENARIO-07: status --json

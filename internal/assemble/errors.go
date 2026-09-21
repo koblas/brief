@@ -21,9 +21,10 @@ var ErrMalformedFeature = errors.New("malformed feature")
 
 // Problem describes why Status could not read a feature directory or one
 // of its step files, or why Start refused to assemble a Brief: Path is the
-// absolute path of the offending directory or file, Detail is the
-// underlying failure's own message, and Fix is the one-line remedy printed
-// beside it.
+// absolute path of the offending directory or file — the step file itself
+// when the fault is that file's own frontmatter, never the feature
+// directory it lives in — Detail is the underlying failure's own message,
+// and Fix is the one-line remedy printed beside it.
 type Problem struct {
 	Path   string
 	Detail string
@@ -68,18 +69,48 @@ func (e *RefusalError) Unwrap() error {
 // unparseable.
 const readClassFix = "make it readable and re-run"
 
+// stepFrontmatterError is the error readSteps wraps a
+// stepfile.ParseFrontmatter failure in: name is the step file's own
+// filename within the feature directory, the one piece of information
+// ParseFrontmatter's own error carries nothing of. Unwrap returns err
+// unchanged, so errors.Is(err, stepfile.ErrNoFrontmatter) still reaches the
+// sentinel through this wrapper.
+type stepFrontmatterError struct {
+	name string
+	err  error
+}
+
+// Error renders "assemble: <name>: <err>".
+func (e *stepFrontmatterError) Error() string {
+	return fmt.Sprintf("assemble: %s: %s", e.name, e.err)
+}
+
+// Unwrap exposes err so errors.Is/errors.As reach the sentinel this error
+// wraps.
+func (e *stepFrontmatterError) Unwrap() error {
+	return e.err
+}
+
 // newProblem converts err, returned while opening or listing a feature's
 // own directory, while reading its specification or state file, or while
 // reading and parsing one of its step files, into the Problem the caller
-// reports. Every open/read failure surfaces as a wrapped *fs.PathError;
-// when nameable is true, that error's own Path field (relative to the
-// feature's root) is joined onto base to name the offending file, and the
-// PathError's own wrapped message becomes Detail. stepfile.ParseFrontmatter's
-// errors carry no file name of their own, so a frontmatter parse failure —
-// the only case that is not a *fs.PathError — keeps base as Path and its
-// full message, stripped of the "assemble: " wrap, as Detail. nameable is
-// false when base already names the exact file err concerns, so joining a
-// relative path onto it would repeat it.
+// reports.
+//
+// An open/read failure surfaces as a wrapped *fs.PathError; when nameable
+// is true, that error's own Path field (relative to the feature's root) is
+// joined onto base to name the offending file, and the PathError's own
+// wrapped message becomes Detail, with Fix pointing at making the file
+// readable.
+//
+// A step-file frontmatter parse failure surfaces as a *stepFrontmatterError:
+// its own name is joined onto base to name the step file, its wrapped
+// error's own message becomes Detail, and Fix always names 'brief check
+// <feature>' — filepath.Base(base), the feature directory, never the step
+// file's own name — as the one place every fault in the feature is listed.
+//
+// Every other error falls to the third, unreached branch: no current caller
+// passes newProblem anything but a *fs.PathError or a *stepFrontmatterError,
+// so this stays a documented default rather than a tested one.
 func newProblem(base string, err error, nameable bool) *Problem {
 	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
 		path := base
@@ -88,6 +119,14 @@ func newProblem(base string, err error, nameable bool) *Problem {
 		}
 
 		return &Problem{Path: path, Detail: pathErr.Err.Error(), Fix: readClassFix}
+	}
+
+	if fmErr, ok := errors.AsType[*stepFrontmatterError](err); ok {
+		return &Problem{
+			Path:   filepath.Join(base, fmErr.name),
+			Detail: fmErr.err.Error(),
+			Fix:    fmt.Sprintf("run 'brief check %s' to list every fault", filepath.Base(base)),
+		}
 	}
 
 	detail := strings.TrimPrefix(err.Error(), "assemble: ")

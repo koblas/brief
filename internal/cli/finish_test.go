@@ -258,7 +258,7 @@ func Test_refuses_a_re_finish_whose_handoff_differs_from_the_recorded_one(t *tes
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 
-	handoffFile := filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md")
+	handoffFile := filepath.Join("docs", "specifications", "demo", "SCENARIO-01-HANDOFF.md")
 	want := fmt.Sprintf(
 		"brief finish: %s: step \"SCENARIO-01\" is already done and the given handoff differs "+
 			"from the one recorded here; diff the handoff you passed against it, then edit this "+
@@ -304,10 +304,12 @@ func Test_refuses_a_handoff_over_the_cap_and_names_the_handoff_path(t *testing.T
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 
+	relHandoffPath, relErr := filepath.Rel(wd, handoffPath)
+	require.NoError(t, relErr)
 	want := fmt.Sprintf(
 		"brief finish: %s: handoff is 61 lines, over the cap of 60; cut the handoff to 60 lines or "+
 			"fewer, or raise handoff-cap-lines in .brief.yaml, and retry (no files changed)\n",
-		handoffPath)
+		relHandoffPath)
 	assert.Equal(t, want, stderr.String())
 }
 
@@ -346,10 +348,12 @@ func Test_refuses_a_state_body_over_the_cap_and_names_the_state_path(t *testing.
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 
+	relStatePath, relErr := filepath.Rel(wd, statePath)
+	require.NoError(t, relErr)
 	want := fmt.Sprintf(
 		"brief finish: %s: state is 81 lines, over the cap of 80; cut the state to 80 lines or "+
 			"fewer, or raise state-cap-lines in .brief.yaml, and retry (no files changed)\n",
-		statePath)
+		relStatePath)
 	assert.Equal(t, want, stderr.String())
 }
 
@@ -369,9 +373,11 @@ func Test_refuses_a_state_body_missing_a_heading_and_names_the_state_path(t *tes
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 
+	relStatePath, relErr := filepath.Rel(wd, statePath)
+	require.NoError(t, relErr)
 	want := fmt.Sprintf(
 		`brief finish: %s: state is missing the "## Traps" section; add a "## Traps" heading to the state body — an empty section is valid — and retry (no files changed)`+"\n",
-		statePath)
+		relStatePath)
 	assert.Equal(t, want, stderr.String())
 }
 
@@ -488,8 +494,10 @@ func Test_names_the_state_path_when_its_fence_is_unterminated(t *testing.T) {
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 
+	relStatePath, relErr := filepath.Rel(wd, statePath)
+	require.NoError(t, relErr)
 	line := oneLine(t, &stderr)
-	assert.Contains(t, line, statePath+":3")
+	assert.Contains(t, line, relStatePath+":3")
 }
 
 func Test_returns_an_error_when_the_handoff_path_is_unreadable(t *testing.T) {
@@ -595,7 +603,7 @@ func Test_finish_refuses_a_step_with_an_open_checklist_item(t *testing.T) {
 
 	want := fmt.Sprintf(
 		`brief finish: %s:15: checklist item "do the thing" is not ticked; tick it with [x] once it is done, or remove it, and retry (no files changed)`+"\n",
-		stepPath)
+		filepath.Join("docs", "specifications", "demo", "SCENARIO-01.md"))
 	assert.Equal(t, want, stderr.String())
 }
 
@@ -665,7 +673,7 @@ func Test_finish_refuses_a_step_whose_dependency_is_unfinished(t *testing.T) {
 
 	want := fmt.Sprintf(
 		`brief finish: %s: step "SCENARIO-02" depends on "SCENARIO-01", which is not finished; finish SCENARIO-01 first, or remove it from this step's depends-on, and retry (no files changed)`+"\n",
-		step02Path)
+		filepath.Join("docs", "specifications", "demo", "SCENARIO-02.md"))
 	assert.Equal(t, want, stderr.String())
 
 	for _, name := range names {

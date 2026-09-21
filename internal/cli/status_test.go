@@ -213,8 +213,8 @@ func Test_status_names_the_reason_for_a_malformed_feature_on_stderr(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, 0, cli.ExitCode(err))
 	assert.Equal(t,
-		"brief status: "+filepath.Join(wd, "docs", "specifications", "delta")+
-			": no frontmatter found; fix its frontmatter, or run 'brief new step delta' to scaffold a conforming step file\n",
+		"brief status: "+filepath.Join("docs", "specifications", "delta", "SCENARIO-01.md")+
+			": no frontmatter found; run 'brief check delta' to list every fault\n",
 		stderr.String())
 	assert.NotContains(t, stderr.String(), "(no files changed)")
 }
@@ -298,8 +298,8 @@ func Test_status_writes_one_stderr_line_per_malformed_feature(t *testing.T) {
 
 	lines := strings.Split(strings.TrimSuffix(stderr.String(), "\n"), "\n")
 	require.Len(t, lines, 2)
-	assert.Contains(t, lines[0], filepath.Join(wd, "docs", "specifications", "delta"))
-	assert.Contains(t, lines[1], filepath.Join(wd, "docs", "specifications", "epsilon"))
+	assert.Contains(t, lines[0], filepath.Join("docs", "specifications", "delta", "SCENARIO-01.md"))
+	assert.Contains(t, lines[1], filepath.Join("docs", "specifications", "epsilon", "SCENARIO-01.md"))
 }
 
 func Test_returns_a_usage_error_when_status_is_given_an_argument(t *testing.T) {

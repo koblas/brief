@@ -57,7 +57,7 @@ func runStatus(ctx context.Context, wd string, rest []string, out reporter) erro
 		}
 
 		fmt.Fprintf(out.stderr, "brief status: %s: %s; %s\n",
-			row.Problem.Path, flattenOneLine(row.Problem.Detail), flattenOneLine(row.Problem.Fix))
+			displayPath(wd, row.Problem.Path), flattenOneLine(row.Problem.Detail), flattenOneLine(row.Problem.Fix))
 	}
 
 	if err := assemble.RenderStatusText(out.stdout, rows); err != nil {

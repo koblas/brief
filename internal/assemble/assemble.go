@@ -282,7 +282,7 @@ func readSteps(root *os.Root, pattern stepfile.Pattern, dirEntries []os.DirEntry
 
 		fm, rest, err := stepfile.ParseFrontmatter(body)
 		if err != nil {
-			return nil, fmt.Errorf("assemble: %w", err)
+			return nil, &stepFrontmatterError{name: e.Name(), err: err}
 		}
 
 		steps = append(steps, stepEntry{number: n, fm: fm, rest: rest})

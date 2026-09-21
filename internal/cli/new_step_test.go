@@ -82,7 +82,7 @@ func Test_refuses_on_one_line_for_an_unknown_feature_for_step(t *testing.T) {
 	assert.Equal(t, 1, cli.ExitCode(err))
 
 	line := oneLine(t, &stderr)
-	assert.Contains(t, line, filepath.Join(wd, "docs", "specifications", "payments"))
+	assert.Contains(t, line, filepath.Join("docs", "specifications", "payments"))
 	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
 }
 
@@ -102,7 +102,7 @@ func Test_refuses_on_one_line_when_the_specification_has_no_progress_heading(t *
 	assert.Equal(t, 1, cli.ExitCode(err))
 
 	line := oneLine(t, &stderr)
-	assert.Contains(t, line, filepath.Join(featureDir, "specification.md"))
+	assert.Contains(t, line, filepath.Join("docs", "specifications", "payments", "specification.md"))
 	assert.Contains(t, line, "## BDD Acceptance Progress")
 	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
 }

@@ -71,7 +71,7 @@ func Test_start_refuses_a_specification_with_no_progress_heading(t *testing.T) {
 	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
 	require.Len(t, lines, 1)
 	assert.NotContains(t, lines[0], "(no files changed)")
-	assert.Contains(t, lines[0], filepath.Join(featureDir, "specification.md"))
+	assert.Contains(t, lines[0], filepath.Join("docs", "specifications", "demo", "specification.md"))
 	assert.Contains(t, lines[0], "## BDD Acceptance Progress")
 }
 
@@ -106,7 +106,7 @@ func Test_start_names_an_absent_acceptance_heading_and_still_prints_the_brief(t 
 
 	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
 	require.Len(t, lines, 1)
-	assert.Contains(t, lines[0], filepath.Join(featureDir, "SCENARIO-01.md"))
+	assert.Contains(t, lines[0], filepath.Join("docs", "specifications", "demo", "SCENARIO-01.md"))
 
 	wantStdout := strings.Replace(baselineStdout.String(), "\n## Scenario\n\nthe acceptance criteria\n", "", 1)
 	assert.Equal(t, wantStdout, stdout.String())
@@ -135,7 +135,7 @@ func Test_start_names_an_absent_state_heading_and_still_prints_the_brief(t *test
 
 	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
 	require.Len(t, lines, 1)
-	assert.Contains(t, lines[0], filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, lines[0], filepath.Join("docs", "specifications", "demo", "STATE.md"))
 
 	wantStdout := strings.Replace(baselineStdout.String(), "\n## Traps\n\na trap\n", "", 1)
 	assert.Equal(t, wantStdout, stdout.String())
@@ -173,15 +173,15 @@ func Test_start_names_every_absent_convention_on_its_own_line(t *testing.T) {
 
 	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
 	require.Len(t, lines, 5)
-	assert.Contains(t, lines[0], filepath.Join(featureDir, "SCENARIO-01.md"))
+	assert.Contains(t, lines[0], filepath.Join("docs", "specifications", "demo", "SCENARIO-01.md"))
 	assert.Contains(t, lines[0], "## Scenario")
-	assert.Contains(t, lines[1], filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, lines[1], filepath.Join("docs", "specifications", "demo", "STATE.md"))
 	assert.Contains(t, lines[1], "## Binding decisions")
-	assert.Contains(t, lines[2], filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, lines[2], filepath.Join("docs", "specifications", "demo", "STATE.md"))
 	assert.Contains(t, lines[2], "## Left unbuilt")
-	assert.Contains(t, lines[3], filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, lines[3], filepath.Join("docs", "specifications", "demo", "STATE.md"))
 	assert.Contains(t, lines[3], "## Traps")
-	assert.Contains(t, lines[4], filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, lines[4], filepath.Join("docs", "specifications", "demo", "STATE.md"))
 	assert.Contains(t, lines[4], "## Open debts")
 
 	wantStdout := baselineStdout.String()
@@ -269,7 +269,7 @@ func Test_start_still_refuses_a_state_file_whose_fence_is_unterminated(t *testin
 
 	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
 	require.Len(t, lines, 1)
-	assert.Contains(t, lines[0], filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, lines[0], filepath.Join("docs", "specifications", "demo", "STATE.md"))
 }
 
 func Test_prints_the_brief_and_writes_nothing_to_stderr(t *testing.T) {
@@ -299,7 +299,7 @@ func Test_start_says_the_feature_is_complete_when_every_step_is_done(t *testing.
 	require.NoError(t, err)
 	assert.Empty(t, stdout.String())
 	assert.Equal(t,
-		"brief start: "+filepath.Join(wd, "docs", "specifications", "demo")+
+		"brief start: "+filepath.Join("docs", "specifications", "demo")+
 			": feature is complete, 1 of 1 steps done; run 'brief new step demo' to add the next one\n",
 		stderr.String())
 }
@@ -328,7 +328,7 @@ func Test_start_says_there_are_no_step_files_yet_for_an_empty_feature(t *testing
 	require.NoError(t, err)
 	assert.Empty(t, stdout.String())
 	assert.Equal(t,
-		"brief start: "+filepath.Join(wd, "docs", "specifications", "demo")+
+		"brief start: "+filepath.Join("docs", "specifications", "demo")+
 			": no step files yet; run 'brief new step demo' to scaffold the first one\n",
 		stderr.String())
 }
@@ -523,7 +523,7 @@ func Test_start_still_refuses_a_feature_with_no_state_file(t *testing.T) {
 
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
-	assert.Contains(t, stderr.String(), filepath.Join(featureDir, "STATE.md"))
+	assert.Contains(t, stderr.String(), filepath.Join("docs", "specifications", "demo", "STATE.md"))
 }
 
 func Test_returns_an_error_for_an_unknown_feature_on_start(t *testing.T) {
@@ -535,6 +535,84 @@ func Test_returns_an_error_for_an_unknown_feature_on_start(t *testing.T) {
 	assert.Equal(t, 1, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 	assert.NotEmpty(t, stderr.String())
+}
+
+// writeStartMalformedFixture writes a conforming specification and state
+// file for "demo" under wd's default layout, plus one step file,
+// SCENARIO-01.md, with no frontmatter at all — the SCENARIO-04 fixture
+// every subtest of Test_start_names_the_malformed_step_file_relative_to_the_working_directory
+// shares.
+func writeStartMalformedFixture(t *testing.T, featureDir string) {
+	t.Helper()
+
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(""), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte("no frontmatter here\n"), 0o600))
+}
+
+// Test_start_names_the_malformed_step_file_relative_to_the_working_directory
+// is SCENARIO-04's CLI slice: a step file with no frontmatter is named by
+// its own path, relative to the working directory — not the feature
+// directory — with a fix pointing at 'brief check'. The json subtest pins
+// R6's split on the same fixture: "path" stays absolute while "message" is
+// byte-identical to the text-mode line. The subdirectory subtest pins that
+// a working directory below the config root renders a "../"-prefixed path.
+func Test_start_names_the_malformed_step_file_relative_to_the_working_directory(t *testing.T) {
+	t.Run("text", func(t *testing.T) {
+		wd := t.TempDir()
+		featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+		writeStartMalformedFixture(t, featureDir)
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+		assert.Equal(t, 1, cli.ExitCode(err))
+		assert.Empty(t, stdout.String())
+		assert.Equal(t,
+			"brief start: "+filepath.Join("docs", "specifications", "demo", "SCENARIO-01.md")+
+				": no frontmatter found; run 'brief check demo' to list every fault\n",
+			stderr.String())
+	})
+
+	t.Run("json", func(t *testing.T) {
+		wd := t.TempDir()
+		featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+		writeStartMalformedFixture(t, featureDir)
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
+
+		assert.Equal(t, 1, cli.ExitCode(err))
+		assert.Empty(t, stderr.String())
+
+		got := decodeErrorDocument(t, stdout.Bytes(), "start")
+		require.NotNil(t, got.Path)
+		assert.Equal(t, filepath.Join(featureDir, "SCENARIO-01.md"), *got.Path)
+		assert.Equal(t,
+			"brief start: "+filepath.Join("docs", "specifications", "demo", "SCENARIO-01.md")+
+				": no frontmatter found; run 'brief check demo' to list every fault",
+			got.Message)
+	})
+
+	t.Run("from a subdirectory", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".brief.yaml"), []byte(""), 0o600))
+		featureDir := filepath.Join(root, "docs", "specifications", "demo")
+		writeStartMalformedFixture(t, featureDir)
+		wd := filepath.Join(root, "a")
+		require.NoError(t, os.MkdirAll(wd, 0o755))
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"start", "demo"}, nil, &stdout, &stderr)
+
+		assert.Equal(t, 1, cli.ExitCode(err))
+		assert.Equal(t,
+			"brief start: "+filepath.Join("..", "docs", "specifications", "demo", "SCENARIO-01.md")+
+				": no frontmatter found; run 'brief check demo' to list every fault\n",
+			stderr.String())
+	})
 }
 
 // startJSONDocument is start's --json success document, decoded field by

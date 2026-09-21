@@ -54,7 +54,7 @@ func Test_refuses_on_one_line_when_the_feature_already_exists(t *testing.T) {
 
 	line := oneLine(t, &stderr)
 	assert.Equal(t,
-		"brief new feature: "+filepath.Join(wd, "docs", "specifications", "payments")+
+		"brief new feature: "+filepath.Join("docs", "specifications", "payments")+
 			": feature already exists; run 'brief new step payments' to add a step to it, or choose a different name (no files changed)",
 		line)
 }
@@ -230,7 +230,8 @@ func Test_refuses_on_one_line_when_the_config_file_is_invalid(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(stderr.String(), "\n"))
 
 	line := strings.TrimSuffix(stderr.String(), "\n")
-	assert.Contains(t, line, configPath)
+	assert.Contains(t, line, ".brief.yaml")
+	assert.NotContains(t, line, configPath)
 	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
 
 	assert.NoDirExists(t, filepath.Join(root, "docs", "specifications", "payments"))

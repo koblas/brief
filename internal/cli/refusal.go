@@ -111,18 +111,42 @@ func classifyRefusal(err error) refusalClassification {
 	}
 }
 
+// displayPath renders p the way every text-mode line names a path (R6): ""
+// and "<stdin>" pass through unchanged — neither is a real path to
+// relativize — a path that is already relative (finish rewrites a refusal's
+// Path to the user's own, possibly relative, "--state"/"--handoff" argument)
+// also passes through unchanged, and an absolute path is rendered relative
+// to wd via filepath.Rel, falling back to p itself on error. A path outside
+// wd renders as a "../" chain rather than being clamped to p: a working
+// directory below the configuration root that owns p is expected to see
+// one, and clamping it would make status.go/start.go's own text line diverge
+// from what --json's absolute "path" names.
+func displayPath(wd, p string) string {
+	if p == "" || p == "<stdin>" || !filepath.IsAbs(p) {
+		return p
+	}
+
+	rel, err := filepath.Rel(wd, p)
+	if err != nil {
+		return p
+	}
+
+	return rel
+}
+
 // textLine renders c's R14a text-mode line, minus the "brief <command>: "
 // prefix: c.problem alone when c.path is "" — a bare not-found or a
 // generic failure names no path in text and never appends c.fix there
-// either — else "<path>[:<line>]: <problem>; <fix>[<tail>]".
-func (c refusalClassification) textLine() string {
+// either — else "<path>[:<line>]: <problem>; <fix>[<tail>]", with c.path
+// rendered relative to wd through displayPath.
+func (c refusalClassification) textLine(wd string) string {
 	if c.path == "" {
 		return c.problem
 	}
 
-	location := c.path
+	location := displayPath(wd, c.path)
 	if c.line > 0 {
-		location = fmt.Sprintf("%s:%d", c.path, c.line)
+		location = fmt.Sprintf("%s:%d", location, c.line)
 	}
 
 	return fmt.Sprintf("%s: %s; %s%s", location, c.problem, c.fix, c.tail)
@@ -178,7 +202,7 @@ func (r reporter) refusal(err error) error {
 			jsonHeader: newJSONHeader(command, ExitCode(err)),
 			Error: jsonError{
 				Kind:         c.kind,
-				Message:      fmt.Sprintf("brief %s: %s", command, c.textLine()),
+				Message:      fmt.Sprintf("brief %s: %s", command, c.textLine(r.wd)),
 				Path:         c.jsonPath(r.wd),
 				Line:         c.jsonLine(),
 				Problem:      &problem,
@@ -192,7 +216,7 @@ func (r reporter) refusal(err error) error {
 		return err
 	}
 
-	fmt.Fprintf(r.stderr, "brief %s: %s\n", command, c.textLine())
+	fmt.Fprintf(r.stderr, "brief %s: %s\n", command, c.textLine(r.wd))
 
 	return err
 }

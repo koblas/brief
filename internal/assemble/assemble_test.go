@@ -565,6 +565,89 @@ func Test_returns_an_error_when_a_step_file_has_no_frontmatter(t *testing.T) {
 	require.ErrorIs(t, err, stepfile.ErrNoFrontmatter)
 }
 
+// Test_start_names_the_step_file_whose_frontmatter_cannot_be_read is
+// SCENARIO-04's core claim: every shape of a step-file frontmatter parse
+// failure names that step file, absolute, and points at 'brief check' —
+// never the feature directory, and never scaffolding a step that already
+// exists. The "second step bad" row proves the name is not hard-coded to
+// the first file readSteps visits: STEP-01 is well-formed there and
+// STEP-02 is the one named.
+func Test_start_names_the_step_file_whose_frontmatter_cannot_be_read(t *testing.T) {
+	cfg := fixtureConfig()
+
+	cases := []struct {
+		name       string
+		files      map[string]string
+		wantStep   string
+		wantDetail string
+		noFm       bool
+	}{
+		{
+			name:       "no frontmatter",
+			files:      map[string]string{"STEP-01.md": "no frontmatter here\n"},
+			wantStep:   "STEP-01.md",
+			wantDetail: "no frontmatter found",
+			noFm:       true,
+		},
+		{
+			name:       "unclosed delimiter",
+			files:      map[string]string{"STEP-01.md": "---\nid: STEP-01\n"},
+			wantStep:   "STEP-01.md",
+			wantDetail: "no frontmatter found: no closing frontmatter delimiter",
+			noFm:       true,
+		},
+		{
+			name:       "bad YAML",
+			files:      map[string]string{"STEP-01.md": "---\nid: [open\n---\n\n# STEP-01\n"},
+			wantStep:   "STEP-01.md",
+			wantDetail: "parse frontmatter",
+		},
+		{
+			name: "second step file is the bad one",
+			files: map[string]string{
+				"STEP-01.md": fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil),
+				"STEP-02.md": "no frontmatter here either\n",
+			},
+			wantStep:   "STEP-02.md",
+			wantDetail: "no frontmatter found",
+			noFm:       true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+			require.NoError(t, os.MkdirAll(featureDir, 0o755))
+			spec := "# demo\n\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-01\n"
+			require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
+
+			for name, body := range tc.files {
+				require.NoError(t, os.WriteFile(filepath.Join(featureDir, name), []byte(body), 0o600))
+			}
+
+			srv := assemble.NewServer(cfg, root)
+
+			_, err := srv.Start(t.Context(), "demo")
+
+			require.Error(t, err)
+
+			if tc.noFm {
+				require.ErrorIs(t, err, stepfile.ErrNoFrontmatter)
+			} else {
+				require.NotErrorIs(t, err, stepfile.ErrNoFrontmatter)
+			}
+
+			var refusal *assemble.RefusalError
+			require.ErrorAs(t, err, &refusal)
+			assert.Equal(t, filepath.Join(featureDir, tc.wantStep), refusal.Path)
+			assert.Contains(t, refusal.Detail, tc.wantDetail)
+			assert.Equal(t, "run 'brief check demo' to list every fault", refusal.Fix)
+		})
+	}
+}
+
 // Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse is
 // SCENARIO-11's tripwire against readSteps becoming tolerant, sharpened by
 // SCENARIO-13: this step file's frontmatter delimiters are present and
@@ -595,7 +678,7 @@ func Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse(t *te
 
 	var refusal *assemble.RefusalError
 	require.ErrorAs(t, err, &refusal)
-	assert.Equal(t, featureDir, refusal.Path)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), refusal.Path)
 	assert.Contains(t, refusal.Detail, "yaml")
 }
 
