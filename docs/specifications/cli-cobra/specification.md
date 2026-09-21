@@ -185,4 +185,4 @@ Scenario: SCENARIO-13 Completion for an unsupported shell
 - [x] SCENARIO-10: "new" has its own help
 - [x] SCENARIO-11: Unknown command stays one line, list built from the command tree
 - [x] SCENARIO-12: Shell completion script
-- [ ] SCENARIO-13: Completion for an unsupported shell
+- [x] SCENARIO-13: Completion for an unsupported shell

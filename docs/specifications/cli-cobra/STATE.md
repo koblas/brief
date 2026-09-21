@@ -1,6 +1,7 @@
 # cli-cobra — current state
 
-Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
+Scenarios complete: SCENARIO-01..13 (all scenarios implemented). Last updated by
+SCENARIO-13.
 
 ## Binding decisions
 
@@ -45,8 +46,11 @@ Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
   `[]completionShell{name, gen}` table (bash, zsh, fish, powershell); any shell-list message
   (arg-count errors' invocation string aside) derives from it. `runCompletion` generates
   against `cmd.Root()`, never the leaf, so the script names "brief". Arg-count errors reuse
-  R2's `start` shapes (`no shell given` / `too many arguments`). An unmatched single shell
-  name is SCENARIO-13's to pin; the miss branch is already implemented. (SCENARIO-12)
+  R2's `start` shapes (`no shell given` / `too many arguments`); an unmatched single shell
+  name is `brief completion: unknown shell %q; expected one of: <list>` off the same table,
+  exit 2. Matching is exact and case-sensitive (`ZSH` is unknown); an empty positional
+  (`brief completion ""`) is an unknown shell, not `no shell given` — that wording is
+  reserved for zero positionals. (SCENARIO-12, 13)
 
 ## Left unbuilt
 
@@ -54,13 +58,11 @@ Scenarios complete: SCENARIO-01..12. Last updated by SCENARIO-12.
   literal — it is a type list, not R7's command list. Unowned.
 - Per-level help errors for `new` — deliberately not built; `brief new help` stays `unknown
   type "help"`, not a help alias.
-- A test pinning `brief completion tcsh` →
-  `brief completion: unknown shell "tcsh"; expected one of: bash, zsh, fish, powershell`,
-  exit 2 — SCENARIO-13. The branch exists in `runCompletion`; S13 adds the row and
-  mutation-verifies it.
 - Feature-name completion (`ValidArgsFunction`) — named follow-up in ADR-002, out of scope.
 - No golden of any generated completion script's full bytes — deliberately; cobra owns them.
   `completion_test.go` asserts only each shell's header-line marker.
+- Any "did you mean" suggestion for a near-miss shell name, and trimming/normalising the
+  shell argument (`"zsh "` is unknown, observed) — deliberately not built. (SCENARIO-13)
 - Unowned, flagged for the final product-vision pass: `<command>` vs `<type>` wording between
   `new`'s errors and the group trailer; `start demo --json=`'s Go-internal `strconv.ParseBool`
   wording reaching the user through R14 (S05); a rejected `finish -handoff`/`-state` writing
