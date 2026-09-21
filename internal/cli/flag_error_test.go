@@ -514,6 +514,47 @@ func Test_prints_help_for_the_h_shorthand_alone(t *testing.T) {
 	assert.Equal(t, helpStdout.String(), shortStdout.String())
 }
 
+// Test_reports_an_invalid_bool_flag_value_without_leaking_strconv_wording
+// pins that a bool flag given a value strconv.ParseBool rejects is
+// reported in brief's own wording, naming the value exactly as given —
+// including "" for "--json=" — rather than pflag's raw "invalid argument
+// %q for %q flag: strconv.ParseBool: parsing %q: invalid syntax". The rule
+// lives in the root FlagErrorFunc frame and so applies to any bool flag,
+// not one hard-coded name; start's --json is the only bool flag brief
+// defines today.
+func Test_reports_an_invalid_bool_flag_value_without_leaking_strconv_wording(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "--json=maybe",
+			args:       []string{"start", "--json=maybe", "demo"},
+			wantStderr: `brief start: invalid value "maybe" for --json (want true or false, or no value); run 'brief start <feature>'`,
+		},
+		{
+			name:       "--json= with an explicit empty value",
+			args:       []string{"start", "--json=", "demo"},
+			wantStderr: `brief start: invalid value "" for --json (want true or false, or no value); run 'brief start <feature>'`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
+}
+
 // Test_accepts_the_double_dash_json_flag is one shape of the control arm
 // for the tables above: "--json" differs from a rejected row only in the
 // flag's dash count ("-json" -> "--json") and succeeds, proving the

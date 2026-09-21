@@ -287,13 +287,14 @@ func Test_prints_root_usage_and_a_nil_error_for_brief_help(t *testing.T) {
 	assert.NotEmpty(t, stdout.String())
 }
 
-// Test_treats_a_help_flag_with_trailing_arguments_as_an_unknown_command
+// Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments
 // pins that root's "-h"/"--help" routing to cmd.Help() applies only when
 // it is the sole argument, matching runNew's own sole-argument rule
-// (new.go's runNew) and the help stub's leftover-args rule: any trailing
-// argument means the whole invocation is reported as an unknown command
-// naming args[0], not as a help request.
-func Test_treats_a_help_flag_with_trailing_arguments_as_an_unknown_command(t *testing.T) {
+// (new.go's runNew) and the help stub's own -h/--help rule: any trailing
+// argument alongside "-h"/"--help" is reported as that flag taking no
+// arguments, naming it exactly as typed and pointing at "brief help
+// <command>" — never as an unknown command naming "-h"/"--help" itself.
+func Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
@@ -302,17 +303,17 @@ func Test_treats_a_help_flag_with_trailing_arguments_as_an_unknown_command(t *te
 		{
 			name:    "--help bogus",
 			args:    []string{"--help", "bogus"},
-			wantErr: `brief: unknown command "--help"; expected one of: new, start, finish, status, check`,
+			wantErr: `brief: '--help' takes no arguments; run 'brief help <command>'`,
 		},
 		{
 			name:    "-h bogus",
 			args:    []string{"-h", "bogus"},
-			wantErr: `brief: unknown command "-h"; expected one of: new, start, finish, status, check`,
+			wantErr: `brief: '-h' takes no arguments; run 'brief help <command>'`,
 		},
 		{
 			name:    "--help start",
 			args:    []string{"--help", "start"},
-			wantErr: `brief: unknown command "--help"; expected one of: new, start, finish, status, check`,
+			wantErr: `brief: '--help' takes no arguments; run 'brief help <command>'`,
 		},
 	}
 
@@ -360,8 +361,10 @@ func Test_still_prints_root_help_for_a_bare_help_flag(t *testing.T) {
 }
 
 // Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag
-// pins that "-x" at the root is reported as an unknown command, the same
-// as any other unrecognized first argument, not as an undefined flag.
+// pins that "-x" at the root is reported the way pflag itself would report
+// an undefined shorthand flag on a leaf — root disables cobra's flag
+// parsing and so never reaches that frame itself — pointing at "brief
+// <command> --help" rather than naming a bogus command.
 func Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -370,12 +373,12 @@ func Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag(t *t
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief: unknown command "-x"; expected one of: new, start, finish, status, check`, oneLine(t, &stderr))
+	assert.Equal(t, "brief: unknown shorthand flag: 'x' in -x; run 'brief <command> --help'", oneLine(t, &stderr))
 }
 
 // Test_returns_a_usage_error_when_the_new_type_is_a_single_dash_flag pins
-// that "-x" under "new" is reported as an unknown type, not as an
-// undefined flag.
+// the same wording for "-x" under "new", pointing at "brief new <type>
+// --help".
 func Test_returns_a_usage_error_when_the_new_type_is_a_single_dash_flag(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -384,5 +387,70 @@ func Test_returns_a_usage_error_when_the_new_type_is_a_single_dash_flag(t *testi
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief new: unknown type "-x"; expected one of: feature, step`, oneLine(t, &stderr))
+	assert.Equal(t, "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'", oneLine(t, &stderr))
+}
+
+// Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root
+// pins the double-dash shape of the same rule, using a plausible-looking
+// flag ("--version") that brief does not define, to prove the wording is
+// generic rather than specific to any one bogus name.
+func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"--version"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief: unknown flag: --version; run 'brief <command> --help'", oneLine(t, &stderr))
+}
+
+// Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new is
+// the "new" shape of the same rule.
+func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"new", "--bogus"}, nil, &stdout, &stderr)
+
+	require.ErrorIs(t, err, cli.ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief new: unknown flag: --bogus; run 'brief new <type> --help'", oneLine(t, &stderr))
+}
+
+// Test_treats_a_bare_dash_as_a_plain_unknown_command is the control arm
+// for isFlagLike: a standalone "-" is pflag's own convention for stdin,
+// never a flag (parseArgs treats len(s) == 1 the same as no "-" prefix at
+// all), so it keeps the ordinary unknown-command/unknown-type wording
+// rather than the flag-shaped wording above.
+func Test_treats_a_bare_dash_as_a_plain_unknown_command(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "root",
+			args:    []string{"-"},
+			wantErr: `brief: unknown command "-"; expected one of: new, start, finish, status, check`,
+		},
+		{
+			name:    "new",
+			args:    []string{"new", "-"},
+			wantErr: `brief new: unknown type "-"; expected one of: feature, step`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantErr, oneLine(t, &stderr))
+		})
+	}
 }

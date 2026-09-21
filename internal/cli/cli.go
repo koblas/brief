@@ -97,10 +97,12 @@ func expectedCommandList(cmd *cobra.Command) string {
 // root, and under "new" itself the same two rows are its entire listing —
 // each row is that command's UseLine padded to a fixed column, wrapped to
 // its own line first when UseLine would overrun that column, followed by
-// its Short; then a "Run '<command path> <command> --help' for details."
-// trailer scoped to that command's own path. Only cobra's built-in
+// its Short; then a "Run '<command path> <noun> --help' for details."
+// trailer scoped to that command's own path, where <noun> is that
+// command's own commandNounAnnotation ("type" for "new") or the literal
+// "command" when the command carries none (root). Only cobra's built-in
 // template funcs (rpad, trim, trimTrailingWhitespaces, index) and
-// text/template builtins are used — no package-global AddTemplateFunc.
+// text/template builtins (or) are used — no package-global AddTemplateFunc.
 var helpTemplate = fmt.Sprintf(`{{- define "cmdRow" -}}
 {{if gt (len .UseLine) 33}}  {{.UseLine}}
 {{rpad "" 35}}{{else}}  {{rpad .UseLine 33}}{{end}}{{.Short}}
@@ -116,7 +118,7 @@ Usage:
 {{- end}}
 {{- end}}
 {{- end}}
-Run '{{.CommandPath}} <command> --help' for details.
+Run '{{.CommandPath}} <{{or (index .Annotations %q) "command"}}> --help' for details.
 {{end -}}
 {{- if .HasAvailableSubCommands}}{{template "cmdList" .}}{{- else}}Usage:
   {{.UseLine}}
@@ -125,7 +127,7 @@ Run '{{.CommandPath}} <command> --help' for details.
 
 Flags:
 {{.LocalFlags.FlagUsages}}{{- end -}}
-`, listedInHelpAnnotation)
+`, listedInHelpAnnotation, commandNounAnnotation)
 
 // invocationAnnotation is the cobra.Command.Annotations key holding the
 // invocation string the root FlagErrorFunc names in "run '<invocation>'"
@@ -141,6 +143,13 @@ const invocationAnnotation = "invocation"
 // valid "brief help" topic.
 const listedInHelpAnnotation = "listedInHelp"
 
+// commandNounAnnotation is the cobra.Command.Annotations key naming the
+// word a "cmdList" group's own trailer uses in place of "command" —
+// "brief new"'s own trailer reads "Run 'brief new <type> --help' for
+// details." because "new" carries this annotation with value "type";
+// root carries none, so helpTemplate falls back to the literal "command".
+const commandNounAnnotation = "commandNoun"
+
 // jsonFlagUsage is start's --json flag's usage string, shown in its Flags
 // table. Its embedded newlines are pflag's own wrapping cue: FlagUsages
 // re-indents them to the table's description column.
@@ -154,16 +163,20 @@ reads the stderr notice. --json may be given before or after
 // handoffFlagUsage is finish's --handoff flag's usage string. The
 // backquoted "path" is pflag's own convention (UnquoteUsage): it names the
 // flag's value in its Flags table row ("--handoff path") instead of
-// pflag's default type name ("string").
-const handoffFlagUsage = "the `path` to the step's handoff body, " +
-	"written to its own file"
+// pflag's default type name ("string"). Its embedded newline is pflag's
+// own wrapping cue, the same convention jsonFlagUsage uses: FlagUsages
+// re-indents it to the table's description column, so every rendered line
+// stays within 80 columns.
+const handoffFlagUsage = `the ` + "`path`" + ` to the step's handoff body,
+written to its own file`
 
 // stateFlagUsage is finish's --state flag's usage string; see
-// handoffFlagUsage for the backquoted "path" convention.
-const stateFlagUsage = "the `path` to the COMPLETE replacement body for " +
-	"the state file; it replaces the file, it is never appended to; " +
-	"it must carry the configured state headings, though a section " +
-	"may be empty"
+// handoffFlagUsage for the backquoted "path" convention and its embedded
+// newlines.
+const stateFlagUsage = `the ` + "`path`" + ` to the COMPLETE replacement body for the state
+file; it replaces the file, it is never appended to; it
+must carry the configured state headings, though a
+section may be empty`
 
 // Run parses args, dispatches to the named command, and renders every
 // user-facing line to stdout or stderr itself. wd is the working directory
@@ -234,9 +247,11 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 
 	newCmd := &cobra.Command{
 		Use:                "new",
+		Short:              newShort,
 		Long:               newLong,
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
+		Annotations:        map[string]string{commandNounAnnotation: "type"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runNew(cmd, args, stderr)
 		},
@@ -302,6 +317,10 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 		path := strings.TrimPrefix(cmd.CommandPath(), "brief ")
 		invocation := cmd.Annotations[invocationAnnotation]
 
+		if msg, ok := boolFlagParseMessage(err); ok {
+			return usageError(stderr, fmt.Sprintf("brief %s: %s; run '%s'", path, msg, invocation))
+		}
+
 		return usageError(stderr, fmt.Sprintf("brief %s: %s; run '%s'", path, flattenOneLine(err.Error()), invocation))
 	})
 
@@ -329,6 +348,12 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 // command "bogus". An accepted topic renders byte-identical to "<path…>
 // --help": InitDefaultHelpFlag backfills the -h/--help row that Execute()
 // would otherwise add during ordinary dispatch, which Find alone skips.
+//
+// A leading "-h"/"--help" or any other dash-prefixed topic is never
+// resolved against the tree at all: unlike runRoot and runNew, the help
+// stub has no sole-argument case that means anything — asking "brief help"
+// for help on "--help" is never valid — so args[0] is checked for both
+// shapes, the same as runRoot and runNew, before Find ever runs.
 func newHelpCommand(stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:                "help",
@@ -336,6 +361,14 @@ func newHelpCommand(stderr io.Writer) *cobra.Command {
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 && isHelpFlag(args[0]) {
+				return usageError(stderr, fmt.Sprintf("brief help: '%s' takes no arguments; run 'brief help <command>'", args[0]))
+			}
+
+			if len(args) > 0 && isFlagLike(args[0]) {
+				return usageError(stderr, fmt.Sprintf("brief help: %s; run 'brief help <command>'", flattenOneLine(unknownFlagMessage(args[0]))))
+			}
+
 			target, residual, _ := cmd.Root().Find(args)
 			listed := target.Annotations[listedInHelpAnnotation] != ""
 			if len(residual) > 0 || (target != cmd.Root() && !target.IsAvailableCommand() && !listed) {
@@ -377,20 +410,64 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 }
 
 // runRoot handles a top-level invocation that named no known command:
-// nothing at all, a sole "-h"/"--help", or something unknown. Cobra
-// intercepts "help" as a dispatch to the tree's own help command (see
-// newRootCommand's SetHelpCommand) before this ever runs, so this function
-// never sees "help" as args[0].
+// nothing at all, a sole "-h"/"--help", a "-h"/"--help" alongside another
+// argument, some other dash-prefixed token, or an unknown command name.
+// Cobra intercepts "help" as a dispatch to the tree's own help command
+// (see newRootCommand's SetHelpCommand) before this ever runs, so this
+// function never sees "help" as args[0].
 func runRoot(cmd *cobra.Command, args []string, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief: no command given; expected one of: "+expectedCommandList(cmd))
 	}
 
-	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
-		return cmd.Help()
+	if isHelpFlag(args[0]) {
+		if len(args) == 1 {
+			return cmd.Help()
+		}
+
+		return usageError(stderr, fmt.Sprintf("brief: '%s' takes no arguments; run 'brief help <command>'", args[0]))
+	}
+
+	if isFlagLike(args[0]) {
+		return usageError(stderr, fmt.Sprintf("brief: %s; run 'brief <command> --help'", flattenOneLine(unknownFlagMessage(args[0]))))
 	}
 
 	return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommandList(cmd)))
+}
+
+// isHelpFlag reports whether arg is spelled exactly as cobra's own help
+// flag, "-h" or "--help" — the only two spellings runRoot, runNew and the
+// help stub route to cmd.Help() when it is the sole argument, and reject
+// with "takes no arguments" wording when it is not.
+func isHelpFlag(arg string) bool {
+	return arg == "-h" || arg == "--help"
+}
+
+// isFlagLike reports whether pflag would parse arg as a flag rather than a
+// positional argument: a "-" prefix followed by at least one more
+// character. A bare "-" is pflag's own convention for stdin, never a
+// flag — parseArgs treats len(s) == 1 the same as no "-" prefix at all.
+func isFlagLike(arg string) bool {
+	return len(arg) > 1 && arg[0] == '-'
+}
+
+// unknownFlagMessage renders arg the way pflag's own error would for the
+// same token on a leaf command, since root and "new" disable cobra's flag
+// parsing and so never reach the root FlagErrorFunc frame themselves: a
+// double-dash flag names itself ("unknown flag: --bogus"), and a
+// single-dash token is pflag's shorthand-cluster wording, quoting its
+// first character and the whole residual cluster ("unknown shorthand
+// flag: 'x' in -xy").
+func unknownFlagMessage(arg string) string {
+	if strings.HasPrefix(arg, "--") {
+		name, _, _ := strings.Cut(arg[2:], "=")
+
+		return "unknown flag: --" + name
+	}
+
+	cluster := arg[1:]
+
+	return fmt.Sprintf("unknown shorthand flag: %q in -%s", rune(cluster[0]), cluster)
 }
 
 // usageError writes msg, followed by a single newline, to stderr and
@@ -399,6 +476,21 @@ func usageError(stderr io.Writer, msg string) error {
 	fmt.Fprintln(stderr, msg)
 
 	return fmt.Errorf("%s: %w", msg, ErrUsage)
+}
+
+// boolFlagParseMessage reports whether err is pflag's *InvalidValueError
+// for a bool-typed flag — "--json=maybe", or any other value
+// strconv.ParseBool rejects — and, when it is, brief's own replacement for
+// pflag's raw strconv wording, naming the value exactly as given (including
+// "" for "--json=") and the flag alone, generalized to any bool flag rather
+// than hard-coded to one.
+func boolFlagParseMessage(err error) (string, bool) {
+	var invalid *pflag.InvalidValueError
+	if !errors.As(err, &invalid) || invalid.GetFlag().Value.Type() != "bool" {
+		return "", false
+	}
+
+	return fmt.Sprintf("invalid value %q for --%s (want true or false, or no value)", invalid.GetValue(), invalid.GetFlag().Name), true
 }
 
 // ExitCode maps a Run error to the exit code main should return: 0 for a

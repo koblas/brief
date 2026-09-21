@@ -11,6 +11,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// newShort is "new"'s one-line description: never rendered in help, since
+// "new" always contributes its children's rows in place of its own (see
+// helpTemplate), but read by completion's descriptions.
+const newShort = "scaffold a feature or its next step"
+
 // newLong is "brief new"'s one-sentence help prose, rendered above its two
 // children's rows in the "cmdList" group body.
 const newLong = "Scaffolds a new feature, or the next step of an existing feature."
@@ -35,16 +40,25 @@ const newStepInvocation = "brief new step <feature>"
 
 // runNew handles "brief new <type> ...": routes a sole "-h"/"--help"
 // argument to cmd.Help() (new's flag parsing is disabled, so cobra's own
-// help check never sees it), and otherwise reports type is neither
-// feature nor step — nothing at all, or something unknown, including a
-// "-h"/"--help" alongside any other argument.
+// help check never sees it), rejects a "-h"/"--help" alongside any other
+// argument and any other dash-prefixed type with the same flag-shaped
+// wording runRoot uses, and otherwise reports type is neither feature nor
+// step — nothing at all, or something unknown.
 func runNew(cmd *cobra.Command, args []string, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief new: no type given; expected one of: feature, step")
 	}
 
-	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
-		return cmd.Help()
+	if isHelpFlag(args[0]) {
+		if len(args) == 1 {
+			return cmd.Help()
+		}
+
+		return usageError(stderr, fmt.Sprintf("brief new: '%s' takes no arguments; run 'brief help new <type>'", args[0]))
+	}
+
+	if isFlagLike(args[0]) {
+		return usageError(stderr, fmt.Sprintf("brief new: %s; run 'brief new <type> --help'", flattenOneLine(unknownFlagMessage(args[0]))))
 	}
 
 	return usageError(stderr, fmt.Sprintf("brief new: unknown type %q; expected one of: feature, step", args[0]))

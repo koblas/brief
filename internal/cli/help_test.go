@@ -75,8 +75,9 @@ Run 'brief <command> --help' for details.
 
 // newHelp is "brief new --help"'s exact stdout: new's group body, listing
 // its two children's rows (copied from rootHelp's own "new feature"/"new
-// step" rows, same cmdRow padding), and the "new"-scoped trailer — no
-// Usage line and no Flags table, since new's own UseLine is rendered
+// step" rows, same cmdRow padding), and the "new"-scoped trailer naming
+// "new"'s own commandNounAnnotation, "type", rather than root's "command"
+// — no Usage line and no Flags table, since new's own UseLine is rendered
 // nowhere.
 const newHelp = `Scaffolds a new feature, or the next step of an existing feature.
 
@@ -84,7 +85,7 @@ Usage:
   brief new feature <name>         scaffold a new feature's specification and state file
   brief new step <feature>         scaffold the next step file and its progress entry
 
-Run 'brief new <command> --help' for details.
+Run 'brief new <type> --help' for details.
 `
 
 // Test_prints_new_help_listing_its_two_types pins SCENARIO-10: "new
@@ -116,12 +117,15 @@ func Test_prints_new_help_listing_its_two_types(t *testing.T) {
 
 // Test_new_help_flag_is_help_only_as_the_sole_argument pins that runNew's
 // "-h"/"--help" routing to cmd.Help() fires only when that flag is new's
-// one and only argument. Any other argument alongside it, in either order,
-// falls through to runNew's existing unknown-type usage error naming
-// whichever argument came first — matching S06's and S09's strictness. A
-// bare "new --help feature" does NOT reach feature's own help: cobra's Find
-// has not yet registered new's help flag when it walks this argv, so it
-// treats "feature" as --help's value and dispatch never leaves new.
+// one and only argument. A "-h"/"--help" alongside another argument, in
+// either order, reports that flag as taking no arguments, naming it
+// exactly as typed and pointing at "brief help new <type>" — matching
+// runRoot's own wording for the same shape. Any other dash-prefixed
+// argument, alone or first, gets pflag's own unknown-flag/unknown-shorthand
+// wording and points at "brief new <type> --help" instead. A bare "new
+// --help feature" does NOT reach feature's own help: cobra's Find has not
+// yet registered new's help flag when it walks this argv, so it treats
+// "feature" as --help's value and dispatch never leaves new.
 func Test_new_help_flag_is_help_only_as_the_sole_argument(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -131,27 +135,27 @@ func Test_new_help_flag_is_help_only_as_the_sole_argument(t *testing.T) {
 		{
 			name:   "--help widget",
 			args:   []string{"new", "--help", "widget"},
-			stderr: `brief new: unknown type "--help"; expected one of: feature, step` + "\n",
+			stderr: `brief new: '--help' takes no arguments; run 'brief help new <type>'` + "\n",
 		},
 		{
 			name:   "--help -x",
 			args:   []string{"new", "--help", "-x"},
-			stderr: `brief new: unknown type "--help"; expected one of: feature, step` + "\n",
+			stderr: `brief new: '--help' takes no arguments; run 'brief help new <type>'` + "\n",
 		},
 		{
 			name:   "-h widget",
 			args:   []string{"new", "-h", "widget"},
-			stderr: `brief new: unknown type "-h"; expected one of: feature, step` + "\n",
+			stderr: `brief new: '-h' takes no arguments; run 'brief help new <type>'` + "\n",
 		},
 		{
 			name:   "--help feature",
 			args:   []string{"new", "--help", "feature"},
-			stderr: `brief new: unknown type "--help"; expected one of: feature, step` + "\n",
+			stderr: `brief new: '--help' takes no arguments; run 'brief help new <type>'` + "\n",
 		},
 		{
 			name:   "-x --help",
 			args:   []string{"new", "-x", "--help"},
-			stderr: `brief new: unknown type "-x"; expected one of: feature, step` + "\n",
+			stderr: "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'\n",
 		},
 	}
 
@@ -299,9 +303,12 @@ func Test_help_start_prints_the_literal_start_help(t *testing.T) {
 // Test_help_with_an_unresolved_topic_is_a_one_line_usage_error pins
 // SCENARIO-09: a help topic is accepted only when Find's residual is
 // empty and the resolved target is root or IsAvailableCommand. Anything
-// else — extra positionals, a flag after the topic, a leading flag before
-// it, or a hidden command like "help" itself — is a usage error naming
-// the whole topic as typed, never just the unresolved residual.
+// else — extra positionals, a flag after the topic, or a hidden command
+// like "help" itself — is a usage error naming the whole topic as typed,
+// never just the unresolved residual. A dash-prefixed topic never reaches
+// Find at all: see Test_help_flag_as_the_topic_argument_takes_no_arguments
+// and Test_help_reports_a_non_help_dash_prefixed_topic_as_an_unknown_flag
+// for those two shapes.
 func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -329,11 +336,6 @@ func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) 
 			stderr: "brief help: unknown command \"start --json\"; expected one of: new, start, finish, status, check\n",
 		},
 		{
-			name:   "leading flag before the topic",
-			args:   []string{"help", "--json", "start"},
-			stderr: "brief help: unknown command \"--json start\"; expected one of: new, start, finish, status, check\n",
-		},
-		{
 			name:   "hidden command as topic",
 			args:   []string{"help", "help"},
 			stderr: "brief help: unknown command \"help\"; expected one of: new, start, finish, status, check\n",
@@ -355,11 +357,116 @@ func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) 
 	}
 }
 
-// Test_prints_finish_flag_prose_in_its_flag_table pins that finish's
-// --handoff and --state rows show their value as "path" (from the
-// backquoted varname in each flag's usage string), not pflag's default
-// "string", and that --state's COMPLETE-replacement prose survives into
-// the generated table.
+// Test_help_flag_as_the_topic_argument_takes_no_arguments pins that "brief
+// help" checks its first argument for "-h"/"--help" before ever calling
+// Find: unlike runRoot and runNew, the help stub has no sole-argument case
+// that means anything, so both a bare "-h"/"--help" and one followed by a
+// trailing topic report the same "takes no arguments" wording, naming
+// whichever spelling was typed.
+func Test_help_flag_as_the_topic_argument_takes_no_arguments(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		stderr string
+	}{
+		{
+			name:   "--help alone",
+			args:   []string{"help", "--help"},
+			stderr: "brief help: '--help' takes no arguments; run 'brief help <command>'\n",
+		},
+		{
+			name:   "-h alone",
+			args:   []string{"help", "-h"},
+			stderr: "brief help: '-h' takes no arguments; run 'brief help <command>'\n",
+		},
+		{
+			name:   "--help with a trailing topic",
+			args:   []string{"help", "--help", "start"},
+			stderr: "brief help: '--help' takes no arguments; run 'brief help <command>'\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tc.stderr, stderr.String())
+		})
+	}
+}
+
+// Test_help_reports_a_non_help_dash_prefixed_topic_as_an_unknown_flag pins
+// that a dash-prefixed topic other than "-h"/"--help" is reported in
+// pflag's own unknown-flag/unknown-shorthand wording, the same as runRoot
+// and runNew report the same shape — never routed through Find, which
+// would otherwise stop at root and quote the whole residual instead.
+func Test_help_reports_a_non_help_dash_prefixed_topic_as_an_unknown_flag(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		stderr string
+	}{
+		{
+			name:   "long flag before a topic",
+			args:   []string{"help", "--json", "start"},
+			stderr: "brief help: unknown flag: --json; run 'brief help <command>'\n",
+		},
+		{
+			name:   "single-dash short flag alone",
+			args:   []string{"help", "-x"},
+			stderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tc.stderr, stderr.String())
+		})
+	}
+}
+
+// finishHelp is "brief finish --help"'s exact stdout: --handoff and
+// --state show their value as "path" (from the backquoted varname in each
+// flag's usage string), not pflag's default "string", and each usage
+// string's own embedded newline wraps it to the description column the
+// same way jsonFlagUsage wraps start's --json — every line at or under 80
+// columns.
+const finishHelp = `Usage:
+  brief finish <feature> <step> --handoff <path> --state <path>
+
+Closes step in feature: writes the body at --handoff to the step's own
+handoff file, replaces the feature's state file with the body at --state,
+and marks the step done in the progress list. "-" reads a flag's body
+from stdin; it may be given for at most one of --handoff and --state.
+
+Flags:
+      --handoff path   the path to the step's handoff body,
+                       written to its own file
+  -h, --help           help for finish
+      --state path     the path to the COMPLETE replacement body for the state
+                       file; it replaces the file, it is never appended to; it
+                       must carry the configured state headings, though a
+                       section may be empty
+`
+
+// Test_prints_finish_flag_prose_in_its_flag_table pins finishHelp
+// byte-identical, so a mutation that reflows the wrap points or drops a
+// word from either flag's prose is caught, not just a substring survival
+// check.
 func Test_prints_finish_flag_prose_in_its_flag_table(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -368,8 +475,43 @@ func Test_prints_finish_flag_prose_in_its_flag_table(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
-	out := stdout.String()
-	assert.Contains(t, out, "--handoff path")
-	assert.Contains(t, out, "--state path")
-	assert.Contains(t, out, "the COMPLETE replacement body for the state file; it replaces the file, it is never appended to; it must carry the configured state headings, though a section")
+	assert.Equal(t, finishHelp, stdout.String())
+}
+
+// Test_every_help_line_fits_in_80_columns sweeps every leaf's "--help"
+// output — the commands that render a Flags table, the surface MAJOR 1
+// fixed — for a generated Usage line, wrapped prose, and a pflag flag
+// table long enough for one leaf's flags to overrun 80 columns unless its
+// usage string carries its own embedded wrap points, the way jsonFlagUsage
+// and handoffFlagUsage/stateFlagUsage do. Root and "new" are out of scope
+// here: their cmdList rows are fixed-column-padded, not wrapped to a
+// terminal width, an existing and separately reviewed layout (rootHelp,
+// newHelp) this fix does not touch.
+func Test_every_help_line_fits_in_80_columns(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "new feature", args: []string{"new", "feature", "--help"}},
+		{name: "new step", args: []string{"new", "step", "--help"}},
+		{name: "start", args: []string{"start", "--help"}},
+		{name: "finish", args: []string{"finish", "--help"}},
+		{name: "status", args: []string{"status", "--help"}},
+		{name: "check", args: []string{"check", "--help"}},
+		{name: "completion", args: []string{"completion", "--help"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			for line := range strings.SplitSeq(stdout.String(), "\n") {
+				assert.LessOrEqual(t, len(line), 80, "line %q of %q help must fit in 80 columns", line, tc.name)
+			}
+		})
+	}
 }
