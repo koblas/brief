@@ -178,7 +178,7 @@ Scenario: SCENARIO-13 Completion for an unsupported shell
 - [x] SCENARIO-03: Undefined short flag is a one-line usage error
 - [x] SCENARIO-04: Single-dash long flag is rejected
 - [x] SCENARIO-05: Flag missing its value
-- [ ] SCENARIO-06: --help next to an undefined flag is a usage error in either order
+- [x] SCENARIO-06: --help next to an undefined flag is a usage error in either order
 - [ ] SCENARIO-07: Command help keeps its prose inside generated structure
 - [ ] SCENARIO-08: "brief help <command>" matches "<command> --help"
 - [ ] SCENARIO-09: "brief help" with an unknown topic

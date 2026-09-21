@@ -357,6 +357,133 @@ func Test_takes_the_next_flag_as_the_value_of_a_flag_missing_its_value(t *testin
 // subtest builds its own fixture — finish mutates its (marks the step
 // done, rewrites STATE.md), so a fixture shared across rows would hit the
 // re-finish refusal on a later row.
+// Test_reports_an_undefined_flag_as_a_usage_error_whichever_side_of_help_it_is_on
+// is SCENARIO-06's table: pflag's ParseFlags stops at the first bad token,
+// so an undefined flag is a usage error through the same root
+// SetFlagErrorFunc frame as SCENARIO-02 regardless of where --help/-h falls
+// relative to it. Every leaf gets both orders of --help; -h is scoped to
+// start only, since cobra's InitDefaultHelpFlag registers -h identically on
+// every leaf and a per-leaf -h row would prove nothing more about the
+// frame. Expected stderr reuses SCENARIO-02's literals verbatim: --help/-h
+// in the args changes nothing about the line pflag reports.
+func Test_reports_an_undefined_flag_as_a_usage_error_whichever_side_of_help_it_is_on(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{
+			name:       "start --help --bogus",
+			args:       []string{"start", "--help", "--bogus"},
+			wantStderr: "brief start: unknown flag: --bogus; run 'brief start <feature>'",
+		},
+		{
+			name:       "start --bogus --help",
+			args:       []string{"start", "--bogus", "--help"},
+			wantStderr: "brief start: unknown flag: --bogus; run 'brief start <feature>'",
+		},
+		{
+			name:       "finish --help --bogus",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--help", "--bogus"},
+			wantStderr: "brief finish: unknown flag: --bogus; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "finish --bogus --help",
+			args:       []string{"finish", "demo", "SCENARIO-01", "--bogus", "--help"},
+			wantStderr: "brief finish: unknown flag: --bogus; run 'brief finish <feature> <step> --handoff <path> --state <path>'",
+		},
+		{
+			name:       "status --help --bogus",
+			args:       []string{"status", "--help", "--bogus"},
+			wantStderr: "brief status: unknown flag: --bogus; run 'brief status'",
+		},
+		{
+			name:       "status --bogus --help",
+			args:       []string{"status", "--bogus", "--help"},
+			wantStderr: "brief status: unknown flag: --bogus; run 'brief status'",
+		},
+		{
+			name:       "check --help --bogus",
+			args:       []string{"check", "--help", "--bogus"},
+			wantStderr: "brief check: unknown flag: --bogus; run 'brief check [feature]'",
+		},
+		{
+			name:       "check --bogus --help",
+			args:       []string{"check", "--bogus", "--help"},
+			wantStderr: "brief check: unknown flag: --bogus; run 'brief check [feature]'",
+		},
+		{
+			name:       "new feature --help --bogus",
+			args:       []string{"new", "feature", "--help", "--bogus", "payments"},
+			wantStderr: "brief new feature: unknown flag: --bogus; run 'brief new feature <name>'",
+		},
+		{
+			name:       "new feature --bogus --help",
+			args:       []string{"new", "feature", "--bogus", "--help", "payments"},
+			wantStderr: "brief new feature: unknown flag: --bogus; run 'brief new feature <name>'",
+		},
+		{
+			name:       "new step --help --bogus",
+			args:       []string{"new", "step", "--help", "--bogus", "demo"},
+			wantStderr: "brief new step: unknown flag: --bogus; run 'brief new step <feature>'",
+		},
+		{
+			name:       "new step --bogus --help",
+			args:       []string{"new", "step", "--bogus", "--help", "demo"},
+			wantStderr: "brief new step: unknown flag: --bogus; run 'brief new step <feature>'",
+		},
+		{
+			name:       "start -h --bogus",
+			args:       []string{"start", "-h", "--bogus"},
+			wantStderr: "brief start: unknown flag: --bogus; run 'brief start <feature>'",
+		},
+		{
+			name:       "start --bogus -h",
+			args:       []string{"start", "--bogus", "-h"},
+			wantStderr: "brief start: unknown flag: --bogus; run 'brief start <feature>'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
+}
+
+// Test_prints_help_for_the_h_shorthand_alone is the control arm for the -h
+// rows above: it proves -h alone still prints help (nil error, exit 0,
+// empty stderr, the same start prose Test_prints_the_start_usage_for_help
+// pins for --help), and that -h's stdout is byte-identical to --help's.
+// Without this, "start --bogus -h" would pass even if -h were itself
+// undefined, since pflag errors on --bogus before -h is ever parsed.
+func Test_prints_help_for_the_h_shorthand_alone(t *testing.T) {
+	wd := t.TempDir()
+	var helpStdout, helpStderr bytes.Buffer
+
+	helpErr := cli.Run(t.Context(), wd, []string{"start", "--help"}, nil, &helpStdout, &helpStderr)
+
+	require.NoError(t, helpErr)
+
+	var shortStdout, shortStderr bytes.Buffer
+
+	shortErr := cli.Run(t.Context(), wd, []string{"start", "-h"}, nil, &shortStdout, &shortStderr)
+
+	require.NoError(t, shortErr)
+	assert.Equal(t, 0, cli.ExitCode(shortErr))
+	assert.Empty(t, shortStderr.String())
+	assert.Contains(t, shortStdout.String(), "brief start reads; it never writes.")
+	assert.Equal(t, helpStdout.String(), shortStdout.String())
+}
+
 func Test_accepts_the_double_dash_spelling_of_each_single_dash_flag_rejected_above(t *testing.T) {
 	t.Run("start --json", func(t *testing.T) {
 		wd := newStartFixture(t, "open")
