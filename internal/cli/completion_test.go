@@ -193,3 +193,19 @@ func Test_the_hidden_complete_command_answers_for_generated_scripts(t *testing.T
 	assert.Contains(t, stdout.String(), "start\t")
 	assert.Regexp(t, `:\d+\n?$`, stdout.String())
 }
+
+// Test_the_hidden_complete_command_describes_new_with_its_own_short pins
+// that "new"'s Short reaches a user somewhere despite root help never
+// rendering it (helpTemplate always expands "new" into its children's rows
+// instead): cobra's generated completion scripts call back into
+// "__complete" at runtime rather than baking descriptions into the script
+// bytes, so this is the one place newShort is observable.
+func Test_the_hidden_complete_command_describes_new_with_its_own_short(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"__complete", ""}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "new\tscaffold a feature or its next step\n")
+}
