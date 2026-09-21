@@ -290,23 +290,94 @@ func Test_RenderStatusText_flattens_a_tab_or_newline_in_the_feature_name_or_titl
 		out.String())
 }
 
-// Test_RenderFindings_writes_the_profile_s_finding_shape pins the exact
-// byte shape SCENARIO-22 ships: "[SEVERITY] <path>:<line> — <problem>", one
-// line per Finding, no Fix — the write path's refusal carries one, a
-// report of a tree Finish was never asked to write does not.
-func Test_RenderFindings_writes_the_profile_s_finding_shape(t *testing.T) {
-	findings := []assemble.Finding{
-		{Severity: assemble.SeverityError, Path: "/repo/docs/specifications/demo/STEP-01.md", Line: 12, Detail: `checklist item "x" is not ticked`},
-		{Severity: assemble.SeverityWarn, Path: "/repo/docs/specifications/demo/NOTES.md", Line: 0, Detail: "state is 90 lines, over the cap of 80"},
+// Test_RenderFindings_writes_a_group_header_and_its_indented_findings pins
+// the grouped shape SCENARIO-08 ships: "<name>  (in flight|complete)" then
+// each finding as "  <SEVERITY>  <path>[:<line>]  <detail>", two-space
+// indented, the ":<line>" suffix present only when Line > 0.
+func Test_RenderFindings_writes_a_group_header_and_its_indented_findings(t *testing.T) {
+	groups := []assemble.FeatureFindings{
+		{
+			Name: "demo", Path: "/repo/docs/specifications/demo", InFlight: true,
+			Findings: []assemble.Finding{
+				{Severity: assemble.SeverityError, Path: "/repo/docs/specifications/demo/STEP-01.md", Line: 12, Detail: `checklist item "x" is not ticked`},
+				{Severity: assemble.SeverityError, Path: "/repo/docs/specifications/demo/NOTES.md", Line: 0, Detail: "state is 90 lines, over the cap of 80"},
+			},
+		},
 	}
 
 	var out bytes.Buffer
-	require.NoError(t, assemble.RenderFindings(&out, findings))
+	require.NoError(t, assemble.RenderFindings(&out, groups))
 
 	assert.Equal(t, ""+
-		"[ERROR] /repo/docs/specifications/demo/STEP-01.md:12 — checklist item \"x\" is not ticked\n"+
-		"[WARN] /repo/docs/specifications/demo/NOTES.md:0 — state is 90 lines, over the cap of 80\n",
+		"demo  (in flight)\n"+
+		"  ERROR  /repo/docs/specifications/demo/STEP-01.md:12  checklist item \"x\" is not ticked\n"+
+		"  ERROR  /repo/docs/specifications/demo/NOTES.md  state is 90 lines, over the cap of 80\n",
 		out.String())
+}
+
+// Test_RenderFindings_labels_a_complete_feature_s_header_from_InFlight pins
+// the header's other arm: "(complete)" when InFlight is false — from
+// InFlight, never recomputed from severity.
+func Test_RenderFindings_labels_a_complete_feature_s_header_from_InFlight(t *testing.T) {
+	groups := []assemble.FeatureFindings{
+		{
+			Name: "demo", Path: "/repo/docs/specifications/demo", InFlight: false,
+			Findings: []assemble.Finding{
+				{Severity: assemble.SeverityWarn, Path: "/repo/docs/specifications/demo/NOTES.md", Detail: "state is 90 lines, over the cap of 80"},
+			},
+		},
+	}
+
+	var out bytes.Buffer
+	require.NoError(t, assemble.RenderFindings(&out, groups))
+
+	assert.Contains(t, out.String(), "demo  (complete)\n")
+}
+
+// Test_RenderFindings_separates_groups_with_exactly_one_blank_line pins the
+// blank-line rule: one blank line between groups, none before the first,
+// none after the last.
+func Test_RenderFindings_separates_groups_with_exactly_one_blank_line(t *testing.T) {
+	groups := []assemble.FeatureFindings{
+		{
+			Name: "alpha", Path: "/repo/docs/specifications/alpha", InFlight: true,
+			Findings: []assemble.Finding{{Severity: assemble.SeverityError, Path: "/repo/docs/specifications/alpha/A.md", Detail: "alpha problem"}},
+		},
+		{
+			Name: "beta", Path: "/repo/docs/specifications/beta", InFlight: false,
+			Findings: []assemble.Finding{{Severity: assemble.SeverityWarn, Path: "/repo/docs/specifications/beta/B.md", Detail: "beta problem"}},
+		},
+	}
+
+	var out bytes.Buffer
+	require.NoError(t, assemble.RenderFindings(&out, groups))
+
+	assert.Equal(t, ""+
+		"alpha  (in flight)\n"+
+		"  ERROR  /repo/docs/specifications/alpha/A.md  alpha problem\n"+
+		"\n"+
+		"beta  (complete)\n"+
+		"  WARN  /repo/docs/specifications/beta/B.md  beta problem\n",
+		out.String())
+}
+
+// Test_RenderFindings_flattens_a_tab_or_newline_in_the_detail pins the same
+// tabwriter-safety stance RenderStatusText already takes: a tab or newline
+// embedded in Detail is flattened to a single space.
+func Test_RenderFindings_flattens_a_tab_or_newline_in_the_detail(t *testing.T) {
+	groups := []assemble.FeatureFindings{
+		{
+			Name: "demo", Path: "/repo/docs/specifications/demo", InFlight: true,
+			Findings: []assemble.Finding{
+				{Severity: assemble.SeverityError, Path: "/repo/docs/specifications/demo/A.md", Detail: "a\tb\nc"},
+			},
+		},
+	}
+
+	var out bytes.Buffer
+	require.NoError(t, assemble.RenderFindings(&out, groups))
+
+	assert.Contains(t, out.String(), "  a b c\n")
 }
 
 // Test_RenderFindings_writes_nothing_for_an_empty_slice is the SCENARIO-10

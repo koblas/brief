@@ -191,12 +191,28 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 // its own imperative rather than reusing the unreadable case's "make it
 // readable": a file that does not exist cannot be made readable.
 func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
+	_, refusal := s.specFault(root, featurePath)
+	if refusal != nil {
+		return refusal
+	}
+
+	return nil
+}
+
+// specFault is checkSpecification's classifier: it reads feature's
+// specification through root and returns the Rule and *RefusalError for
+// the first of absent, unreadable, an unclosed fenced code block, or a
+// missing cfg.ProgressHeading section it finds — checkSpecification wraps
+// its *RefusalError unchanged as its own return, and Check's
+// checkSpecFindings reuses the Rule to stamp the Finding it renders from
+// the same refusal. It returns ("", nil) when the specification conforms.
+func (s *Server) specFault(root *os.Root, featurePath string) (Rule, *RefusalError) {
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
 
 	specBytes, err := root.ReadFile(s.cfg.SpecificationFile)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return &RefusalError{
+			return RuleSpecMissing, &RefusalError{
 				Path:   specPath,
 				Detail: s.cfg.SpecificationFile + " not found",
 				Fix:    fmt.Sprintf("write a %s with a %q heading and re-run", s.cfg.SpecificationFile, s.cfg.ProgressHeading),
@@ -204,11 +220,11 @@ func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
 			}
 		}
 
-		return &RefusalError{Problem: *newProblem(specPath, err, false), Err: ErrMalformedFeature}
+		return RuleSpecUnreadable, &RefusalError{Problem: *newProblem(specPath, err, false), Err: ErrMalformedFeature}
 	}
 
 	if line, delim, unterminated := markdown.UnterminatedFence(string(specBytes)); unterminated {
-		return &RefusalError{
+		return RuleFence, &RefusalError{
 			Path:   specPath,
 			Detail: fmt.Sprintf("specification has an unclosed %s fence opened at line %d", delim, line),
 			Fix:    "close the fence and re-run",
@@ -218,7 +234,7 @@ func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
 	}
 
 	if _, found := markdown.Section(string(specBytes), s.cfg.ProgressHeading); !found {
-		return &RefusalError{
+		return RuleHeading, &RefusalError{
 			Path:   specPath,
 			Detail: fmt.Sprintf("no %q heading found", s.cfg.ProgressHeading),
 			Fix:    fmt.Sprintf("add a %q heading to the specification", s.cfg.ProgressHeading),
@@ -226,7 +242,7 @@ func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
 		}
 	}
 
-	return nil
+	return "", nil
 }
 
 // readStateFile reads feature's state file through root and refuses with a

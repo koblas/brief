@@ -138,16 +138,45 @@ func flattenTabwriterField(s string) string {
 	return strings.NewReplacer("\t", " ", "\n", " ").Replace(s)
 }
 
-// RenderFindings writes findings to w, one per line, in the profile's
-// finding shape: "[SEVERITY] <path>:<line> — <detail>". It carries no Fix:
-// the write-path refusal's "... and retry" copy has no meaning in a report
-// about a tree scaffold.Finish was never asked to write. RenderFindings
-// decides nothing about severity or ordering — Check has already decided
-// both — it only renders the slice it is given, in the order given.
-func RenderFindings(w io.Writer, findings []Finding) error {
-	for _, f := range findings {
-		if _, err := fmt.Fprintf(w, "[%s] %s:%d — %s\n", f.Severity, f.Path, f.Line, f.Detail); err != nil {
+// RenderFindings writes groups to w: one blank line between feature groups
+// (none before the first, none after the last), each opening with
+// "<name>  (in flight)" or "<name>  (complete)" — from InFlight, never
+// recomputed from severity — then each finding as
+// "  <SEVERITY>  <path>[:<line>]  <detail>", two-space indented, the
+// ":<line>" suffix omitted when Line is 0 (a whole-file finding). It
+// carries no Fix: the write-path refusal's "... and retry" copy has no
+// meaning in a report about a tree scaffold.Finish was never asked to
+// write. RenderFindings renders Path verbatim — the caller relativizes it
+// for text mode — and decides nothing about grouping, severity or
+// ordering, all decided upstream; a tab or newline in Detail is flattened
+// to a single space, the same tabwriter-safety stance RenderStatusText
+// takes, even though this output is not itself a tabwriter table.
+func RenderFindings(w io.Writer, groups []FeatureFindings) error {
+	for i, g := range groups {
+		if i > 0 {
+			if _, err := fmt.Fprintln(w); err != nil {
+				return fmt.Errorf("assemble: render: %w", err)
+			}
+		}
+
+		status := "(complete)"
+		if g.InFlight {
+			status = "(in flight)"
+		}
+
+		if _, err := fmt.Fprintf(w, "%s  %s\n", g.Name, status); err != nil {
 			return fmt.Errorf("assemble: render: %w", err)
+		}
+
+		for _, f := range g.Findings {
+			location := f.Path
+			if f.Line > 0 {
+				location = fmt.Sprintf("%s:%d", f.Path, f.Line)
+			}
+
+			if _, err := fmt.Fprintf(w, "  %s  %s  %s\n", f.Severity, location, flattenTabwriterField(f.Detail)); err != nil {
+				return fmt.Errorf("assemble: render: %w", err)
+			}
 		}
 	}
 
