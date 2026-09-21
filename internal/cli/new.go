@@ -38,15 +38,21 @@ const newFeatureInvocation = "brief new feature <name>"
 // error names as how to fix it.
 const newStepInvocation = "brief new step <feature>"
 
-// runNew handles "brief new <type> ...": routes a sole "-h"/"--help"
-// argument to cmd.Help() (new's flag parsing is disabled, so cobra's own
-// help check never sees it), rejects a "-h"/"--help" alongside any other
-// argument and any other dash-prefixed type with the same flag-shaped
-// wording runRoot uses, and otherwise reports type is neither feature nor
-// step — nothing at all, or something unknown.
+// runNew handles "brief new <type> ...": rejects "-h"/"--help" given an
+// attached value, routes a sole "-h"/"--help" argument to cmd.Help()
+// (new's flag parsing is disabled, so cobra's own help check never sees
+// it), rejects a "-h"/"--help" alongside any other argument and any other
+// dash-prefixed type with the same flag-shaped wording runRoot uses — "--"
+// excluded, since it is pflag's own flag-parsing terminator rather than a
+// flag itself — and otherwise reports type is neither feature nor step —
+// nothing at all, or something unknown.
 func runNew(cmd *cobra.Command, args []string, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief new: no type given; expected one of: feature, step")
+	}
+
+	if flag, ok := helpFlagWithValue(args[0]); ok {
+		return usageError(stderr, fmt.Sprintf("brief new: '%s' takes no value; run 'brief new --help'", flag))
 	}
 
 	if isHelpFlag(args[0]) {
@@ -58,7 +64,7 @@ func runNew(cmd *cobra.Command, args []string, stderr io.Writer) error {
 	}
 
 	if isFlagLike(args[0]) {
-		return usageError(stderr, fmt.Sprintf("brief new: %s; run 'brief new <type> --help'", flattenOneLine(unknownFlagMessage(args[0]))))
+		return usageError(stderr, fmt.Sprintf("brief new: %s; run 'brief new <type> --help'", unknownFlagMessage(args[0])))
 	}
 
 	return usageError(stderr, fmt.Sprintf("brief new: unknown type %q; expected one of: feature, step", args[0]))

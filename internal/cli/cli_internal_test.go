@@ -26,12 +26,14 @@ func newTreeWithExtraCommands(t *testing.T, hiddenExtraHidden bool) (*cobra.Comm
 	wd := t.TempDir()
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 	root := newRootCommand(wd, nil, stdout, stderr)
+	extra := &cobra.Command{
+		Use:  "extra",
+		Args: cobra.ArbitraryArgs,
+		RunE: func(*cobra.Command, []string) error { return nil },
+	}
+	extra.Flags().Int("count", 0, "an int flag, to prove boolFlagParseMessage's bool type guard: it must not rewrite an invalid *int* value's pflag wording")
 	root.AddCommand(
-		&cobra.Command{
-			Use:  "extra",
-			Args: cobra.ArbitraryArgs,
-			RunE: func(*cobra.Command, []string) error { return nil },
-		},
+		extra,
 		&cobra.Command{
 			Use:    "hiddenextra",
 			Hidden: hiddenExtraHidden,
@@ -41,6 +43,30 @@ func newTreeWithExtraCommands(t *testing.T, hiddenExtraHidden bool) (*cobra.Comm
 	)
 
 	return root, stdout, stderr
+}
+
+// Test_bool_flag_rewrite_does_not_apply_to_a_non_bool_flag pins
+// boolFlagParseMessage's type guard: an invalid value for "extra"'s Int
+// flag "count" reaches the root FlagErrorFunc frame as pflag's own raw
+// strconv.ParseInt wording, unrewritten — proving the rewrite in
+// Test_reports_an_invalid_bool_flag_value_without_leaking_strconv_wording
+// (flag_error_test.go) is scoped to bool-typed flags, not every flag pflag
+// rejects a value for.
+//
+// Mutation-verified: dropping boolFlagParseMessage's
+// "invalid.GetFlag().Value.Type() != \"bool\"" guard reds this test — the
+// int-flag error would be rewritten into the bool wording, naming a value
+// of "want true or false" for a flag that takes neither.
+func Test_bool_flag_rewrite_does_not_apply_to_a_non_bool_flag(t *testing.T) {
+	root, stdout, stderr := newTreeWithExtraCommands(t, true)
+	root.SetArgs([]string{"extra", "--count=notanumber"})
+
+	err := root.ExecuteContext(t.Context())
+
+	require.ErrorIs(t, err, ErrUsage)
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), `strconv.ParseInt: parsing "notanumber": invalid syntax`)
+	assert.NotContains(t, stderr.String(), "want true or false")
 }
 
 // Test_expected_command_list_names_every_visible_registered_command pins

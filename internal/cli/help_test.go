@@ -478,7 +478,7 @@ func Test_prints_finish_flag_prose_in_its_flag_table(t *testing.T) {
 	assert.Equal(t, finishHelp, stdout.String())
 }
 
-// Test_every_help_line_fits_in_80_columns sweeps every leaf's "--help"
+// Test_every_leaf_help_line_fits_in_80_columns sweeps every leaf's "--help"
 // output — the commands that render a Flags table, the surface MAJOR 1
 // fixed — for a generated Usage line, wrapped prose, and a pflag flag
 // table long enough for one leaf's flags to overrun 80 columns unless its
@@ -486,8 +486,9 @@ func Test_prints_finish_flag_prose_in_its_flag_table(t *testing.T) {
 // and handoffFlagUsage/stateFlagUsage do. Root and "new" are out of scope
 // here: their cmdList rows are fixed-column-padded, not wrapped to a
 // terminal width, an existing and separately reviewed layout (rootHelp,
-// newHelp) this fix does not touch.
-func Test_every_help_line_fits_in_80_columns(t *testing.T) {
+// newHelp) this fix does not touch. require.NotEmpty on stdout guards the
+// loop below from passing vacuously against an empty or truncated render.
+func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
@@ -509,6 +510,7 @@ func Test_every_help_line_fits_in_80_columns(t *testing.T) {
 			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
 
 			require.NoError(t, err)
+			require.NotEmpty(t, stdout.String())
 			for line := range strings.SplitSeq(stdout.String(), "\n") {
 				assert.LessOrEqual(t, len(line), 80, "line %q of %q help must fit in 80 columns", line, tc.name)
 			}

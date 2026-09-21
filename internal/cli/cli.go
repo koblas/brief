@@ -95,30 +95,31 @@ func expectedCommandList(cmd *cobra.Command) string {
 // its own available subcommands contributes its children's rows instead of
 // its own, so "new feature" and "new step" list in "new"'s place under
 // root, and under "new" itself the same two rows are its entire listing —
-// each row is that command's UseLine padded to a fixed column, wrapped to
-// its own line first when UseLine would overrun that column, followed by
-// its Short; then a "Run '<command path> <noun> --help' for details."
+// each row is that command's UseLine padded to cmdRowUseWidth columns,
+// wrapped to its own line first (continuation indented to
+// cmdRowContinuationWidth) when UseLine would overrun that column, followed
+// by its Short; then a "Run '<command path> <noun> --help' for details."
 // trailer scoped to that command's own path, where <noun> is that
 // command's own commandNounAnnotation ("type" for "new") or the literal
 // "command" when the command carries none (root). Only cobra's built-in
 // template funcs (rpad, trim, trimTrailingWhitespaces, index) and
 // text/template builtins (or) are used — no package-global AddTemplateFunc.
 var helpTemplate = fmt.Sprintf(`{{- define "cmdRow" -}}
-{{if gt (len .UseLine) 33}}  {{.UseLine}}
-{{rpad "" 35}}{{else}}  {{rpad .UseLine 33}}{{end}}{{.Short}}
+{{if gt (len .UseLine) %[3]d}}  {{.UseLine}}
+{{rpad "" %[4]d}}{{else}}  {{rpad .UseLine %[3]d}}{{end}}{{.Short}}
 {{end -}}
 {{- define "cmdList" -}}
 {{.Long}}
 
 Usage:
-{{range .Commands}}{{if or .IsAvailableCommand (index .Annotations %q)}}
+{{range .Commands}}{{if or .IsAvailableCommand (index .Annotations %[1]q)}}
 {{- if .HasAvailableSubCommands}}
 {{- range .Commands}}{{if .IsAvailableCommand}}{{template "cmdRow" .}}{{end}}{{end}}
 {{- else}}{{template "cmdRow" .}}
 {{- end}}
 {{- end}}
 {{- end}}
-Run '{{.CommandPath}} <{{or (index .Annotations %q) "command"}}> --help' for details.
+Run '{{.CommandPath}} <{{or (index .Annotations %[2]q) "command"}}> --help' for details.
 {{end -}}
 {{- if .HasAvailableSubCommands}}{{template "cmdList" .}}{{- else}}Usage:
   {{.UseLine}}
@@ -127,7 +128,18 @@ Run '{{.CommandPath}} <{{or (index .Annotations %q) "command"}}> --help' for det
 
 Flags:
 {{.LocalFlags.FlagUsages}}{{- end -}}
-`, listedInHelpAnnotation, commandNounAnnotation)
+`, listedInHelpAnnotation, commandNounAnnotation, cmdRowUseWidth, cmdRowContinuationWidth)
+
+// cmdRowUseWidth is the column helpTemplate's "cmdRow" block pads a short
+// UseLine to before its Short description; a UseLine longer than this
+// wraps onto its own line instead.
+const cmdRowUseWidth = 33
+
+// cmdRowContinuationWidth is the column a wrapped "cmdRow" row's Short
+// starts at on its continuation line: cmdRowUseWidth plus the 2-column
+// indent every row's UseLine carries, so a wrapped row's Short lines up
+// with an unwrapped one's.
+const cmdRowContinuationWidth = cmdRowUseWidth + 2
 
 // invocationAnnotation is the cobra.Command.Annotations key holding the
 // invocation string the root FlagErrorFunc names in "run '<invocation>'"
@@ -317,11 +329,12 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 		path := strings.TrimPrefix(cmd.CommandPath(), "brief ")
 		invocation := cmd.Annotations[invocationAnnotation]
 
-		if msg, ok := boolFlagParseMessage(err); ok {
-			return usageError(stderr, fmt.Sprintf("brief %s: %s; run '%s'", path, msg, invocation))
+		msg, ok := boolFlagParseMessage(err)
+		if !ok {
+			msg = flattenOneLine(err.Error())
 		}
 
-		return usageError(stderr, fmt.Sprintf("brief %s: %s; run '%s'", path, flattenOneLine(err.Error()), invocation))
+		return usageError(stderr, fmt.Sprintf("brief %s: %s; run '%s'", path, msg, invocation))
 	})
 
 	root.SetHelpTemplate(helpTemplate)
@@ -349,11 +362,14 @@ func newRootCommand(wd string, stdin io.Reader, stdout, stderr io.Writer) *cobra
 // --help": InitDefaultHelpFlag backfills the -h/--help row that Execute()
 // would otherwise add during ordinary dispatch, which Find alone skips.
 //
-// A leading "-h"/"--help" or any other dash-prefixed topic is never
-// resolved against the tree at all: unlike runRoot and runNew, the help
-// stub has no sole-argument case that means anything — asking "brief help"
-// for help on "--help" is never valid — so args[0] is checked for both
-// shapes, the same as runRoot and runNew, before Find ever runs.
+// A leading "-h"/"--help" (with or without an attached value) or any other
+// dash-prefixed topic is never resolved against the tree at all: unlike
+// runRoot and runNew, the help stub has no sole-argument case that means
+// anything — asking "brief help" for help on "--help" is never valid — so
+// args[0] is checked for all three shapes, the same checks runRoot and
+// runNew apply, before Find ever runs. "--" is not one of those shapes —
+// see isFlagLike — so "brief help --" falls through to Find like any other
+// topic and is rejected as an unresolved one.
 func newHelpCommand(stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:                "help",
@@ -361,12 +377,18 @@ func newHelpCommand(stderr io.Writer) *cobra.Command {
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				if flag, ok := helpFlagWithValue(args[0]); ok {
+					return usageError(stderr, fmt.Sprintf("brief help: '%s' takes no value; run 'brief help <command>'", flag))
+				}
+			}
+
 			if len(args) > 0 && isHelpFlag(args[0]) {
 				return usageError(stderr, fmt.Sprintf("brief help: '%s' takes no arguments; run 'brief help <command>'", args[0]))
 			}
 
 			if len(args) > 0 && isFlagLike(args[0]) {
-				return usageError(stderr, fmt.Sprintf("brief help: %s; run 'brief help <command>'", flattenOneLine(unknownFlagMessage(args[0]))))
+				return usageError(stderr, fmt.Sprintf("brief help: %s; run 'brief help <command>'", unknownFlagMessage(args[0])))
 			}
 
 			target, residual, _ := cmd.Root().Find(args)
@@ -410,14 +432,19 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 }
 
 // runRoot handles a top-level invocation that named no known command:
-// nothing at all, a sole "-h"/"--help", a "-h"/"--help" alongside another
-// argument, some other dash-prefixed token, or an unknown command name.
-// Cobra intercepts "help" as a dispatch to the tree's own help command
-// (see newRootCommand's SetHelpCommand) before this ever runs, so this
-// function never sees "help" as args[0].
+// nothing at all, "--help"/"-h" given a value, a sole "-h"/"--help", a
+// "-h"/"--help" alongside another argument, some other dash-prefixed
+// token, "--" (pflag's flag-parsing terminator, never a flag itself), or
+// an unknown command name. Cobra intercepts "help" as a dispatch to the
+// tree's own help command (see newRootCommand's SetHelpCommand) before
+// this ever runs, so this function never sees "help" as args[0].
 func runRoot(cmd *cobra.Command, args []string, stderr io.Writer) error {
 	if len(args) == 0 {
 		return usageError(stderr, "brief: no command given; expected one of: "+expectedCommandList(cmd))
+	}
+
+	if flag, ok := helpFlagWithValue(args[0]); ok {
+		return usageError(stderr, fmt.Sprintf("brief: '%s' takes no value; run 'brief --help'", flag))
 	}
 
 	if isHelpFlag(args[0]) {
@@ -429,45 +456,114 @@ func runRoot(cmd *cobra.Command, args []string, stderr io.Writer) error {
 	}
 
 	if isFlagLike(args[0]) {
-		return usageError(stderr, fmt.Sprintf("brief: %s; run 'brief <command> --help'", flattenOneLine(unknownFlagMessage(args[0]))))
+		return usageError(stderr, fmt.Sprintf("brief: %s; run 'brief <command> --help'", unknownFlagMessage(args[0])))
 	}
 
 	return usageError(stderr, fmt.Sprintf("brief: unknown command %q; expected one of: %s", args[0], expectedCommandList(cmd)))
 }
 
-// isHelpFlag reports whether arg is spelled exactly as cobra's own help
-// flag, "-h" or "--help" — the only two spellings runRoot, runNew and the
-// help stub route to cmd.Help() when it is the sole argument, and reject
-// with "takes no arguments" wording when it is not.
+// isHelpFlag reports whether arg is spelled as cobra's own help flag with
+// no attached value: "--help", or "-h" repeated one or more times ("-h",
+// "-hh", "-hhh", ...). pflag's own shorthand-cluster parser consumes any
+// run of defined, no-value shorthand characters without error, and "h" is
+// the only shorthand any command in this tree registers, so a cluster made
+// entirely of "h" characters parses exactly like a single "-h" does —
+// pflag reports no error for either. runRoot, runNew and the help stub
+// route arg to cmd.Help() when it is the sole argument, and reject it with
+// "takes no arguments" wording when it is not.
 func isHelpFlag(arg string) bool {
-	return arg == "-h" || arg == "--help"
+	if arg == "--help" {
+		return true
+	}
+
+	if len(arg) < 2 || arg[0] != '-' || arg[1] == '-' {
+		return false
+	}
+
+	for _, r := range arg[1:] {
+		if r != 'h' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// helpFlagWithValue reports whether arg spells the help flag with an
+// explicit attached value — "--help=<v>" or "-h=<v>" — and, when it does,
+// the flag exactly as typed ("-h" or "--help") for echoing back in the
+// "takes no value" message. runRoot, runNew and the help stub reject such
+// a value outright, regardless of what it is: unlike a leaf's real
+// pflag.Parse, which accepts "--help=true"/"--help=false" silently and
+// only errors on a value strconv.ParseBool rejects, these three sites
+// never parse args[0] as a flag at all — they inspect it by hand — so
+// there is no parseable-value case to preserve.
+func helpFlagWithValue(arg string) (string, bool) {
+	switch {
+	case strings.HasPrefix(arg, "--help="):
+		return "--help", true
+	case strings.HasPrefix(arg, "-h="):
+		return "-h", true
+	default:
+		return "", false
+	}
 }
 
 // isFlagLike reports whether pflag would parse arg as a flag rather than a
 // positional argument: a "-" prefix followed by at least one more
 // character. A bare "-" is pflag's own convention for stdin, never a
 // flag — parseArgs treats len(s) == 1 the same as no "-" prefix at all.
+// "--" is pflag's own end-of-flags terminator, not a flag itself —
+// parseArgs matches it before ever calling parseLongArg — so isFlagLike
+// excludes it too, leaving it to fall through to the plain
+// unknown-command/unknown-type wording at every call site.
 func isFlagLike(arg string) bool {
-	return len(arg) > 1 && arg[0] == '-'
+	return len(arg) > 1 && arg[0] == '-' && arg != "--"
 }
 
 // unknownFlagMessage renders arg the way pflag's own error would for the
-// same token on a leaf command, since root and "new" disable cobra's flag
-// parsing and so never reach the root FlagErrorFunc frame themselves: a
-// double-dash flag names itself ("unknown flag: --bogus"), and a
-// single-dash token is pflag's shorthand-cluster wording, quoting its
-// first character and the whole residual cluster ("unknown shorthand
-// flag: 'x' in -xy").
+// same token on a leaf command, since root, "new" and the help stub
+// disable cobra's flag parsing and so never reach the root
+// SetFlagErrorFunc frame themselves. The result is already flattened to
+// one line — the same treatment that frame gives pflag's own error text —
+// so callers pass it straight to usageError without flattening it again.
+//
+// A double-dash token whose name is empty or starts with "-" or "=" is
+// pflag's own bad-flag-syntax case: "bad flag syntax: <arg>", the token
+// unchanged (isFlagLike excludes the empty-name case, "--" itself, before
+// any call site reaches here). Any other double-dash token names itself:
+// "unknown flag: --bogus".
+//
+// A single-dash token is pflag's shorthand-cluster wording. pflag consumes
+// every leading defined, no-value shorthand character before reporting the
+// first one it cannot resolve; "h" is the only such character any command
+// in this tree registers, so unknownFlagMessage skips a leading run of 'h'
+// the same way before quoting the first residual character and the
+// residual cluster: "-hx" reports "unknown shorthand flag: 'x' in -x", not
+// "in -hx". Every call site checks isHelpFlag first, so a cluster made
+// entirely of 'h' characters never reaches this branch.
 func unknownFlagMessage(arg string) string {
 	if strings.HasPrefix(arg, "--") {
-		name, _, _ := strings.Cut(arg[2:], "=")
+		name := arg[2:]
+		if name == "" || name[0] == '-' || name[0] == '=' {
+			return flattenOneLine("bad flag syntax: " + arg)
+		}
 
-		return "unknown flag: --" + name
+		name, _, _ = strings.Cut(name, "=")
+
+		return flattenOneLine("unknown flag: --" + name)
 	}
 
 	cluster := arg[1:]
 
-	return fmt.Sprintf("unknown shorthand flag: %q in -%s", rune(cluster[0]), cluster)
+	i := 0
+	for i < len(cluster) && cluster[i] == 'h' {
+		i++
+	}
+
+	residual := cluster[i:]
+
+	return flattenOneLine(fmt.Sprintf("unknown shorthand flag: %q in -%s", rune(residual[0]), residual))
 }
 
 // usageError writes msg, followed by a single newline, to stderr and

@@ -80,6 +80,10 @@ func Test_reports_an_undefined_long_flag_as_one_usage_line_naming_the_command_in
 // short flags. pflag quotes the whole cluster when every letter in it is
 // undefined ("-xy" -> "in -xy") but quotes only the residual cluster once a
 // leading defined shorthand ("-h") has been consumed ("-hx" -> "in -x").
+//
+// Mutation-verified: removing unknownFlagMessage's leading-'h'-skip loop
+// reds the "residual cluster after a defined -h" row ("in -x" becomes
+// "in -hx").
 func Test_reports_an_undefined_short_flag_as_one_usage_line_naming_the_command_invocation(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -522,6 +526,12 @@ func Test_prints_help_for_the_h_shorthand_alone(t *testing.T) {
 // lives in the root FlagErrorFunc frame and so applies to any bool flag,
 // not one hard-coded name; start's --json is the only bool flag brief
 // defines today.
+//
+// Mutation-verified: removing boolFlagParseMessage's call from the root
+// FlagErrorFunc frame reds both rows below (pflag's raw strconv wording
+// leaks instead); Test_bool_flag_rewrite_does_not_apply_to_a_non_bool_flag
+// (cli_internal_test.go) is this test's control arm, proving the rewrite
+// stays scoped to bool-typed flags.
 func Test_reports_an_invalid_bool_flag_value_without_leaking_strconv_wording(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -586,6 +596,123 @@ func Test_accepts_the_double_dash_handoff_and_state_flags(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, cli.ExitCode(err))
+}
+
+// Test_handles_flag_shaped_and_terminator_tokens_at_disabled_parsing_sites
+// covers the token shapes root, "new" and the help stub must each classify
+// by hand, since all three disable cobra's flag parsing: "--" is pflag's
+// own end-of-flags terminator, never a flag, so it falls through to the
+// plain unknown-command/unknown-type wording; "--help=<v>"/"-h=<v>" is the
+// help flag given an explicit value, which these three sites reject
+// outright rather than parse, unlike a leaf's real pflag.Parse (proven by
+// the "-hh" row below: a cluster made entirely of "h" characters parses
+// exactly like a single "-h" for pflag's own shorthand-cluster parser, so
+// it stays a sole-argument "print help" case, not an error); "-hx" is the
+// residual-cluster shape SCENARIO-03 pinned, now generalized to skip any
+// number of leading "h" characters, not just one; "--=x"/"---x" are
+// pflag's own bad-flag-syntax case.
+//
+// Mutation-verified: reverting isFlagLike's "arg != \"--\"" exclusion reds
+// the root/new/help "--" rows above (each starts reporting a flag-shaped
+// message instead of falling through to the plain unknown-command
+// wording); reverting unknownFlagMessage's leading-'h' skip reds the "-hx"
+// rows (each reports "in -hx" instead of "in -x").
+func Test_handles_flag_shaped_and_terminator_tokens_at_disabled_parsing_sites(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantStderr string
+		wantHelp   bool
+	}{
+		{
+			name:       "root, a bare -- is not flag-like",
+			args:       []string{"--"},
+			wantStderr: `brief: unknown command "--"; expected one of: new, start, finish, status, check`,
+		},
+		{
+			name:       "root, --help given a value",
+			args:       []string{"--help=true"},
+			wantStderr: "brief: '--help' takes no value; run 'brief --help'",
+		},
+		{
+			name:       "root, -h given a value",
+			args:       []string{"-h=x"},
+			wantStderr: "brief: '-h' takes no value; run 'brief --help'",
+		},
+		{
+			name:       "root, -hx is an unknown shorthand after a leading defined -h",
+			args:       []string{"-hx"},
+			wantStderr: "brief: unknown shorthand flag: 'x' in -x; run 'brief <command> --help'",
+		},
+		{
+			name:     "root, -hh is a cluster of only the defined -h",
+			args:     []string{"-hh"},
+			wantHelp: true,
+		},
+		{
+			name:       "root, --=x is bad flag syntax",
+			args:       []string{"--=x"},
+			wantStderr: "brief: bad flag syntax: --=x; run 'brief <command> --help'",
+		},
+		{
+			name:       "root, ---x is bad flag syntax",
+			args:       []string{"---x"},
+			wantStderr: "brief: bad flag syntax: ---x; run 'brief <command> --help'",
+		},
+		{
+			name:       "new, a bare -- is not flag-like",
+			args:       []string{"new", "--"},
+			wantStderr: `brief new: unknown type "--"; expected one of: feature, step`,
+		},
+		{
+			name:       "new, --help given a value",
+			args:       []string{"new", "--help=true"},
+			wantStderr: "brief new: '--help' takes no value; run 'brief new --help'",
+		},
+		{
+			name:       "new, -hx is an unknown shorthand after a leading defined -h",
+			args:       []string{"new", "-hx"},
+			wantStderr: "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'",
+		},
+		{
+			name:       "help, a bare -- is not flag-like",
+			args:       []string{"help", "--"},
+			wantStderr: `brief help: unknown command "--"; expected one of: new, start, finish, status, check`,
+		},
+		{
+			name:       "help, --help given a value",
+			args:       []string{"help", "--help=true"},
+			wantStderr: "brief help: '--help' takes no value; run 'brief help <command>'",
+		},
+		{
+			name:       "help, -hx is an unknown shorthand after a leading defined -h",
+			args:       []string{"help", "-hx"},
+			wantStderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tt.args, nil, &stdout, &stderr)
+
+			if tt.wantHelp {
+				require.NoError(t, err)
+				assert.Equal(t, 0, cli.ExitCode(err))
+				assert.Empty(t, stderr.String())
+				assert.Contains(t, stdout.String(), "brief manages feature specifications as files in your repository.")
+
+				return
+			}
+
+			require.ErrorIs(t, err, cli.ErrUsage)
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, tt.wantStderr, oneLine(t, &stderr))
+		})
+	}
 }
 
 // Test_accepts_the_double_dash_help_flag_on_every_leaf is the --help shape

@@ -492,17 +492,6 @@ func Test_names_the_state_path_when_its_fence_is_unterminated(t *testing.T) {
 	assert.Contains(t, line, statePath+":3")
 }
 
-func Test_prints_the_finish_usage_for_help(t *testing.T) {
-	wd := t.TempDir()
-	var stdout, stderr bytes.Buffer
-
-	err := cli.Run(t.Context(), wd, []string{"finish", "--help"}, nil, &stdout, &stderr)
-
-	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
-	assert.Contains(t, stdout.String(), "Closes step in feature: writes the body at --handoff to the step's own")
-}
-
 func Test_returns_an_error_when_the_handoff_path_is_unreadable(t *testing.T) {
 	wd := newFinishCLIFixture(t)
 	statePath := writeInput(t, "state.md", "")
