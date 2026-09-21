@@ -67,7 +67,7 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 			}
 		}
 
-		return out.refusal(err)
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
 	}
 
 	fmt.Fprintf(out.stderr, "brief finish: %s is done\n", step)

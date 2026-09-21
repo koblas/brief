@@ -60,7 +60,7 @@ func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, out r
 
 	brief, err := srv.Start(ctx, feature)
 	if err != nil {
-		return out.refusal(err)
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
 	}
 
 	// In --json mode a successful run writes nothing to stderr (R1): every

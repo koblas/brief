@@ -21,10 +21,10 @@ const schemaVersion = 1
 const errorKindUsage = "usage"
 
 // errorKindRefusal is the "error.kind" value for a refusal's JSON
-// document: a *config.InvalidConfigError, a *scaffold.RefusalError, a
-// *assemble.RefusalError, or the bare assemble.ErrNoSuchFeature sentinel —
-// every case classifyRefusal recognizes by type or by sentinel, always
-// exit code 1 (R3).
+// document: a *config.InvalidConfigError, an enriched not-found
+// (*unknownFeatureError), a *scaffold.RefusalError, or a
+// *assemble.RefusalError — every case classifyRefusal recognizes by type,
+// always exit code 1 (R3).
 const errorKindRefusal = "refusal"
 
 // errorKindFailure is the "error.kind" value for every other non-nil error

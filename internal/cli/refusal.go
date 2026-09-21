@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -27,9 +28,23 @@ func flattenOneLine(s string) string {
 // bare not-found or a generic failure.
 const noFilesChangedTail = " (no files changed)"
 
+// refusalTextLayout selects which of refusalClassification.textLine's two
+// shapes a classification renders through: layoutPathProblem (the default,
+// zero value) for every ordinary refusal, layoutProblemInPath for
+// *unknownFeatureError, whose ruled copy puts the problem before the path
+// it names rather than after it.
+type refusalTextLayout int
+
+const (
+	// layoutPathProblem renders "<path>[:<line>]: <problem>; <fix><tail>".
+	layoutPathProblem refusalTextLayout = iota
+	// layoutProblemInPath renders "<problem> in <path>; <fix><tail>".
+	layoutProblemInPath
+)
+
 // refusalClassification is classifyRefusal's pure output: the R14a
-// text-mode line's own ingredients (path, line, problem, fix, tail) and
-// R3's error.kind, both built from err alone with no knowledge of the
+// text-mode line's own ingredients (path, line, problem, fix, tail, layout)
+// and R3's error.kind, both built from err alone with no knowledge of the
 // failing command or the working directory a relative path is resolved
 // against — (reporter).refusal supplies both.
 type refusalClassification struct {
@@ -37,34 +52,37 @@ type refusalClassification struct {
 	kind string
 	// path is the refusal's own path exactly as the error carries it —
 	// relative, absolute, or "<stdin>" — used verbatim in the text-mode
-	// line. It is "" for a bare not-found or a generic failure, neither of
-	// which names a path in either mode.
+	// line. It is "" for a generic failure, which names no path in either
+	// mode.
 	path string
 	// line is the refusal's own 1-based line, 0 when it names no specific
 	// line within path.
 	line int
 	// problem is always filled: the refusal's own Problem/Detail, or the
-	// flattened err.Error() for a bare not-found or a generic failure.
+	// flattened err.Error() for a generic failure.
 	problem string
-	// fix is the refusal's own Fix, or the bare not-found's constant fix.
-	// It is "" for a generic failure — errorKindFailure — whose fix
-	// depends on the failing command, filled in by (reporter).refusal.
+	// fix is the refusal's own Fix. It is "" for a generic failure —
+	// errorKindFailure — whose fix depends on the failing command, filled
+	// in by (reporter).refusal.
 	fix string
 	// tail is noFilesChangedTail for a write refusal, "" otherwise.
 	tail string
+	// layout selects textLine's rendering shape; layoutPathProblem (the
+	// zero value) unless set otherwise.
+	layout refusalTextLayout
 }
 
 // classifyRefusal renders err into the R14a text-mode line's ingredients
-// and R3's error.kind. The three typed refusals are checked first, the
-// bare assemble.ErrNoSuchFeature sentinel after them, and anything else
-// falls to the generic errorKindFailure case: assemble.Start and
-// assemble.Check return ErrNoSuchFeature bare, never wrapped in a
-// *assemble.RefusalError, so a sentinel check ahead of, or instead of, the
-// typed checks would never fire for them; running it after guarantees a
-// *scaffold.RefusalError (which always wraps scaffold's own, distinct
-// ErrNoSuchFeature sentinel) is classified by the scaffold.RefusalError
-// check first, keeping its path, problem and fix rather than being
-// stripped to the bare not-found's path-less shape.
+// and R3's error.kind. *unknownFeatureError is checked first, ahead of the
+// three typed refusals: scaffold's own not-found (noSuchFeatureRefusal) is
+// itself a *scaffold.RefusalError wrapping scaffold.ErrNoSuchFeature, so a
+// *unknownFeatureError built around one — enrichUnknownFeature wraps the
+// original error unchanged — would be silently reclassified by the
+// scaffold.RefusalError branch below it if checked in the other order,
+// keeping its old path-less copy for "new step"/"finish" while "start"
+// (whose not-found is the bare assemble.ErrNoSuchFeature sentinel, never a
+// *scaffold.RefusalError) looked fixed. Anything else falls to the generic
+// errorKindFailure case.
 func classifyRefusal(err error) refusalClassification {
 	if invalidCfg, ok := errors.AsType[*config.InvalidConfigError](err); ok {
 		return refusalClassification{
@@ -73,6 +91,22 @@ func classifyRefusal(err error) refusalClassification {
 			problem: flattenOneLine(invalidCfg.Err.Error()),
 			fix:     "fix it or remove it to fall back to the shipped defaults",
 			tail:    noFilesChangedTail,
+		}
+	}
+
+	if unknown, ok := errors.AsType[*unknownFeatureError](err); ok {
+		tail := ""
+		if errors.Is(unknown.err, scaffold.ErrNoSuchFeature) {
+			tail = noFilesChangedTail
+		}
+
+		return refusalClassification{
+			kind:    errorKindRefusal,
+			layout:  layoutProblemInPath,
+			path:    unknown.dir,
+			problem: fmt.Sprintf("no feature %q", unknown.name),
+			fix:     knownFeaturesFix(unknown.known, unknown.name),
+			tail:    tail,
 		}
 	}
 
@@ -97,17 +131,74 @@ func classifyRefusal(err error) refusalClassification {
 		}
 	}
 
-	if errors.Is(err, assemble.ErrNoSuchFeature) {
-		return refusalClassification{
-			kind:    errorKindRefusal,
-			problem: flattenOneLine(err.Error()),
-			fix:     "run 'brief status' to list the known features",
-		}
-	}
-
 	return refusalClassification{
 		kind:    errorKindFailure,
 		problem: flattenOneLine(err.Error()),
+	}
+}
+
+// unknownFeatureError enriches a not-found sentinel — scaffold.ErrNoSuchFeature
+// or assemble.ErrNoSuchFeature, bare or wrapped — with the feature
+// directory's own known list, so classifyRefusal's copy can name what does
+// exist rather than only what doesn't. name is the feature argument as
+// given (never resolved against dir), dir is the absolute feature
+// directory, known is assemble.Features' own result (fs.ReadDir order,
+// real directories only), and err is the original error unchanged, so
+// Unwrap keeps errors.Is(scaffold.ErrNoSuchFeature) /
+// errors.Is(assemble.ErrNoSuchFeature) reachable through this wrapper.
+type unknownFeatureError struct {
+	name  string
+	dir   string
+	known []string
+	err   error
+}
+
+// Error renders "no feature "<name>" in <dir>" — dir absolute here; cli's
+// text-mode line relativizes it through displayPath at render time.
+func (e *unknownFeatureError) Error() string {
+	return fmt.Sprintf("no feature %q in %s", e.name, e.dir)
+}
+
+// Unwrap exposes err so errors.Is/errors.As reach the sentinel this error
+// wraps.
+func (e *unknownFeatureError) Unwrap() error {
+	return e.err
+}
+
+// knownFeaturesFix renders unknownFeatureError's "fix" segment: the known
+// list joined by ", " when non-empty, else the suggestion to create name.
+func knownFeaturesFix(known []string, name string) string {
+	if len(known) == 0 {
+		return fmt.Sprintf("known: none; run 'brief new feature %s' to create it", name)
+	}
+
+	return "known: " + strings.Join(known, ", ")
+}
+
+// enrichUnknownFeature recognizes a scaffold.ErrNoSuchFeature or
+// assemble.ErrNoSuchFeature carried anywhere in err's chain, for feature
+// under the configuration cfg resolves root against, and returns a
+// *unknownFeatureError naming every known feature (assemble.Features,
+// fs.ReadDir order). A failure listing the feature directory itself is
+// returned in its place — never rendered as "known: none". Any other err,
+// including nil, passes through unchanged.
+func enrichUnknownFeature(ctx context.Context, cfg config.Config, root, feature string, err error) error {
+	if !errors.Is(err, scaffold.ErrNoSuchFeature) && !errors.Is(err, assemble.ErrNoSuchFeature) {
+		return err
+	}
+
+	srv := assemble.NewServer(cfg, root)
+
+	known, listErr := srv.Features(ctx)
+	if listErr != nil {
+		return fmt.Errorf("cli: %w", listErr)
+	}
+
+	return &unknownFeatureError{
+		name:  feature,
+		dir:   filepath.Join(root, cfg.FeatureDirectory),
+		known: known,
+		err:   err,
 	}
 }
 
@@ -135,10 +226,12 @@ func displayPath(wd, p string) string {
 }
 
 // textLine renders c's R14a text-mode line, minus the "brief <command>: "
-// prefix: c.problem alone when c.path is "" — a bare not-found or a
-// generic failure names no path in text and never appends c.fix there
-// either — else "<path>[:<line>]: <problem>; <fix>[<tail>]", with c.path
-// rendered relative to wd through displayPath.
+// prefix: c.problem alone when c.path is "" — a generic failure names no
+// path in text and never appends c.fix there either — else one of two
+// shapes selected by c.layout, both with c.path rendered relative to wd
+// through displayPath: layoutPathProblem's default
+// "<path>[:<line>]: <problem>; <fix>[<tail>]", or layoutProblemInPath's
+// "<problem> in <path>; <fix>[<tail>]".
 func (c refusalClassification) textLine(wd string) string {
 	if c.path == "" {
 		return c.problem
@@ -149,7 +242,11 @@ func (c refusalClassification) textLine(wd string) string {
 		location = fmt.Sprintf("%s:%d", location, c.line)
 	}
 
-	return fmt.Sprintf("%s: %s; %s%s", location, c.problem, c.fix, c.tail)
+	if c.layout == layoutPathProblem {
+		return fmt.Sprintf("%s: %s; %s%s", location, c.problem, c.fix, c.tail)
+	}
+
+	return fmt.Sprintf("%s in %s; %s%s", c.problem, location, c.fix, c.tail)
 }
 
 // jsonPath renders c.path for --json's "path" field: null for "" or

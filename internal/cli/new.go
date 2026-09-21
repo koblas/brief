@@ -130,7 +130,7 @@ func runNewStep(ctx context.Context, wd string, rest []string, out reporter) err
 
 	path, err := srv.NewStep(ctx, feature)
 	if err != nil {
-		return out.refusal(err)
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
 	}
 
 	rel, err := filepath.Rel(wd, path)

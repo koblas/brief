@@ -150,8 +150,8 @@ type refusalMatrixRow struct {
 
 // refusalMatrixRows is Test_json_mode_refusal_matrix's own test list: one
 // representative failure per command, and every classifyRefusal shape —
-// config, scaffold, assemble, the bare not-found sentinel, and a generic
-// failure.
+// config, an enriched not-found (*unknownFeatureError), scaffold, assemble,
+// and a generic failure.
 func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 	return []refusalMatrixRow{
 		{
@@ -179,12 +179,16 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 			setup: func(t *testing.T) refusalCase {
 				t.Helper()
 
+				wd := t.TempDir()
+				featureDir := filepath.Join(wd, "docs", "specifications")
+
 				return refusalCase{
-					wd:       t.TempDir(),
+					wd:       wd,
 					args:     []string{"start", "--json", "ghost"},
 					textArgs: []string{"start", "ghost"},
 					newStdin: noStdin,
 					wantKind: "refusal",
+					wantPath: &featureDir,
 				}
 			},
 			command: "start",
@@ -234,12 +238,16 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 			setup: func(t *testing.T) refusalCase {
 				t.Helper()
 
+				wd := t.TempDir()
+				featureDir := filepath.Join(wd, "docs", "specifications")
+
 				return refusalCase{
-					wd:       t.TempDir(),
+					wd:       wd,
 					args:     []string{"check", "--json", "ghost"},
 					textArgs: []string{"check", "ghost"},
 					newStdin: noStdin,
 					wantKind: "refusal",
+					wantPath: &featureDir,
 				}
 			},
 			command: "check",
@@ -366,7 +374,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 				t.Helper()
 
 				wd := t.TempDir()
-				featurePath := filepath.Join(wd, "docs", "specifications", "ghost")
+				featureDir := filepath.Join(wd, "docs", "specifications")
 
 				return refusalCase{
 					wd:       wd,
@@ -374,7 +382,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					textArgs: []string{"new", "step", "ghost"},
 					newStdin: noStdin,
 					wantKind: "refusal",
-					wantPath: &featurePath,
+					wantPath: &featureDir,
 				}
 			},
 			command:      "new step",

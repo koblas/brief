@@ -58,7 +58,7 @@ func runCheck(ctx context.Context, wd string, rest []string, out reporter) error
 
 	findings, err := srv.Check(ctx, feature)
 	if err != nil {
-		return out.refusal(err)
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
 	}
 
 	if len(findings) == 0 {

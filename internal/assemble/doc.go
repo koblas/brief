@@ -6,8 +6,9 @@
 // total, the next open step, and how many steps are blocked on an
 // unfinished dependency.
 //
-// Start and Status are the entry points. Start refuses a feature that does
-// not exist with ErrNoSuchFeature. It refuses, with a *RefusalError
+// Start, Status and Features are the entry points. Start refuses a
+// feature that does not exist with ErrNoSuchFeature. It refuses, with a
+// *RefusalError
 // wrapping ErrMalformedFeature, a feature whose structure it cannot
 // assemble around rather than return a brief that silently omits or
 // misreports part of it: a specification that is missing, unreadable,
@@ -34,6 +35,10 @@
 // step files through readSteps, which stays intolerant of a parse failure
 // either way — the difference is which caller turns that failure into a
 // refusal (Start) and which caller catches it and marks a row (Status).
+//
+// Features lists the names of a repository's known feature directories,
+// the layout-reading step cli's not-found copy builds its "known: …"
+// suggestion from — cli never lists a directory itself.
 //
 // Check is the backstop R18 assigns the read path: it reports every fault
 // in a feature's on-disk layout that scaffold.Finish would now refuse to
