@@ -20,6 +20,18 @@ const schemaVersion = 1
 // exit code 2 (R3).
 const errorKindUsage = "usage"
 
+// errorKindRefusal is the "error.kind" value for a refusal's JSON
+// document: a *config.InvalidConfigError, a *scaffold.RefusalError, a
+// *assemble.RefusalError, or the bare assemble.ErrNoSuchFeature sentinel —
+// every case classifyRefusal recognizes by type or by sentinel, always
+// exit code 1 (R3).
+const errorKindRefusal = "refusal"
+
+// errorKindFailure is the "error.kind" value for every other non-nil error
+// a command returns: an infrastructure fault or anything else
+// classifyRefusal does not recognize, always exit code 1 (R3).
+const errorKindFailure = "failure"
+
 // jsonHeader is embedded, first, in every --json document: schema,
 // command, ok and exit_code precede any command-specific field, with no
 // "data" wrapper (R2). command is the failing or succeeding command's own
@@ -45,9 +57,11 @@ func newJSONHeader(command string, exitCode int) jsonHeader {
 // jsonError is the "error" member of a failing --json document (R3).
 // Every field is a pointer, or a plain string for one that is always
 // filled, so an unused member marshals to null rather than being omitted:
-// path, line and problem stay null for every usage error this scenario
-// renders, and files_changed is null for a read command or a pointer to
-// false for a write one (filesChangedFor).
+// path, line and problem stay null for a usage error; a refusal or
+// failure (reporter.refusal) leaves problem always filled, path null only
+// for "<stdin>", a bare not-found or a generic failure, and line null
+// unless the refusal names a specific one. files_changed is null for a
+// read command or a pointer to false for a write one (filesChangedFor).
 type jsonError struct {
 	Kind         string  `json:"kind"`
 	Message      string  `json:"message"`
@@ -200,14 +214,16 @@ func jsonTakesNoValueMessage(cmd *cobra.Command) string {
 
 // reporter is the one per-Run output seam every command renders through:
 // stdout and stderr are Run's own writers, json is whether R5's --json
-// detection turned JSON mode on for this run, and cmd is the command
-// currently rendering, set by forCommand. Every RunE closure and the root
-// FlagErrorFunc narrow the base reporter built in run with forCommand
-// before rendering anything.
+// detection turned JSON mode on for this run, wd is Run's own working
+// directory (R6: the base every relative refusal path is absolutized
+// against), and cmd is the command currently rendering, set by forCommand.
+// Every RunE closure and the root FlagErrorFunc narrow the base reporter
+// built in run with forCommand before rendering anything.
 type reporter struct {
 	stdout io.Writer
 	stderr io.Writer
 	json   bool
+	wd     string
 	cmd    *cobra.Command
 }
 

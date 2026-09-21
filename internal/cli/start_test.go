@@ -642,11 +642,12 @@ func Test_start_json_keeps_stdout_parseable_when_a_convention_is_missing(t *test
 	assert.Contains(t, got.Shortfalls[0].Path, "SCENARIO-01.md")
 }
 
-// Test_start_json_writes_no_bytes_to_stdout_when_it_refuses asserts a
-// refusal under --json is still a plain R14a stderr line at exit 1, with
-// zero stdout bytes and no JSON envelope: runStart calls Start before it
-// renders anything, so a refusal never reaches RenderJSON.
-func Test_start_json_writes_no_bytes_to_stdout_when_it_refuses(t *testing.T) {
+// Test_start_json_writes_the_error_document_when_it_refuses asserts a
+// refusal under --json renders R3's error document on stdout, empty
+// stderr, exit 1 — not R14a's plain stderr line: runStart calls Start
+// before it renders anything, so its refusal reaches out.refusal the same
+// way every other command's does (SCENARIO-02).
+func Test_start_json_writes_the_error_document_when_it_refuses(t *testing.T) {
 	t.Run("malformed feature", func(t *testing.T) {
 		wd := newStartFixture(t, "open")
 		featureDir := filepath.Join(wd, "docs", "specifications", "demo")
@@ -657,10 +658,11 @@ func Test_start_json_writes_no_bytes_to_stdout_when_it_refuses(t *testing.T) {
 		err := cli.Run(t.Context(), wd, []string{"start", "--json", "demo"}, nil, &stdout, &stderr)
 
 		assert.Equal(t, 1, cli.ExitCode(err))
-		assert.Zero(t, stdout.Len())
-		lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
-		require.Len(t, lines, 1)
-		assert.NotContains(t, lines[0], "(no files changed)")
+		assert.Empty(t, stderr.String())
+
+		got := decodeErrorDocument(t, stdout.Bytes(), "start")
+		assert.Equal(t, "refusal", got.Kind)
+		assert.NotContains(t, got.Message, "(no files changed)")
 	})
 
 	t.Run("unknown feature", func(t *testing.T) {
@@ -670,8 +672,11 @@ func Test_start_json_writes_no_bytes_to_stdout_when_it_refuses(t *testing.T) {
 		err := cli.Run(t.Context(), wd, []string{"start", "--json", "ghost"}, nil, &stdout, &stderr)
 
 		assert.Equal(t, 1, cli.ExitCode(err))
-		assert.Zero(t, stdout.Len())
-		assert.NotEmpty(t, stderr.String())
+		assert.Empty(t, stderr.String())
+
+		got := decodeErrorDocument(t, stdout.Bytes(), "start")
+		assert.Equal(t, "refusal", got.Kind)
+		assert.NotEmpty(t, got.Message)
 	})
 }
 

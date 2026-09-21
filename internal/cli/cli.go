@@ -45,8 +45,8 @@ const rootShort = "brief manages feature specifications as files in your reposit
 // that configuration is relative to: source's directory when a config file
 // was found, wd itself otherwise. Every command that touches configuration
 // or the repository tree shares this pattern; the caller still renders its
-// own renderRefusal(stderr, "<command>", err) on a non-nil error, since the
-// command name in that refusal differs per caller.
+// own out.refusal(err) on a non-nil error, since the command that refusal
+// renders against differs per caller.
 func resolveRoot(wd string) (config.Config, string, error) {
 	cfg, source, err := config.Resolve(wd)
 	if err != nil {
@@ -228,7 +228,7 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) error {
 	strippedArgs, jsonMode, hasJSONValue := scanJSONFlag(args)
 
-	out := reporter{stdout: stdout, stderr: stderr, json: jsonMode}
+	out := reporter{stdout: stdout, stderr: stderr, json: jsonMode, wd: wd}
 
 	// cobra's RunE has no context.Context parameter; every closure below
 	// reads it via cmd.Context(), which ExecuteContext(ctx) sets on the

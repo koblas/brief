@@ -44,14 +44,14 @@ func runStart(ctx context.Context, wd string, rest []string, jsonOut bool, out r
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(out.stderr, "start", err)
+		return out.refusal(err)
 	}
 
 	srv := assemble.NewServer(cfg, root)
 
 	brief, err := srv.Start(ctx, feature)
 	if err != nil {
-		return renderRefusal(out.stderr, "start", err)
+		return out.refusal(err)
 	}
 
 	for _, s := range brief.Shortfalls {

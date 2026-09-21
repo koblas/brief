@@ -81,7 +81,7 @@ func runNewFeature(ctx context.Context, wd string, rest []string, out reporter) 
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(out.stderr, "new feature", err)
+		return out.refusal(err)
 	}
 
 	srv := scaffold.NewServer(cfg, root)
@@ -96,7 +96,7 @@ func runNewFeature(ctx context.Context, wd string, rest []string, out reporter) 
 			return out.usageError(fmt.Sprintf("brief new feature: name %q contains whitespace; run '%s' with a name containing no whitespace", name, newFeatureInvocation))
 		}
 
-		return renderRefusal(out.stderr, "new feature", err)
+		return out.refusal(err)
 	}
 
 	rel, err := filepath.Rel(wd, path)
@@ -123,14 +123,14 @@ func runNewStep(ctx context.Context, wd string, rest []string, out reporter) err
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(out.stderr, "new step", err)
+		return out.refusal(err)
 	}
 
 	srv := scaffold.NewServer(cfg, root)
 
 	path, err := srv.NewStep(ctx, feature)
 	if err != nil {
-		return renderRefusal(out.stderr, "new step", err)
+		return out.refusal(err)
 	}
 
 	rel, err := filepath.Rel(wd, path)

@@ -30,14 +30,14 @@ func runStatus(ctx context.Context, wd string, rest []string, out reporter) erro
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(out.stderr, "status", err)
+		return out.refusal(err)
 	}
 
 	srv := assemble.NewServer(cfg, root)
 
 	rows, err := srv.Status(ctx)
 	if err != nil {
-		return renderRefusal(out.stderr, "status", err)
+		return out.refusal(err)
 	}
 
 	if len(rows) == 0 {
@@ -48,7 +48,7 @@ func runStatus(ctx context.Context, wd string, rest []string, out reporter) erro
 
 	// A malformed feature always yields a row, never dropped, so this loop
 	// and the len(rows) == 0 notice above are mutually exclusive by
-	// construction. renderRefusal is not used here: it returns err for
+	// construction. out.refusal is not used here: it returns err for
 	// ExitCode to classify, and a malformed feature must not drive a
 	// non-zero exit from status — that failing role belongs to check.
 	for _, row := range rows {

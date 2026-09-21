@@ -3,7 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/koblas/brief/internal/assemble"
@@ -19,62 +19,180 @@ func flattenOneLine(s string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
 }
 
-// renderRefusal writes err's one-line refusal, prefixed by the failing
-// command, to stderr, and returns err unchanged for ExitCode to classify.
-//
-// A *config.InvalidConfigError names the offending path and tells the user
-// this refusal changed nothing on disk:
-//
-//	brief <command>: <path>: <problem>; fix it or remove it to fall back to the shipped defaults (no files changed)
-//
-// A *scaffold.RefusalError renders the same "nothing changed" promise
-// around its own path, problem and fix, naming a line within the path
-// when the refusal has one ("<path>[:<line>]"):
-//
-//	brief <command>: <path>[:<line>]: <problem>; <fix> (no files changed)
-//
-// A *assemble.RefusalError is the read-side counterpart: assemble.Start
-// never writes, so its refusals carry no "nothing changed" promise to make
-// and drop the tail entirely:
-//
-//	brief <command>: <path>[:<line>]: <detail>; <fix>
-//
-// Every other error renders as one flattened line:
-//
-//	brief <command>: <cause>
-func renderRefusal(stderr io.Writer, cmd string, err error) error {
-	if invalidCfg, ok := errors.AsType[*config.InvalidConfigError](err); ok {
-		fmt.Fprintf(stderr, "brief %s: %s: %s; fix it or remove it to fall back to the shipped defaults (no files changed)\n",
-			cmd, invalidCfg.Path, flattenOneLine(invalidCfg.Err.Error()))
+// noFilesChangedTail is the "nothing changed on disk" promise appended to
+// a write command's refusal: a *config.InvalidConfigError or a
+// *scaffold.RefusalError, both of which concern a write that never
+// happened. A *assemble.RefusalError carries no such promise — assemble
+// never writes, so there is nothing for it to promise — and neither does a
+// bare not-found or a generic failure.
+const noFilesChangedTail = " (no files changed)"
 
-		return err
+// refusalClassification is classifyRefusal's pure output: the R14a
+// text-mode line's own ingredients (path, line, problem, fix, tail) and
+// R3's error.kind, both built from err alone with no knowledge of the
+// failing command or the working directory a relative path is resolved
+// against — (reporter).refusal supplies both.
+type refusalClassification struct {
+	// kind is errorKindRefusal or errorKindFailure.
+	kind string
+	// path is the refusal's own path exactly as the error carries it —
+	// relative, absolute, or "<stdin>" — used verbatim in the text-mode
+	// line. It is "" for a bare not-found or a generic failure, neither of
+	// which names a path in either mode.
+	path string
+	// line is the refusal's own 1-based line, 0 when it names no specific
+	// line within path.
+	line int
+	// problem is always filled: the refusal's own Problem/Detail, or the
+	// flattened err.Error() for a bare not-found or a generic failure.
+	problem string
+	// fix is the refusal's own Fix, or the bare not-found's constant fix.
+	// It is "" for a generic failure — errorKindFailure — whose fix
+	// depends on the failing command, filled in by (reporter).refusal.
+	fix string
+	// tail is noFilesChangedTail for a write refusal, "" otherwise.
+	tail string
+}
+
+// classifyRefusal renders err into the R14a text-mode line's ingredients
+// and R3's error.kind. The three typed refusals are checked first, the
+// bare assemble.ErrNoSuchFeature sentinel after them, and anything else
+// falls to the generic errorKindFailure case: assemble.Start and
+// assemble.Check return ErrNoSuchFeature bare, never wrapped in a
+// *assemble.RefusalError, so a sentinel check ahead of, or instead of, the
+// typed checks would never fire for them; running it after guarantees a
+// *scaffold.RefusalError (which always wraps scaffold's own, distinct
+// ErrNoSuchFeature sentinel) is classified by the scaffold.RefusalError
+// check first, keeping its path, problem and fix rather than being
+// stripped to the bare not-found's path-less shape.
+func classifyRefusal(err error) refusalClassification {
+	if invalidCfg, ok := errors.AsType[*config.InvalidConfigError](err); ok {
+		return refusalClassification{
+			kind:    errorKindRefusal,
+			path:    invalidCfg.Path,
+			problem: flattenOneLine(invalidCfg.Err.Error()),
+			fix:     "fix it or remove it to fall back to the shipped defaults",
+			tail:    noFilesChangedTail,
+		}
 	}
 
 	if refusal, ok := errors.AsType[*scaffold.RefusalError](err); ok {
-		path := refusal.Path
-		if refusal.Line > 0 {
-			path = fmt.Sprintf("%s:%d", refusal.Path, refusal.Line)
+		return refusalClassification{
+			kind:    errorKindRefusal,
+			path:    refusal.Path,
+			line:    refusal.Line,
+			problem: flattenOneLine(refusal.Problem),
+			fix:     flattenOneLine(refusal.Fix),
+			tail:    noFilesChangedTail,
 		}
-
-		fmt.Fprintf(stderr, "brief %s: %s: %s; %s (no files changed)\n",
-			cmd, path, flattenOneLine(refusal.Problem), flattenOneLine(refusal.Fix))
-
-		return err
 	}
 
 	if refusal, ok := errors.AsType[*assemble.RefusalError](err); ok {
-		path := refusal.Path
-		if refusal.Line > 0 {
-			path = fmt.Sprintf("%s:%d", refusal.Path, refusal.Line)
+		return refusalClassification{
+			kind:    errorKindRefusal,
+			path:    refusal.Path,
+			line:    refusal.Line,
+			problem: flattenOneLine(refusal.Detail),
+			fix:     flattenOneLine(refusal.Fix),
+		}
+	}
+
+	if errors.Is(err, assemble.ErrNoSuchFeature) {
+		return refusalClassification{
+			kind:    errorKindRefusal,
+			problem: flattenOneLine(err.Error()),
+			fix:     "run 'brief status' to list the known features",
+		}
+	}
+
+	return refusalClassification{
+		kind:    errorKindFailure,
+		problem: flattenOneLine(err.Error()),
+	}
+}
+
+// textLine renders c's R14a text-mode line, minus the "brief <command>: "
+// prefix: c.problem alone when c.path is "" — a bare not-found or a
+// generic failure names no path in text and never appends c.fix there
+// either — else "<path>[:<line>]: <problem>; <fix>[<tail>]".
+func (c refusalClassification) textLine() string {
+	if c.path == "" {
+		return c.problem
+	}
+
+	location := c.path
+	if c.line > 0 {
+		location = fmt.Sprintf("%s:%d", c.path, c.line)
+	}
+
+	return fmt.Sprintf("%s: %s; %s%s", location, c.problem, c.fix, c.tail)
+}
+
+// jsonPath renders c.path for --json's "path" field: null for "" or
+// "<stdin>" (R6 never names a placeholder or piped source as a real
+// path), else c.path joined onto wd when relative, unchanged when already
+// absolute.
+func (c refusalClassification) jsonPath(wd string) *string {
+	if c.path == "" || c.path == "<stdin>" {
+		return nil
+	}
+
+	path := c.path
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(wd, path)
+	}
+
+	return &path
+}
+
+// jsonLine renders c.line for --json's "line" field: null when c.line is
+// not a positive 1-based line number.
+func (c refusalClassification) jsonLine() *int {
+	if c.line <= 0 {
+		return nil
+	}
+
+	line := c.line
+
+	return &line
+}
+
+// refusal renders err — a refusal that changed nothing on disk, or any
+// other non-nil error a command returns — as R14a's one-line text-mode
+// message on stderr, or R3's error document on stdout under --json, and
+// returns err unchanged for ExitCode to classify. path absolutizes against
+// r.wd (R6); a JSON document's "message" is always the same text-mode line
+// R14a would have printed, byte for byte.
+func (r reporter) refusal(err error) error {
+	c := classifyRefusal(err)
+	command := commandName(r.cmd)
+
+	if r.json {
+		fix := c.fix
+		if c.kind == errorKindFailure {
+			fix = fmt.Sprintf("resolve the problem, then run '%s' again", usageHint(r.cmd))
 		}
 
-		fmt.Fprintf(stderr, "brief %s: %s: %s; %s\n",
-			cmd, path, flattenOneLine(refusal.Detail), flattenOneLine(refusal.Fix))
+		problem := c.problem
+		doc := errorDocument{
+			jsonHeader: newJSONHeader(command, ExitCode(err)),
+			Error: jsonError{
+				Kind:         c.kind,
+				Message:      fmt.Sprintf("brief %s: %s", command, c.textLine()),
+				Path:         c.jsonPath(r.wd),
+				Line:         c.jsonLine(),
+				Problem:      &problem,
+				Fix:          fix,
+				FilesChanged: filesChangedFor(command),
+			},
+		}
+
+		_ = writeJSONDocument(r.stdout, doc)
 
 		return err
 	}
 
-	fmt.Fprintf(stderr, "brief %s: %s\n", cmd, flattenOneLine(err.Error()))
+	fmt.Fprintf(r.stderr, "brief %s: %s\n", command, c.textLine())
 
 	return err
 }

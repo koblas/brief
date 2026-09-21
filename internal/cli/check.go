@@ -51,14 +51,14 @@ func runCheck(ctx context.Context, wd string, rest []string, out reporter) error
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(out.stderr, "check", err)
+		return out.refusal(err)
 	}
 
 	srv := assemble.NewServer(cfg, root)
 
 	findings, err := srv.Check(ctx, feature)
 	if err != nil {
-		return renderRefusal(out.stderr, "check", err)
+		return out.refusal(err)
 	}
 
 	if len(findings) == 0 {

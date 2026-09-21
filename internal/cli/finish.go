@@ -42,17 +42,17 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 
 	handoff, err := readSource(handoffPath, stdin)
 	if err != nil {
-		return renderRefusal(out.stderr, "finish", err)
+		return out.refusal(err)
 	}
 
 	state, err := readSource(statePath, stdin)
 	if err != nil {
-		return renderRefusal(out.stderr, "finish", err)
+		return out.refusal(err)
 	}
 
 	cfg, root, err := resolveRoot(wd)
 	if err != nil {
-		return renderRefusal(out.stderr, "finish", err)
+		return out.refusal(err)
 	}
 
 	srv := scaffold.NewServer(cfg, root)
@@ -67,7 +67,7 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 			}
 		}
 
-		return renderRefusal(out.stderr, "finish", err)
+		return out.refusal(err)
 	}
 
 	fmt.Fprintf(out.stderr, "brief finish: %s is done\n", step)
