@@ -497,9 +497,14 @@ func runRoot(cmd *cobra.Command, args []string, stdout, stderr io.Writer, readBu
 
 // versionLine renders "--version"'s stdout line, prefix included but the
 // trailing newline excluded: "brief " followed by readBuildInfo's
-// Main.Version verbatim (R1).
+// Main.Version verbatim (R1), or "brief (devel)" when readBuildInfo reports
+// ok=false or an empty Main.Version — asking for the version never fails
+// (R2).
 func versionLine(readBuildInfo func() (*debug.BuildInfo, bool)) string {
-	info, _ := readBuildInfo()
+	info, ok := readBuildInfo()
+	if !ok || info.Main.Version == "" {
+		return "brief (devel)"
+	}
 
 	return "brief " + info.Main.Version
 }

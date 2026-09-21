@@ -421,10 +421,10 @@ func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new(t *tes
 
 // Test_version_flag_through_Run_prints_one_brief_line_to_stdout is the only
 // test proving cli.Run wires debug.ReadBuildInfo into "--version" — see
-// version_internal_test.go for the exact-value pin against a fake reader.
-// It cannot assert a specific version text: a go test binary's own
-// debug.ReadBuildInfo reports Main.Version as "" or "(devel)" rather than
-// the module's real version, and that fallback text belongs to S02.
+// version_internal_test.go for the fallback and pass-through tables against
+// fake readers. A go test binary's own debug.ReadBuildInfo reports
+// Main.Version as "(devel)", so the exact stdout line is assertable here
+// too, by way of R2's fallback rather than R1's pass-through.
 func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -433,8 +433,7 @@ func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T)
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
-	line := oneLine(t, &stdout)
-	assert.True(t, strings.HasPrefix(line, "brief "), "line %q must start with %q", line, "brief ")
+	assert.Equal(t, "brief (devel)\n", stdout.String())
 }
 
 // Test_treats_a_bare_dash_as_a_plain_unknown_command is the control arm
