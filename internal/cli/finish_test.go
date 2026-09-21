@@ -48,6 +48,62 @@ func newFinishCLIFixture(t *testing.T) string {
 	return wd
 }
 
+// finishStep names one step file newFinishCLIFixtureWithSteps writes: id,
+// status ("open" or "done"), and dependsOn, its frontmatter depends-on
+// list rendered verbatim ("[]" or "[SCENARIO-01]").
+type finishStep struct {
+	id, status, dependsOn string
+}
+
+// newFinishCLIFixtureWithSteps writes one step file per spec for feature
+// "demo" under the default profile's layout, each with a fully ticked
+// checklist and a bare handoff anchor, and a progress entry in
+// specification.md for every one, and returns the working directory Run
+// should be called with. Unlike newFinishCLIFixture's single step, this
+// lets a test finish one step while others stay open, to exercise the
+// next-open-step rule.
+func newFinishCLIFixtureWithSteps(t *testing.T, specs ...finishStep) string {
+	t.Helper()
+
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	var progress strings.Builder
+
+	for _, s := range specs {
+		step := "---\n" +
+			"id: " + s.id + "\n" +
+			"status: " + s.status + "\n" +
+			"depends-on: " + s.dependsOn + "\n" +
+			"---\n\n" +
+			"# " + s.id + " Demo step\n\n" +
+			"## Scenario\n\n" +
+			"the acceptance criteria\n\n" +
+			"## Implementation Plan\n\n" +
+			"- [x] do the thing\n"
+		require.NoError(t, os.WriteFile(filepath.Join(featureDir, s.id+".md"), []byte(step), 0o600))
+
+		mark := " "
+		if s.status == "done" {
+			mark = "x"
+		}
+
+		fmt.Fprintf(&progress, "- [%s] %s\n", mark, s.id)
+	}
+
+	state := "## Binding decisions\n\nsome decision\n\n" +
+		"## Left unbuilt\n\nsomething left\n\n" +
+		"## Traps\n\na trap\n\n" +
+		"## Open debts\n\na debt\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(state), 0o600))
+
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n" + progress.String()
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(spec), 0o600))
+
+	return wd
+}
+
 // writeInput writes contents to a fresh file under t.TempDir() and returns
 // its path.
 func writeInput(t *testing.T, name, contents string) string {
@@ -69,7 +125,7 @@ func Test_finishes_the_step_and_prints_nothing_to_stdout(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", stderr.String())
+	assert.Equal(t, wantFinishCompleteLine("demo", "SCENARIO-01"), stderr.String())
 }
 
 func Test_finishes_the_step_when_the_flags_precede_the_feature_and_step(t *testing.T) {
@@ -82,19 +138,30 @@ func Test_finishes_the_step_when_the_flags_precede_the_feature_and_step(t *testi
 
 	require.NoError(t, err)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", stderr.String())
+	assert.Equal(t, wantFinishCompleteLine("demo", "SCENARIO-01"), stderr.String())
 }
 
-// Test_finishing_an_already_finished_step_a_second_time_prints_the_same_line_and_succeeds
-// pins the user-visible contract of a no-op re-finish: exit 0, nothing on
-// stdout (reserved for R9 findings), the same state-describing stderr
-// line printed by a writing run. That indistinguishability is deliberate —
-// before the scaffold package's identity check existed, an overwriting
-// second finish also returned nil and printed this exact line, so this
-// test cannot redden under any of the identity check's conjuncts; it is
-// not the test that proves the no-op, only the one that proves the
-// no-op is invisible at the command surface.
-func Test_finishing_an_already_finished_step_a_second_time_prints_the_same_line_and_succeeds(t *testing.T) {
+// wantFinishCompleteLine renders the "wrote …; <feature> is complete"
+// success line newFinishCLIFixture's single-step tree always produces:
+// finishing its only step always leaves nothing else open. The paths are
+// relative to wd via displayPath, which every newFinishCLIFixture caller
+// builds identically regardless of wd's own value, so it takes no wd
+// argument.
+func wantFinishCompleteLine(feature, step string) string {
+	return fmt.Sprintf(
+		"brief finish: %s %s done; wrote %s, replaced %s; %s is complete\n",
+		feature, step,
+		filepath.Join("docs", "specifications", feature, step+"-HANDOFF.md"),
+		filepath.Join("docs", "specifications", feature, "STATE.md"),
+		feature)
+}
+
+// Test_finishing_an_already_finished_step_a_second_time_reports_the_no_op_and_succeeds
+// pins R11's user-visible contract: a second finish call with identical
+// --handoff/--state inputs writes nothing, exits 0, and reports the no-op
+// on stderr in a shape distinct from a writing finish's "done; wrote …"
+// line.
+func Test_finishing_an_already_finished_step_a_second_time_reports_the_no_op_and_succeeds(t *testing.T) {
 	wd := newFinishCLIFixture(t)
 	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
 	statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
@@ -109,7 +176,78 @@ func Test_finishing_an_already_finished_step_a_second_time_prints_the_same_line_
 
 	require.NoError(t, secondErr)
 	assert.Empty(t, secondStdout.String())
-	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", secondStderr.String())
+	assert.Equal(t, "brief finish: demo SCENARIO-01 already done with identical inputs; nothing written\n", secondStderr.String())
+}
+
+// Test_finish_names_the_next_open_step_and_its_start_command finishes
+// SCENARIO-01 while SCENARIO-02 is still open: the stderr line names it as
+// next, with the "run 'brief start demo'" hint.
+func Test_finish_names_the_next_open_step_and_its_start_command(t *testing.T) {
+	wd := newFinishCLIFixtureWithSteps(t,
+		finishStep{id: "SCENARIO-01", status: "open", dependsOn: "[]"},
+		finishStep{id: "SCENARIO-02", status: "open", dependsOn: "[]"},
+	)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	want := fmt.Sprintf(
+		"brief finish: demo SCENARIO-01 done; wrote %s, replaced %s; next: SCENARIO-02 — run 'brief start demo'\n",
+		filepath.Join("docs", "specifications", "demo", "SCENARIO-01-HANDOFF.md"),
+		filepath.Join("docs", "specifications", "demo", "STATE.md"))
+	assert.Equal(t, want, stderr.String())
+}
+
+// Test_finish_names_a_blocked_step_as_next finishes SCENARIO-01 while
+// SCENARIO-02 depends on SCENARIO-03, itself still open: SCENARIO-02 is
+// named next anyway — finish's next-step rule ignores depends-on the same
+// way brief start's own next-step rule does.
+func Test_finish_names_a_blocked_step_as_next(t *testing.T) {
+	wd := newFinishCLIFixtureWithSteps(t,
+		finishStep{id: "SCENARIO-01", status: "open", dependsOn: "[]"},
+		finishStep{id: "SCENARIO-02", status: "open", dependsOn: "[SCENARIO-03]"},
+		finishStep{id: "SCENARIO-03", status: "open", dependsOn: "[]"},
+	)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	want := fmt.Sprintf(
+		"brief finish: demo SCENARIO-01 done; wrote %s, replaced %s; next: SCENARIO-02 — run 'brief start demo'\n",
+		filepath.Join("docs", "specifications", "demo", "SCENARIO-01-HANDOFF.md"),
+		filepath.Join("docs", "specifications", "demo", "STATE.md"))
+	assert.Equal(t, want, stderr.String())
+}
+
+// Test_finish_names_a_lower_numbered_open_step_as_next finishes SCENARIO-02
+// while SCENARIO-01 is still open: SCENARIO-01 is named next, since it is
+// the lowest-numbered open step, not the step order finish was called in.
+func Test_finish_names_a_lower_numbered_open_step_as_next(t *testing.T) {
+	wd := newFinishCLIFixtureWithSteps(t,
+		finishStep{id: "SCENARIO-01", status: "open", dependsOn: "[]"},
+		finishStep{id: "SCENARIO-02", status: "open", dependsOn: "[]"},
+	)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\nnew decision\n\n## Left unbuilt\n\nnothing\n\n## Traps\n\nnone\n\n## Open debts\n\nnone\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-02", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	want := fmt.Sprintf(
+		"brief finish: demo SCENARIO-02 done; wrote %s, replaced %s; next: SCENARIO-01 — run 'brief start demo'\n",
+		filepath.Join("docs", "specifications", "demo", "SCENARIO-02-HANDOFF.md"),
+		filepath.Join("docs", "specifications", "demo", "STATE.md"))
+	assert.Equal(t, want, stderr.String())
 }
 
 // Test_finish_leaves_a_legacy_handoff_section_in_the_step_file_untouched
@@ -228,9 +366,10 @@ func Test_reads_the_state_body_from_stdin_when_the_path_is_a_dash(t *testing.T) 
 // that differs from the one recorded on disk is refused rather than
 // silently discarding the new handoff or overwriting the record. The
 // whole stderr string is asserted, not merely Contains, because today's
-// code also prints "brief finish: SCENARIO-01 is done" on exactly these
-// inputs — a Contains assertion here would still pass with the refusal
-// deleted.
+// code also prints a "brief finish: demo SCENARIO-01 done; …" line
+// sharing the same "brief finish: demo SCENARIO-01" prefix on exactly
+// these inputs — a Contains assertion checking only that prefix would
+// still pass with the refusal deleted.
 func Test_refuses_a_re_finish_whose_handoff_differs_from_the_recorded_one(t *testing.T) {
 	wd := newFinishCLIFixture(t)
 	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
@@ -551,7 +690,7 @@ func Test_preserves_a_CRLF_step_body_when_marking_it_done(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief finish: SCENARIO-01 is done\n", stderr.String())
+	assert.Equal(t, wantFinishCompleteLine("demo", "SCENARIO-01"), stderr.String())
 
 	got, readErr := os.ReadFile(filepath.Join(featureDir, "SCENARIO-01.md"))
 	require.NoError(t, readErr)

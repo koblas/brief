@@ -38,7 +38,7 @@ func Test_finish_refuses_a_step_whose_dependency_is_not_finished(t *testing.T) {
 	before := snapshotTree(t, fx.featureDir())
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrUnmetDependency)
 
@@ -72,7 +72,7 @@ func Test_finish_refuses_a_dependency_id_that_names_no_step_file(t *testing.T) {
 	before := snapshotTree(t, fx.featureDir())
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrUnmetDependency)
 
@@ -103,7 +103,7 @@ func Test_finish_refuses_a_dependency_whose_step_file_does_not_parse(t *testing.
 	require.NoError(t, os.WriteFile(fx.stepPath("STEP-01.md"), []byte("not frontmatter at all\n"), 0o600))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrUnmetDependency)
 	require.NotErrorIs(t, err, scaffold.ErrMalformedFeature)
@@ -124,7 +124,7 @@ func Test_finish_refuses_a_step_that_depends_on_itself(t *testing.T) {
 	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(selfDep), 0o600))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrUnmetDependency)
 
@@ -148,7 +148,7 @@ func Test_finish_accepts_a_step_with_no_declared_dependencies(t *testing.T) {
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	handoff := []byte("STEP-03 handoff\n")
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-03", handoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-03", handoff, fx.newState)
 	require.NoError(t, err)
 
 	stepGot, readErr := os.ReadFile(fx.stepPath("STEP-03.md"))
@@ -175,7 +175,7 @@ func Test_finish_accepts_a_step_whose_dependency_is_done(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
@@ -195,7 +195,7 @@ func Test_finish_reports_an_open_checklist_item_before_an_unfinished_dependency(
 	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(step02BodyWithOpenItem(fx.cfg)), 0o600))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 	assert.NotErrorIs(t, err, scaffold.ErrUnmetDependency)
@@ -214,7 +214,7 @@ func Test_finish_reports_an_unfinished_dependency_before_the_specification_read(
 	require.NoError(t, os.WriteFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile), []byte(spec), 0o600))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrUnmetDependency)
 	assert.NotErrorIs(t, err, scaffold.ErrNoProgressEntry)
@@ -232,7 +232,7 @@ func Test_re_finishing_a_done_step_whose_dependency_is_open_with_recorded_inputs
 	before := snapshotTree(t, fx.featureDir())
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
@@ -254,7 +254,7 @@ func Test_re_finishing_a_done_step_whose_dependency_is_open_with_divergent_input
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	divergentHandoff := []byte("DIFFERENT-HANDOFF-02\n")
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", divergentHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", divergentHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
 	assert.NotErrorIs(t, err, scaffold.ErrUnmetDependency)

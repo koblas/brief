@@ -80,7 +80,7 @@ func Test_check_drift_over_cap_handoff_matches_finishes_own_refusal(t *testing.T
 	cfg := config.Default()
 
 	scaffoldSrv := scaffold.NewServer(cfg, root)
-	finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte(overCap), []byte(conformingState))
+	_, finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte(overCap), []byte(conformingState))
 	require.ErrorIs(t, finishErr, scaffold.ErrOverCap)
 
 	var refusal *scaffold.RefusalError
@@ -104,7 +104,7 @@ func Test_check_drift_unterminated_state_fence_matches_finishes_own_refusal(t *t
 	cfg := config.Default()
 
 	scaffoldSrv := scaffold.NewServer(cfg, root)
-	finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte("a fine handoff\n"), []byte(stateWithUnterminatedFence))
+	_, finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte("a fine handoff\n"), []byte(stateWithUnterminatedFence))
 	require.ErrorIs(t, finishErr, scaffold.ErrUnterminatedFence)
 
 	var refusal *scaffold.RefusalError
@@ -128,7 +128,7 @@ func Test_check_drift_missing_state_heading_matches_finishes_own_refusal(t *test
 	cfg := config.Default()
 
 	scaffoldSrv := scaffold.NewServer(cfg, root)
-	finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte("a fine handoff\n"), []byte(stateMissingTraps))
+	_, finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte("a fine handoff\n"), []byte(stateMissingTraps))
 	require.ErrorIs(t, finishErr, scaffold.ErrMissingStateHeading)
 
 	var refusal *scaffold.RefusalError
@@ -153,7 +153,7 @@ func Test_check_drift_open_checklist_item_matches_finishes_own_refusal(t *testin
 	cfg := config.Default()
 
 	scaffoldSrv := scaffold.NewServer(cfg, openRoot)
-	finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte("a fine handoff\n"), []byte(conformingState))
+	_, finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte("a fine handoff\n"), []byte(conformingState))
 	require.ErrorIs(t, finishErr, scaffold.ErrOpenChecklistItem)
 
 	var refusal *scaffold.RefusalError

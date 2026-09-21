@@ -1,63 +1,61 @@
 # human-output — current state
 
-Scenarios complete: SCENARIO-01..10. Last updated by SCENARIO-10.
+Scenarios complete: SCENARIO-01..11. Last updated by SCENARIO-11.
 
 ## Binding decisions
 
 - JSON mode = exact `--json` token before the first `--`, **stripped** by `scanJSONFlag` in
   `run()` ahead of cobra parsing. `--json=<v>` is always a text usage error. (S01)
-- `reporter` (`internal/cli/json.go`) is the one per-Run output seam, narrowed per command
-  via `forCommand(cmd)`. `usageError`/`refusal(err)` render R3's error document; success
-  documents are a per-command `<cmd>Document` embedding `jsonHeader` first, by value.
-  `(reporter).headerFor(exitCode)` builds that header at any code; `successHeader()` is
-  `headerFor(0)`. `newJSONHeader` alone derives `ok` — a success-shaped doc at a non-zero
-  exit (check --json with an ERROR) must use `headerFor`, never `successHeader`. (S09)
+- `reporter` (`internal/cli/json.go`) is the one per-Run output seam. `usageError`/
+  `refusal(err)` render R3's error document; success documents are a per-command
+  `<cmd>Document` embedding `jsonHeader` first, by value. `successHeader()` is
+  `headerFor(0)`; a success doc at non-zero exit (check --json with an ERROR) uses
+  `headerFor` directly. (S09)
 - `files_changed` (`filesChangedFor`): `false` for `new`, `new feature`, `new step`,
   `finish`; `null` otherwise.
 - `classifyRefusal(err)` order: `*config.InvalidConfigError`, `*unknownFeatureError`,
   `*scaffold.RefusalError`, `*assemble.RefusalError`, generic `errorKindFailure` —
   `*unknownFeatureError` before `*scaffold.RefusalError` is load-bearing (mutation-verified).
 - **Paths: absolute in `assemble`/`scaffold`/JSON, relative in text (R6)** via
-  `displayPath(wd, p)` — every command, including `new.go`, goes through it; no private
-  `filepath.Rel` copies. `check`'s text path relativizes a **copy** of each finding's `Path`;
-  its JSON branch builds `checkDocument` from the un-relativized findings directly. (S04, S08,
-  S09, S10)
-- Every `run*` writes its full success payload (table/groups/stdout-path), then stderr,
-  always before returning; every `--json` branch runs **before** any success-path
-  stdout/stderr write (R1) — mutation-verified for `status`, `check`, `new feature`, `new
-  step`. Slices in JSON are never nil, so zero rows render `[]`, not `null`. (S06-S10)
-- `assemble.Finding`/`GroupByFeature`/`countFindings` carry `check`'s rule/severity/tally
-  contract (Check's own emission order, `InFlight` hard-coded per feature-level producer,
-  one shared ERROR/WARN tally). (S08, S09)
-- `scaffold.NewFeature`/`NewStep` return `Result{Feature, Step, Path, Created}` instead of a
-  bare path. `Step` is `""` for `NewFeature`; the id exists only inside scaffold
-  (`pattern.ID(next)`) — cli must never recompile `step-file-pattern` to recover it.
-  `Created` lists exactly the files each call **wrote into existence**, in write order —
-  `NewFeature`: `[spec, state]`; `NewStep`: `[step file]` only, never the specification it
-  merely modifies. `Path` is always the single path the text-mode contract prints. (S10)
-- `new feature`/`new step --json`: `newDocument{jsonHeader, Feature, Step *string, Path,
-  Created}` — `Step` `nil` for `new feature` (only `new.go` enforces this; `scaffold.Result`
-  carries no such guarantee), the id for `new step`; `path`/`created[]` are `res.Path`/
-  `res.Created` verbatim (already absolute). Text-mode success stderr (one line, after
-  stdout): `brief new feature: created <name> (<spec rel>, <state rel>); add a step with
-  'brief new step <name>'` / `brief new step: created <id> in <feature>; fill in its
-  acceptance criteria and checklist, then 'brief start <feature>'`. S14 must not describe
-  different copy. (S10)
+  `displayPath(wd, p)` — every command goes through it, no private `filepath.Rel` copies.
+  (S04, S08-S11)
+- Every `run*` writes its full success payload, then stderr, before returning; `--json`
+  always runs **before** any text-mode write (R1, mutation-verified). JSON slices are never
+  nil — `[]`, not `null`. (S06-S11)
+- `scaffold.NewFeature`/`NewStep` return `Result{Feature, Step, Path, Created}`; `scaffold.
+  Finish` returns a separate `FinishResult{Feature, Step, Changed, HandoffPath, StatePath,
+  Next}` — same "absolute, verbatim into JSON" convention, different type. (S10, S11)
+- Text-mode success stderr, one line after stdout: `new feature`/`new step` — "created <name>
+  (<spec rel>, <state rel>); add a step with…" / "created <id> in <feature>; fill in its
+  acceptance criteria…, then 'brief start <feature>'". `finish` — "<f> <s> done; wrote
+  <handoff rel>, replaced <state rel>; next: <id> — run 'brief start <f>'" / "…; <f> is
+  complete" / no-op: "<f> <s> already done with identical inputs; nothing written". (S10, S11)
+- `finish --json`: `{header, feature, step, changed, handoff_path, state_path, next}`.
+  `next` is `*string` — null, not omitted, even on the no-op, where the *text* line omits it
+  entirely; deliberate asymmetry, do not harmonize. `changed` false only on the no-op.
+  `state_path` is the replaced state file, never the `--state` input source. (S11)
+- `next` = lowest-numbered step file (`stepfile.Pattern.Number`) whose frontmatter status
+  isn't done, finished step counted done, **depends-on ignored** (a blocked step can be
+  next) — `assemble.Start`'s rule, duplicated in `scaffold.nextOpenStep` since assemble and
+  scaffold may not import each other. `Test_finish_next_agrees_with_start` (internal/cli)
+  pins the two in agreement. Computed in `Finish`'s validation phase, before any write, from
+  the `[]os.DirEntry` `findStepFile` already read — no second `ReadDir`, no error return.
+  (S11)
 - Golden policy: one exact-bytes golden pins key order (`assert.Equal`, never `JSONEq`);
-  matrix/decode tests check dynamic fields against a captured value, never a production
-  literal. A step id can't be pinned as a literal — capture it from the created file's name,
-  or from a sibling fresh feature's text-mode run (both are their feature's first step).
+  decode tables check dynamic fields (ids, generated paths) against a captured value, never a
+  literal.
 
 ## Left unbuilt
 
-- `finish`/`--version`/`help` JSON documents — S11/12/13; until each lands that command runs
-  its **text** path under `--json`. `finish`'s success stderr is still absolute — S11.
-- `brief new --json` (bare `new`, no type) success document — it only ever errors; nothing to
-  build.
-- `completion … --json` usage-error document — S13.
-- `--json` flag row in every command's help, and status/check's "For scripts, use --json;
-  the text layout may change." sentence — S14. Only `start` registers `--json` in help today.
+- `--version`/`help`/`completion --json` documents — S12/S13; those commands run their
+  **text** path under `--json` until then.
+- `brief new --json` (bare `new`, no type) success document — it only ever errors.
+- `--json` help row on every command, and status/check's "For scripts, use --json…" sentence
+  — S14. Only `start` registers `--json` in help today.
 - `assemble.Problem.Line` and `assemble.RenderJSON` — both unowned.
+- A shared platform helper for the "next open step" rule is unbuilt — it lives once in
+  `assemble`, once in `scaffold`, tied only by the S11 agreement test.
+- A `blocked` flag in `finish`'s output does not exist; the ruled JSON shape has none.
 
 ## Traps
 
@@ -66,19 +64,20 @@ Scenarios complete: SCENARIO-01..10. Last updated by SCENARIO-10.
   be the user's own relative `--state`/`--handoff` argument.
 - A reserved-name collision (`schema`, `command`, `ok`, `exit_code`, `error`) in a future
   payload struct is silently resolved by encoding/json's equal-depth rule.
-- `known:` (unknown-feature errors) lists only openable directories via `assemble.Features`
-  — a symlink/unopenable dir named like a feature appears in `status`'s rows but never in
-  `known:`, pre-existing, never reconciled.
-- A zero-step feature with findings is `InFlight == false` → `(complete)` in `check`, even
-  though `status`'s `Complete()` would say "not complete" — pre-existing, not reconciled.
+- `known:` lists only openable dirs (`assemble.Features`) — an unopenable dir appears in
+  `status` but never `known:`. A zero-step feature with findings is `InFlight == false` →
+  `(complete)` in `check`, though `status.Complete()` says otherwise. Both pre-existing.
 - A new feature-level `Finding` producer must stamp its own `Feature`/`FeaturePath`/
-  `InFlight` itself — it never passes through `checkFeatureDir`'s stamping loop
-  (mutation-verified). `Rule` likewise must be set at every `Finding{...}` site; sorting the
-  tally by rule id alone drops count-priority silently (both mutation-verified).
-- `errCheckFindings` is returned bare from both branches of `runCheck`; routing it through
-  `out.refusal` would add an error object and break R4 (findings are data, even at exit 1).
+  `InFlight`/`Rule` itself, at every `Finding{...}` site (mutation-verified).
 - On macOS `t.TempDir()` sits under a symlinked `/var`; build expected absolute paths from
-  the same `wd` passed to `cli.Run`, never from `filepath.EvalSymlinks`.
+  the same `wd` passed to `cli.Run`, never `filepath.EvalSymlinks`.
+- `os.ReadDir` order is filename order — `nextOpenStep` picks the minimum by
+  `pattern.Number` itself; a sibling with unparseable frontmatter counts as not done and can
+  be named `next`, even though `brief start` then refuses the whole feature — truthful, but
+  the two disagree on that one tree.
+- `scaffold.Finish` sits right at golangci-lint's `maintidx` budget (its four writes are
+  already extracted into `applyFinishWrites` for this reason); a future addition should
+  extract another helper rather than inline more branches into it.
 
 ## Open debts
 

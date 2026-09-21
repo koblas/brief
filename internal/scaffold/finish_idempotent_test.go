@@ -32,7 +32,7 @@ func newFinishedFixture(t *testing.T) finishFixture {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	return fx
@@ -91,7 +91,7 @@ func Test_re_finishing_a_done_step_with_a_different_handoff_is_refused(t *testin
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	differentHandoff := []byte("DIFFERENT-HANDOFF-02\n")
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
 
@@ -114,7 +114,7 @@ func Test_re_finishing_a_done_step_whose_handoff_file_is_missing_rewrites_it(t *
 	require.NoError(t, os.Remove(fx.handoffPath()))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(fx.handoffPath())
@@ -134,7 +134,7 @@ func Test_re_finishing_a_done_step_whose_handoff_file_is_missing_accepts_a_diffe
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	differentState := differentStateBody(fx.cfg)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
@@ -152,7 +152,7 @@ func Test_re_finishing_a_done_step_with_a_different_state_body_is_refused(t *tes
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	differentState := differentStateBody(fx.cfg)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
 
 	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
 
@@ -174,7 +174,7 @@ func Test_re_finishing_a_done_step_with_both_inputs_differing_names_the_handoff_
 	differentHandoff := []byte("DIFFERENT-HANDOFF-02\n")
 	differentState := differentStateBody(fx.cfg)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, differentState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, differentState)
 
 	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
 
@@ -197,7 +197,7 @@ func Test_a_refused_re_finish_leaves_every_file_byte_identical(t *testing.T) {
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	differentState := differentStateBody(fx.cfg)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, differentState)
 
 	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
 	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
@@ -219,7 +219,7 @@ func Test_the_snapshot_probe_sees_a_write_on_a_legitimate_finish(t *testing.T) {
 	before := snapshotTree(t, fx.featureDir())
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, before, snapshotTree(t, fx.featureDir()))
@@ -238,7 +238,7 @@ func Test_re_finishing_a_done_step_with_an_un_ticked_entry_and_a_different_hando
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	differentHandoff := []byte("DIFFERENT-HANDOFF-02\n")
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", differentHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
 
@@ -255,7 +255,7 @@ func Test_re_finishing_a_done_step_whose_progress_entry_was_un_ticked_re_ticks_i
 	require.NoError(t, os.WriteFile(specPath, []byte(unticked), 0o600))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(specPath)
@@ -277,7 +277,7 @@ func Test_the_modification_time_probe_sees_a_write_when_the_progress_entry_diver
 	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	after := modTimes(t, fx.featureDir(), names)
@@ -293,7 +293,7 @@ func Test_re_finishing_a_done_step_with_the_same_inputs_preserves_every_modifica
 	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	after := modTimes(t, fx.featureDir(), names)
@@ -308,7 +308,7 @@ func Test_re_finishing_a_done_step_with_the_same_inputs_leaves_every_file_byte_i
 	before := snapshotTree(t, fx.featureDir())
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
@@ -344,7 +344,7 @@ func Test_re_finishing_a_done_step_whose_progress_title_contains_an_unticked_mar
 	before := snapshotTree(t, fx.featureDir())
 
 	srv := scaffold.NewServer(fx.cfg, fx.root)
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	assert.Equal(t, before, snapshotTree(t, fx.featureDir()), "a re-finish with identical inputs must write nothing")
@@ -363,7 +363,7 @@ func Test_a_step_whose_frontmatter_is_still_open_is_marked_done_even_when_every_
 	require.NoError(t, os.WriteFile(stepPath, []byte(reverted), 0o600))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(stepPath)

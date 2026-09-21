@@ -83,7 +83,7 @@ func Test_the_handoff_probe_sees_a_handoff_file_after_a_finish(t *testing.T) {
 	require.NoError(t, err)
 
 	state := "## Decisions Fixture\n\n## Left Fixture\n\n## Gotchas\n\n## Debts Fixture\n"
-	err = srv.Finish(context.Background(), "widgets", "STEP-01", []byte("HANDOFF"), []byte(state))
+	_, err = srv.Finish(context.Background(), "widgets", "STEP-01", []byte("HANDOFF"), []byte(state))
 	require.NoError(t, err)
 
 	_, statErr := os.Stat(stepHandoffPath(root, cfg, "widgets"))

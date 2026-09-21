@@ -74,7 +74,7 @@ func Test_refuses_a_state_body_missing_a_required_heading(t *testing.T) {
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	missingGotchas := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.Traps)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missingGotchas)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missingGotchas)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 
@@ -94,7 +94,7 @@ func Test_accepts_a_state_body_whose_sections_are_all_empty(t *testing.T) {
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	empty := stateBodyEmptySections(fx.cfg)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, empty)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, empty)
 
 	require.NoError(t, err)
 }
@@ -107,7 +107,7 @@ func Test_accepts_a_state_body_whose_headings_are_out_of_configured_order(t *tes
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	shuffled := stateBodyShuffled(fx.cfg)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, shuffled)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, shuffled)
 
 	require.NoError(t, err)
 }
@@ -132,7 +132,7 @@ func Test_accepts_the_state_body_new_feature_writes(t *testing.T) {
 	pattern, err := stepfile.Compile(cfg.StepFilePattern)
 	require.NoError(t, err)
 
-	err = srv.Finish(context.Background(), "widgets", pattern.ID(1), []byte("handoff body\n"), stateBody)
+	_, err = srv.Finish(context.Background(), "widgets", pattern.ID(1), []byte("handoff body\n"), stateBody)
 	require.NoError(t, err)
 }
 
@@ -153,7 +153,7 @@ func Test_refuses_a_state_body_whose_headings_are_only_inside_a_fenced_block(t *
 	body.WriteString("```\n")
 	fenced := []byte(body.String())
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fenced)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fenced)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 
@@ -169,7 +169,7 @@ func Test_refuses_an_empty_state_body_naming_the_first_configured_heading(t *tes
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, []byte(""))
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, []byte(""))
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 
@@ -189,7 +189,7 @@ func Test_names_the_first_configured_heading_when_several_are_missing(t *testing
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.BindingDecisions, fx.cfg.StateHeadings.Traps)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 
@@ -207,7 +207,7 @@ func Test_refuses_a_state_body_missing_only_the_last_configured_heading(t *testi
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.OpenDebts)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 
@@ -224,7 +224,7 @@ func Test_reports_the_state_cap_before_a_missing_heading(t *testing.T) {
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	overCapNoHeadings := bodyOfLines(fx.cfg.StateCapLines + 1)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCapNoHeadings)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCapNoHeadings)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 	assert.NotErrorIs(t, err, scaffold.ErrMissingStateHeading)
@@ -239,7 +239,7 @@ func Test_reports_the_state_s_unclosed_fence_before_a_missing_heading(t *testing
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	unterminated := []byte("```\nunterminated\n")
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, unterminated)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, unterminated)
 
 	require.ErrorIs(t, err, scaffold.ErrUnterminatedFence)
 	assert.NotErrorIs(t, err, scaffold.ErrMissingStateHeading)
@@ -255,7 +255,7 @@ func Test_a_state_body_missing_a_heading_on_a_done_step_reports_the_heading_not_
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.Traps)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 	assert.NotErrorIs(t, err, scaffold.ErrAlreadyFinished)
@@ -273,7 +273,7 @@ func Test_a_refused_missing_heading_leaves_every_file_byte_identical(t *testing.
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.Traps)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))

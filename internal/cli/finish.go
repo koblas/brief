@@ -16,6 +16,21 @@ handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
 from stdin; it may be given for at most one of --handoff and --state.`
 
+// finishDocument is finish's --json success document: the common header
+// first, then scaffold.FinishResult's own fields, both paths absolute and
+// passed through verbatim. Next is nil (JSON null) when nothing is open
+// rather than an empty string, and Changed is false only on R11's no-op.
+type finishDocument struct {
+	jsonHeader
+
+	Feature     string  `json:"feature"`
+	Step        string  `json:"step"`
+	Changed     bool    `json:"changed"`
+	HandoffPath string  `json:"handoff_path"`
+	StatePath   string  `json:"state_path"`
+	Next        *string `json:"next"`
+}
+
 // runFinish implements "brief finish <feature> <step> --handoff <path>
 // --state <path>"; rest is its positional arguments and handoffPath and
 // statePath its flag values, "" when the flag was not given.
@@ -57,7 +72,8 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 
 	srv := scaffold.NewServer(cfg, root)
 
-	if err := srv.Finish(ctx, feature, step, handoff, state); err != nil {
+	res, err := srv.Finish(ctx, feature, step, handoff, state)
+	if err != nil {
 		if refusal, ok := errors.AsType[*scaffold.RefusalError](err); ok {
 			switch refusal.Path {
 			case scaffold.StateSource:
@@ -70,7 +86,44 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
 	}
 
-	fmt.Fprintf(out.stderr, "brief finish: %s is done\n", step)
+	if out.json {
+		var next *string
+		if res.Next != "" {
+			next = &res.Next
+		}
+
+		doc := finishDocument{
+			jsonHeader:  out.successHeader(),
+			Feature:     res.Feature,
+			Step:        res.Step,
+			Changed:     res.Changed,
+			HandoffPath: res.HandoffPath,
+			StatePath:   res.StatePath,
+			Next:        next,
+		}
+
+		if err := writeJSONDocument(out.stdout, doc); err != nil {
+			return fmt.Errorf("brief finish: %w", err)
+		}
+
+		return nil
+	}
+
+	if !res.Changed {
+		fmt.Fprintf(out.stderr, "brief finish: %s %s already done with identical inputs; nothing written\n", feature, step)
+
+		return nil
+	}
+
+	handoffRel, stateRel := displayPath(wd, res.HandoffPath), displayPath(wd, res.StatePath)
+
+	if res.Next != "" {
+		fmt.Fprintf(out.stderr, "brief finish: %s %s done; wrote %s, replaced %s; next: %s — run 'brief start %s'\n",
+			feature, step, handoffRel, stateRel, res.Next, feature)
+	} else {
+		fmt.Fprintf(out.stderr, "brief finish: %s %s done; wrote %s, replaced %s; %s is complete\n",
+			feature, step, handoffRel, stateRel, feature)
+	}
 
 	return nil
 }

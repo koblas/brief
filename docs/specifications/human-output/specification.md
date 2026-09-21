@@ -232,7 +232,7 @@ Scenario: SCENARIO-14 Every command's help advertises --json
 - [x] SCENARIO-08: check groups findings by feature and names each rule
 - [x] SCENARIO-09: check --json
 - [x] SCENARIO-10: new feature / new step say what happened and what's next
-- [ ] SCENARIO-11: finish reports what it wrote and what's next
+- [x] SCENARIO-11: finish reports what it wrote and what's next
 - [ ] SCENARIO-12: --version --json in either order
 - [ ] SCENARIO-13: help --json is a machine-readable command index
 - [ ] SCENARIO-14: Every command's help advertises --json

@@ -215,7 +215,7 @@ func Test_writes_the_supplied_handoff_to_its_own_file(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(fx.handoffPath())
@@ -233,7 +233,7 @@ func Test_leaves_the_step_file_byte_identical_apart_from_the_status_line(t *test
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
@@ -255,7 +255,7 @@ func Test_leaves_the_specification_byte_identical_apart_from_the_finished_step_s
 	before, readErr := os.ReadFile(specPath)
 	require.NoError(t, readErr)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(specPath)
@@ -270,7 +270,7 @@ func Test_replaces_the_state_file_with_exactly_the_supplied_body(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
@@ -283,7 +283,7 @@ func Test_marks_the_step_done_in_its_frontmatter(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
@@ -329,7 +329,7 @@ func Test_finish_refuses_a_replacement_state_body_with_an_unterminated_fence(t *
 	handoff := []byte("NEW-HANDOFF\n")
 	badState := []byte("## Decisions Fixture\n\n```\nunterminated\n")
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", handoff, badState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", handoff, badState)
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, scaffold.ErrUnterminatedFence)
@@ -366,7 +366,7 @@ func Test_Finish_ticks_a_progress_entry_when_the_specification_uses_CRLF(t *test
 
 	srv := scaffold.NewServer(cfg, root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("NEW-HANDOFF"), []byte(state))
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("NEW-HANDOFF"), []byte(state))
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(filepath.Join(featureDir, cfg.SpecificationFile))
@@ -378,7 +378,7 @@ func Test_ticks_the_progress_entry_for_the_finished_step(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
@@ -391,7 +391,7 @@ func Test_leaves_every_other_progress_entry_unchanged(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
@@ -424,7 +424,7 @@ func Test_does_not_tick_an_entry_whose_id_merely_starts_with_the_finished_id(t *
 
 	srv := scaffold.NewServer(cfg, root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-1", []byte("handoff body"), []byte(state))
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-1", []byte("handoff body"), []byte(state))
 	require.NoError(t, err)
 
 	got, readErr := os.ReadFile(filepath.Join(featureDir, cfg.SpecificationFile))
@@ -449,7 +449,7 @@ func Test_finish_leaves_no_temp_file_in_the_feature_directory(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
 	entries, readErr := os.ReadDir(fx.featureDir())
@@ -477,7 +477,7 @@ func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 	blocked := filepath.Join(fx.featureDir(), "STEP-02"+fx.cfg.HandoffFileSuffix)
 	require.NoError(t, os.Mkdir(blocked, 0o755))
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.Error(t, err)
 
@@ -502,7 +502,7 @@ func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 
 	require.NoError(t, os.RemoveAll(blocked))
 
-	retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, retryErr, "a retry once the obstruction is cleared must converge")
 
 	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
@@ -542,7 +542,7 @@ func Test_reports_a_state_write_that_cannot_be_committed(t *testing.T) {
 	blocked := filepath.Join(fx.featureDir(), "."+fx.cfg.StateFile+".brief-tmp")
 	require.NoError(t, os.Mkdir(blocked, 0o755))
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.Error(t, err)
 
 	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
@@ -565,7 +565,7 @@ func Test_reports_a_state_write_that_cannot_be_committed(t *testing.T) {
 
 	require.NoError(t, os.RemoveAll(blocked))
 
-	retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, retryErr, "a retry once the obstruction is cleared must converge")
 
 	gotStateAfterRetry, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
@@ -594,7 +594,7 @@ func Test_reports_a_step_file_write_that_cannot_be_committed(t *testing.T) {
 	blocked := filepath.Join(fx.featureDir(), "."+"STEP-02.md"+".brief-tmp")
 	require.NoError(t, os.Mkdir(blocked, 0o755))
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.Error(t, err)
 
 	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
@@ -617,7 +617,7 @@ func Test_reports_a_step_file_write_that_cannot_be_committed(t *testing.T) {
 
 	require.NoError(t, os.RemoveAll(blocked))
 
-	retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, retryErr, "a retry once the obstruction is cleared must converge")
 
 	gotStepAfterRetry, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
@@ -646,7 +646,7 @@ func Test_reports_a_specification_write_that_cannot_be_committed(t *testing.T) {
 	blocked := filepath.Join(fx.featureDir(), "."+fx.cfg.SpecificationFile+".brief-tmp")
 	require.NoError(t, os.Mkdir(blocked, 0o755))
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.Error(t, err)
 
 	gotHandoff, readErr := os.ReadFile(fx.handoffPath())
@@ -668,7 +668,7 @@ func Test_reports_a_specification_write_that_cannot_be_committed(t *testing.T) {
 
 	require.NoError(t, os.RemoveAll(blocked))
 
-	retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, retryErr := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, retryErr, "a retry once the obstruction is cleared must converge")
 
 	gotSpecAfterRetry, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
@@ -701,7 +701,7 @@ func Test_refuses_an_unknown_feature_on_finish(t *testing.T) {
 	cfg := fixtureConfig()
 	srv := scaffold.NewServer(cfg, root)
 
-	err := srv.Finish(context.Background(), "ghost", "STEP-02", []byte("h"), []byte("s"))
+	_, err := srv.Finish(context.Background(), "ghost", "STEP-02", []byte("h"), []byte("s"))
 
 	require.ErrorIs(t, err, scaffold.ErrNoSuchFeature)
 	assert.NoDirExists(t, filepath.Join(root, cfg.FeatureDirectory, "ghost"))
@@ -712,7 +712,7 @@ func Test_refuses_an_unknown_step(t *testing.T) {
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	before := snapshotTree(t, fx.featureDir())
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-99", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-99", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrNoSuchStep)
 	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
@@ -732,7 +732,7 @@ func Test_refuses_a_specification_with_no_progress_heading_on_finish(t *testing.
 	srv := scaffold.NewServer(cfg, root)
 	before := snapshotTree(t, featureDir)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte(oldStateBody(cfg)))
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte(oldStateBody(cfg)))
 
 	require.ErrorIs(t, err, scaffold.ErrNoProgressHeading)
 	assert.Equal(t, before, snapshotTree(t, featureDir))
@@ -754,7 +754,7 @@ func Test_refuses_a_progress_list_with_no_entry_for_the_step(t *testing.T) {
 	srv := scaffold.NewServer(cfg, root)
 	before := snapshotTree(t, featureDir)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte(oldStateBody(cfg)))
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte(oldStateBody(cfg)))
 
 	require.ErrorIs(t, err, scaffold.ErrNoProgressEntry)
 	assert.Equal(t, before, snapshotTree(t, featureDir))
@@ -776,7 +776,7 @@ func Test_refuses_a_missing_state_file_on_finish(t *testing.T) {
 	srv := scaffold.NewServer(cfg, root)
 	before := snapshotTree(t, featureDir)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte(oldStateBody(cfg)))
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte(oldStateBody(cfg)))
 
 	require.ErrorIs(t, err, scaffold.ErrMalformedFeature)
 	assert.Equal(t, before, snapshotTree(t, featureDir))
@@ -787,7 +787,7 @@ func Test_refuses_a_feature_name_that_escapes_the_feature_root_on_finish(t *test
 	cfg := fixtureConfig()
 	srv := scaffold.NewServer(cfg, root)
 
-	err := srv.Finish(context.Background(), "../escaped", "STEP-02", []byte("h"), []byte("s"))
+	_, err := srv.Finish(context.Background(), "../escaped", "STEP-02", []byte("h"), []byte("s"))
 
 	require.ErrorIs(t, err, scaffold.ErrNoSuchFeature)
 	assert.NoDirExists(t, filepath.Join(root, "escaped"))
@@ -806,7 +806,7 @@ func Test_returns_an_error_and_changes_nothing_when_the_feature_directory_is_not
 	before := snapshotTree(t, fx.featureDir())
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.Error(t, err)
 
@@ -847,7 +847,8 @@ func Test_the_handoff_file_is_created_with_the_same_mode_as_its_siblings(t *test
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	require.NoError(t, srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState))
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	require.NoError(t, err)
 
 	handoffInfo, err := os.Stat(fx.handoffPath())
 	require.NoError(t, err)
