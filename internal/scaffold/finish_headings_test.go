@@ -120,13 +120,13 @@ func Test_accepts_the_state_body_new_feature_writes(t *testing.T) {
 	root := t.TempDir()
 	srv := scaffold.NewServer(cfg, root)
 
-	featurePath, err := srv.NewFeature(context.Background(), "widgets")
+	featureRes, err := srv.NewFeature(context.Background(), "widgets")
 	require.NoError(t, err)
 
 	_, err = srv.NewStep(context.Background(), "widgets")
 	require.NoError(t, err)
 
-	stateBody, err := os.ReadFile(filepath.Join(featurePath, cfg.StateFile))
+	stateBody, err := os.ReadFile(filepath.Join(featureRes.Path, cfg.StateFile))
 	require.NoError(t, err)
 
 	pattern, err := stepfile.Compile(cfg.StepFilePattern)

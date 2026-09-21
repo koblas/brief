@@ -24,10 +24,10 @@ func Test_writes_the_step_file_with_frontmatter_a_title_and_an_empty_checklist(t
 	_, err := srv.NewFeature(context.Background(), "widgets")
 	require.NoError(t, err)
 
-	path, err := srv.NewStep(context.Background(), "widgets")
+	res, err := srv.NewStep(context.Background(), "widgets")
 	require.NoError(t, err)
 
-	got, readErr := os.ReadFile(path)
+	got, readErr := os.ReadFile(res.Path)
 	require.NoError(t, readErr)
 
 	want := "---\n" +
@@ -107,10 +107,43 @@ func Test_a_handoff_file_does_not_advance_the_next_step_number(t *testing.T) {
 
 	srv := scaffold.NewServer(cfg, root)
 
-	path, err := srv.NewStep(context.Background(), "widgets")
+	res, err := srv.NewStep(context.Background(), "widgets")
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-02.md"), path)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-02.md"), res.Path)
+}
+
+// Test_new_step_reports_the_step_id_and_only_the_step_file_as_created pins
+// NewStep's result shape: Step is the id the created file's own name
+// carries, and Created lists only the step file — never the specification,
+// even though NewStep also modifies it by appending a progress entry. The
+// control arm is the specification's own bytes: they differ from what
+// NewFeature wrote (Test_writes_the_specification_skeleton_with_the_
+// configured_progress_heading_and_nothing_under_it pins that baseline), so
+// this test proves a real write is nonetheless excluded from Created,
+// rather than Created being empty because nothing happened.
+func Test_new_step_reports_the_step_id_and_only_the_step_file_as_created(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+	featureRes, err := srv.NewFeature(context.Background(), "widgets")
+	require.NoError(t, err)
+	specBefore, err := os.ReadFile(filepath.Join(featureRes.Path, cfg.SpecificationFile))
+	require.NoError(t, err)
+
+	res, err := srv.NewStep(context.Background(), "widgets")
+
+	require.NoError(t, err)
+	stepPath := filepath.Join(featureRes.Path, "STEP-01.md")
+	assert.Equal(t, "widgets", res.Feature)
+	assert.Equal(t, "STEP-01", res.Step)
+	assert.Equal(t, stepPath, res.Path)
+	assert.Equal(t, []string{stepPath}, res.Created)
+
+	specAfter, err := os.ReadFile(filepath.Join(featureRes.Path, cfg.SpecificationFile))
+	require.NoError(t, err)
+	assert.NotEqual(t, string(specBefore), string(specAfter), "the specification must have actually changed")
+	assert.NotContains(t, res.Created, filepath.Join(featureRes.Path, cfg.SpecificationFile))
 }
 
 func Test_appends_the_progress_entry_under_the_progress_heading_when_the_list_is_empty(t *testing.T) {
@@ -135,10 +168,10 @@ func Test_returns_the_path_of_the_created_step_file(t *testing.T) {
 	_, err := srv.NewFeature(context.Background(), "widgets")
 	require.NoError(t, err)
 
-	path, err := srv.NewStep(context.Background(), "widgets")
+	res, err := srv.NewStep(context.Background(), "widgets")
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(root, "specs", "widgets", "STEP-01.md"), path)
+	assert.Equal(t, filepath.Join(root, "specs", "widgets", "STEP-01.md"), res.Path)
 }
 
 func Test_leaves_no_temp_file_in_the_feature_directory(t *testing.T) {
@@ -196,10 +229,10 @@ func Test_numbers_the_next_step_from_the_highest_existing_step_file(t *testing.T
 
 	srv := scaffold.NewServer(cfg, root)
 
-	path, err := srv.NewStep(context.Background(), "widgets")
+	res, err := srv.NewStep(context.Background(), "widgets")
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-04.md"), path)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-04.md"), res.Path)
 	assert.FileExists(t, filepath.Join(featureDir, "STEP-04.md"))
 }
 
@@ -217,10 +250,10 @@ func Test_ignores_files_that_do_not_match_the_step_file_pattern_when_numbering(t
 
 	srv := scaffold.NewServer(cfg, root)
 
-	path, err := srv.NewStep(context.Background(), "widgets")
+	res, err := srv.NewStep(context.Background(), "widgets")
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-02.md"), path)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-02.md"), res.Path)
 }
 
 // Test_reports_a_specification_write_that_cannot_be_committed_on_new_step

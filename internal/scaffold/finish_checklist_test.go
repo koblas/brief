@@ -102,7 +102,7 @@ func Test_finish_accepts_a_step_whose_checklist_is_empty(t *testing.T) {
 	root := t.TempDir()
 	srv := scaffold.NewServer(cfg, root)
 
-	featurePath, err := srv.NewFeature(context.Background(), "widgets")
+	featureRes, err := srv.NewFeature(context.Background(), "widgets")
 	require.NoError(t, err)
 
 	_, err = srv.NewStep(context.Background(), "widgets")
@@ -111,11 +111,11 @@ func Test_finish_accepts_a_step_whose_checklist_is_empty(t *testing.T) {
 	pattern, err := stepfile.Compile(cfg.StepFilePattern)
 	require.NoError(t, err)
 
-	stateBody, err := os.ReadFile(filepath.Join(featurePath, cfg.StateFile))
+	stateBody, err := os.ReadFile(filepath.Join(featureRes.Path, cfg.StateFile))
 	require.NoError(t, err)
 
 	id := pattern.ID(1)
-	stepPath := filepath.Join(featurePath, pattern.Name(1))
+	stepPath := filepath.Join(featureRes.Path, pattern.Name(1))
 
 	err = srv.Finish(context.Background(), "widgets", id, []byte("handoff body\n"), stateBody)
 	require.NoError(t, err)
@@ -124,15 +124,15 @@ func Test_finish_accepts_a_step_whose_checklist_is_empty(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Contains(t, string(stepGot), "status: done")
 
-	specGot, readErr := os.ReadFile(filepath.Join(featurePath, cfg.SpecificationFile))
+	specGot, readErr := os.ReadFile(filepath.Join(featureRes.Path, cfg.SpecificationFile))
 	require.NoError(t, readErr)
 	assert.Contains(t, string(specGot), "- [x] "+id)
 
-	stateGot, readErr := os.ReadFile(filepath.Join(featurePath, cfg.StateFile))
+	stateGot, readErr := os.ReadFile(filepath.Join(featureRes.Path, cfg.StateFile))
 	require.NoError(t, readErr)
 	assert.Equal(t, string(stateBody), string(stateGot))
 
-	handoffPath := filepath.Join(featurePath, id+cfg.HandoffFileSuffix)
+	handoffPath := filepath.Join(featureRes.Path, id+cfg.HandoffFileSuffix)
 	handoffGot, readErr := os.ReadFile(handoffPath)
 	require.NoError(t, readErr)
 	assert.Equal(t, "handoff body\n", string(handoffGot))

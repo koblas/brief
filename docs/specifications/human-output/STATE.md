@@ -1,6 +1,6 @@
 # human-output — current state
 
-Scenarios complete: SCENARIO-01..09. Last updated by SCENARIO-09.
+Scenarios complete: SCENARIO-01..10. Last updated by SCENARIO-10.
 
 ## Binding decisions
 
@@ -12,45 +12,57 @@ Scenarios complete: SCENARIO-01..09. Last updated by SCENARIO-09.
   `(reporter).headerFor(exitCode)` builds that header at any code; `successHeader()` is
   `headerFor(0)`. `newJSONHeader` alone derives `ok` — a success-shaped doc at a non-zero
   exit (check --json with an ERROR) must use `headerFor`, never `successHeader`. (S09)
-- `files_changed`: `false` for `new`, `new feature`, `new step`, `finish`; `null` otherwise
-  (`filesChangedFor`).
+- `files_changed` (`filesChangedFor`): `false` for `new`, `new feature`, `new step`,
+  `finish`; `null` otherwise.
 - `classifyRefusal(err)` order: `*config.InvalidConfigError`, `*unknownFeatureError`,
   `*scaffold.RefusalError`, `*assemble.RefusalError`, generic `errorKindFailure` —
   `*unknownFeatureError` before `*scaffold.RefusalError` is load-bearing (mutation-verified).
 - **Paths: absolute in `assemble`/`scaffold`/JSON, relative in text (R6)** via
-  `displayPath(wd, p)`. `check`'s text path relativizes a **copy** of each finding's `Path`
-  (`displayFindings`); its JSON branch builds `checkDocument` from the un-relativized
-  `GroupByFeature(findings)` directly, sitting *before* `displayFindings` runs. (S04, S08, S09)
-- A step frontmatter parse failure wraps as `*stepFrontmatterError{name, err}`; `newProblem`
-  names the step file, fix `run 'brief check <feature>' to list every fault`. (S04)
-- `assemble.FeatureStatus.Complete()` = `Problem == nil && Total > 0 && Done == Total` —
-  zero steps is NOT complete. Every `run*` writes its table/groups, then stderr, always
-  before returning; `status --json`/`check --json` both branch **before** any success-path
-  stderr write (R1) — an ordering violation is mutation-verified for both. `[]` never `null`
-  for zero rows/groups. (S06, S07, S08, S09)
+  `displayPath(wd, p)` — every command, including `new.go`, goes through it; no private
+  `filepath.Rel` copies. `check`'s text path relativizes a **copy** of each finding's `Path`;
+  its JSON branch builds `checkDocument` from the un-relativized findings directly. (S04, S08,
+  S09, S10)
+- Every `run*` writes its full success payload (table/groups/stdout-path), then stderr,
+  always before returning; every `--json` branch runs **before** any success-path
+  stdout/stderr write (R1) — mutation-verified for `status`, `check`, `new feature`, `new
+  step`. Slices in JSON are never nil, so zero rows render `[]`, not `null`. (S06-S10)
 - `assemble.Finding{Rule, Severity, Path, Line, Detail, Feature, FeaturePath, InFlight}` —
-  `Rule` (R8) and `Severity` (`"ERROR"`/`"WARN"`) render verbatim as `check --json`'s
-  `rule`/`severity`. `GroupByFeature` order is `check --json`'s `features[]` order (Check's
-  emission order, never sorted); `InFlight` is the group-header label, never severity — both
-  feature-level producers (`feature-symlink`, `feature-unreadable`) hard-code `InFlight:true`
-  regardless of doneness, so an `in_flight:false` fixture needs a file-level finding on a
-  done feature instead. `rule`/`detail` in JSON are raw, never `flattenTabwriterField`/
-  `flattenOneLine` (text-only); `Line *int` is `nil` iff `Finding.Line == 0`. (S08, S09)
+  `Rule`/`Severity` render verbatim as `check --json`'s `rule`/`severity`. `GroupByFeature`
+  order is Check's emission order, never sorted; `InFlight` is the group-header label, never
+  severity — feature-level producers hard-code `InFlight:true` regardless of doneness. JSON
+  `rule`/`detail` are raw, never flattened; `Line *int` is `nil` iff `Finding.Line == 0`.
+  (S08, S09)
 - `countFindings(groups) (int, int)` is the single ERROR/WARN tally shared by
   `checkSummary`'s text line, `checkDocument.Counts` and the `errCheckFindings` exit
   decision — the three can never disagree. (S09)
+- `scaffold.NewFeature`/`NewStep` return `Result{Feature, Step, Path, Created}` instead of a
+  bare path. `Step` is `""` for `NewFeature`; the id exists only inside scaffold
+  (`pattern.ID(next)`) — cli must never recompile `step-file-pattern` to recover it.
+  `Created` lists exactly the files each call **wrote into existence**, in write order —
+  `NewFeature`: `[spec, state]`; `NewStep`: `[step file]` only, never the specification it
+  merely modifies. `Path` is always the single path the text-mode contract prints. (S10)
+- `new feature`/`new step --json`: `newDocument{jsonHeader, Feature, Step *string, Path,
+  Created}` — `Step` `nil` for `new feature` (only `new.go` enforces this; `scaffold.Result`
+  carries no such guarantee), the id for `new step`; `path`/`created[]` are `res.Path`/
+  `res.Created` verbatim (already absolute). Text-mode success stderr (one line, after
+  stdout): `brief new feature: created <name> (<spec rel>, <state rel>); add a step with
+  'brief new step <name>'` / `brief new step: created <id> in <feature>; fill in its
+  acceptance criteria and checklist, then 'brief start <feature>'`. S14 must not describe
+  different copy. (S10)
 - Golden policy: one exact-bytes golden pins key order (`assert.Equal`, never `JSONEq`);
   matrix/decode tests check dynamic fields against a captured value, never a production
-  literal.
+  literal. A step id can't be pinned as a literal — capture it from the created file's name,
+  or from a sibling fresh feature's text-mode run (both are their feature's first step).
 
 ## Left unbuilt
 
-- `new`/`finish`/`--version`/`help` JSON documents — S10/11/12/13; until each lands that
-  command runs its **text** path under `--json`.
+- `finish`/`--version`/`help` JSON documents — S11/12/13; until each lands that command runs
+  its **text** path under `--json`. `finish`'s success stderr is still absolute — S11.
+- `brief new --json` (bare `new`, no type) success document — it only ever errors; nothing to
+  build.
 - `completion … --json` usage-error document — S13.
 - `--json` flag row in every command's help, and status/check's "For scripts, use --json;
   the text layout may change." sentence — S14. Only `start` registers `--json` in help today.
-- `new`'s stdout path and `new`/`finish` success stderr are still absolute — S10/S11.
 - `assemble.Problem.Line` and `assemble.RenderJSON` — both unowned.
 
 ## Traps
@@ -66,15 +78,13 @@ Scenarios complete: SCENARIO-01..09. Last updated by SCENARIO-09.
 - A zero-step feature with findings is `InFlight == false` → `(complete)` in `check`, even
   though `status`'s `Complete()` would say "not complete" — pre-existing, not reconciled.
 - A new feature-level `Finding` producer must stamp its own `Feature`/`FeaturePath`/
-  `InFlight` itself, like `symlinkFeatureFinding`/`unreadableFeatureFinding` do — it never
-  passes through `checkFeatureDir`'s stamping loop (mutation-verified). `Rule` likewise must
-  be set at every `Finding{...}` site; an empty one renders as `N ` in the tally. Sorting the
+  `InFlight` itself — it never passes through `checkFeatureDir`'s stamping loop
+  (mutation-verified). `Rule` likewise must be set at every `Finding{...}` site; sorting the
   tally by rule id alone drops count-priority silently (both mutation-verified).
-- `errCheckFindings` is returned bare from both branches of `runCheck`; nothing in `Run`
-  renders it — routing it through `out.refusal` would add an error object and break R4
-  (findings are data, even at exit 1). S09's own golden fixture has no multi-line detail, so
-  a `flattenOneLine`'d detail would NOT redden it (mutation ran clean, not red) — a future
-  fixture with a multi-line detail must add its own guard, not assume this one proves it.
+- `errCheckFindings` is returned bare from both branches of `runCheck`; routing it through
+  `out.refusal` would add an error object and break R4 (findings are data, even at exit 1).
+- On macOS `t.TempDir()` sits under a symlinked `/var`; build expected absolute paths from
+  the same `wd` passed to `cli.Run`, never from `filepath.EvalSymlinks`.
 
 ## Open debts
 

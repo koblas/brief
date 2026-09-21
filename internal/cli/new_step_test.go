@@ -23,7 +23,9 @@ func Test_creates_the_step_and_prints_its_path(t *testing.T) {
 	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
+	assert.Equal(t,
+		"brief new step: created SCENARIO-01 in payments; fill in its acceptance criteria and checklist, then 'brief start payments'\n",
+		stderr.String())
 	assert.Equal(t, "docs/specifications/payments/SCENARIO-01.md\n", stdout.String())
 }
 

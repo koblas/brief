@@ -62,10 +62,34 @@ func Test_returns_the_path_of_the_created_feature_directory(t *testing.T) {
 	root := t.TempDir()
 	srv := scaffold.NewServer(fixtureConfig(), root)
 
-	path, err := srv.NewFeature(context.Background(), "widgets")
+	res, err := srv.NewFeature(context.Background(), "widgets")
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(root, "specs", "widgets"), path)
+	assert.Equal(t, filepath.Join(root, "specs", "widgets"), res.Path)
+}
+
+// Test_new_feature_reports_the_directory_and_the_files_it_created pins
+// NewFeature's result shape: Path names the feature directory, Created
+// lists exactly the specification and the state file it wrote, in write
+// order, both already on disk by the time NewFeature returns.
+func Test_new_feature_reports_the_directory_and_the_files_it_created(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+
+	res, err := srv.NewFeature(context.Background(), "widgets")
+
+	require.NoError(t, err)
+	featureDir := filepath.Join(root, "specs", "widgets")
+	assert.Equal(t, "widgets", res.Feature)
+	assert.Empty(t, res.Step)
+	assert.Equal(t, featureDir, res.Path)
+	assert.Equal(t, []string{
+		filepath.Join(featureDir, cfg.SpecificationFile),
+		filepath.Join(featureDir, cfg.StateFile),
+	}, res.Created)
+	assert.FileExists(t, res.Created[0])
+	assert.FileExists(t, res.Created[1])
 }
 
 func Test_writes_the_specification_skeleton_with_the_configured_progress_heading_and_nothing_under_it(t *testing.T) {
@@ -328,16 +352,16 @@ func Test_the_scaffolded_files_are_all_created_owner_only(t *testing.T) {
 	root := t.TempDir()
 	srv := scaffold.NewServer(cfg, root)
 
-	featureDir, err := srv.NewFeature(context.Background(), "widgets")
+	featureRes, err := srv.NewFeature(context.Background(), "widgets")
 	require.NoError(t, err)
 
-	stepPath, err := srv.NewStep(context.Background(), "widgets")
+	stepRes, err := srv.NewStep(context.Background(), "widgets")
 	require.NoError(t, err)
 
 	for _, path := range []string{
-		filepath.Join(featureDir, cfg.SpecificationFile),
-		filepath.Join(featureDir, cfg.StateFile),
-		stepPath,
+		filepath.Join(featureRes.Path, cfg.SpecificationFile),
+		filepath.Join(featureRes.Path, cfg.StateFile),
+		stepRes.Path,
 	} {
 		info, statErr := os.Stat(path)
 		require.NoError(t, statErr, path)

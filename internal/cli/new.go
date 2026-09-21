@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/spf13/cobra"
@@ -36,6 +35,21 @@ const newFeatureInvocation = "brief new feature <name>"
 // newStepInvocation is the invocation string every "brief new step" usage
 // error names as how to fix it.
 const newStepInvocation = "brief new step <feature>"
+
+// newDocument is "new feature"'s and "new step"'s shared --json success
+// document: the common header first, then the scaffolded feature, the
+// step id (null for "new feature" — no call creates a feature and a step
+// together), the single path the text-mode contract prints, and every
+// path this call created, absolute throughout (R6). Created is never nil,
+// so it encodes "[]" rather than "null" if ever empty.
+type newDocument struct {
+	jsonHeader
+
+	Feature string   `json:"feature"`
+	Step    *string  `json:"step"`
+	Path    string   `json:"path"`
+	Created []string `json:"created"`
+}
 
 // runNew handles "brief new <type> ...": rejects "-h"/"--help" given an
 // attached value, routes a sole "-h"/"--help" argument to cmd.Help()
@@ -86,7 +100,7 @@ func runNewFeature(ctx context.Context, wd string, rest []string, out reporter) 
 
 	srv := scaffold.NewServer(cfg, root)
 
-	path, err := srv.NewFeature(ctx, name)
+	res, err := srv.NewFeature(ctx, name)
 	if err != nil {
 		if errors.Is(err, scaffold.ErrInvalidFeatureName) {
 			if name == "" {
@@ -99,12 +113,19 @@ func runNewFeature(ctx context.Context, wd string, rest []string, out reporter) 
 		return out.refusal(err)
 	}
 
-	rel, err := filepath.Rel(wd, path)
-	if err != nil {
-		rel = path
+	if out.json {
+		doc := newDocument{jsonHeader: out.successHeader(), Feature: res.Feature, Path: res.Path, Created: res.Created}
+
+		if err := writeJSONDocument(out.stdout, doc); err != nil {
+			return fmt.Errorf("brief new feature: %w", err)
+		}
+
+		return nil
 	}
 
-	fmt.Fprintln(out.stdout, rel)
+	fmt.Fprintln(out.stdout, displayPath(wd, res.Path))
+	fmt.Fprintf(out.stderr, "brief new feature: created %s (%s, %s); add a step with 'brief new step %s'\n",
+		res.Feature, displayPath(wd, res.Created[0]), displayPath(wd, res.Created[1]), res.Feature)
 
 	return nil
 }
@@ -128,17 +149,25 @@ func runNewStep(ctx context.Context, wd string, rest []string, out reporter) err
 
 	srv := scaffold.NewServer(cfg, root)
 
-	path, err := srv.NewStep(ctx, feature)
+	res, err := srv.NewStep(ctx, feature)
 	if err != nil {
 		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
 	}
 
-	rel, err := filepath.Rel(wd, path)
-	if err != nil {
-		rel = path
+	if out.json {
+		step := res.Step
+		doc := newDocument{jsonHeader: out.successHeader(), Feature: res.Feature, Step: &step, Path: res.Path, Created: res.Created}
+
+		if err := writeJSONDocument(out.stdout, doc); err != nil {
+			return fmt.Errorf("brief new step: %w", err)
+		}
+
+		return nil
 	}
 
-	fmt.Fprintln(out.stdout, rel)
+	fmt.Fprintln(out.stdout, displayPath(wd, res.Path))
+	fmt.Fprintf(out.stderr, "brief new step: created %s in %s; fill in its acceptance criteria and checklist, then 'brief start %s'\n",
+		res.Step, res.Feature, res.Feature)
 
 	return nil
 }
