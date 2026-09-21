@@ -55,11 +55,14 @@ Scenarios complete: SCENARIO-01..08. Last updated by SCENARIO-08.
   residual post-`Find` args, not a `Find` error. Same rule covers `help <cmd> <extra>`/
   `help <cmd> --flag` (e.g. `help start extra`, `help start --json`, `help new bogus`) and
   `help help` — all currently render some leaf's own help; none pinned. (SCENARIO-08)
-- `new`'s own help (`brief new --help` still a `runNew` usage error; `brief help new` now
-  renders `new`'s bare template output — `"Usage:\n  brief new\n\n\n\nFlags:\n"`, no
-  `Short`/`Long`, empty flag table since `new` is `DisableFlagParsing`; `new` has no `Short`,
-  so no root-listing row of its own) — S10. Not an S10 regression: S08's correct `Find`
-  resolution is what exposes the bare render.
+- `new`'s own help (`brief new --help` still a `runNew` usage error, exit 2; `brief help new`
+  now renders `new`'s bare template output — observed
+  `"Usage:\n  brief new [flags]\n\n\n\nFlags:\n  -h, --help   help for new\n"`. `[flags]` and
+  the populated Flags row appear because `newCmd`, unlike every `leafCommand`, does not set
+  `DisableFlagsInUseLine`, and the stub's `InitDefaultHelpFlag()` registers `-h`/`--help` on
+  `new`'s own FlagSet, flipping `HasAvailableFlags()` true. No `Short`/`Long`, so `new` still
+  has no root-listing row of its own) — S10. Not an S10 regression: S08's correct `Find`
+  resolution is what exposes this render.
 - Tree-derived `expected one of:` list — S11; `runRoot` keeps a hard-coded literal until then.
 - `completion` command (`CompletionOptions.DisableDefaultCmd` flips back on) — S12/S13.
 - Assertion that a rejected `finish -handoff`/`-state` writes nothing to disk (S04), or a
