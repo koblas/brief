@@ -3,7 +3,7 @@ name: test-reviewer
 description: Chief Test Quality Officer for the Go tests in brief. Guards that the change is tested at all, that bug fixes have a test that went red first, that corner cases are covered rather than hand-waved, and that structure/naming/fakes follow the project conventions. Invoke while writing tests and again on the finished diff. Returns ranked findings; it does not write the tests.
 type: reviewer
 triggers: ["**/*_test.go"]
-tools: Read, Glob, Grep
+tools: Read, Glob, Grep, Bash
 model: sonnet
 effort: high
 color: blue

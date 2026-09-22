@@ -97,7 +97,8 @@ another 780k on the developer passes answering them, and the largest single caus
 reviewers re-reading whole packages they had already read in an earlier round.
 
 **Read the delta, not the tree.** Your prompt names a commit range or a file list. Start from
-`git diff <range>` and read only what the diff touches. Widen to a whole file when the diff
+`git diff <range>` and read only what the diff touches. Every reviewer has `Bash` for exactly
+this; a reviewer that cannot run it says so rather than quietly reading whole packages. Widen to a whole file when the diff
 alone cannot settle a question — and say in the finding why you had to. A package you already
 reviewed in an earlier round, on a surface this fix did not touch, has nothing new in it.
 

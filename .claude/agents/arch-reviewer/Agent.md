@@ -3,7 +3,7 @@ name: arch-reviewer
 description: Chief Architecture Officer for brief — the cmd/internal layout, the dependency rule (what may import what), the thin-main + feature-package split, Store-interface + adapters placement, and functional-options wiring. Invoke at design time when deciding where code lives and what it may import, and again on the finished diff. Returns ranked findings; it does not rewrite the code.
 type: reviewer
 triggers: ["cmd/**/*.go", "internal/**/*.go", "*.go"]
-tools: Read, Glob, Grep
+tools: Read, Glob, Grep, Bash
 model: sonnet
 effort: medium
 color: red
