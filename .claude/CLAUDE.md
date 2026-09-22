@@ -61,7 +61,10 @@ bug — fix it rather than working around it.
   **After all scenarios implemented:** 7. Run **`/run-reviewers`** (once, no arguments) on all changed files. 8. **FAIL** (any BLOCKER or MAJOR) → run **`developer`** in fix mode with consolidated
   findings, one pass. 9. Run **`/run-reviewers`** again. Repeat until PASS or PASS WITH FOLLOW-UPS. 10. Run **`product-vision`** once more on finished surface — command names, flags, help
   text, output, error copy, exit codes. It reviews design that shipped, not design
-  proposed. Verdict has consequences: - **SHIP** — done. - **SHIP WITH CHANGES** — hand changes to **`developer`** in fix mode as MAJOR
+  proposed. Verdict has consequences: - **SHIP** — push the branch and open a PR against
+  `main` (title from the spec's Primary Goal; body: summary, final gate verdicts, STATE.md
+  follow-ups, test plan, anything left unverified). Pushing and opening the PR are the only
+  outward-facing steps; ask before running them. Never merge. - **SHIP WITH CHANGES** — hand changes to **`developer`** in fix mode as MAJOR
   findings, then re-run `/run-reviewers` (step 7). - **RETHINK** / **DON'T BUILD** — stop, put it to user. Surface already shipped, so
   this is a conversation, not a silent revert.
 
@@ -90,6 +93,13 @@ bug — fix it rather than working around it.
     returned PASS on a surface the fix did not touch has nothing new to read.
   - **PASS WITH FOLLOW-UPS is done.** Only BLOCKER and MAJOR block. MINOR/NIT are
     fix-if-cheap — never force another round trip.
+  - **Fix passes are capped at 3.** A 4th round opens only for a BLOCKER, or for a MAJOR
+    the previous fix pass itself introduced *and* that changes an exit code or a written
+    file. Every other finding after pass 3 goes to STATE.md `## Open debts` and the
+    feature proceeds to the final product-vision pass. Two passes in a row that each
+    reopen the same surface is a design smell, not a to-do list: stop and consolidate
+    that logic behind one decision point before patching again (fix pass 9 on
+    init-doctor was the pass that should have been pass 3).
   - **A gate round is the expensive unit.** Wait for every reviewer before dispatching the
     fix pass, and hand the developer one consolidated list — blocking findings plus the
     cheap MINOR/NIT folds. A fix pass sent the moment the first reviewer reports guarantees
@@ -106,9 +116,10 @@ bug — fix it rather than working around it.
     nobody ruled on, and the final pass sends it back at ten times the cost.
   - `/run-reviewers` reports `REVIEWER DISCOVERY FAILED` → gate did not run. Fix
     discovery; do not treat as PASS.
-  - **Two gates, only two.** Pipeline pauses for user at scenario approval (before
+  - **Two gates, plus the push.** Pipeline pauses for user at scenario approval (before
     `specification.md` written) and at RETHINK / DON'T BUILD verdict. Everything after
-    scenario approval auto-continues — do not ask permission between steps.
+    scenario approval auto-continues — do not ask permission between steps — up to the
+    SHIP push, which is outward-facing and asks first.
   - Scenario-approval gate is load-bearing precisely because pipeline now starts
     implicitly. Never write spec file from offhand request without it.
 
