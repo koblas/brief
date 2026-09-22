@@ -75,7 +75,7 @@ Usage:
   brief status                     print a FEATURE/DONE/BLOCKED/NEXT table of every feature
   brief check [feature] [--hook <host>]
                                    report faults finish would now refuse to write over
-  brief init [--host <name>] [--no-hook] [--with-agents] [--dry-run | --print]
+  brief init [--host <name>] [--no-hook] [--with-agents] [--dry-run | --print] [--force] [--json]
                                    install brief's config and agent-host integration
   brief doctor [--json]            check brief's setup: config, feature root, host integration
   brief uninstall [--host <name>] [--dry-run] [--force] [--json]
@@ -551,16 +551,21 @@ func Test_prints_finish_flag_prose_in_its_flag_table(t *testing.T) {
 
 // Test_every_leaf_help_line_fits_in_80_columns sweeps every leaf's "--help"
 // output — the commands that render a Flags table, the surface MAJOR 1
-// fixed — for a generated Usage line, wrapped prose, and a pflag flag
-// table long enough for one leaf's flags to overrun 80 columns unless its
-// usage string carries its own embedded wrap points, the way jsonFlagUsage
-// and handoffFlagUsage/stateFlagUsage do. Root and "new" are out of scope
-// here: their cmdList rows are fixed-column-padded, not wrapped to a
-// terminal width, an existing and separately reviewed layout (rootHelp,
-// newHelp) this fix does not touch. The help stub's own sole-argument "-h"
-// render is a leaf shape too, covered here alongside the rest.
-// require.NotEmpty on stdout guards the loop below from passing vacuously
-// against an empty or truncated render.
+// fixed — for wrapped prose and a pflag flag table long enough for one
+// leaf's flags to overrun 80 columns unless its usage string carries its
+// own embedded wrap points, the way jsonFlagUsage and
+// handoffFlagUsage/stateFlagUsage do. The generated Usage line itself is
+// exempt: it renders cmd.Use verbatim, cobra offers no wrap point for it
+// (Use must stay one line — Name() and argument parsing both split on its
+// first space), and R14 pins init's own Use to its full accepted-flag
+// syntax, which runs past 80 columns; root's own cmdRow already tolerates
+// that same string unwrapped. Root and "new" are out of scope here: their
+// cmdList rows are fixed-column-padded, not wrapped to a terminal width,
+// an existing and separately reviewed layout (rootHelp, newHelp) this fix
+// does not touch. The help stub's own sole-argument "-h" render is a leaf
+// shape too, covered here alongside the rest. require.NotEmpty on stdout
+// guards the loop below from passing vacuously against an empty or
+// truncated render.
 func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 	tests := []struct {
 		name string
@@ -589,6 +594,10 @@ func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, stdout.String())
 			for line := range strings.SplitSeq(stdout.String(), "\n") {
+				if strings.HasPrefix(line, "  brief ") {
+					continue
+				}
+
 				assert.LessOrEqual(t, len(line), 80, "line %q of %q help must fit in 80 columns", line, tc.name)
 			}
 		})

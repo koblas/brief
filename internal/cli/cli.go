@@ -281,14 +281,23 @@ file; it replaces the file, it is never appended to; it
 must carry the configured state headings, though a
 section may be empty`
 
-// hostFlagUsage is init's --host flag's usage string.
-const hostFlagUsage = "the agent host to install for (default: detected;\nclaude-code or `none`)"
+// hostFlagUsage is init's --host flag's usage string. The backquoted
+// "name" is pflag's own placeholder convention (see handoffFlagUsage) —
+// unlike an earlier draft that backquoted "none", one of the two accepted
+// values, which pflag then rendered as the flag's own table placeholder
+// ("--host none") instead of a generic one.
+const hostFlagUsage = "the agent host `name` to install for: claude-code or none\n(default: detected)"
 
 // printFlagUsage is init's --print flag's usage string.
 const printFlagUsage = "print each pending file to stdout instead of\nwriting it (cannot be combined with --dry-run)"
 
-// noHookFlagUsage is init's --no-hook flag's usage string.
-const noHookFlagUsage = "install the plugin without its PostToolUse hook"
+// noHookFlagUsage is init's --no-hook flag's usage string. Unlike
+// --with-agents, --no-hook is never refused under --host none — with no
+// plugin to omit a hook from, it is a documented no-op there, since
+// InitRequest.Host == "" may still resolve to claude-code (R8's own
+// detection), and a fixed value the caller cannot predict in advance is a
+// poor thing to make a usage error turn on.
+const noHookFlagUsage = "install the plugin without its PostToolUse hook\n(no effect with --host none)"
 
 // withAgentsFlagUsage is init's --with-agents flag's usage string. Its
 // continuation line, like handoffFlagUsage's, wraps via an embedded
@@ -299,8 +308,10 @@ const noHookFlagUsage = "install the plugin without its PostToolUse hook"
 const withAgentsFlagUsage = "install the three role agents (the resolved\nhost must be claude-code)"
 
 // hookFlagUsage is check's --hook flag's usage string. Its embedded newline
-// is pflag's own wrapping cue — see handoffFlagUsage.
-const hookFlagUsage = "read a hook payload from stdin and check only the\nedited feature (`claude-code`)"
+// is pflag's own wrapping cue — see handoffFlagUsage. The backquoted "host"
+// is the generic placeholder (see hostFlagUsage); host.HookHosts() names
+// only "claude-code" today, so that is what the parenthetical states.
+const hookFlagUsage = "read a hook payload from stdin and check only the\nedited feature (`host`; claude-code only)"
 
 // dryRunFlagUsage is init's --dry-run flag's usage string.
 const dryRunFlagUsage = "print the plan without writing anything"
@@ -523,7 +534,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		})
 	finishCmd.Annotations[writesFilesAnnotation] = "true"
 
-	initCmd := leafCommand("init [--host <name>] [--no-hook] [--with-agents] [--dry-run | --print]", "install brief's config and agent-host integration", initInvocation, initLong,
+	initCmd := leafCommand("init [--host <name>] [--no-hook] [--with-agents] [--dry-run | --print] [--force] [--json]", "install brief's config and agent-host integration", initInvocation, initLong,
 		func(fs *pflag.FlagSet) {
 			fs.String("host", "", hostFlagUsage)
 			fs.Bool("no-hook", false, noHookFlagUsage)
