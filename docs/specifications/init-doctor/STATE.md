@@ -2,43 +2,43 @@
 
 Scenarios complete: SCENARIO-01..10 — every spec scenario shipped. Fix passes 1-3: git-
 boundary root scoping (R3), partial-write/`files_changed` consistency, a `*RefusalError`
-type-preservation gap. Fix pass 4 (product-vision SHIP WITH CHANGES): pflag placeholder bug
-on `--host`/`--hook`; `uninstall`'s "removed" line discriminates host-artifact-removed vs
-config-only vs edited-kept; non-regular CLAUDE.md candidate is doctor WARN (was SKIP) and
-still renders via `init --print`; agent role copy tightened; `init` names host-detection's
-own signal (`Result.DetectedBy`). Fix pass 5 (re-gate): host-snippet's WARN now considers
-only the one candidate `planSnippet` would choose, never a farther candidate's own shape;
-`uninstall --dry-run` discriminates by the computed plan exactly like a real run instead of
-naming a host install unconditionally; `planSnippetRemoval`'s kept detail no longer borrows
-`planSnippet`'s install-side copy; the "N file(s) … kept" count moved off `Detail` text onto
-a typed `Artifact.ForceRemovable`; the pflag-placeholder fix (fix pass 4) finally got a test.
+type-preservation gap. Fix pass 4: pflag placeholder bug on `--host`/`--hook`; `uninstall`'s
+"removed" line discriminates host-artifact-removed vs config-only vs edited-kept; non-regular
+CLAUDE.md candidate is doctor WARN (was SKIP); `init` names host-detection's own signal
+(`Result.DetectedBy`). Fix pass 5: host-snippet's WARN considers only the one candidate
+`planSnippet` would choose; `uninstall --dry-run` discriminates by the computed plan like a
+real run; the "N file(s) … kept" count moved onto typed `Artifact.ForceRemovable`. Fix pass
+6: three untested fix-pass-5 arms pinned and mutation-verified (`notRegularDetail`'s
+empty-kind fold, `uninstall --dry-run`'s edited-kept and plain "nothing removed" arms);
+host-snippet's SKIP row Path now names the real first-present candidate, not a hardcoded
+root path; the pflag-placeholder test's control values now carry enough trailing usage text
+to stay unique; `ForceRemovable` is false on every force-removed artifact across all three
+producers, rule stated on `Artifact`'s own doc comment.
 
 ## Binding decisions
 - `config.LocateWithin(dir, boundary)` bounds a walk at `boundary`, itself still checked, its
-  parent never; `LocateInRepo` bounds it to `repo.Root(wd)`. `init`/`uninstall`/`doctor`/
-  `check --hook` all call `LocateInRepo`; a config above that boundary is treated as absent.
-  Refuses as `*InvalidConfigError` (`errors.Is(err, ErrInvalidConfig)` holds too); callers
-  type-assert the concrete type for `Path`/`Err`.
+  parent never; `LocateInRepo` bounds it to `repo.Root(wd)`, called by `init`/`uninstall`/
+  `doctor`/`check --hook`; a config above that boundary is treated as absent. Refuses as
+  `*InvalidConfigError` (`errors.Is(err, ErrInvalidConfig)` holds too).
 - `internal/doctor`/`internal/setup` import only `internal/platform/*`, never each other or
   `scaffold`. `writable.Probe` is the one write-probe both share.
 - `internal/platform/artifact` renders + digests every brief-written file; every
   `older…Digests` list ships empty, so `OriginOlder` is reachable only white-box.
 - `init`/`uninstall` plan-then-apply, every refusal decided first; apply order: feature root,
   plugin/agent files, CLAUDE.md, config last. A non-regular CLAUDE.md candidate is kept, never
-  followed/written; `setup`'s install-side Detail ("…add the block by hand, see 'brief init
-  --print'") and doctor's WARN both point at `--print`; the removal-side Detail
-  (`planSnippetRemoval`) is the plain "not a regular file" — there is nothing to add by hand
-  on a removal, and the two wordings are free to differ without breaking anything, since
-  `ForceRemovable` (not Detail text) is what callers key behavior on. Doctor's host-snippet
-  WARN fires only for the one candidate `planSnippet`/`chooseSnippetLocation` would itself
-  pick — the first candidate present at all, regular or not, in `host.InstructionFiles`
-  priority order — never a farther candidate's own shape; a regular-but-blockless first
-  candidate is the ordinary SKIP `not installed`, matching what `init` would actually do.
-- `setup.Artifact.ForceRemovable` is true only on an Uninstall-side `ActionKept` artifact
-  `--force` can turn into `ActionRemoved` (an edited file: `planPluginRemoval`,
-  `planConfigRemoval`, `planSnippetRemoval`'s own non-`OriginCurrent` arm) — false on a
-  non-regular kept artifact and on every Init-side artifact, where the field is unused.
-  `cli.uninstallNextAction` switches on it, not on `Detail == "edited locally"`.
+  followed/written; `setup`'s install-side Detail and doctor's WARN both point at `--print`;
+  `planSnippetRemoval`'s own removal-side Detail is the plain "not a regular file" — the two
+  wordings differ freely since `ForceRemovable`, not Detail text, is what callers key on.
+  Doctor's host-snippet WARN/SKIP fire only for the one candidate `planSnippet`/
+  `chooseSnippetLocation` would itself pick — the first candidate present at all, regular or
+  not, in `host.InstructionFiles` priority order, never a farther candidate's own shape;
+  SKIP's own Path names that same first-present candidate (falls back to the first candidate
+  in priority order only when none is present at all).
+- `setup.Artifact.ForceRemovable` is true exactly on an Uninstall-side `ActionKept` artifact
+  `--force` would turn into `ActionRemoved` (an edited file: `planPluginRemoval`,
+  `planConfigRemoval`, `planSnippetRemoval`'s own non-`OriginCurrent` arm) — false on every
+  other Action, including that same file once force has already removed it, and on every
+  Init-side artifact. `cli.uninstallNextAction` switches on it, never on Detail text.
 - Role bindings come only from `artifact.AgentBindings()`, written only into a config `Init`
   creates/`--force`-rewrites; `roles` resolves `brief:<name>` via plugin-or-project, bare
   `<name>` via project-or-injected-home; WARN never ERROR.
@@ -46,28 +46,26 @@ a typed `Artifact.ForceRemovable`; the pflag-placeholder fix (fix pass 4) finall
   opted-in repo is exit 1, one stderr line, never usage-error's exit 2.
 - Host detection (`setup` only): `Host == ""` → root `.claude`/`CLAUDE.md`, else
   `WithHomeDir`'s `.claude` → `HostClaudeCode`; else `HostNone`. `detectHost`'s third return
-  (`Result.DetectedBy`: `.claude`, `CLAUDE.md`, `~/.claude`) is `""` when `Host` was explicit
-  — `initNextAction`'s "(detected …)" clause and `--json`'s `detected_by` gate on it non-empty.
+  (`Result.DetectedBy`) is `""` when `Host` was explicit; `initNextAction`'s "(detected …)"
+  and `--json`'s `detected_by` gate on it non-empty.
 - `doctor` appends `host-plugin, host-hook, host-snippet, host-agents, roles` after `env-path`;
   `host.originRow` decides every row's WARN-older/OK-edited/OK-current triple.
 - A partial write returns the populated `Result`, wrapped `ErrPartialWrite`; cli prints landed
-  rows before the refusal; `--json` drops the `files_changed`-contradicting "(no files
-  changed)" tail on that same wrap.
-- `uninstallNextAction` discriminates by what the plan holds — dry run or real, both read the
-  plan the same way, only the phrasing (promise vs report) differs: a non-config
-  `ActionRemoved` names the host install; a lone config removal names "brief's config"; any
-  `ForceRemovable` `ActionKept` counts toward "N file(s) … kept"; zero artifacts is "nothing
-  installed"; anything else is "nothing removed".
+  rows before the refusal; `--json` drops the contradicting "(no files changed)" tail.
+- `uninstallNextAction` discriminates by what the plan holds — dry run or real read the plan
+  the same way, only the phrasing (promise vs report) differs: a non-config `ActionRemoved`
+  names the host install; a lone config removal names "brief's config"; any `ForceRemovable`
+  `ActionKept` counts toward "N file(s) … kept"; zero artifacts is "nothing installed";
+  anything else is "nothing removed".
 
 ## Left unbuilt
 - Line number for a value error, heading-shape rules; dry-run writability prediction (R10)
 - Marker detection inside fenced code blocks; removal of `.claude/skills/`/`.claude/`
 - A stray-plugin row (`wd ≠ root`); agent resolution by frontmatter `name:`;
   `~/.claude/skills/brief` (user-scope plugin) — none consulted
-- A CLAUDE.md symlink to a recognized alternate (e.g. AGENTS.md) reads WARN/kept like any
-  other symlink — never resolved to check its target. **Unowned.**
-- `cli.uninstallNextAction` (~65 lines, artifact-classification loop plus a 4-way dry-run/real
-  switch) and its own 20-line doc comment are still one function — refactor-advisor MINOR,
+- A CLAUDE.md symlink to a recognized alternate reads WARN/kept like any other symlink —
+  never resolved to check its target. **Unowned.**
+- `cli.uninstallNextAction` (~65 lines) is still one function — refactor-advisor MINOR,
   extracting a `classifyUninstallResult` helper, deferred as fix-if-cheap. **Unowned.**
 
 ## Traps
@@ -77,21 +75,24 @@ a typed `Artifact.ForceRemovable`; the pflag-placeholder fix (fix pass 4) finall
 - A round-trip "nothing written" assertion passes vacuously if init wrote nothing — assert a
   control run differs first.
 - pflag's `UnquoteUsage` keeps the backticked word in the rendered text too — backtick a real
-  value and it becomes the table placeholder; backtick a generic word instead. Now pinned by
-  `Test_host_and_hook_flags_render_a_generic_table_placeholder` (help_test.go) — mutation-
-  verified per flag.
+  value and it becomes the table placeholder; backtick a generic word instead. Pinned by
+  `Test_host_and_hook_flags_render_a_generic_table_placeholder` (help_test.go), mutation-
+  verified per flag; a control asserting the reverted placeholder is absent needs enough
+  trailing usage text to stay unique — a bare "--host none" also occurs, unrelated to this
+  bug, in `--no-hook`'s own "(no effect with --host none)" parenthetical.
 - `os.Lstat` on a file-as-directory returns `ENOTDIR`, never `os.IsNotExist` — checked
   explicitly in `planPluginFile`/`checkWritable`.
 - `newHealthyDoctorFixture` and the cli doctor goldens pin the full 12-row order/content; a
   doctor test leaving `WithHomeDir` unset reads the developer's real `~/.claude/agents`.
-- A leaf's Usage line and root `cmdRow` share one `cmd.Use` — cobra has no wrap point for it
-  (init's own Use is 97 cols); the 80-column help test exempts it by position (the one
-  content line right after the literal "Usage:" line), never by a "  brief " prefix match,
-  which also caught unrelated wrapped lines.
-- `setup.Artifact` has both install-side and removal-side construction sites sharing one
-  struct; a test comparing a literal `setup.Artifact{...}` must include `ForceRemovable`
-  whenever the artifact came from `srv.Uninstall`, or the comparison silently expects the
-  zero value (false).
+- A leaf's Usage line and root `cmdRow` share one `cmd.Use` — the 80-column help test exempts
+  it by position, never by a "  brief " prefix match, which also caught unrelated wrapped
+  lines.
+- `setup.Artifact` has install-side and removal-side construction sites sharing one struct; a
+  literal `setup.Artifact{...}` comparison must include `ForceRemovable` whenever the artifact
+  came from `srv.Uninstall`, or it silently expects false.
+- A `hostCheckCase.wantPathSuffix` shorter than the full disambiguating suffix (e.g. bare
+  "CLAUDE.md") can match either candidate's own path — use the full relative suffix, or the
+  negative `wantPathNotSuffix` when a case must pin the root candidate specifically.
 
 ## Open debts
 - setup never rewrites/removes an `OriginOlder` file — harmless while every older digest list
@@ -101,5 +102,10 @@ a typed `Artifact.ForceRemovable`; the pflag-placeholder fix (fix pass 4) finall
   tests pin stdout byte-exact. **Unowned.**
 - `hostPluginCheck`/`hostAgentsCheck` duplicate the same origin-check body — refactor-advisor
   MINORs, deferred rather than risk behavior change. **Unowned.**
-- `host_test.go`/`detect_test.go`'s classification tables carry no mutation-verification
-  statement on most cases, unlike their siblings (fix pass 5 added two that do). **Unowned.**
+- `host_test.go`/`detect_test.go`'s classification tables mostly carry no mutation-verification
+  statement, unlike their siblings (fix passes 5 and 6 each added a couple that do). **Unowned.**
+- `internal/doctor` (`scanSnippetCandidateStates`/`hostSnippetCheck`) and `internal/setup`
+  (`scanSnippetCandidates`/`chooseSnippetLocation`) each hand-write the same snippet-candidate-
+  selection rule and cannot import each other (dependency rule) — arch-reviewer suggests
+  hoisting the shared predicate into `internal/platform/artifact`, which both already import.
+  **Unowned.**
