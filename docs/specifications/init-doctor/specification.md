@@ -169,19 +169,37 @@ feature root (accessible, not counted), environment, host integration — setup 
   claude-code", which read awkwardly; every other next-action line keeps the trailing `for <host>`
   suffix.
 
-  **Amended in fix pass 4**: `uninstall`'s next-action line discriminates by what Uninstall
-  actually removed, not by the requested host — a lone config removal (the shape a default-host
-  `uninstall` leaves after an earlier `init --host none`) reports `brief uninstall: removed
-  brief's config; the feature root and its contents were left in place`, never a claude-code
-  install that was never there; dry run reports `brief uninstall: dry run, nothing removed;
-  rerun without --dry-run to remove brief's <host> install` (or "brief's install" for `none`);
-  everything kept reports `brief uninstall: nothing removed; N file(s) edited locally were kept;
-  run 'brief uninstall --force' to remove them`, N counting only artifacts kept because they were
-  edited, never one kept because it is not a regular file (`--force` cannot remove that either).
+  **Amended in fix pass 4, corrected in fix pass 5**: `uninstall`'s next-action line
+  discriminates by what the plan actually holds, not by the requested host, dry run or not — the
+  plan is fully computed before either arm returns, so both read the same four-way split. A host
+  artifact (any non-config `ActionRemoved`) reports `brief uninstall: removed brief's <host>
+  install; the feature root and its contents were left in place` for a real run, or `brief
+  uninstall: dry run, nothing removed; rerun without --dry-run to remove brief's <host> install`
+  under `--dry-run` (or "brief's install" for `none`, both arms). A lone config removal (the
+  shape a default-host `uninstall` leaves after an earlier `init --host none`) reports `removed
+  brief's config; …` or, under `--dry-run`, `dry run, nothing removed; rerun without --dry-run to
+  remove brief's config` — never a claude-code install that was never there, dry run included:
+  fix pass 4's own dry-run line named `installLabel(host)` unconditionally, the exact same false
+  claim the real-run arm was fixed against in the git-boundary fix, just left standing on the
+  dry-run arm. Everything kept reports `nothing removed; N file(s) edited locally were kept; run
+  'brief uninstall --force' to remove them` for a real run, or, under `--dry-run`, `dry run,
+  nothing removed; N file(s) edited locally would be kept; run 'brief uninstall --force' to
+  remove them` — N counting only artifacts kept because they were edited, never one kept because
+  it is not a regular file (`--force` cannot remove that either). Nothing installed reports
+  `nothing installed for <host>` (real) or `dry run, nothing installed for <host>` (dry run,
+  `withHostSuffix`, dropped for `none`); a non-empty plan with nothing removed and nothing
+  force-removable reports `nothing removed for <host>` or `dry run, nothing removed for <host>`
+  the same way.
   `init`'s own next-action line and JSON document additionally name host-detection's own signal
   when `--host` was not given: `brief init: installed for claude-code (detected <.claude|
   CLAUDE.md|~/.claude>; use --host none to skip); …`, and `--json` gains `detected_by` (null
   unless detected), inserted right after `host`.
+
+  **Ruled in fix pass 5**: a non-regular CLAUDE.md candidate's own stdout row differs by
+  direction — `uninstall`'s `kept <rel> (not a regular file)`, plain, never R9's own install-side
+  `not a regular file; add the block by hand, see 'brief init --print'`. There is no block to
+  add by hand on a removal: `planSnippetRemoval` never carries `notRegular`, and `--print` is
+  `init`'s own flag, not `uninstall`'s.
 - R12: **`check --hook <host>`** reads the host hook payload on stdin, takes the path from
   `tool_input.file_path`, and checks only the feature containing it. No `.brief.yaml` found, or
   a path outside the feature root: silent, exit 0. **Amended during SCENARIO-05 planning** (verified
@@ -220,12 +238,21 @@ feature root (accessible, not counted), environment, host integration — setup 
   existed, and the config family reports the "no config anywhere" rows rather than naming that
   ancestor file.
 
-  **Amended in fix pass 4**: a CLAUDE.md candidate that exists but is not a regular file (a
-  symlink or a directory) is host-snippet WARN, detail `not a regular file (symlink|directory);
-  brief block not installed`, fix `run 'brief init --print' and add the CLAUDE.md block by
-  hand` — not the SKIP `not installed` row a genuinely missing candidate reports — unless the
-  other candidate still holds a real block, in which case that block is reported exactly as it
-  would be were both candidates regular files.
+  **Amended in fix pass 4, corrected in fix pass 5**: a CLAUDE.md candidate that exists but is
+  not a regular file (a symlink or a directory) is host-snippet WARN, detail `not a regular file
+  (symlink|directory); brief block not installed`, fix `run 'brief init --print' and add the
+  CLAUDE.md block by hand` — not the SKIP `not installed` row a genuinely missing candidate
+  reports — unless the other candidate still holds a real block, in which case that block is
+  reported exactly as it would be were both candidates regular files. Fix pass 4's own wording
+  ("unless the other candidate still holds a real block") only ever ruled the both-a-block-and-a-
+  non-regular-file case; it never ruled a non-regular candidate sitting *behind* a regular,
+  blockless one. The WARN considers only the one candidate `planSnippet` would itself choose
+  once neither candidate holds a block — the first candidate that exists at all, regular or not,
+  in host.InstructionFiles' own priority order (`chooseSnippetLocation`'s own fallback rule) —
+  never a later candidate's own shape. A regular root `CLAUDE.md` with no block and a directory
+  at `.claude/CLAUDE.md` is the SKIP `not installed` row, naming root `CLAUDE.md`, exactly as
+  `init --dry-run` would merge into that same file; the directory is never named, since brief
+  would never write there either.
 - R14: **Command surface & order.** Root help and every "expected one of:" list:
   `new, start, finish, status, check, init, doctor, uninstall`. Shorts: init `install brief's
   config and agent-host integration`; doctor `check brief's setup: config, feature root, host
