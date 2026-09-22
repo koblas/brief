@@ -138,8 +138,9 @@ what actually happens.
   `relPathsWithOrigin` only counts `present && regular` ones, so both come back empty.
   `integrationFileRowDetail`'s own branch is the *only* thing standing between that and the
   final `return … SeverityOK, "installed"` — delete it (or its call) and the row goes healthy,
-  not merely wrong-severity. Five tests guard this arm today; keep it ahead of both other
-  branches.
+  not merely wrong-severity. Several tests across `Test_diagnose_classifies_host_plugin`,
+  `…_host_plugin_unreadable`, `…_host_agents` and the cli doctor tests guard this arm; keep
+  it ahead of both other branches.
 
 ## Open debts
 - setup never rewrites/removes an `OriginOlder` file — harmless while every older digest list

@@ -455,9 +455,11 @@ func notReadableDetail(reason string) string {
 // unsearchable directory still resolves its own Lstat but blocks every
 // Lstat of anything nested inside it. The walk never rises above root —
 // the one directory every host check already treats as its own install
-// boundary — returning root itself if even it fails to resolve, which
-// should not happen in practice since only root's own descendants are
-// ever the broken directory.
+// boundary — and returns root itself when no ancestor below it resolves,
+// which is exactly the answer when root is the unsearchable directory.
+// A symlinked ancestor resolves its own Lstat without its target being
+// consulted, so the walk stops at the link, not at an unsearchable
+// directory behind it.
 func blockingDir(root, path string) string {
 	dir := filepath.Dir(path)
 
