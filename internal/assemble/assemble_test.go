@@ -175,12 +175,12 @@ func Test_returns_the_next_step_s_acceptance_criteria_and_checklist(t *testing.T
 	assert.True(t, brief.Step.Checklist.Found)
 }
 
-// Test_a_section_distinguishes_present_but_empty_from_not_found_at_all
-// closes the reviewer's finding: stepFromEntry and stateSections used to
-// discard markdown.Section's ok, so a state file missing a configured
-// heading entirely rendered the same empty Body as a heading present with
-// nothing under it. Section.Found now carries that distinction, which the
-// CRLF fix depends on being observable rather than silently collapsed.
+// Test_a_section_distinguishes_present_but_empty_from_not_found_at_all pins
+// that stepFromEntry and stateSections must not discard markdown.Section's
+// ok: a state file missing a configured heading entirely must not render
+// the same empty Body as a heading present with nothing under it.
+// Section.Found carries that distinction, which the CRLF fix depends on
+// being observable rather than silently collapsed.
 func Test_a_section_distinguishes_present_but_empty_from_not_found_at_all(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -512,9 +512,10 @@ func Test_returns_an_error_when_the_state_file_is_missing(t *testing.T) {
 	assert.Empty(t, brief.Inherited)
 }
 
-// Test_refuses_a_state_file_whose_fence_is_unterminated reproduces the
-// reviewer's BLOCKER directly: stateSections finds each configured
-// heading by scanning forward for a terminator, the same as every other
+// Test_refuses_a_state_file_whose_fence_is_unterminated pins the rule that
+// makes an unclosed fence a refusal rather than a silent omission:
+// stateSections finds each configured heading by scanning forward for a
+// terminator, the same as every other
 // caller of markdown.Section, so a fence opened before the first heading
 // and never closed puts every one of them inside it — the control arm
 // (Test_carries_every_state_file_section_as_inherited_context) already
@@ -565,6 +566,89 @@ func Test_returns_an_error_when_a_step_file_has_no_frontmatter(t *testing.T) {
 	require.ErrorIs(t, err, stepfile.ErrNoFrontmatter)
 }
 
+// Test_start_names_the_step_file_whose_frontmatter_cannot_be_read is
+// SCENARIO-04's core claim: every shape of a step-file frontmatter parse
+// failure names that step file, absolute, and points at 'brief check' —
+// never the feature directory, and never scaffolding a step that already
+// exists. The "second step bad" row proves the name is not hard-coded to
+// the first file readSteps visits: STEP-01 is well-formed there and
+// STEP-02 is the one named.
+func Test_start_names_the_step_file_whose_frontmatter_cannot_be_read(t *testing.T) {
+	cfg := fixtureConfig()
+
+	cases := []struct {
+		name       string
+		files      map[string]string
+		wantStep   string
+		wantDetail string
+		noFm       bool
+	}{
+		{
+			name:       "no frontmatter",
+			files:      map[string]string{"STEP-01.md": "no frontmatter here\n"},
+			wantStep:   "STEP-01.md",
+			wantDetail: "no frontmatter found",
+			noFm:       true,
+		},
+		{
+			name:       "unclosed delimiter",
+			files:      map[string]string{"STEP-01.md": "---\nid: STEP-01\n"},
+			wantStep:   "STEP-01.md",
+			wantDetail: "no frontmatter found: no closing frontmatter delimiter",
+			noFm:       true,
+		},
+		{
+			name:       "bad YAML",
+			files:      map[string]string{"STEP-01.md": "---\nid: [open\n---\n\n# STEP-01\n"},
+			wantStep:   "STEP-01.md",
+			wantDetail: "parse frontmatter",
+		},
+		{
+			name: "second step file is the bad one",
+			files: map[string]string{
+				"STEP-01.md": fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil),
+				"STEP-02.md": "no frontmatter here either\n",
+			},
+			wantStep:   "STEP-02.md",
+			wantDetail: "no frontmatter found",
+			noFm:       true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+			require.NoError(t, os.MkdirAll(featureDir, 0o755))
+			spec := "# demo\n\n" + cfg.ProgressHeading + "\n\n- [ ] STEP-01\n"
+			require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(spec), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(""), 0o600))
+
+			for name, body := range tc.files {
+				require.NoError(t, os.WriteFile(filepath.Join(featureDir, name), []byte(body), 0o600))
+			}
+
+			srv := assemble.NewServer(cfg, root)
+
+			_, err := srv.Start(t.Context(), "demo")
+
+			require.Error(t, err)
+
+			if tc.noFm {
+				require.ErrorIs(t, err, stepfile.ErrNoFrontmatter)
+			} else {
+				require.NotErrorIs(t, err, stepfile.ErrNoFrontmatter)
+			}
+
+			var refusal *assemble.RefusalError
+			require.ErrorAs(t, err, &refusal)
+			assert.Equal(t, filepath.Join(featureDir, tc.wantStep), refusal.Path)
+			assert.Contains(t, refusal.Detail, tc.wantDetail)
+			assert.Equal(t, "run 'brief check demo' to list every fault", refusal.Fix)
+		})
+	}
+}
+
 // Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse is
 // SCENARIO-11's tripwire against readSteps becoming tolerant, sharpened by
 // SCENARIO-13: this step file's frontmatter delimiters are present and
@@ -595,7 +679,7 @@ func Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse(t *te
 
 	var refusal *assemble.RefusalError
 	require.ErrorAs(t, err, &refusal)
-	assert.Equal(t, featureDir, refusal.Path)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), refusal.Path)
 	assert.Contains(t, refusal.Detail, "yaml")
 }
 
@@ -723,6 +807,69 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 	_, err := srv.Start(t.Context(), "../escaped")
 
 	require.ErrorIs(t, err, assemble.ErrNoSuchFeature)
+}
+
+// Test_returns_an_error_when_the_feature_name_is_empty pins that an empty
+// feature argument is refused the same way a traversal attempt is —
+// validFeatureArgument rejects it before either os.Root.OpenRoot call —
+// rather than reaching topRoot.OpenRoot("") and surfacing its own opaque
+// "empty path" failure, which names no feature and suggests no fix.
+func Test_returns_an_error_when_the_feature_name_is_empty(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
+
+	srv := assemble.NewServer(cfg, root)
+
+	_, err := srv.Start(t.Context(), "")
+
+	require.ErrorIs(t, err, assemble.ErrNoSuchFeature)
+}
+
+// Test_start_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_directory
+// covers Start's first os.Root.OpenRoot call — the configured feature
+// directory itself, not feature's own subdirectory — the same way
+// Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry
+// already covers the second: a regular file standing where the configured
+// feature directory belongs must fail generically, carrying that path in
+// its message, never as ErrNoSuchFeature.
+func Test_start_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_directory(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDirPath := filepath.Join(root, cfg.FeatureDirectory)
+	require.NoError(t, os.WriteFile(featureDirPath, []byte("not a directory"), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	_, err := srv.Start(t.Context(), "demo")
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, assemble.ErrNoSuchFeature)
+	assert.Contains(t, err.Error(), featureDirPath)
+}
+
+// Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry pins
+// that only a genuinely absent directory is ErrNoSuchFeature: a feature
+// entry that exists but cannot be opened as a
+// directory — here, a regular file standing where "demo"'s directory
+// belongs — must not read as "no such feature demo", since demo plainly
+// does exist. The portable, privilege-independent substitute for a
+// permission failure is the same technique
+// Test_status_propagates_a_feature_root_that_is_not_a_directory already
+// uses: a regular file makes os.Root.OpenRoot fail with "not a directory",
+// never fs.ErrNotExist.
+func Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, cfg.FeatureDirectory, "demo"), []byte("not a directory"), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	_, err := srv.Start(t.Context(), "demo")
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, assemble.ErrNoSuchFeature)
 }
 
 // fileSnapshot is one file's identity for a disk-unchanged sweep: its

@@ -23,7 +23,9 @@ func Test_creates_the_step_and_prints_its_path(t *testing.T) {
 	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
+	assert.Equal(t,
+		"brief new step: created SCENARIO-01 in payments and added it to docs/specifications/payments/specification.md; fill in its acceptance criteria and checklist, then 'brief start payments'\n",
+		stderr.String())
 	assert.Equal(t, "docs/specifications/payments/SCENARIO-01.md\n", stdout.String())
 }
 
@@ -71,6 +73,12 @@ func Test_prints_usage_to_stdout_when_help_is_requested_for_new_step(t *testing.
 	assert.NotEmpty(t, stdout.String())
 }
 
+// Test_refuses_on_one_line_for_an_unknown_feature_for_step pins that the
+// error "new step" returns for an unknown feature still satisfies
+// errors.Is(err, scaffold.ErrNoSuchFeature) — enrichUnknownFeature wraps the
+// sentinel rather than replacing it. The stderr copy itself (the "known:"
+// list and its tail) is Test_an_unknown_feature_names_the_known_ones's own
+// contract, in unknown_feature_test.go.
 func Test_refuses_on_one_line_for_an_unknown_feature_for_step(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -80,10 +88,7 @@ func Test_refuses_on_one_line_for_an_unknown_feature_for_step(t *testing.T) {
 	require.ErrorIs(t, err, scaffold.ErrNoSuchFeature)
 	assert.Empty(t, stdout.String())
 	assert.Equal(t, 1, cli.ExitCode(err))
-
-	line := oneLine(t, &stderr)
-	assert.Contains(t, line, filepath.Join(wd, "docs", "specifications", "payments"))
-	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
+	oneLine(t, &stderr)
 }
 
 func Test_refuses_on_one_line_when_the_specification_has_no_progress_heading(t *testing.T) {
@@ -102,7 +107,7 @@ func Test_refuses_on_one_line_when_the_specification_has_no_progress_heading(t *
 	assert.Equal(t, 1, cli.ExitCode(err))
 
 	line := oneLine(t, &stderr)
-	assert.Contains(t, line, filepath.Join(featureDir, "specification.md"))
+	assert.Contains(t, line, filepath.Join("docs", "specifications", "payments", "specification.md"))
 	assert.Contains(t, line, "## BDD Acceptance Progress")
 	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
 }

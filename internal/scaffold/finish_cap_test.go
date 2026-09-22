@@ -55,7 +55,7 @@ func Test_refuses_a_handoff_one_line_over_the_configured_cap(t *testing.T) {
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	overCap := bodyOfLines(fx.cfg.HandoffCapLines + 1)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", overCap, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", overCap, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 
@@ -77,7 +77,7 @@ func Test_accepts_a_handoff_of_exactly_the_configured_cap(t *testing.T) {
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	atCap := bodyOfLines(fx.cfg.HandoffCapLines)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", atCap, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", atCap, fx.newState)
 
 	require.NoError(t, err)
 
@@ -92,7 +92,7 @@ func Test_accepts_a_handoff_of_exactly_the_configured_cap_with_no_trailing_newli
 	atCap := bodyOfLines(fx.cfg.HandoffCapLines)
 	atCap = []byte(strings.TrimSuffix(string(atCap), "\n"))
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", atCap, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", atCap, fx.newState)
 
 	require.NoError(t, err)
 
@@ -116,7 +116,7 @@ func Test_a_refused_over_cap_handoff_leaves_every_file_byte_identical(t *testing
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	overCap := bodyOfLines(fx.cfg.HandoffCapLines + 1)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", overCap, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", overCap, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
@@ -138,7 +138,7 @@ func Test_an_over_cap_handoff_on_a_done_step_reports_the_cap_not_the_re_finish_r
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	overCap := bodyOfLines(fx.cfg.HandoffCapLines + 1)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", overCap, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", overCap, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 	assert.NotErrorIs(t, err, scaffold.ErrAlreadyFinished)
@@ -149,7 +149,7 @@ func Test_refuses_a_state_body_one_line_over_the_configured_cap(t *testing.T) {
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	overCap := bodyOfLines(fx.cfg.StateCapLines + 1)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCap)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCap)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 
@@ -171,7 +171,7 @@ func Test_accepts_a_state_body_of_exactly_the_configured_cap(t *testing.T) {
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	atCap := stateBodyOfLines(fx.cfg, fx.cfg.StateCapLines)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, atCap)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, atCap)
 
 	require.NoError(t, err)
 
@@ -186,7 +186,7 @@ func Test_accepts_a_state_body_of_exactly_the_configured_cap_with_no_trailing_ne
 	atCap := stateBodyOfLines(fx.cfg, fx.cfg.StateCapLines)
 	atCap = []byte(strings.TrimSuffix(string(atCap), "\n"))
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, atCap)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, atCap)
 
 	require.NoError(t, err)
 
@@ -208,7 +208,7 @@ func Test_a_refused_over_cap_state_body_leaves_every_file_byte_identical(t *test
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	overCap := bodyOfLines(fx.cfg.StateCapLines + 1)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCap)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCap)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
@@ -230,7 +230,7 @@ func Test_reports_the_handoff_cap_first_when_both_bodies_are_over_their_caps(t *
 	overHandoff := bodyOfLines(fx.cfg.HandoffCapLines + 1)
 	overState := bodyOfLines(fx.cfg.StateCapLines + 1)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", overHandoff, overState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", overHandoff, overState)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 
@@ -249,7 +249,7 @@ func Test_reports_the_state_cap_before_the_state_s_unclosed_fence(t *testing.T) 
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	overState := append(bodyOfLines(fx.cfg.StateCapLines), []byte("```\n")...)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overState)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 	assert.NotErrorIs(t, err, scaffold.ErrUnterminatedFence)
@@ -267,7 +267,7 @@ func Test_an_over_cap_state_body_on_a_done_step_reports_the_cap_not_the_re_finis
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	overCap := bodyOfLines(fx.cfg.StateCapLines + 1)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCap)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCap)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 	assert.NotErrorIs(t, err, scaffold.ErrAlreadyFinished)

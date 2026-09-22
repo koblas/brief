@@ -19,15 +19,19 @@
 // first byte reaches disk. Its four writes land in a fixed order — handoff
 // file, state file, step file, specification — chosen so a crash between
 // them always converges on a retry; see the doc comment on Finish for why
-// the reverse order does not. A write failure after validation is
-// returned as-is, never as a *RefusalError, since nothing changed on disk
-// is not true past that point. Finishing an already-finished step with
-// the same handoff and state is a true no-op: nothing is written and
-// every file's modification time is preserved. Finishing it again with a
-// handoff or state that differs from what is recorded is refused instead,
-// naming the specific divergent file, unless the recorded handoff file is
-// missing or unreadable, which exempts the step from the refusal
-// entirely.
+// the reverse order does not. On success it returns a FinishResult naming
+// the absolute handoff and state paths it wrote, whether anything changed,
+// and the id of the next open step (ignoring depends-on) — the same step
+// brief start would brief next, computed before any write so it is
+// present even on a no-op. A write failure after validation is returned
+// as-is, never as a *RefusalError, since nothing changed on disk is not
+// true past that point. Finishing an already-finished step with the same
+// handoff and state is a true no-op: nothing is written and every file's
+// modification time is preserved, and FinishResult.Changed reports false.
+// Finishing it again with a handoff or state that differs from what is
+// recorded is refused instead, naming the specific divergent file, unless
+// the recorded handoff file is missing or unreadable, which exempts the
+// step from the refusal entirely.
 //
 // A caller-facing refusal is a *RefusalError: a path, an optional line
 // within it, what was wrong, and how to fix it, wrapping one of

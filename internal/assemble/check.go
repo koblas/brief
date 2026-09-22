@@ -25,18 +25,75 @@ const (
 	SeverityWarn Severity = "WARN"
 )
 
+// Rule is the stable id a Finding's fault carries (R8), so a script driving
+// Check branches on this rather than parsing the English in Detail.
+type Rule string
+
+const (
+	// RuleFeatureSymlink marks a symlink where a feature directory is
+	// expected.
+	RuleFeatureSymlink Rule = "feature-symlink"
+	// RuleFeatureUnreadable marks a feature directory that exists but
+	// could not be opened.
+	RuleFeatureUnreadable Rule = "feature-unreadable"
+	// RuleSpecMissing marks an absent specification file (C1).
+	RuleSpecMissing Rule = "spec-missing"
+	// RuleSpecUnreadable marks a specification file that exists but could
+	// not be read (C1).
+	RuleSpecUnreadable Rule = "spec-unreadable"
+	// RuleStateMissing marks an absent state file (C2).
+	RuleStateMissing Rule = "state-missing"
+	// RuleStateUnreadable marks a state file that exists but could not be
+	// read (C2).
+	RuleStateUnreadable Rule = "state-unreadable"
+	// RuleStepsUnlistable marks a feature directory whose step files could
+	// not be listed at all.
+	RuleStepsUnlistable Rule = "steps-unlistable"
+	// RuleStepUnreadable marks a step file that exists but could not be
+	// read.
+	RuleStepUnreadable Rule = "step-unreadable"
+	// RuleFrontmatter marks a step file whose frontmatter does not parse
+	// (C6).
+	RuleFrontmatter Rule = "frontmatter"
+	// RuleFence marks a specification or state body with an unterminated
+	// fenced code block (C1, C4).
+	RuleFence Rule = "fence"
+	// RuleHeading marks a specification or state body missing one of its
+	// configured headings (C1, C5).
+	RuleHeading Rule = "heading"
+	// RuleStateCap marks a state body over cfg.StateCapLines (C3).
+	RuleStateCap Rule = "state-cap"
+	// RuleHandoffCap marks a step's handoff file over cfg.HandoffCapLines
+	// (C10).
+	RuleHandoffCap Rule = "handoff-cap"
+	// RuleChecklist marks a done step's unticked checklist item (C7).
+	RuleChecklist Rule = "checklist"
+	// RuleDependsOn marks a step's self-dependency or a depends-on id
+	// naming no step file (C8, C9).
+	RuleDependsOn Rule = "depends-on"
+)
+
 // Finding is one fault Check found in a feature's on-disk layout that
-// scaffold.Finish would now refuse to write over. Path is absolute; Line is
-// the 1-based line within Path the fault concerns, 0 when it names the
-// whole file. Detail is the same string the write-path refusal would
-// print — Finding carries no Fix: the refusal copy's "... and retry" is
-// write-path language with no meaning in a report of a tree Finish was
-// never asked to write.
+// scaffold.Finish would now refuse to write over. Rule is the stable id
+// this fault's producer carries (R8). Path is absolute; Line is the
+// 1-based line within Path the fault concerns, 0 when it names the whole
+// file. Detail is the same string the write-path refusal would print —
+// Finding carries no Fix: the refusal copy's "... and retry" is write-path
+// language with no meaning in a report of a tree Finish was never asked to
+// write. Feature is the owning feature's directory name, FeaturePath its
+// absolute directory, and InFlight is the group-header discriminator
+// GroupByFeature carries forward — true for every finding on a feature
+// still in flight, including both feature-level producers regardless of
+// their feature's own doneness, matching Severity's own decision.
 type Finding struct {
-	Severity Severity
-	Path     string
-	Line     int
-	Detail   string
+	Rule        Rule
+	Severity    Severity
+	Path        string
+	Line        int
+	Detail      string
+	Feature     string
+	FeaturePath string
+	InFlight    bool
 }
 
 // Check reports every fault in feature's on-disk layout that
@@ -74,8 +131,8 @@ type Finding struct {
 //
 // Check narrows the population Finish's band applies to, never the
 // predicate: an open step's unticked checklist item, and an open step's
-// known-but-unmet dependency — already counted by Status's Blocked — are
-// ordinary in-progress work, not findings. C8 and C9 carry no such
+// known-but-unmet dependency, are ordinary in-progress work, not findings.
+// C8 and C9 carry no such
 // narrowing: a self-dependency or a dangling depends-on id is a fault on a
 // done step exactly as much as an open one. Every other rule applies
 // without narrowing too, including C10: a done or open step's over-cap
@@ -91,12 +148,15 @@ type Finding struct {
 // C10 for it, since the handoff cap does not depend on frontmatter.
 //
 // Severity is decided once per feature, after every step file is walked:
-// SeverityError when any step is not done or could not be read or parsed;
-// SeverityWarn when every step reads as done. A feature with no step files
-// is vacuously "every step done" and takes SeverityWarn. A feature-level
-// Finding — an unreadable or symlinked feature directory, or a feature
-// whose step files could not be listed at all — always takes
-// SeverityError: its doneness cannot be measured, and treating the
+// SeverityError when any step is not done or could not be read or parsed,
+// or the feature has no step files at all; SeverityWarn when every step
+// reads as done. A feature with no step files takes SeverityError rather
+// than the vacuous "every step done" WARN a naive empty-loop would read,
+// matching (FeatureStatus).Complete's own Total > 0 requirement
+// (Test_check_marks_a_zero_step_feature_in_flight_not_complete). A
+// feature-level Finding — an unreadable or symlinked feature directory, or
+// a feature whose step files could not be listed at all — always takes
+// SeverityError too: its doneness cannot be measured, and treating the
 // unmeasurable case as anything less would understate it.
 func (s *Server) Check(_ context.Context, feature string) ([]Finding, error) {
 	pattern, err := stepfile.Compile(s.cfg.StepFilePattern)
@@ -166,9 +226,13 @@ func (s *Server) Check(_ context.Context, feature string) ([]Finding, error) {
 // never "\" alone on POSIX, where it is an ordinary filename character.
 // Check rejects everything else before it ever reaches OpenRoot, so a
 // caller cannot walk it into the feature-directory root itself or a
-// directory outside any feature.
+// directory outside any feature. An empty feature is rejected here too:
+// Check's own all-features listing never calls this function with one — it
+// checks `feature != ""` first — so this only ever turns Start's empty
+// argument into ErrNoSuchFeature instead of topRoot.OpenRoot("")'s opaque
+// "empty path" failure.
 func validFeatureArgument(feature string) bool {
-	if feature == "." || feature == ".." {
+	if feature == "" || feature == "." || feature == ".." {
 		return false
 	}
 
@@ -217,20 +281,41 @@ func (s *Server) checkNamedFeature(topRoot *os.Root, feature string, pattern ste
 
 // symlinkFeatureFinding is the Finding Check reports for a symlink where a
 // feature directory is expected: SeverityError, since a symlink is never
-// read through, so nothing about what it points at can be measured.
+// read through, so nothing about what it points at can be measured. It
+// stamps its own Feature/FeaturePath/InFlight rather than relying on
+// checkFeatureDir's severity loop, which this finding never passes
+// through.
 func symlinkFeatureFinding(featurePath string) Finding {
-	return Finding{Severity: SeverityError, Path: featurePath, Detail: "is a symbolic link, not read as a feature directory"}
+	return Finding{
+		Rule:        RuleFeatureSymlink,
+		Severity:    SeverityError,
+		Path:        featurePath,
+		Detail:      "is a symbolic link, not read as a feature directory",
+		Feature:     filepath.Base(featurePath),
+		FeaturePath: featurePath,
+		InFlight:    true,
+	}
 }
 
 // unreadableFeatureFinding is the Finding Check reports for a feature
 // directory that exists but could not be opened as its own root — most
 // often a permission failure. newProblem's Detail (never its Fix, which
 // Finding does not carry) becomes the Finding's own Detail; SeverityError,
-// since an unreadable feature's doneness cannot be measured.
+// since an unreadable feature's doneness cannot be measured. It stamps its
+// own Feature/FeaturePath/InFlight for the same reason
+// symlinkFeatureFinding does.
 func unreadableFeatureFinding(featurePath string, err error) Finding {
 	problem := newProblem(featurePath, err, false)
 
-	return Finding{Severity: SeverityError, Path: problem.Path, Detail: problem.Detail}
+	return Finding{
+		Rule:        RuleFeatureUnreadable,
+		Severity:    SeverityError,
+		Path:        problem.Path,
+		Detail:      problem.Detail,
+		Feature:     filepath.Base(featurePath),
+		FeaturePath: featurePath,
+		InFlight:    true,
+	}
 }
 
 // checkFeatureDir runs every rule Check owns against one feature directory
@@ -254,28 +339,29 @@ func (s *Server) checkFeatureDir(root *os.Root, pattern stepfile.Pattern, handof
 		sev = SeverityError
 	}
 
+	name := filepath.Base(featurePath)
+
 	for i := range findings {
 		findings[i].Severity = sev
+		findings[i].Feature = name
+		findings[i].FeaturePath = featurePath
+		findings[i].InFlight = inFlight
 	}
 
 	return findings
 }
 
-// checkSpecFindings is C1: it reuses checkSpecification, the exact rule
-// Start refuses a feature's specification against, and renders its
-// *RefusalError as at most one Finding.
+// checkSpecFindings is C1: it reuses specFault, the exact classifier
+// checkSpecification refuses a feature's specification against, and
+// renders its *RefusalError as at most one Finding carrying that
+// classifier's own Rule.
 func (s *Server) checkSpecFindings(root *os.Root, featurePath string) []Finding {
-	err := s.checkSpecification(root, featurePath)
-	if err == nil {
+	rule, refusal := s.specFault(root, featurePath)
+	if refusal == nil {
 		return nil
 	}
 
-	var refusal *RefusalError
-	if !errors.As(err, &refusal) {
-		return nil
-	}
-
-	return []Finding{{Path: refusal.Path, Line: refusal.Line, Detail: refusal.Detail}}
+	return []Finding{{Rule: rule, Path: refusal.Path, Line: refusal.Line, Detail: refusal.Detail}}
 }
 
 // checkStateFindings is C2-C5. C2 (missing or unreadable) gates the rest:
@@ -293,7 +379,12 @@ func (s *Server) checkStateFindings(root *os.Root, featurePath string) []Finding
 	if err != nil {
 		problem := newProblem(statePath, err, false)
 
-		return []Finding{{Path: problem.Path, Detail: problem.Detail}}
+		rule := RuleStateUnreadable
+		if errors.Is(err, fs.ErrNotExist) {
+			rule = RuleStateMissing
+		}
+
+		return []Finding{{Rule: rule, Path: problem.Path, Detail: problem.Detail}}
 	}
 
 	var findings []Finding
@@ -302,15 +393,15 @@ func (s *Server) checkStateFindings(root *os.Root, featurePath string) []Finding
 		// conform.OverCap stays line-less, so the write path's own pinned
 		// refusal bytes never move; a cap finding's line is cap+1, the
 		// first line over it, set here at the call site instead.
-		findings = append(findings, Finding{Path: statePath, Line: s.cfg.StateCapLines + 1, Detail: v.Problem})
+		findings = append(findings, Finding{Rule: RuleStateCap, Path: statePath, Line: s.cfg.StateCapLines + 1, Detail: v.Problem})
 	}
 
 	if v := conform.UnterminatedFence(stateBytes, "state"); v != nil {
-		findings = append(findings, Finding{Path: statePath, Line: v.Line, Detail: v.Problem})
+		findings = append(findings, Finding{Rule: RuleFence, Path: statePath, Line: v.Line, Detail: v.Problem})
 	}
 
 	if v := conform.MissingHeading(stateBytes, "state", s.cfg.StateHeadings); v != nil {
-		findings = append(findings, Finding{Path: statePath, Line: v.Line, Detail: v.Problem})
+		findings = append(findings, Finding{Rule: RuleHeading, Path: statePath, Line: v.Line, Detail: v.Problem})
 	}
 
 	return findings
@@ -333,8 +424,9 @@ type parsedStep struct {
 // pattern recognizes, in ascending step-number order. It returns the
 // findings and whether the feature reads as still in flight (the severity
 // rule Check's own doc comment states): true when any step is not done, or
-// could not be read or parsed, or the step files could not be listed at
-// all.
+// could not be read or parsed, the step files could not be listed at all,
+// or there are no step files at all — the same Total > 0 requirement
+// assemble.Status's Complete() applies.
 //
 // A listing failure — the directory opened but could not be read, most
 // often a permission failure on the directory itself rather than on
@@ -357,7 +449,7 @@ func (s *Server) checkStepFindings(root *os.Root, pattern stepfile.Pattern, hand
 	if err != nil {
 		problem := newProblem(featurePath, err, false)
 
-		return []Finding{{Path: problem.Path, Detail: problem.Detail}}, true
+		return []Finding{{Rule: RuleStepsUnlistable, Path: problem.Path, Detail: problem.Detail}}, true
 	}
 
 	var parsed []parsedStep
@@ -400,7 +492,10 @@ func (s *Server) checkStepFindings(root *os.Root, pattern stepfile.Pattern, hand
 
 	var findings []Finding
 
-	inFlight := false
+	// A feature with no step files at all is not vacuously "every step
+	// done": it is in flight, matching (FeatureStatus).Complete's own
+	// Total > 0 requirement (Test_check_marks_a_zero_step_feature_in_flight_not_complete).
+	inFlight := len(parsed) == 0
 
 	for _, ps := range parsed {
 		stepPath := filepath.Join(featurePath, ps.name)
@@ -408,10 +503,10 @@ func (s *Server) checkStepFindings(root *os.Root, pattern stepfile.Pattern, hand
 
 		switch {
 		case ps.readErr != nil:
-			findings = append(findings, Finding{Path: stepPath, Detail: fmt.Sprintf("step file cannot be read: %v", ps.readErr)})
+			findings = append(findings, Finding{Rule: RuleStepUnreadable, Path: stepPath, Detail: fmt.Sprintf("step file cannot be read: %v", ps.readErr)})
 			inFlight = true
 		case ps.parseErr != nil:
-			findings = append(findings, Finding{Path: stepPath, Detail: fmt.Sprintf("frontmatter does not parse: %v", ps.parseErr)})
+			findings = append(findings, Finding{Rule: RuleFrontmatter, Path: stepPath, Detail: fmt.Sprintf("frontmatter does not parse: %v", ps.parseErr)})
 			inFlight = true
 		default:
 			if !ps.fm.Done() {
@@ -443,7 +538,7 @@ func checkStepChecklistFinding(heading string, ps parsedStep, stepPath string) [
 		return nil
 	}
 
-	return []Finding{{Path: stepPath, Line: v.Line, Detail: v.Problem}}
+	return []Finding{{Rule: RuleChecklist, Path: stepPath, Line: v.Line, Detail: v.Problem}}
 }
 
 // checkStepDependencyFindings is C8 and C9. idx.FirstUnmet is a refusal
@@ -454,10 +549,8 @@ func checkStepChecklistFinding(heading string, ps parsedStep, stepPath string) [
 // (C8) fault. It walks every id in fm.DependsOn directly, in declaration
 // order, and emits one Finding per id that is stepID itself (C9) or that
 // idx.Known reports nothing recorded under (C8). An id that is Known and
-// not stepID is an ordinary known-but-unmet dependency — already counted
-// by Status's Blocked for an open step, and never a fault for a done one —
-// and is never a finding. Copy matches
-// scaffold.checkStepDependencies's own two refusal branches verbatim.
+// not stepID is an ordinary known-but-unmet dependency, never a fault
+// whether the step is open or done, and is never a finding.
 func checkStepDependencyFindings(idx *stepfile.DependencyIndex, fm stepfile.Frontmatter, stepID, stepPath string) []Finding {
 	var findings []Finding
 
@@ -465,11 +558,13 @@ func checkStepDependencyFindings(idx *stepfile.DependencyIndex, fm stepfile.Fron
 		switch {
 		case dep == stepID:
 			findings = append(findings, Finding{
+				Rule:   RuleDependsOn,
 				Path:   stepPath,
 				Detail: fmt.Sprintf("step %q depends on %q, which is not finished", stepID, dep),
 			})
 		case !idx.Known(dep):
 			findings = append(findings, Finding{
+				Rule:   RuleDependsOn,
 				Path:   stepPath,
 				Detail: fmt.Sprintf("step %q depends on %q, which names no step file", stepID, dep),
 			})
@@ -477,6 +572,42 @@ func checkStepDependencyFindings(idx *stepfile.DependencyIndex, fm stepfile.Fron
 	}
 
 	return findings
+}
+
+// FeatureFindings is one feature's findings, folded by GroupByFeature: Name
+// and Path are the feature's own name and absolute directory, and InFlight
+// is the group-header discriminator (renders "(in flight)" or
+// "(complete)"), all three copied from the findings themselves rather than
+// recomputed.
+type FeatureFindings struct {
+	Name     string
+	Path     string
+	InFlight bool
+	Findings []Finding
+}
+
+// GroupByFeature folds findings into one FeatureFindings per distinct
+// Finding.Feature, in first-appearance order — Check's own emission order,
+// since one feature's findings are always contiguous. An empty or nil
+// findings folds into an empty result.
+func GroupByFeature(findings []Finding) []FeatureFindings {
+	var groups []FeatureFindings
+
+	index := make(map[string]int, len(findings))
+
+	for _, f := range findings {
+		i, ok := index[f.Feature]
+		if !ok {
+			i = len(groups)
+			index[f.Feature] = i
+
+			groups = append(groups, FeatureFindings{Name: f.Feature, Path: f.FeaturePath, InFlight: f.InFlight})
+		}
+
+		groups[i].Findings = append(groups[i].Findings, f)
+	}
+
+	return groups
 }
 
 // checkHandoffCapFinding is C10: number's handoff file, when it exists and
@@ -499,5 +630,5 @@ func checkHandoffCapFinding(root *os.Root, handoffPattern stepfile.HandoffPatter
 
 	// conform.OverCap stays line-less; a cap finding's line is limit+1, the
 	// first line over it, set here at the call site instead.
-	return &Finding{Path: filepath.Join(featurePath, name), Line: limit + 1, Detail: v.Problem}
+	return &Finding{Rule: RuleHandoffCap, Path: filepath.Join(featurePath, name), Line: limit + 1, Detail: v.Problem}
 }

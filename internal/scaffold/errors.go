@@ -83,35 +83,39 @@ var ErrOverCap = conform.ErrOverCap
 var ErrOpenChecklistItem = conform.ErrOpenChecklistItem
 
 // ErrUnmetDependency is returned when Finish is asked to close a step whose
-// frontmatter declares a depends-on id that is not a done step —
-// stepfile.DependencyIndex.FirstUnmet, the same rule assemble.Status's
-// blocked count uses. It travels inside a *RefusalError naming the step
-// file being finished (Line 0), and covers two distinct causes rendered as
-// different copy: the dependency names a step file that exists but is not
-// done — including a self-dependency, which can never become done through
-// this check alone since the tool refuses rather than writes — or the
-// dependency names no step file at all (stepfile.DependencyIndex.Known is
-// false). A done step is never refused this way, whatever its dependencies
-// say: FirstUnmet short-circuits on the dependant's own doneness, the same
-// exemption assemble.Status's blocked count applies, so a re-finish of a
-// done step whose dependency was later reopened stays a no-op. A step
-// file this scenario depends on that cannot be read or whose frontmatter
-// does not parse is recorded as a known, not-done step rather than
-// skipped, so it takes the "is not finished" branch, never the "names no
-// step file" one — finish grows no separate malformed-sibling refusal for
-// that case.
+// frontmatter declares a depends-on id that is not a done step, by
+// stepfile.DependencyIndex.FirstUnmet. It travels inside a *RefusalError
+// naming the step file being finished (Line 0), and covers two distinct
+// causes rendered as different copy: the dependency names a step file that
+// exists but is not done — including a self-dependency, which can never
+// become done through this check alone since the tool refuses rather than
+// writes — or the dependency names no step file at all
+// (stepfile.DependencyIndex.Known is false). A done step is never refused
+// this way, whatever its dependencies say: FirstUnmet short-circuits on
+// the dependant's own doneness, so a re-finish of a done step whose
+// dependency was later reopened stays a no-op. A step file this scenario
+// depends on that cannot be read or whose frontmatter does not parse is
+// recorded as a known, not-done step rather than skipped, so it takes the
+// "is not finished" branch, never the "names no step file" one — finish
+// grows no separate malformed-sibling refusal for that case.
 var ErrUnmetDependency = errors.New("step depends on a step that is not finished")
 
 // ErrMissingStateHeading is returned when a replacement state body given to
 // Finish carries no section for one of cfg.StateHeadings.Ordered()'s four
 // required headings. The check is presence-only (markdown.Section's found
-// return, the same trigger assemble.Start's shortfall degrade uses), in any
-// order, and a section with an empty body is valid — a freshly scaffolded
-// state file with every section empty is accepted; only a missing heading
-// line itself is refused. It is conform.ErrMissingStateHeading: assemble.Check
-// reports the same fault as a Finding against a state file the write path
-// never validated.
+// return), in any order, and a section with an empty body is valid — a
+// freshly scaffolded state file with every section empty is accepted; only
+// a missing heading line itself is refused. It is
+// conform.ErrMissingStateHeading: assemble.Check reports the same fault as
+// a Finding against a state file the write path never validated.
 var ErrMissingStateHeading = conform.ErrMissingStateHeading
+
+// ErrPartialWrite marks a write-path error returned after at least one of
+// Finish's, NewFeature's, or NewStep's own writes already landed on disk —
+// distinct from one returned before any of them did. cli's files_changed
+// (R3) reads this through errors.Is rather than assuming every write
+// command's own failure always changed nothing.
+var ErrPartialWrite = errors.New("partial write")
 
 // StateSource is the RefusalError.Path placeholder a refusal carries when
 // it concerns the bytes of Finish's state argument rather than a file
@@ -150,4 +154,26 @@ func (e *RefusalError) Error() string {
 // Unwrap exposes Err so errors.Is reaches the sentinel this refusal wraps.
 func (e *RefusalError) Unwrap() error {
 	return e.Err
+}
+
+// partialWriteError marks err as ErrPartialWrite without changing what
+// Error() reports: Go's multi-error Unwrap lets errors.Is reach both err's
+// own chain and ErrPartialWrite, while Error() renders exactly what err
+// alone would have, so a --json document's "message"/"problem" text is
+// never affected by whether a write landed before this error was returned.
+type partialWriteError struct {
+	err error
+}
+
+func (e *partialWriteError) Error() string   { return e.err.Error() }
+func (e *partialWriteError) Unwrap() []error { return []error{e.err, ErrPartialWrite} }
+
+// markPartial wraps err with ErrPartialWrite, reporting that at least one
+// write already landed before err was produced. It returns nil unchanged.
+func markPartial(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return &partialWriteError{err: err}
 }

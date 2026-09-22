@@ -29,7 +29,8 @@ func newTreeWithExtraCommands(t *testing.T, hiddenExtraHidden bool) (*cobra.Comm
 	wd := t.TempDir()
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
 	readBuildInfo := func() (*debug.BuildInfo, bool) { return nil, false }
-	root := newRootCommand(wd, nil, stdout, stderr, readBuildInfo)
+	out := reporter{stdout: stdout, stderr: stderr}
+	root := newRootCommand(wd, nil, out, readBuildInfo)
 	extra := &cobra.Command{
 		Use:  "extra",
 		Args: cobra.ArbitraryArgs,
@@ -52,10 +53,11 @@ func newTreeWithExtraCommands(t *testing.T, hiddenExtraHidden bool) (*cobra.Comm
 // Test_bool_flag_rewrite_does_not_apply_to_a_non_bool_flag pins
 // boolFlagParseMessage's type guard: an invalid value for "extra"'s Int
 // flag "count" reaches the root FlagErrorFunc frame as pflag's own raw
-// strconv.ParseInt wording, unrewritten — proving the rewrite in
-// Test_reports_an_invalid_bool_flag_value_without_leaking_strconv_wording
-// (flag_error_test.go) is scoped to bool-typed flags, not every flag pflag
-// rejects a value for.
+// strconv.ParseInt wording, unrewritten — proving the rewrite the
+// "status --help=x --json" row of
+// Test_json_mode_usage_error_message_is_the_text_mode_line
+// (json_usage_test.go) pins for a real bool flag is scoped to bool-typed
+// flags, not every flag pflag rejects a value for.
 //
 // Mutation-verified: dropping boolFlagParseMessage's
 // "invalid.GetFlag().Value.Type() != \"bool\"" guard reds this test — the

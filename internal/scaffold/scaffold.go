@@ -28,9 +28,31 @@ func NewServer(cfg config.Config, root string) *Server {
 	return &Server{cfg: cfg, root: root}
 }
 
+// Result is what NewFeature and NewStep return: Feature is the feature
+// name given to the call, Step is the created step's id (empty for
+// NewFeature — no call creates a feature and a step in one invocation),
+// Path is the single path the caller's own text-mode contract prints (the
+// feature directory for NewFeature, the step file for NewStep), Created
+// lists every path this call brought into existence, in the order it wrote
+// them, and Modified lists every path it rewrote in place instead —
+// NewStep's own specification, whose progress list it appends an entry to,
+// never NewFeature's, which creates both its files fresh. Neither slice
+// ever includes a path the other already names, and neither is ever nil,
+// so a caller can range over either without a nil check.
+type Result struct {
+	Feature  string
+	Step     string
+	Path     string
+	Created  []string
+	Modified []string
+}
+
 // NewFeature creates the feature directory for name under the configured
 // feature directory, writing an empty specification skeleton and an empty
-// state file into it, and returns the created directory's path.
+// state file into it, and returns a Result naming the created directory
+// and the two files written into it. Result.Created is always exactly
+// [specification, state], in that order — a caller may index it directly
+// rather than ranging over it.
 //
 // name is validated before anything touches disk: an empty name, or one
 // containing whitespace, is refused as ErrInvalidFeatureName and no
@@ -49,19 +71,19 @@ func NewServer(cfg config.Config, root string) *Server {
 // additionally opened O_CREATE|O_EXCL, a second guard behind Mkdir's that
 // cannot fire while Mkdir guarantees a brand-new leaf, and which holds the
 // line if that guarantee is ever relaxed.
-func (s *Server) NewFeature(_ context.Context, name string) (string, error) {
+func (s *Server) NewFeature(_ context.Context, name string) (Result, error) {
 	if err := validateFeatureName(name); err != nil {
-		return "", err
+		return Result{}, err
 	}
 
 	featureRoot := filepath.Join(s.root, s.cfg.FeatureDirectory)
 	if err := os.MkdirAll(featureRoot, 0o755); err != nil {
-		return "", fmt.Errorf("scaffold: %w", err)
+		return Result{}, fmt.Errorf("scaffold: %w", err)
 	}
 
 	root, err := os.OpenRoot(featureRoot)
 	if err != nil {
-		return "", fmt.Errorf("scaffold: %w", err)
+		return Result{}, fmt.Errorf("scaffold: %w", err)
 	}
 	defer func() { _ = root.Close() }()
 
@@ -69,7 +91,7 @@ func (s *Server) NewFeature(_ context.Context, name string) (string, error) {
 		if errors.Is(err, fs.ErrExist) {
 			featurePath := filepath.Join(featureRoot, name)
 
-			return "", &RefusalError{
+			return Result{}, &RefusalError{
 				Path:    featurePath,
 				Problem: "feature already exists",
 				Fix:     fmt.Sprintf("run 'brief new step %s' to add a step to it, or choose a different name", name),
@@ -77,43 +99,57 @@ func (s *Server) NewFeature(_ context.Context, name string) (string, error) {
 			}
 		}
 
-		return "", fmt.Errorf("scaffold: %w", err)
+		return Result{}, fmt.Errorf("scaffold: %w", err)
 	}
 
+	featurePath := filepath.Join(featureRoot, name)
+	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
+	statePath := filepath.Join(featurePath, s.cfg.StateFile)
+
+	// Both failures below are marked ErrPartialWrite: root.Mkdir above has
+	// already landed the feature directory itself by the time either can
+	// fail, so cli's files_changed (R3) must report true, not false.
 	if err := writeExclusive(root, filepath.Join(name, s.cfg.SpecificationFile), specificationSkeleton(s.cfg, name)); err != nil {
-		return "", err
+		return Result{}, markPartial(err)
 	}
 
 	if err := writeExclusive(root, filepath.Join(name, s.cfg.StateFile), stateSkeleton(s.cfg)); err != nil {
-		return "", err
+		return Result{}, markPartial(err)
 	}
 
-	return filepath.Join(featureRoot, name), nil
+	return Result{
+		Feature:  name,
+		Path:     featurePath,
+		Created:  []string{specPath, statePath},
+		Modified: []string{},
+	}, nil
 }
 
 // NewStep creates the next step file for feature and appends its progress
-// entry, returning the created step file's path.
+// entry, returning a Result naming the created step's id and file. Created
+// holds only the step file; Modified holds the specification, which this
+// call rewrites in place rather than creates.
 //
 // Validation runs in the order a refusal must name the first thing wrong
-// (R14a): the configured step-file-pattern compiles, the feature directory
-// opens (also the traversal guard: a feature name that escapes the
-// feature directory is reported as ErrNoSuchFeature rather than as a
-// traversal error, since Root.OpenRoot cannot distinguish the two),
-// the specification is read, and the specification carries the configured
-// progress heading. Nothing is created until all four pass; only then is
-// the next step number computed and written.
+// (R14a): the configured step-file-pattern compiles, feature passes
+// validFeatureArgument (the traversal guard: a feature name that escapes
+// the feature directory refuses as ErrNoSuchFeature rather than as a
+// traversal error), the feature directory opens, the specification is
+// read, and the specification carries the configured progress heading.
+// Nothing is created until all five pass; only then is the next step
+// number computed and written.
 //
 // The step file is written before the specification: if the specification
 // write then fails, the result is an orphan step file with no progress
 // entry — visible and repairable — rather than a progress entry pointing
 // at a step file that was never created.
-func (s *Server) NewStep(_ context.Context, feature string) (string, error) {
+func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
 	featurePath := filepath.Join(featureDirPath, feature)
 
 	pattern, err := stepfile.Compile(s.cfg.StepFilePattern)
 	if err != nil {
-		return "", &RefusalError{
+		return Result{}, &RefusalError{
 			Path:    featurePath,
 			Problem: fmt.Sprintf("step-file-pattern %q is invalid: %v", s.cfg.StepFilePattern, err),
 			Fix:     "fix step-file-pattern in .brief.yaml",
@@ -121,23 +157,18 @@ func (s *Server) NewStep(_ context.Context, feature string) (string, error) {
 		}
 	}
 
-	topRoot, err := os.OpenRoot(featureDirPath)
+	topRoot, root, err := openFeatureDir(featureDirPath, featurePath, feature)
 	if err != nil {
-		return "", noSuchFeatureRefusal(featurePath, feature)
+		return Result{}, err
 	}
 	defer func() { _ = topRoot.Close() }()
-
-	root, err := topRoot.OpenRoot(feature)
-	if err != nil {
-		return "", noSuchFeatureRefusal(featurePath, feature)
-	}
 	defer func() { _ = root.Close() }()
 
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
 
 	specBytes, err := root.ReadFile(s.cfg.SpecificationFile)
 	if err != nil {
-		return "", &RefusalError{
+		return Result{}, &RefusalError{
 			Path:    specPath,
 			Problem: "specification file is missing",
 			Fix:     "scaffold the feature again to restore it",
@@ -148,7 +179,7 @@ func (s *Server) NewStep(_ context.Context, feature string) (string, error) {
 	spec := string(specBytes)
 
 	if _, err := insertProgressEntry(spec, s.cfg.ProgressHeading, ""); err != nil {
-		return "", &RefusalError{
+		return Result{}, &RefusalError{
 			Path:    specPath,
 			Problem: fmt.Sprintf("no %q heading found", s.cfg.ProgressHeading),
 			Fix:     fmt.Sprintf("add a %q heading to the specification", s.cfg.ProgressHeading),
@@ -158,7 +189,7 @@ func (s *Server) NewStep(_ context.Context, feature string) (string, error) {
 
 	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
-		return "", fmt.Errorf("scaffold: %w", err)
+		return Result{}, fmt.Errorf("scaffold: %w", err)
 	}
 
 	next := 1
@@ -177,19 +208,29 @@ func (s *Server) NewStep(_ context.Context, feature string) (string, error) {
 	stepName := pattern.Name(next)
 
 	if err := writeExclusive(root, stepName, stepSkeleton(s.cfg, id)); err != nil {
-		return "", err
+		return Result{}, err
 	}
 
 	newSpec, err := insertProgressEntry(spec, s.cfg.ProgressHeading, progressEntry(id))
 	if err != nil {
-		return "", fmt.Errorf("scaffold: %w", err)
+		return Result{}, fmt.Errorf("scaffold: %w", err)
 	}
 
+	// Marked ErrPartialWrite: the step file above has already landed by the
+	// time this can fail, so cli's files_changed (R3) must report true.
 	if err := replaceString(root, s.cfg.SpecificationFile, newSpec); err != nil {
-		return "", fmt.Errorf("scaffold: %w", err)
+		return Result{}, markPartial(fmt.Errorf("scaffold: %w", err))
 	}
 
-	return filepath.Join(featurePath, stepName), nil
+	stepPath := filepath.Join(featurePath, stepName)
+
+	return Result{
+		Feature:  feature,
+		Step:     id,
+		Path:     stepPath,
+		Created:  []string{stepPath},
+		Modified: []string{specPath},
+	}, nil
 }
 
 // noSuchFeatureRefusal reports that feature has no directory at path,
@@ -201,6 +242,70 @@ func noSuchFeatureRefusal(path, feature string) error {
 		Fix:     fmt.Sprintf("run 'brief new feature %s' to create it", feature),
 		Err:     ErrNoSuchFeature,
 	}
+}
+
+// openFeatureDir opens feature's own directory under featureDirPath,
+// returning both *os.Root the caller must close (topRoot, the configured
+// feature directory, then root, feature's own subdirectory). It refuses as
+// noSuchFeatureRefusal(featurePath, feature) when feature fails
+// validFeatureArgument, checked before either os.Root.OpenRoot call so a
+// traversal attempt never depends on OpenRoot's own error shape, or when
+// either open fails with errors.Is(err, fs.ErrNotExist) — a genuinely
+// absent directory. Any other open failure — permission denied, or a
+// regular file where a directory belongs — is returned wrapped instead,
+// never misreported as "no such feature". NewStep and Finish share this
+// rather than duplicating the two-level open each carries.
+func openFeatureDir(featureDirPath, featurePath, feature string) (*os.Root, *os.Root, error) {
+	if !validFeatureArgument(feature) {
+		return nil, nil, noSuchFeatureRefusal(featurePath, feature)
+	}
+
+	topRoot, err := os.OpenRoot(featureDirPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, noSuchFeatureRefusal(featurePath, feature)
+		}
+
+		return nil, nil, fmt.Errorf("scaffold: open feature %s: %w", feature, err)
+	}
+
+	root, err := topRoot.OpenRoot(feature)
+	if err != nil {
+		_ = topRoot.Close()
+
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, noSuchFeatureRefusal(featurePath, feature)
+		}
+
+		return nil, nil, fmt.Errorf("scaffold: open feature %s: %w", feature, err)
+	}
+
+	return topRoot, root, nil
+}
+
+// validFeatureArgument reports whether feature is a well-formed single path
+// component: not empty, not "." or "..", and free of any
+// os.IsPathSeparator character. NewStep and Finish check it before either
+// of their two os.Root.OpenRoot calls, so a traversal attempt ("../x"), a
+// path-separator name, or an empty string refuses as noSuchFeatureRefusal
+// without depending on OpenRoot's own error shape to distinguish those from
+// a genuinely missing directory — an empty string otherwise reaches
+// topRoot.OpenRoot("") and surfaces its own opaque "empty path" failure.
+// Mirrors assemble's own validFeatureArgument (internal/assemble/check.go),
+// duplicated rather than shared because scaffold and assemble must not
+// import each other.
+func validFeatureArgument(feature string) bool {
+	if feature == "" || feature == "." || feature == ".." {
+		return false
+	}
+
+	for i := range len(feature) {
+		if os.IsPathSeparator(feature[i]) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // validateFeatureName refuses an empty name, or one carrying a rune

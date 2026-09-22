@@ -646,21 +646,18 @@ func Test_prints_help_for_the_h_shorthand_alone(t *testing.T) {
 	assert.Equal(t, helpStdout.String(), shortStdout.String())
 }
 
-// Test_reports_an_invalid_bool_flag_value_without_leaking_strconv_wording
-// pins that a bool flag given a value strconv.ParseBool rejects is
-// reported in brief's own wording, naming the value exactly as given —
-// including "" for "--json=" — rather than pflag's raw "invalid argument
-// %q for %q flag: strconv.ParseBool: parsing %q: invalid syntax". The rule
-// lives in the root FlagErrorFunc frame and so applies to any bool flag,
-// not one hard-coded name; start's --json is the only bool flag brief
-// defines today.
-//
-// Mutation-verified: removing boolFlagParseMessage's call from the root
-// FlagErrorFunc frame reds both rows below (pflag's raw strconv wording
-// leaks instead); Test_bool_flag_rewrite_does_not_apply_to_a_non_bool_flag
-// (cli_internal_test.go) is this test's control arm, proving the rewrite
-// stays scoped to bool-typed flags.
-func Test_reports_an_invalid_bool_flag_value_without_leaking_strconv_wording(t *testing.T) {
+// Test_json_flag_with_a_value_never_reaches_the_bool_flag_rewrite pins R5:
+// "--json=<v>" — any value, including an explicit empty one — is caught by
+// run's own scanJSONFlag before ExecuteContext ever runs, so it is always
+// "'--json' takes no value", never boolFlagParseMessage's
+// strconv-rejected-value wording, which fires only once a value actually
+// reaches pflag.Parse. Before this scenario, start's --json was the only
+// bool flag brief defined, and these two rows pinned boolFlagParseMessage's
+// rewrite of pflag's raw strconv wording; the JSON-mode matrix in
+// json_usage_test.go's "status --help=x --json" row now carries that
+// proof instead, using a leaf's auto-registered --help — the live bool
+// flag once --json is intercepted ahead of pflag entirely.
+func Test_json_flag_with_a_value_never_reaches_the_bool_flag_rewrite(t *testing.T) {
 	tests := []struct {
 		name       string
 		args       []string
@@ -669,12 +666,12 @@ func Test_reports_an_invalid_bool_flag_value_without_leaking_strconv_wording(t *
 		{
 			name:       "--json=maybe",
 			args:       []string{"start", "--json=maybe", "demo"},
-			wantStderr: `brief start: invalid value "maybe" for --json (want true or false, or no value); run 'brief start <feature>'`,
+			wantStderr: "brief start: '--json' takes no value; run 'brief start <feature> --json'",
 		},
 		{
 			name:       "--json= with an explicit empty value",
 			args:       []string{"start", "--json=", "demo"},
-			wantStderr: `brief start: invalid value "" for --json (want true or false, or no value); run 'brief start <feature>'`,
+			wantStderr: "brief start: '--json' takes no value; run 'brief start <feature> --json'",
 		},
 	}
 

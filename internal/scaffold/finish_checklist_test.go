@@ -71,7 +71,7 @@ func Test_finish_refuses_a_step_with_an_open_checklist_item(t *testing.T) {
 	before := snapshotTree(t, fx.featureDir())
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 
@@ -102,7 +102,7 @@ func Test_finish_accepts_a_step_whose_checklist_is_empty(t *testing.T) {
 	root := t.TempDir()
 	srv := scaffold.NewServer(cfg, root)
 
-	featurePath, err := srv.NewFeature(context.Background(), "widgets")
+	featureRes, err := srv.NewFeature(context.Background(), "widgets")
 	require.NoError(t, err)
 
 	_, err = srv.NewStep(context.Background(), "widgets")
@@ -111,28 +111,28 @@ func Test_finish_accepts_a_step_whose_checklist_is_empty(t *testing.T) {
 	pattern, err := stepfile.Compile(cfg.StepFilePattern)
 	require.NoError(t, err)
 
-	stateBody, err := os.ReadFile(filepath.Join(featurePath, cfg.StateFile))
+	stateBody, err := os.ReadFile(filepath.Join(featureRes.Path, cfg.StateFile))
 	require.NoError(t, err)
 
 	id := pattern.ID(1)
-	stepPath := filepath.Join(featurePath, pattern.Name(1))
+	stepPath := filepath.Join(featureRes.Path, pattern.Name(1))
 
-	err = srv.Finish(context.Background(), "widgets", id, []byte("handoff body\n"), stateBody)
+	_, err = srv.Finish(context.Background(), "widgets", id, []byte("handoff body\n"), stateBody)
 	require.NoError(t, err)
 
 	stepGot, readErr := os.ReadFile(stepPath)
 	require.NoError(t, readErr)
 	assert.Contains(t, string(stepGot), "status: done")
 
-	specGot, readErr := os.ReadFile(filepath.Join(featurePath, cfg.SpecificationFile))
+	specGot, readErr := os.ReadFile(filepath.Join(featureRes.Path, cfg.SpecificationFile))
 	require.NoError(t, readErr)
 	assert.Contains(t, string(specGot), "- [x] "+id)
 
-	stateGot, readErr := os.ReadFile(filepath.Join(featurePath, cfg.StateFile))
+	stateGot, readErr := os.ReadFile(filepath.Join(featureRes.Path, cfg.StateFile))
 	require.NoError(t, readErr)
 	assert.Equal(t, string(stateBody), string(stateGot))
 
-	handoffPath := filepath.Join(featurePath, id+cfg.HandoffFileSuffix)
+	handoffPath := filepath.Join(featureRes.Path, id+cfg.HandoffFileSuffix)
 	handoffGot, readErr := os.ReadFile(handoffPath)
 	require.NoError(t, readErr)
 	assert.Equal(t, "handoff body\n", string(handoffGot))
@@ -148,7 +148,7 @@ func Test_finish_accepts_a_step_with_no_checklist_heading(t *testing.T) {
 	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(noHeading), 0o600))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.NoError(t, err)
 }
@@ -180,7 +180,7 @@ func Test_finish_ignores_an_unchecked_item_outside_the_checklist_section(t *test
 	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(body), 0o600))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.NoError(t, err)
 }
@@ -195,7 +195,7 @@ func Test_finish_reports_the_open_checklist_item_rather_than_a_missing_specifica
 	require.NoError(t, os.Remove(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile)))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 	assert.NotErrorIs(t, err, scaffold.ErrMalformedFeature)
@@ -211,7 +211,7 @@ func Test_finish_reports_a_state_body_missing_a_heading_rather_than_the_open_che
 	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.Traps)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 	assert.NotErrorIs(t, err, scaffold.ErrOpenChecklistItem)
@@ -227,7 +227,7 @@ func Test_finish_reports_the_open_checklist_item_on_a_done_step_with_a_divergent
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 	divergentHandoff := []byte("DIFFERENT-HANDOFF\n")
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", divergentHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", divergentHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 	assert.NotErrorIs(t, err, scaffold.ErrAlreadyFinished)
@@ -242,7 +242,7 @@ func Test_finish_refuses_a_bare_open_checklist_item_without_a_quoted_empty_strin
 	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(bareOpenItemStep02Body(fx.cfg)), 0o600))
 	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 	assert.Equal(t,

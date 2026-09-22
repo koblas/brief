@@ -1,6 +1,7 @@
 package assemble_test
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -49,11 +50,25 @@ func writeStepFile(t *testing.T, featureDir, name, content string) {
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, name), []byte(content), 0o600))
 }
 
+// writeConformingFeature creates featureDir and writes a specification and
+// state file that pass specFault/readStateFile — the same two checks
+// assemble.Start refuses on, so Status must not report a clean row for a
+// feature Start would refuse. Every fixture in this file that means to
+// exercise step-level behavior, not the spec/state gate itself, must route
+// its directory creation through this rather than a bare os.MkdirAll, or the
+// spec/state check now ahead of the step read would win the row's Problem
+// for the wrong reason.
+func writeConformingFeature(t *testing.T, cfg config.Config, featureDir string) {
+	t.Helper()
+
+	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
+}
+
 func Test_status_counts_done_over_total_and_names_the_next_step(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeature(t, cfg, featureDir)
 
 	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "done", "STEP-01", nil))
 	writeStepFile(t, featureDir, "STEP-02.md", fixtureStepWithDeps(cfg, "STEP-02", "open", "STEP-02", nil))
@@ -65,7 +80,58 @@ func Test_status_counts_done_over_total_and_names_the_next_step(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 1, Total: 3, Next: "STEP-02", Blocked: 0}, rows[0])
+	assert.Equal(t, assemble.FeatureStatus{
+		Name:  "demo",
+		Done:  1,
+		Total: 3,
+		Next:  &assemble.NextStep{ID: "STEP-02", Title: "STEP-02", Path: filepath.Join(featureDir, "STEP-02.md")},
+		Path:  featureDir,
+	}, rows[0])
+}
+
+// Test_status_names_the_next_step_s_title_and_path uses a fixture whose
+// heading text differs from its frontmatter id — unlike every other fixture
+// in this file, which writes "# <id>" and so cannot discriminate Title
+// being the id echoed twice from Title actually being markdown.Title's own
+// result.
+func Test_status_names_the_next_step_s_title_and_path(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	writeConformingFeature(t, cfg, featureDir)
+
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "Handle the widget", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Next)
+	assert.Equal(t, "STEP-01", rows[0].Next.ID)
+	assert.Equal(t, "Handle the widget", rows[0].Next.Title)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), rows[0].Next.Path)
+}
+
+// Test_status_reports_the_feature_directory_path pins FeatureStatus.Path as
+// the feature's own absolute directory — distinct from Next.Path, which
+// names the open step file inside it.
+func Test_status_reports_the_feature_directory_path(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	writeConformingFeature(t, cfg, featureDir)
+
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, featureDir, rows[0].Path)
 }
 
 // Test_status_counts_a_step_whose_dependency_is_unfinished_as_blocked seeds
@@ -79,7 +145,7 @@ func Test_status_counts_a_step_whose_dependency_is_unfinished_as_blocked(t *test
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeature(t, cfg, featureDir)
 
 	// STEP-01 is open and has no dependency, so it is Next.
 	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
@@ -105,14 +171,15 @@ func Test_status_counts_a_step_whose_dependency_is_unfinished_as_blocked(t *test
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, 2, rows[0].Blocked)
-	assert.Equal(t, "STEP-01", rows[0].Next)
+	require.NotNil(t, rows[0].Next)
+	assert.Equal(t, "STEP-01", rows[0].Next.ID)
 }
 
 func Test_status_reports_an_unknown_dependency_id_as_blocking(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeature(t, cfg, featureDir)
 
 	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", []string{"STEP-99"}))
 
@@ -129,7 +196,7 @@ func Test_status_reports_no_next_step_for_a_completed_feature(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeature(t, cfg, featureDir)
 
 	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "done", "STEP-01", nil))
 	writeStepFile(t, featureDir, "STEP-02.md", fixtureStepWithDeps(cfg, "STEP-02", "done", "STEP-02", nil))
@@ -140,14 +207,14 @@ func Test_status_reports_no_next_step_for_a_completed_feature(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 2, Total: 2, Next: "", Blocked: 0}, rows[0])
+	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 2, Total: 2, Next: nil, Blocked: 0, Path: featureDir}, rows[0])
 }
 
 func Test_status_reports_no_next_step_for_a_feature_with_no_step_files(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeature(t, cfg, featureDir)
 
 	srv := assemble.NewServer(cfg, root)
 
@@ -155,7 +222,7 @@ func Test_status_reports_no_next_step_for_a_feature_with_no_step_files(t *testin
 
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 0, Total: 0, Next: "", Blocked: 0}, rows[0])
+	assert.Equal(t, assemble.FeatureStatus{Name: "demo", Done: 0, Total: 0, Next: nil, Blocked: 0, Path: featureDir}, rows[0])
 }
 
 // Test_status_reports_no_features_when_the_feature_root_does_not_exist is
@@ -202,20 +269,20 @@ func Test_status_marks_a_feature_whose_step_frontmatter_does_not_parse(t *testin
 	root := t.TempDir()
 
 	alphaDir := filepath.Join(root, cfg.FeatureDirectory, "alpha")
-	require.NoError(t, os.MkdirAll(alphaDir, 0o755))
+	writeConformingFeature(t, cfg, alphaDir)
 	writeStepFile(t, alphaDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "done", "STEP-01", nil))
 	writeStepFile(t, alphaDir, "STEP-02.md", fixtureStepWithDeps(cfg, "STEP-02", "open", "STEP-02", nil))
 
 	betaDir := filepath.Join(root, cfg.FeatureDirectory, "beta")
-	require.NoError(t, os.MkdirAll(betaDir, 0o755))
+	writeConformingFeature(t, cfg, betaDir)
 	writeStepFile(t, betaDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "done", "STEP-01", nil))
 
 	gammaDir := filepath.Join(root, cfg.FeatureDirectory, "gamma")
-	require.NoError(t, os.MkdirAll(gammaDir, 0o755))
+	writeConformingFeature(t, cfg, gammaDir)
 	writeStepFile(t, gammaDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
 
 	deltaDir := filepath.Join(root, cfg.FeatureDirectory, "delta")
-	require.NoError(t, os.MkdirAll(deltaDir, 0o755))
+	writeConformingFeature(t, cfg, deltaDir)
 	writeStepFile(t, deltaDir, "STEP-01.md", "no frontmatter here\n")
 
 	srv := assemble.NewServer(cfg, root)
@@ -230,19 +297,28 @@ func Test_status_marks_a_feature_whose_step_frontmatter_does_not_parse(t *testin
 		byName[row.Name] = row
 	}
 
-	assert.Equal(t, assemble.FeatureStatus{Name: "alpha", Done: 1, Total: 2, Next: "STEP-02", Blocked: 0}, byName["alpha"])
-	assert.Equal(t, assemble.FeatureStatus{Name: "beta", Done: 1, Total: 1, Next: "", Blocked: 0}, byName["beta"])
-	assert.Equal(t, assemble.FeatureStatus{Name: "gamma", Done: 0, Total: 1, Next: "STEP-01", Blocked: 0}, byName["gamma"])
+	assert.Equal(t, assemble.FeatureStatus{
+		Name: "alpha", Done: 1, Total: 2,
+		Next: &assemble.NextStep{ID: "STEP-02", Title: "STEP-02", Path: filepath.Join(alphaDir, "STEP-02.md")},
+		Path: alphaDir,
+	}, byName["alpha"])
+	assert.Equal(t, assemble.FeatureStatus{Name: "beta", Done: 1, Total: 1, Next: nil, Blocked: 0, Path: betaDir}, byName["beta"])
+	assert.Equal(t, assemble.FeatureStatus{
+		Name: "gamma", Done: 0, Total: 1,
+		Next: &assemble.NextStep{ID: "STEP-01", Title: "STEP-01", Path: filepath.Join(gammaDir, "STEP-01.md")},
+		Path: gammaDir,
+	}, byName["gamma"])
 
 	delta := byName["delta"]
 	require.NotNil(t, delta.Problem)
 	assert.Equal(t, 0, delta.Done)
 	assert.Equal(t, 0, delta.Total)
-	assert.Empty(t, delta.Next)
+	assert.Nil(t, delta.Next)
 	assert.Equal(t, 0, delta.Blocked)
-	assert.Equal(t, deltaDir, delta.Problem.Path)
-	assert.Equal(t, "no frontmatter found", delta.Problem.Detail)
-	assert.NotEmpty(t, delta.Problem.Fix)
+	assert.Equal(t, deltaDir, delta.Path)
+	assert.Equal(t, filepath.Join(deltaDir, "STEP-01.md"), delta.Problem.Path)
+	assert.Equal(t, "frontmatter does not parse: no frontmatter found", delta.Problem.Detail)
+	assert.Equal(t, "run 'brief check delta' to list every fault", delta.Problem.Fix)
 }
 
 // Test_status_reports_one_problem_per_feature_not_one_per_file bounds
@@ -253,7 +329,7 @@ func Test_status_reports_one_problem_per_feature_not_one_per_file(t *testing.T) 
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "delta")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeature(t, cfg, featureDir)
 
 	writeStepFile(t, featureDir, "STEP-01.md", "no frontmatter here either\n")
 	writeStepFile(t, featureDir, "STEP-02.md", "still no frontmatter\n")
@@ -265,6 +341,7 @@ func Test_status_reports_one_problem_per_feature_not_one_per_file(t *testing.T) 
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), rows[0].Problem.Path)
 }
 
 // Test_status_marks_a_feature_whose_step_file_cannot_be_read uses a step
@@ -276,7 +353,7 @@ func Test_status_marks_a_feature_whose_step_file_cannot_be_read(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "delta")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeature(t, cfg, featureDir)
 
 	outside := filepath.Join(root, "outside.md")
 	require.NoError(t, os.WriteFile(outside, []byte("x"), 0o600))
@@ -378,6 +455,7 @@ func Test_status_marks_a_symlinked_feature_directory_rather_than_dropping_it(t *
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "gamma", rows[0].Name)
+	assert.Equal(t, linkPath, rows[0].Path)
 	require.NotNil(t, rows[0].Problem)
 	assert.Equal(t, linkPath, rows[0].Problem.Path)
 	assert.Equal(t, "is a symbolic link, not read as a feature directory", rows[0].Problem.Detail)
@@ -396,7 +474,7 @@ func Test_status_skips_a_regular_file_in_the_feature_directory_without_a_row(t *
 
 	for _, name := range []string{"alpha", "beta", "gamma"} {
 		featureDir := filepath.Join(root, cfg.FeatureDirectory, name)
-		require.NoError(t, os.MkdirAll(featureDir, 0o755))
+		writeConformingFeature(t, cfg, featureDir)
 		writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
 	}
 
@@ -423,7 +501,7 @@ func Test_status_leaves_a_feature_whose_frontmatter_id_disagrees_with_its_filena
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeature(t, cfg, featureDir)
 
 	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-99", "open", "STEP-01", nil))
 
@@ -434,7 +512,8 @@ func Test_status_leaves_a_feature_whose_frontmatter_id_disagrees_with_its_filena
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Nil(t, rows[0].Problem)
-	assert.Equal(t, "STEP-01", rows[0].Next)
+	require.NotNil(t, rows[0].Next)
+	assert.Equal(t, "STEP-01", rows[0].Next.ID)
 }
 
 // Test_status_leaves_a_feature_with_no_step_files_unmarked pins the other
@@ -444,7 +523,7 @@ func Test_status_leaves_a_feature_with_no_step_files_unmarked(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
 	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeature(t, cfg, featureDir)
 
 	srv := assemble.NewServer(cfg, root)
 
@@ -537,4 +616,267 @@ func Test_status_orders_features_in_byte_order_not_case_insensitive_order(t *tes
 	require.NoError(t, err)
 	require.Len(t, rows, 3)
 	assert.Equal(t, []string{"Beta", "Zeta", "alpha"}, []string{rows[0].Name, rows[1].Name, rows[2].Name})
+}
+
+// Test_status_marks_a_feature_whose_specification_is_missing pins
+// featureStatus's own check ahead of its step read: a feature directory
+// with a conforming state file and a well-formed step, but no
+// specification at all — the shape assemble.Start itself refuses over
+// (specFault) — must not read as a clean row.
+func Test_status_marks_a_feature_whose_specification_is_missing(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(checkConformingState(cfg)), 0o600))
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, 0, rows[0].Done)
+	assert.Equal(t, 0, rows[0].Total)
+	assert.Nil(t, rows[0].Next)
+	assert.Equal(t, featureDir, rows[0].Path)
+	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), rows[0].Problem.Path)
+	assert.Equal(t, cfg.SpecificationFile+" not found", rows[0].Problem.Detail)
+	assert.Equal(t, fmt.Sprintf("write a %s with a %q heading and re-run", cfg.SpecificationFile, cfg.ProgressHeading), rows[0].Problem.Fix)
+}
+
+// Test_status_marks_a_feature_whose_specification_has_no_progress_heading
+// pins specFault's other refusal shape: a specification that reads fine
+// but carries none of cfg.ProgressHeading.
+func Test_status_marks_a_feature_whose_specification_has_no_progress_heading(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte("# demo\n\nno progress list here\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(checkConformingState(cfg)), 0o600))
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), rows[0].Problem.Path)
+	assert.Equal(t, fmt.Sprintf("no %q heading found", cfg.ProgressHeading), rows[0].Problem.Detail)
+	assert.Equal(t, fmt.Sprintf("add a %q heading to the specification", cfg.ProgressHeading), rows[0].Problem.Fix)
+}
+
+// Test_status_marks_a_feature_whose_state_file_is_missing pins
+// readStateFile's own refusal shape: a conforming specification and a
+// well-formed step, but no state file. wantDetail is captured
+// through a real os.Open on the removed path rather than hardcoded, the
+// same technique Test_json_mode_renders_a_refusal_as_one_document (cli
+// package) uses: the OS-native "file does not exist" text is not this
+// test's own contract, path/fix are.
+func Test_status_marks_a_feature_whose_state_file_is_missing(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(checkConformingSpec(cfg)), 0o600))
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	statePath := filepath.Join(featureDir, cfg.StateFile)
+	_, openErr := os.Open(statePath)
+	var pathErr *fs.PathError
+	require.ErrorAs(t, openErr, &pathErr)
+	wantDetail := pathErr.Err.Error()
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, statePath, rows[0].Problem.Path)
+	assert.Equal(t, wantDetail, rows[0].Problem.Detail)
+	assert.Equal(t, "make it readable and re-run", rows[0].Problem.Fix)
+}
+
+// Test_status_prefers_the_specification_fault_over_a_missing_state_file pins
+// featureStatus's own check order at the one point the two tests above never
+// exercise: each of them leaves the other file conforming, so either check
+// order produces the same single-fault row. Dropping both specification and
+// state leaves only the check order to decide which Problem wins.
+func Test_status_prefers_the_specification_fault_over_a_missing_state_file(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), rows[0].Problem.Path)
+	assert.Equal(t, cfg.SpecificationFile+" not found", rows[0].Problem.Detail)
+}
+
+// Test_status_leaves_a_feature_with_a_conforming_specification_and_state_unmarked
+// is the control arm for the three tests above: the same shape, minus the
+// one fault each removes, stays a clean row — the malformed rows above are
+// not an artifact of the fixture, only of the one file each one drops.
+func Test_status_leaves_a_feature_with_a_conforming_specification_and_state_unmarked(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	writeConformingFeature(t, cfg, featureDir)
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Nil(t, rows[0].Problem)
+	assert.Equal(t, 1, rows[0].Total)
+}
+
+// Test_status_prefers_the_specification_fault_over_a_step_file_fault pins
+// featureStatus's first-fault-wins check order at the point where two
+// faults compete: a feature with no specification and a step file whose
+// frontmatter does not parse must report the specification's own Problem,
+// not the step's — the tests above only prove a spec fault alone produces a
+// row, never that it is checked ahead of a step fault that would otherwise
+// win.
+func Test_status_prefers_the_specification_fault_over_a_step_file_fault(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(checkConformingState(cfg)), 0o600))
+	writeStepFile(t, featureDir, "STEP-01.md", "no frontmatter here\n")
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), rows[0].Problem.Path)
+	assert.Equal(t, cfg.SpecificationFile+" not found", rows[0].Problem.Detail)
+}
+
+// Test_status_prefers_the_state_fault_over_a_step_file_fault pins
+// featureStatus's check order one step further: a conforming specification
+// beside a missing state file and a step file whose frontmatter does not
+// parse must report the state file's own Problem, not the step's.
+// wantDetail comes from a real os.Open on the removed state path, the same
+// technique Test_status_marks_a_feature_whose_state_file_is_missing uses,
+// since the OS-native error text is not this test's own contract.
+func Test_status_prefers_the_state_fault_over_a_step_file_fault(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(checkConformingSpec(cfg)), 0o600))
+	writeStepFile(t, featureDir, "STEP-01.md", "no frontmatter here\n")
+
+	statePath := filepath.Join(featureDir, cfg.StateFile)
+	_, openErr := os.Open(statePath)
+	var pathErr *fs.PathError
+	require.ErrorAs(t, openErr, &pathErr)
+	wantDetail := pathErr.Err.Error()
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, statePath, rows[0].Problem.Path)
+	assert.Equal(t, wantDetail, rows[0].Problem.Detail)
+}
+
+// Test_status_reports_the_line_of_a_state_file_s_unclosed_fence pins
+// Problem.Line: a state file whose fenced code block never closes reports
+// the fence's own opening line, the same line Check's own RuleFence finding
+// reports for the byte-identical fixture (17, checkStateUnterminatedFence's
+// four headings each contributing four lines before the fence opens) — the
+// two readers of the same fault must never disagree about where it is.
+func Test_status_reports_the_line_of_a_state_file_s_unclosed_fence(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkStateUnterminatedFence(cfg))
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, 17, rows[0].Problem.Line)
+
+	findings, err := srv.Check(t.Context(), "demo")
+	require.NoError(t, err)
+	require.Len(t, findings, 1)
+	assert.Equal(t, 17, findings[0].Line, "Status and Check must report the same line for the same fence")
+}
+
+// Test_status_leaves_line_at_zero_for_a_whole_file_fault pins the other
+// half of Problem.Line's contract: a fault with no particular line — here,
+// a missing specification — reports Line 0, the "whole file" sentinel
+// statusProblemJSON renders as a null "line" rather than a fabricated 0.
+func Test_status_leaves_line_at_zero_for_a_whole_file_fault(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(checkConformingState(cfg)), 0o600))
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, 0, rows[0].Problem.Line)
+}
+
+// Test_complete reports (FeatureStatus).Complete's one rule — Problem ==
+// nil && Total > 0 && Done == Total — over its four discriminating shapes.
+// The malformed case sets Done == Total == 3 specifically so a mutant that
+// drops the Problem == nil check would read this case as complete; the
+// zero-step case sets Done == Total == 0 so a mutant that drops Total > 0
+// would read it as complete too.
+func Test_complete(t *testing.T) {
+	cases := []struct {
+		name string
+		row  assemble.FeatureStatus
+		want bool
+	}{
+		{name: "in progress", row: assemble.FeatureStatus{Total: 3, Done: 1}, want: false},
+		{name: "all steps done", row: assemble.FeatureStatus{Total: 3, Done: 3}, want: true},
+		{name: "zero step files", row: assemble.FeatureStatus{Total: 0, Done: 0}, want: false},
+		{name: "malformed despite done equaling total", row: assemble.FeatureStatus{Total: 3, Done: 3, Problem: &assemble.Problem{Detail: "x", Fix: "y"}}, want: false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, c.row.Complete())
+		})
+	}
 }

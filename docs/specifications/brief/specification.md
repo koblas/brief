@@ -156,6 +156,9 @@ no per-step files, no carried state — is out of scope rather than degraded int
 - **R13 — Output is bounded, and truncation is never silent.** Each read command has a
   configurable byte budget. Output over budget is cut at a line boundary and ends with one
   line stating how many bytes were dropped and the command that returns the rest.
+  In `--json` mode the document is never cut at a line boundary: truncation becomes a field,
+  `"truncated": {"dropped_bytes": N, "rest": "<command>"}` (added by
+  `docs/specifications/human-output/`).
 - **R14 — Errors are one line and actionable.** An unknown feature lists the known ones; an
   unknown section lists that file's headings. Exit codes: 0 ok, 1 validation failure, 2 usage.
   No stack traces. **Nothing to return is not an error: empty stdout, one line on stderr,
@@ -170,7 +173,9 @@ no per-step files, no carried state — is out of scope rather than degraded int
   the reader did not ask. **Refusals** (exit 1, stderr) and **findings** (R9, exit 0, the
   profile's `[SEVERITY] <path>:<line> — <finding>` shape) are deliberately different shapes so
   that a script tells "finished with reported drops" from "refused" by exit code alone. That
-  holds only because findings never appear on a failed run.
+  holds only because findings never appear on a failed run. In `--json` mode a refusal is the
+  common error document on stdout (`error.kind: "refusal"`, same path/line/problem/fix slots);
+  text mode is unchanged (see `docs/specifications/human-output/`).
 
 ### Integration
 
@@ -641,6 +646,9 @@ Settled at the scoping gate. Recorded with the reason so they are not re-litigat
    format; a second stable format on an already-parseable surface is a schema to keep stable
    forever for nothing. The rule of thumb for later commands: `--json` where the output is a
    structured payload or a record set, not where it is a scalar.
+   **Reversed** by `docs/specifications/human-output/`: once human text was freed to change,
+   `status`'s table stopped being the machine format, so `--json` is on every command (except
+   `completion`) with one common envelope.
 4. **The state schema is configured, not compiled in.** Was open question 5. R2 says names are
    configuration, and this is a name. SCENARIO-01 pins it: the four required headings that
    SCENARIO-19 refuses on come from resolved configuration, with the shipped profile as the
@@ -682,6 +690,7 @@ Settled at the scoping gate. Recorded with the reason so they are not re-litigat
    profile v1" by reference rather than by copying values into config?
 8. Does `--json` extend past `start` — to `next`, `show`, `state get`, `handoff`? Deferred
    rather than settled; see *Decisions taken* 3 for the rule of thumb it should be decided by.
+   **Settled** by `docs/specifications/human-output/`: yes, every command except `completion`.
 
 ## Prior art
 

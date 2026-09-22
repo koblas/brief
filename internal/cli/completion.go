@@ -16,6 +16,11 @@ be sourced directly or written to your shell's completion directory.`
 // including a flag error, via leafCommand's invocation argument.
 const completionInvocation = "brief completion <bash|zsh|fish|powershell>"
 
+// completionJSONUnsupportedMessage is R11's own line: "brief completion
+// <shell> --json" is a usage error, never a document wrapping the script,
+// since completion's stdout contract is a shell script's own bytes.
+const completionJSONUnsupportedMessage = "brief completion: completion prints a shell script; --json does not apply"
+
 // completionShell names one supported shell and the cobra generator that
 // writes its script to w for root's own tree.
 type completionShell struct {
@@ -48,12 +53,18 @@ func completionShellList() string {
 // rest is its positional arguments, flags already parsed away. It requires
 // exactly one shell name, generated against cmd.Root() so the script names
 // the whole "brief" program rather than the completion leaf itself.
-func runCompletion(cmd *cobra.Command, rest []string, stdout, stderr io.Writer) error {
+//
+// R11: a resolved shell under --json is a usage error
+// (completionJSONUnsupportedMessage), never the script wrapped in a
+// document — checked only once the shell name itself is known valid, so
+// "completion --json" (no shell) and "completion nosh --json" keep their
+// own, unrelated usage errors above and below this branch.
+func runCompletion(cmd *cobra.Command, rest []string, out reporter) error {
 	switch {
 	case len(rest) == 0:
-		return usageError(stderr, "brief completion: no shell given; run '"+completionInvocation+"'")
+		return out.usageError("brief completion: no shell given; run '" + completionInvocation + "'")
 	case len(rest) > 1:
-		return usageError(stderr, "brief completion: too many arguments; run '"+completionInvocation+"'")
+		return out.usageError("brief completion: too many arguments; run '" + completionInvocation + "'")
 	}
 
 	shell := rest[0]
@@ -62,8 +73,12 @@ func runCompletion(cmd *cobra.Command, rest []string, stdout, stderr io.Writer) 
 			continue
 		}
 
-		return s.gen(cmd.Root(), stdout)
+		if out.json {
+			return out.usageError(completionJSONUnsupportedMessage)
+		}
+
+		return s.gen(cmd.Root(), out.stdout)
 	}
 
-	return usageError(stderr, fmt.Sprintf("brief completion: unknown shell %q; expected one of: %s", shell, completionShellList()))
+	return out.usageError(fmt.Sprintf("brief completion: unknown shell %q; expected one of: %s", shell, completionShellList()))
 }

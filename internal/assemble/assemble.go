@@ -75,22 +75,49 @@ type stepEntry struct {
 // instead, one entry per absent heading, acceptance first then the state
 // headings in cfg.StateHeadings.Ordered() order. Start reads only; it
 // writes nothing to disk.
+//
+// feature is checked by validFeatureArgument before either directory ever
+// opens — the same well-formedness check Check applies to a named feature,
+// guarded there by its own `feature != ""` since Check's empty argument
+// means "every feature", not a feature named "" — so a traversal attempt
+// ("../x"), a path-separator name, or an empty string refuses as
+// ErrNoSuchFeature without depending on os.Root.OpenRoot's own error shape
+// for the two to be distinguishable. This is not the guard that catches a
+// genuinely absent feature — Check's is its checkNamedFeature Lstat,
+// Start's is the errors.Is(err, fs.ErrNotExist) check on either OpenRoot
+// call below. Once past validFeatureArgument, only a genuinely absent
+// directory (errors.Is(err, fs.ErrNotExist), on either the configured
+// feature root or feature's own subdirectory) is ErrNoSuchFeature; any
+// other open failure — permission denied, or a regular file where a
+// directory belongs — is a generic wrapped error instead, never
+// misreported as "no such feature".
 func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
+	if !validFeatureArgument(feature) {
+		return Brief{}, ErrNoSuchFeature
+	}
+
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
+	featurePath := filepath.Join(featureDirPath, feature)
 
 	topRoot, err := os.OpenRoot(featureDirPath)
 	if err != nil {
-		return Brief{}, ErrNoSuchFeature
+		if errors.Is(err, fs.ErrNotExist) {
+			return Brief{}, ErrNoSuchFeature
+		}
+
+		return Brief{}, fmt.Errorf("assemble: open feature %s: %w", feature, err)
 	}
 	defer func() { _ = topRoot.Close() }()
 
 	root, err := topRoot.OpenRoot(feature)
 	if err != nil {
-		return Brief{}, ErrNoSuchFeature
+		if errors.Is(err, fs.ErrNotExist) {
+			return Brief{}, ErrNoSuchFeature
+		}
+
+		return Brief{}, fmt.Errorf("assemble: open feature %s: %w", feature, err)
 	}
 	defer func() { _ = root.Close() }()
-
-	featurePath := filepath.Join(featureDirPath, feature)
 
 	if err := s.checkSpecification(root, featurePath); err != nil {
 		return Brief{}, err
@@ -191,12 +218,28 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 // its own imperative rather than reusing the unreadable case's "make it
 // readable": a file that does not exist cannot be made readable.
 func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
+	_, refusal := s.specFault(root, featurePath)
+	if refusal != nil {
+		return refusal
+	}
+
+	return nil
+}
+
+// specFault is checkSpecification's classifier: it reads feature's
+// specification through root and returns the Rule and *RefusalError for
+// the first of absent, unreadable, an unclosed fenced code block, or a
+// missing cfg.ProgressHeading section it finds — checkSpecification wraps
+// its *RefusalError unchanged as its own return, and Check's
+// checkSpecFindings reuses the Rule to stamp the Finding it renders from
+// the same refusal. It returns ("", nil) when the specification conforms.
+func (s *Server) specFault(root *os.Root, featurePath string) (Rule, *RefusalError) {
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
 
 	specBytes, err := root.ReadFile(s.cfg.SpecificationFile)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return &RefusalError{
+			return RuleSpecMissing, &RefusalError{
 				Path:   specPath,
 				Detail: s.cfg.SpecificationFile + " not found",
 				Fix:    fmt.Sprintf("write a %s with a %q heading and re-run", s.cfg.SpecificationFile, s.cfg.ProgressHeading),
@@ -204,11 +247,11 @@ func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
 			}
 		}
 
-		return &RefusalError{Problem: *newProblem(specPath, err, false), Err: ErrMalformedFeature}
+		return RuleSpecUnreadable, &RefusalError{Problem: *newProblem(specPath, err, false), Err: ErrMalformedFeature}
 	}
 
 	if line, delim, unterminated := markdown.UnterminatedFence(string(specBytes)); unterminated {
-		return &RefusalError{
+		return RuleFence, &RefusalError{
 			Path:   specPath,
 			Detail: fmt.Sprintf("specification has an unclosed %s fence opened at line %d", delim, line),
 			Fix:    "close the fence and re-run",
@@ -218,7 +261,7 @@ func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
 	}
 
 	if _, found := markdown.Section(string(specBytes), s.cfg.ProgressHeading); !found {
-		return &RefusalError{
+		return RuleHeading, &RefusalError{
 			Path:   specPath,
 			Detail: fmt.Sprintf("no %q heading found", s.cfg.ProgressHeading),
 			Fix:    fmt.Sprintf("add a %q heading to the specification", s.cfg.ProgressHeading),
@@ -226,7 +269,7 @@ func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
 		}
 	}
 
-	return nil
+	return "", nil
 }
 
 // readStateFile reads feature's state file through root and refuses with a
@@ -282,7 +325,7 @@ func readSteps(root *os.Root, pattern stepfile.Pattern, dirEntries []os.DirEntry
 
 		fm, rest, err := stepfile.ParseFrontmatter(body)
 		if err != nil {
-			return nil, fmt.Errorf("assemble: %w", err)
+			return nil, &stepFrontmatterError{name: e.Name(), err: err}
 		}
 
 		steps = append(steps, stepEntry{number: n, fm: fm, rest: rest})

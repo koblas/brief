@@ -33,7 +33,12 @@ func Test_creates_the_feature_and_prints_its_path(t *testing.T) {
 	err := cli.Run(t.Context(), wd, []string{"new", "feature", "payments"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
+	assert.Equal(t,
+		"brief new feature: created payments ("+
+			filepath.Join("docs", "specifications", "payments", "specification.md")+", "+
+			filepath.Join("docs", "specifications", "payments", "STATE.md")+
+			"); add a step with 'brief new step payments'\n",
+		stderr.String())
 	assert.Equal(t, "docs/specifications/payments\n", stdout.String())
 	assert.DirExists(t, filepath.Join(wd, "docs", "specifications"))
 	assert.DirExists(t, filepath.Join(wd, "docs", "specifications", "payments"))
@@ -54,7 +59,7 @@ func Test_refuses_on_one_line_when_the_feature_already_exists(t *testing.T) {
 
 	line := oneLine(t, &stderr)
 	assert.Equal(t,
-		"brief new feature: "+filepath.Join(wd, "docs", "specifications", "payments")+
+		"brief new feature: "+filepath.Join("docs", "specifications", "payments")+
 			": feature already exists; run 'brief new step payments' to add a step to it, or choose a different name (no files changed)",
 		line)
 }
@@ -212,7 +217,13 @@ func Test_creates_the_feature_where_an_ancestor_config_directs(t *testing.T) {
 	err := cli.Run(t.Context(), wd, []string{"new", "feature", "payments"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
+	assert.Equal(t, filepath.Join("..", "..", "specs", "payments")+"\n", stdout.String())
+	assert.Equal(t,
+		"brief new feature: created payments ("+
+			filepath.Join("..", "..", "specs", "payments", "specification.md")+", "+
+			filepath.Join("..", "..", "specs", "payments", "NOTES.md")+
+			"); add a step with 'brief new step payments'\n",
+		stderr.String())
 	assert.FileExists(t, filepath.Join(root, "specs", "payments", "NOTES.md"))
 }
 
@@ -230,7 +241,8 @@ func Test_refuses_on_one_line_when_the_config_file_is_invalid(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(stderr.String(), "\n"))
 
 	line := strings.TrimSuffix(stderr.String(), "\n")
-	assert.Contains(t, line, configPath)
+	assert.Contains(t, line, ".brief.yaml")
+	assert.NotContains(t, line, configPath)
 	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
 
 	assert.NoDirExists(t, filepath.Join(root, "docs", "specifications", "payments"))
@@ -452,16 +464,25 @@ func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T)
 // no arguments, pointing at "brief --version" — never as the unknown-flag
 // wording argVersionFlag's msg would otherwise carry (R4).
 //
-// The four rows are one behavior — any trailing argument, whatever its
-// shape — not four independent rules: "extra" and "--json" are the
-// specification's own examples, and "--help"/"--version" pin that args[1]
-// is never classified at all (R8), a shape no mutation in this arm can
-// discriminate. No mutation reddens one row without reddening all four.
+// The three rows are one behavior — any trailing argument, whatever its
+// shape — not three independent rules: "extra" is the specification's own
+// example, and "--help"/"--version" pin that args[1] is never classified
+// at all (R8), a shape no mutation in this arm can discriminate. No
+// mutation reddens one row without reddening all three. "--version
+// --json" is no longer a member of this family: run's own scanJSONFlag
+// strips "--json" ahead of dispatch entirely (R5), so it relaxes the
+// sole-argument rule instead of tripping it — see
+// Test_version_with_json_relaxes_the_sole_argument_rule
+// (json_usage_test.go).
 //
 // Mutation-verified, restored byte-identical after each: widening the
 // argVersionFlag arm's guard from "len(args) == 1" to "len(args) >= 1"
 // reddens every row here (nil error, version printed instead of the usage
-// error); changing that arm's run hint from "brief --version" to "brief
+// error) plus json_usage_test.go's "--version extra --json" and "--json
+// --version extra" rows (Test_json_mode_usage_error_message_is_the_text_mode_line),
+// while that table's "--version=x --json" row — a value, not a trailing
+// argument — stays green, proving the guard and the value check are
+// independent; changing that arm's run hint from "brief --version" to "brief
 // help <command>" reddens every row here on the hint text while the sibling
 // table's "--help --version" control row (R8) stays green, proving the two
 // arms report independently.
@@ -471,7 +492,6 @@ func Test_reports_a_version_flag_with_trailing_arguments_as_taking_no_arguments(
 		args []string
 	}{
 		{name: "--version extra", args: []string{"--version", "extra"}},
-		{name: "--version --json", args: []string{"--version", "--json"}},
 		{name: "--version --help", args: []string{"--version", "--help"}},
 		{name: "--version --version", args: []string{"--version", "--version"}},
 	}

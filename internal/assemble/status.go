@@ -8,24 +8,45 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/koblas/brief/internal/platform/markdown"
 	"github.com/koblas/brief/internal/platform/stepfile"
 )
 
-// FeatureStatus is one feature's status line: its directory name, how many
-// of its step files are done, how many it has in total, the pattern.ID of
-// the lowest-numbered not-done step (empty when there is none — the
-// caller's renderer, not FeatureStatus, is where that becomes "-"), how
-// many not-done steps are blocked on an unfinished dependency, and
-// Problem, non-nil when the feature could not be read at all. When Problem
-// is set, Done, Total, Next and Blocked stay at their zero values — a
-// partial count would look measured and was not.
+// NextStep names the lowest-numbered not-done step a FeatureStatus row
+// reports: ID is pattern.ID(n) — the same token scaffold.findStepFile
+// resolves for "brief finish" — Title is markdown.Title of the step body
+// after frontmatter (empty when the step file has no "# " heading), and
+// Path is the step file's own absolute path.
+type NextStep struct {
+	ID    string
+	Title string
+	Path  string
+}
+
+// FeatureStatus is one feature's status line: its directory name, its own
+// absolute directory path, how many of its step files are done, how many
+// it has in total, the lowest-numbered not-done step (nil when there is
+// none), how many not-done steps are blocked on an unfinished dependency,
+// and Problem, non-nil when the feature could not be read at all. When
+// Problem is set, Done, Total, Next and Blocked stay at their zero values —
+// a partial count would look measured and was not; Path is still set, so a
+// caller can still name the feature's own directory.
 type FeatureStatus struct {
 	Name    string
+	Path    string
 	Done    int
 	Total   int
-	Next    string
+	Next    *NextStep
 	Blocked int
 	Problem *Problem
+}
+
+// Complete reports whether row's feature is done: every step file read
+// without error (Problem == nil), at least one step file exists (Total >
+// 0), and every one of them is done (Done == Total). A feature with no
+// step files at all is not complete — it has nothing to be complete about.
+func (row FeatureStatus) Complete() bool {
+	return row.Problem == nil && row.Total > 0 && row.Done == row.Total
 }
 
 // Status returns one FeatureStatus per feature directory under the
@@ -78,13 +99,14 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 
 		switch {
 		case e.IsDir():
-			rows = append(rows, featureStatus(topRoot, s.openRoot, s.readDir, pattern, e.Name(), entryPath))
+			rows = append(rows, s.featureStatus(topRoot, pattern, e.Name(), entryPath))
 		case e.Type()&fs.ModeSymlink != 0:
 			// A symlink is marked without being resolved or opened: brief
 			// does not follow symbolic links in the feature directory, so
 			// its target is irrelevant to what the row reports.
 			rows = append(rows, FeatureStatus{
 				Name: e.Name(),
+				Path: entryPath,
 				Problem: &Problem{
 					Path:   entryPath,
 					Detail: "is a symbolic link, not read as a feature directory",
@@ -104,39 +126,48 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 
 // featureStatus reads one feature directory, name, under topRoot and
 // summarizes it as a FeatureStatus. A failure opening or listing the
-// directory, or reading or parsing one of its step files, is degraded into
-// the returned row's Problem rather than propagated — the first such
-// failure wins, and the row's counts stay at their zero values.
-// displayPath is name's absolute path, used to build Problem.Path. openRoot
-// opens name under topRoot — (*os.Root).OpenRoot in production, a fake in a
-// test that injects a permission failure independent of effective uid.
-// readDir lists the opened root's own entries — s.readDir in production, a
-// fake in a test that injects a listing failure the same way, independent
-// of openRoot's own failure.
-func featureStatus(
-	topRoot *os.Root,
-	openRoot func(*os.Root, string) (*os.Root, error),
-	readDir func(*os.Root) ([]os.DirEntry, error),
-	pattern stepfile.Pattern,
-	name, displayPath string,
-) FeatureStatus {
-	root, err := openRoot(topRoot, name)
+// directory, reading or parsing one of its step files, or either of the two
+// faults assemble.Start itself refuses a feature over — an unreadable or
+// heading-less specification (specFault), or a missing or unreadable state
+// file (readStateFile) — is degraded into the returned row's Problem rather
+// than propagated: the first such failure wins, checked in that order
+// (directory, then specification, then state, then step files — the same
+// spec-then-state order Check applies), and the row's counts stay at their
+// zero values. A row's Problem is therefore a subset of what would make
+// Start refuse, not the whole set: Start also refuses on the briefed step's
+// own missing "id:" or absent checklist heading, which featureStatus never
+// reads far enough to see. displayPath is name's absolute path, used to
+// build Problem.Path.
+func (s *Server) featureStatus(topRoot *os.Root, pattern stepfile.Pattern, name, displayPath string) FeatureStatus {
+	root, err := s.openRoot(topRoot, name)
 	if err != nil {
-		return FeatureStatus{Name: name, Problem: newProblem(displayPath, err, false)}
+		return FeatureStatus{Name: name, Path: displayPath, Problem: newProblem(displayPath, err, false)}
 	}
 	defer func() { _ = root.Close() }()
 
-	dirEntries, err := readDir(root)
+	dirEntries, err := s.readDir(root)
 	if err != nil {
-		return FeatureStatus{Name: name, Problem: newProblem(displayPath, err, false)}
+		return FeatureStatus{Name: name, Path: displayPath, Problem: newProblem(displayPath, err, false)}
+	}
+
+	if _, refusal := s.specFault(root, displayPath); refusal != nil {
+		problem := refusal.Problem
+
+		return FeatureStatus{Name: name, Path: displayPath, Problem: &problem}
+	}
+
+	if _, err := s.readStateFile(root, displayPath); err != nil {
+		problem := stateFaultProblem(displayPath, err)
+
+		return FeatureStatus{Name: name, Path: displayPath, Problem: &problem}
 	}
 
 	steps, err := readSteps(root, pattern, dirEntries)
 	if err != nil {
-		return FeatureStatus{Name: name, Problem: newProblem(displayPath, err, true)}
+		return FeatureStatus{Name: name, Path: displayPath, Problem: newProblem(displayPath, err, true)}
 	}
 
-	row := FeatureStatus{Name: name, Total: len(steps)}
+	row := FeatureStatus{Name: name, Path: displayPath, Total: len(steps)}
 
 	idx := stepfile.NewDependencyIndex()
 
@@ -153,8 +184,13 @@ func featureStatus(
 			continue
 		}
 
-		if row.Next == "" {
-			row.Next = pattern.ID(e.number)
+		if row.Next == nil {
+			title, _ := markdown.Title(string(e.rest))
+			row.Next = &NextStep{
+				ID:    pattern.ID(e.number),
+				Title: title,
+				Path:  filepath.Join(displayPath, pattern.Name(e.number)),
+			}
 		}
 
 		if _, unmet := idx.FirstUnmet(e.fm); unmet {
@@ -163,4 +199,18 @@ func featureStatus(
 	}
 
 	return row
+}
+
+// stateFaultProblem renders err — readStateFile's own error, always a
+// *RefusalError by that function's contract — as the Problem featureStatus
+// reports for a missing, unreadable or fence-broken state file. The type
+// assertion falls back to newProblem for any other error shape rather than
+// panicking, so a future readStateFile change that stops honoring its own
+// contract degrades into an ordinary Problem instead of crashing Status.
+func stateFaultProblem(displayPath string, err error) Problem {
+	if refusal, ok := errors.AsType[*RefusalError](err); ok {
+		return refusal.Problem
+	}
+
+	return *newProblem(displayPath, err, false)
 }

@@ -6,8 +6,9 @@
 which build it is: `brief --version` prints one line on stdout and exits 0.
 
 **Out of Scope**: `-v` shorthand; a `brief version` subcommand; `--version` on subcommands;
-`--version --json`; `-ldflags -X` overrides; tags, goreleaser, release workflows (separate
-backlog item); shell completion for `--version`.
+`-ldflags -X` overrides; tags, goreleaser, release workflows (separate backlog item); shell
+completion for `--version`. `--version --json` was originally out of scope (Product Verdict
+below); reversed by `docs/specifications/human-output/` SCENARIO-12.
 
 **Business Rules**: Version comes from Go's build info (`debug.BuildInfo.Main.Version`),
 printed verbatim — Go ≥ 1.24 already stamps the tag, the pseudo-version, and `+dirty`.
@@ -69,7 +70,9 @@ was written to test. No test pins `-v` by name.
 1. Root `--version` only — no `-v` (reserved for a future `--verbose`), no `version`
    subcommand, not on subcommands.
 2. Print `Main.Version` verbatim, `brief ` prefix, `brief (devel)` fallback, exit 0 always.
-3. No `--json` (scalar; spec Decisions taken #3).
+3. No `--json` (scalar; spec Decisions taken #3). **Reversed** by
+   `docs/specifications/human-output/`: `brief --version --json` (either order) prints the
+   common JSON envelope plus `version`; SCENARIO-03's `--version --json` row no longer holds.
 4. Argument rules and exact copy per R4/R5/R8; `new`/`help` byte-identical (R6).
 5. Release tooling out of scope; `ReadBuildInfo` only.
 6. One root-help trailer line (R7).
@@ -96,7 +99,7 @@ Scenario: SCENARIO-02 A build with no stored version reports (devel)
   Then stdout is exactly "brief (devel)" followed by a newline, and the exit code is 0
 
 Scenario: SCENARIO-03 --version takes no arguments
-  When I run "brief --version extra" or "brief --version --json"
+  When I run "brief --version extra"
   Then stderr is exactly: brief: '--version' takes no arguments; run 'brief --version'
   And stdout is empty and the exit code is 2
 

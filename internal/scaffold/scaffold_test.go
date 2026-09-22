@@ -62,10 +62,34 @@ func Test_returns_the_path_of_the_created_feature_directory(t *testing.T) {
 	root := t.TempDir()
 	srv := scaffold.NewServer(fixtureConfig(), root)
 
-	path, err := srv.NewFeature(context.Background(), "widgets")
+	res, err := srv.NewFeature(context.Background(), "widgets")
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(root, "specs", "widgets"), path)
+	assert.Equal(t, filepath.Join(root, "specs", "widgets"), res.Path)
+}
+
+// Test_new_feature_reports_the_directory_and_the_files_it_created pins
+// NewFeature's result shape: Path names the feature directory, Created
+// lists exactly the specification and the state file it wrote, in write
+// order, both already on disk by the time NewFeature returns.
+func Test_new_feature_reports_the_directory_and_the_files_it_created(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, root)
+
+	res, err := srv.NewFeature(context.Background(), "widgets")
+
+	require.NoError(t, err)
+	featureDir := filepath.Join(root, "specs", "widgets")
+	assert.Equal(t, "widgets", res.Feature)
+	assert.Empty(t, res.Step)
+	assert.Equal(t, featureDir, res.Path)
+	assert.Equal(t, []string{
+		filepath.Join(featureDir, cfg.SpecificationFile),
+		filepath.Join(featureDir, cfg.StateFile),
+	}, res.Created)
+	assert.FileExists(t, res.Created[0])
+	assert.FileExists(t, res.Created[1])
 }
 
 func Test_writes_the_specification_skeleton_with_the_configured_progress_heading_and_nothing_under_it(t *testing.T) {
@@ -219,6 +243,52 @@ func Test_the_byte_identity_probe_sees_a_change_when_the_scaffold_writes_one(t *
 	assert.NotEqual(t, before, after)
 }
 
+// Test_reports_a_specification_write_that_cannot_be_committed_on_new_feature
+// covers NewFeature's own specification-write markPartial site: a
+// configured specification-file carrying a path separator makes
+// writeExclusive's OpenFile fail against a parent directory that was
+// never created — the feature directory itself (Root.Mkdir) has already
+// landed by then, so the failure must be reported as ErrPartialWrite.
+func Test_reports_a_specification_write_that_cannot_be_committed_on_new_feature(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	cfg.SpecificationFile = filepath.Join("sub", "SPEC.md")
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewFeature(context.Background(), "widgets")
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrPartialWrite,
+		"the feature directory already landed via Root.Mkdir before the specification write could fail")
+	assert.DirExists(t, filepath.Join(root, "specs", "widgets"))
+}
+
+// Test_reports_a_state_write_that_cannot_be_committed_on_new_feature covers
+// NewFeature's own state-write markPartial site: configuring the state
+// file with the same name as the specification file makes the
+// specification's writeExclusive land first, then the state write's own
+// O_CREATE|O_EXCL collide with the file the specification write just
+// created. The control arm reads that file back: its bytes are still the
+// specification skeleton, proving the second, failed write never
+// truncated what the first one landed.
+func Test_reports_a_state_write_that_cannot_be_committed_on_new_feature(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	cfg.StateFile = cfg.SpecificationFile
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.NewFeature(context.Background(), "widgets")
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, scaffold.ErrPartialWrite,
+		"the specification write already landed before the colliding state write could fail")
+
+	got, readErr := os.ReadFile(filepath.Join(root, "specs", "widgets", cfg.SpecificationFile))
+	require.NoError(t, readErr)
+	assert.Equal(t, "# widgets\n\n## Progress\n", string(got),
+		"the specification write must not have been truncated by the failed state write")
+}
+
 // Test_the_scaffolded_files_are_all_created_owner_only pins the mode
 // writeExclusive creates the specification, state and step files with.
 //
@@ -328,16 +398,16 @@ func Test_the_scaffolded_files_are_all_created_owner_only(t *testing.T) {
 	root := t.TempDir()
 	srv := scaffold.NewServer(cfg, root)
 
-	featureDir, err := srv.NewFeature(context.Background(), "widgets")
+	featureRes, err := srv.NewFeature(context.Background(), "widgets")
 	require.NoError(t, err)
 
-	stepPath, err := srv.NewStep(context.Background(), "widgets")
+	stepRes, err := srv.NewStep(context.Background(), "widgets")
 	require.NoError(t, err)
 
 	for _, path := range []string{
-		filepath.Join(featureDir, cfg.SpecificationFile),
-		filepath.Join(featureDir, cfg.StateFile),
-		stepPath,
+		filepath.Join(featureRes.Path, cfg.SpecificationFile),
+		filepath.Join(featureRes.Path, cfg.StateFile),
+		stepRes.Path,
 	} {
 		info, statErr := os.Stat(path)
 		require.NoError(t, statErr, path)
