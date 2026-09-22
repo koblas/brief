@@ -14,8 +14,10 @@ import (
 
 // Test_finish_json_is_one_exact_document is the exact-bytes golden pinning
 // finishDocument's key order: newFinishCLIFixture's single step leaves
-// nothing else open, so next is JSON null, changed is true, and both paths
-// are absolute.
+// nothing else open, so next is JSON null, changed is true, both paths are
+// absolute, and modified lists the state file, the step file and the
+// specification, in that write order — never the handoff file, this call's
+// own output.
 func Test_finish_json_is_one_exact_document(t *testing.T) {
 	wd := newFinishCLIFixture(t)
 	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
@@ -28,9 +30,13 @@ func Test_finish_json_is_one_exact_document(t *testing.T) {
 	assert.Empty(t, stderr.String())
 
 	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	stateFilePath := filepath.Join(featureDir, "STATE.md")
+	stepFilePath := filepath.Join(featureDir, "SCENARIO-01.md")
+	specFilePath := filepath.Join(featureDir, "specification.md")
 	want := `{"schema":1,"command":"finish","ok":true,"exit_code":0,"feature":"demo","step":"SCENARIO-01","changed":true,"handoff_path":` +
 		jsonString(t, filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md")) + `,"state_path":` +
-		jsonString(t, filepath.Join(featureDir, "STATE.md")) + `,"next":null}` + "\n"
+		jsonString(t, stateFilePath) + `,"next":null,"modified":[` +
+		jsonString(t, stateFilePath) + `,` + jsonString(t, stepFilePath) + `,` + jsonString(t, specFilePath) + `]}` + "\n"
 
 	assert.Equal(t, want, stdout.String())
 }
@@ -101,6 +107,22 @@ func Test_finish_json_decodes_next_and_changed_correctly(t *testing.T) {
 			},
 			key:  "changed",
 			want: `false`,
+		},
+		{
+			name: "modified is empty on the R11 no-op",
+			setup: func(t *testing.T) (string, []string) {
+				t.Helper()
+
+				wd := newFinishCLIFixture(t)
+				handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+				statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+				firstRun := []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}
+				require.NoError(t, cli.Run(t.Context(), wd, firstRun, nil, &bytes.Buffer{}, &bytes.Buffer{}))
+
+				return wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath, "--json"}
+			},
+			key:  "modified",
+			want: `[]`,
 		},
 	}
 

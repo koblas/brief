@@ -125,11 +125,12 @@ rewritten per scenario as text changes (user decision).
   run 'brief new step <feature>' to create one`. Replaces the old "run 'brief new step
   <feature>' to see the next step" fix, which named a command that writes files as the remedy
   for a read-only refusal.
-- finish: `brief finish: <feature> <step> done; wrote <handoff rel>, replaced <state rel>;
-  next: <id> — run 'brief start <feature>'` (or no next); re-finish:
+- finish: `brief finish: <feature> <step> done; wrote <handoff rel>, replaced <state rel>,
+  ticked <spec rel>; next: <id> — run 'brief start <feature>'` (or no next); re-finish:
   `brief finish: <feature> <step> already done with identical inputs; nothing written`.
-- new step stderr: `brief new step: created <id> in <feature>; fill in its acceptance
-  criteria and checklist, then 'brief start <feature>'` (new feature analogous).
+- new step stderr: `brief new step: created <id> in <feature> and added it to <spec rel>; fill
+  in its acceptance criteria and checklist, then 'brief start <feature>'` (new feature
+  analogous, no "added it to" clause — it creates both its files fresh).
 - help: every `<cmd> --help` lists `--json   print one JSON document on stdout` and a
   paragraph of top-level JSON fields; status/check help add `For scripts, use --json; the text
   layout may change.`
@@ -142,10 +143,15 @@ rewritten per scenario as text changes (user decision).
   "findings":[{"severity","rule","path","line"|null,"detail"}]}]}`.
 - `start`: existing `assemble.Brief` fields unchanged + header.
 - `finish`: `{"feature","step","changed","handoff_path","state_path",
-  "next":{"id","title","path"}|null}` — same shape as `status`'s own `"next"` (MAJOR 2: the two
-  duplicated "next open step" computations, one in `scaffold`, one in `assemble`, now render an
-  identical object). Text mode is unchanged: it still names only the id.
-- `new feature` / `new step`: `{"feature","step"|null,"path","created":[abs…]}`.
+  "next":{"id","title","path"}|null,"modified":[abs…]}` — `"next"` is the same shape as
+  `status`'s own (MAJOR 2: the two duplicated "next open step" computations, one in
+  `scaffold`, one in `assemble`, now render an identical object; text mode is unchanged, it
+  still names only the id). `"modified"` lists the state file, the step file and the
+  specification, in write order, when `changed`; `[]` on the no-op. `handoff_path` is never in
+  `"modified"`: it is this call's own output, not a file it found already on disk.
+- `new feature` / `new step`: `{"feature","step"|null,"path","created":[abs…],
+  "modified":[abs…]}` — `new feature`'s `"modified"` is always `[]` (it creates both its files
+  fresh); `new step`'s is `[<specification>]` (the progress entry it appends).
 - `--version`: `{"version"}` (`"(devel)"` when unstamped).
 - `help`: `{"commands":[{"name","usage","summary","description","flags":[{"name","type",
   "usage"}]}]}`; `help <cmd> --json` ≡ `<cmd> --help --json`, filtered to one entry.

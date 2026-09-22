@@ -32,17 +32,19 @@ func NewServer(cfg config.Config, root string) *Server {
 // name given to the call, Step is the created step's id (empty for
 // NewFeature — no call creates a feature and a step in one invocation),
 // Path is the single path the caller's own text-mode contract prints (the
-// feature directory for NewFeature, the step file for NewStep), and
-// Created lists every path this call brought into existence, in the order
-// it wrote them. Created never includes a file the call only modified — a
-// specification NewStep appends a progress entry to is not "created" by
-// that call — and is never nil, so a caller can range over it without a
-// nil check.
+// feature directory for NewFeature, the step file for NewStep), Created
+// lists every path this call brought into existence, in the order it wrote
+// them, and Modified lists every path it rewrote in place instead —
+// NewStep's own specification, whose progress list it appends an entry to,
+// never NewFeature's, which creates both its files fresh. Neither slice
+// ever includes a path the other already names, and neither is ever nil,
+// so a caller can range over either without a nil check.
 type Result struct {
-	Feature string
-	Step    string
-	Path    string
-	Created []string
+	Feature  string
+	Step     string
+	Path     string
+	Created  []string
+	Modified []string
 }
 
 // NewFeature creates the feature directory for name under the configured
@@ -116,16 +118,17 @@ func (s *Server) NewFeature(_ context.Context, name string) (Result, error) {
 	}
 
 	return Result{
-		Feature: name,
-		Path:    featurePath,
-		Created: []string{specPath, statePath},
+		Feature:  name,
+		Path:     featurePath,
+		Created:  []string{specPath, statePath},
+		Modified: []string{},
 	}, nil
 }
 
 // NewStep creates the next step file for feature and appends its progress
 // entry, returning a Result naming the created step's id and file. Created
-// holds only the step file: the specification's progress entry is a
-// modification of an existing file, not a creation, and is never listed.
+// holds only the step file; Modified holds the specification, which this
+// call rewrites in place rather than creates.
 //
 // Validation runs in the order a refusal must name the first thing wrong
 // (R14a): the configured step-file-pattern compiles, the feature directory
@@ -227,10 +230,11 @@ func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 	stepPath := filepath.Join(featurePath, stepName)
 
 	return Result{
-		Feature: feature,
-		Step:    id,
-		Path:    stepPath,
-		Created: []string{stepPath},
+		Feature:  feature,
+		Step:     id,
+		Path:     stepPath,
+		Created:  []string{stepPath},
+		Modified: []string{specPath},
 	}, nil
 }
 

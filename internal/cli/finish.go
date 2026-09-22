@@ -16,13 +16,17 @@ handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
 from stdin; it may be given for at most one of --handoff and --state.
 
-` + jsonFieldsParagraph("feature", "step", "changed", "handoff_path", "state_path", "next")
+` + jsonFieldsParagraph("feature", "step", "changed", "handoff_path", "state_path", "next", "modified")
 
 // finishDocument is finish's --json success document: the common header
-// first, then scaffold.FinishResult's own fields, both paths absolute and
+// first, then scaffold.FinishResult's own fields, every path absolute and
 // passed through verbatim. Next is statusNextJSON, the identical
 // id/title/path object status's own "next" renders (MAJOR 2) — nil (JSON
-// null) when nothing is open — and Changed is false only on R11's no-op.
+// null) when nothing is open. Modified is res.Modified verbatim — the
+// state file, the step file and the specification, in that order, when
+// Changed; empty on the no-op — and never includes handoff_path, this
+// call's own output rather than a file it found already on disk. Changed
+// is false only on R11's no-op.
 type finishDocument struct {
 	jsonHeader
 
@@ -32,6 +36,7 @@ type finishDocument struct {
 	HandoffPath string          `json:"handoff_path"`
 	StatePath   string          `json:"state_path"`
 	Next        *statusNextJSON `json:"next"`
+	Modified    []string        `json:"modified"`
 }
 
 // runFinish implements "brief finish <feature> <step> --handoff <path>
@@ -103,6 +108,7 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 			HandoffPath: res.HandoffPath,
 			StatePath:   res.StatePath,
 			Next:        next,
+			Modified:    res.Modified,
 		}
 
 		return out.document(doc)
@@ -114,14 +120,14 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 		return nil
 	}
 
-	handoffRel, stateRel := displayPath(wd, res.HandoffPath), displayPath(wd, res.StatePath)
+	handoffRel, stateRel, specRel := displayPath(wd, res.HandoffPath), displayPath(wd, res.StatePath), displayPath(wd, res.SpecPath)
 
 	if res.Next.ID != "" {
-		fmt.Fprintf(out.stderr, "brief finish: %s %s done; wrote %s, replaced %s; next: %s — run 'brief start %s'\n",
-			feature, step, handoffRel, stateRel, res.Next.ID, feature)
+		fmt.Fprintf(out.stderr, "brief finish: %s %s done; wrote %s, replaced %s, ticked %s; next: %s — run 'brief start %s'\n",
+			feature, step, handoffRel, stateRel, specRel, res.Next.ID, feature)
 	} else {
-		fmt.Fprintf(out.stderr, "brief finish: %s %s done; wrote %s, replaced %s; %s is complete\n",
-			feature, step, handoffRel, stateRel, feature)
+		fmt.Fprintf(out.stderr, "brief finish: %s %s done; wrote %s, replaced %s, ticked %s; %s is complete\n",
+			feature, step, handoffRel, stateRel, specRel, feature)
 	}
 
 	return nil

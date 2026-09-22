@@ -24,7 +24,7 @@ func Test_creates_the_step_and_prints_its_path(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t,
-		"brief new step: created SCENARIO-01 in payments; fill in its acceptance criteria and checklist, then 'brief start payments'\n",
+		"brief new step: created SCENARIO-01 in payments and added it to docs/specifications/payments/specification.md; fill in its acceptance criteria and checklist, then 'brief start payments'\n",
 		stderr.String())
 	assert.Equal(t, "docs/specifications/payments/SCENARIO-01.md\n", stdout.String())
 }

@@ -141,18 +141,19 @@ func Test_finishes_the_step_when_the_flags_precede_the_feature_and_step(t *testi
 	assert.Equal(t, wantFinishCompleteLine("demo", "SCENARIO-01"), stderr.String())
 }
 
-// wantFinishCompleteLine renders the "wrote …; <feature> is complete"
-// success line newFinishCLIFixture's single-step tree always produces:
-// finishing its only step always leaves nothing else open. The paths are
-// relative to wd via displayPath, which every newFinishCLIFixture caller
-// builds identically regardless of wd's own value, so it takes no wd
+// wantFinishCompleteLine renders the "wrote …, ticked …; <feature> is
+// complete" success line newFinishCLIFixture's single-step tree always
+// produces: finishing its only step always leaves nothing else open. The
+// paths are relative to wd via displayPath, which every newFinishCLIFixture
+// caller builds identically regardless of wd's own value, so it takes no wd
 // argument.
 func wantFinishCompleteLine(feature, step string) string {
 	return fmt.Sprintf(
-		"brief finish: %s %s done; wrote %s, replaced %s; %s is complete\n",
+		"brief finish: %s %s done; wrote %s, replaced %s, ticked %s; %s is complete\n",
 		feature, step,
 		filepath.Join("docs", "specifications", feature, step+"-HANDOFF.md"),
 		filepath.Join("docs", "specifications", feature, "STATE.md"),
+		filepath.Join("docs", "specifications", feature, "specification.md"),
 		feature)
 }
 
@@ -196,9 +197,10 @@ func Test_finish_names_the_next_open_step_and_its_start_command(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stdout.String())
 	want := fmt.Sprintf(
-		"brief finish: demo SCENARIO-01 done; wrote %s, replaced %s; next: SCENARIO-02 — run 'brief start demo'\n",
+		"brief finish: demo SCENARIO-01 done; wrote %s, replaced %s, ticked %s; next: SCENARIO-02 — run 'brief start demo'\n",
 		filepath.Join("docs", "specifications", "demo", "SCENARIO-01-HANDOFF.md"),
-		filepath.Join("docs", "specifications", "demo", "STATE.md"))
+		filepath.Join("docs", "specifications", "demo", "STATE.md"),
+		filepath.Join("docs", "specifications", "demo", "specification.md"))
 	assert.Equal(t, want, stderr.String())
 }
 
@@ -221,9 +223,10 @@ func Test_finish_names_a_blocked_step_as_next(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stdout.String())
 	want := fmt.Sprintf(
-		"brief finish: demo SCENARIO-01 done; wrote %s, replaced %s; next: SCENARIO-02 — run 'brief start demo'\n",
+		"brief finish: demo SCENARIO-01 done; wrote %s, replaced %s, ticked %s; next: SCENARIO-02 — run 'brief start demo'\n",
 		filepath.Join("docs", "specifications", "demo", "SCENARIO-01-HANDOFF.md"),
-		filepath.Join("docs", "specifications", "demo", "STATE.md"))
+		filepath.Join("docs", "specifications", "demo", "STATE.md"),
+		filepath.Join("docs", "specifications", "demo", "specification.md"))
 	assert.Equal(t, want, stderr.String())
 }
 
@@ -244,9 +247,10 @@ func Test_finish_names_a_lower_numbered_open_step_as_next(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stdout.String())
 	want := fmt.Sprintf(
-		"brief finish: demo SCENARIO-02 done; wrote %s, replaced %s; next: SCENARIO-01 — run 'brief start demo'\n",
+		"brief finish: demo SCENARIO-02 done; wrote %s, replaced %s, ticked %s; next: SCENARIO-01 — run 'brief start demo'\n",
 		filepath.Join("docs", "specifications", "demo", "SCENARIO-02-HANDOFF.md"),
-		filepath.Join("docs", "specifications", "demo", "STATE.md"))
+		filepath.Join("docs", "specifications", "demo", "STATE.md"),
+		filepath.Join("docs", "specifications", "demo", "specification.md"))
 	assert.Equal(t, want, stderr.String())
 }
 

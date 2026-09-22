@@ -363,7 +363,7 @@ func Test_help_finish_json_is_the_exact_document(t *testing.T) {
 		"With --json, this command writes one JSON document on stdout: the common header\n" +
 		"(`schema`, `command`, `ok`, `exit_code`; on a usage error or refusal an `error`\n" +
 		"object carries the failure), then its own top-level fields, in document order:\n" +
-		"`feature`, `step`, `changed`, `handoff_path`, `state_path`, `next`."
+		"`feature`, `step`, `changed`, `handoff_path`, `state_path`, `next`, `modified`."
 	handoffUsage := "the path to the step's handoff body,\nwritten to its own file"
 	stateUsage := "the path to the COMPLETE replacement body for the state\n" +
 		"file; it replaces the file, it is never appended to; it\n" +

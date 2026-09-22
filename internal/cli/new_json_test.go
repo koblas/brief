@@ -17,7 +17,8 @@ import (
 // pinning newDocument's key order for "new feature": step is null (no call
 // creates a feature and a step together), path names the feature
 // directory, created lists the specification and the state file in write
-// order, both absolute.
+// order, both absolute, and modified is empty — NewFeature creates both
+// its files fresh, rewriting nothing that already existed.
 func Test_new_feature_json_is_one_exact_document(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -32,7 +33,7 @@ func Test_new_feature_json_is_one_exact_document(t *testing.T) {
 	want := `{"schema":1,"command":"new feature","ok":true,"exit_code":0,"feature":"payments","step":null,"path":` +
 		jsonString(t, featureDir) + `,"created":[` +
 		jsonString(t, filepath.Join(featureDir, "specification.md")) + `,` +
-		jsonString(t, filepath.Join(featureDir, "STATE.md")) + `]}` + "\n"
+		jsonString(t, filepath.Join(featureDir, "STATE.md")) + `],"modified":[]}` + "\n"
 
 	assert.Equal(t, want, stdout.String())
 }
@@ -43,8 +44,9 @@ func Test_new_feature_json_is_one_exact_document(t *testing.T) {
 // their feature's first step, so production's own next-step-number logic
 // assigns the same id to each independently. path is the absolute form of
 // the single stdout line a text-mode run would have printed, created is
-// exactly [path], stderr is empty, and stdout carries the JSON document
-// alone — no bare path line ahead of it.
+// exactly [path], modified is exactly [the feature's specification.md] —
+// the progress entry this call appends — stderr is empty, and stdout
+// carries the JSON document alone — no bare path line ahead of it.
 func Test_new_step_json_names_the_step_and_its_file(t *testing.T) {
 	wdText := t.TempDir()
 	require.NoError(t, cli.Run(t.Context(), wdText, []string{"new", "feature", "alpha"}, nil, &bytes.Buffer{}, &bytes.Buffer{}))
@@ -66,7 +68,7 @@ func Test_new_step_json_names_the_step_and_its_file(t *testing.T) {
 
 	var doc map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
-	assert.ElementsMatch(t, []string{"schema", "command", "ok", "exit_code", "feature", "step", "path", "created"}, jsonKeys(t, doc))
+	assert.ElementsMatch(t, []string{"schema", "command", "ok", "exit_code", "feature", "step", "path", "created", "modified"}, jsonKeys(t, doc))
 
 	var step string
 	require.NoError(t, json.Unmarshal(doc["step"], &step))
@@ -81,6 +83,12 @@ func Test_new_step_json_names_the_step_and_its_file(t *testing.T) {
 	var created []string
 	require.NoError(t, json.Unmarshal(doc["created"], &created))
 	assert.Equal(t, []string{wantPath}, created)
+
+	wantSpecPath := filepath.Join(wd, "docs", "specifications", "beta", "specification.md")
+
+	var modified []string
+	require.NoError(t, json.Unmarshal(doc["modified"], &modified))
+	assert.Equal(t, []string{wantSpecPath}, modified)
 }
 
 // Test_new_feature_json_files_changed_is_true_when_the_state_write_fails

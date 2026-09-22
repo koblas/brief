@@ -33,21 +33,28 @@ type FinishNext struct {
 // writes land, or as R11's no-op, which still returns the populated result
 // rather than a zero value. Feature and Step are the arguments Finish was
 // called with. Changed is false only for R11's no-op: every input already
-// matched what was on disk, so nothing was written. HandoffPath and
-// StatePath are absolute — the step's own handoff file and the feature's
-// state file Finish wrote or, on a no-op, would have — never the caller's
-// own --state/--handoff input path, which Finish never learns. Next names
-// the lowest-numbered step file (by stepfile.Pattern.Number) whose
-// frontmatter status is not "done", counting the just-finished step as
-// done and ignoring depends-on, so a blocked step can still be Next; the
-// zero FinishNext when every other step is done. A sibling whose
-// frontmatter cannot be read or does not parse counts as not done, so it
-// can be named Next too.
+// matched what was on disk, so nothing was written. HandoffPath, StatePath,
+// StepPath and SpecPath are absolute — the four files Finish wrote or, on a
+// no-op, would have — never the caller's own --state/--handoff input path,
+// which Finish never learns. Modified lists StatePath, StepPath and
+// SpecPath, in that write order, when Changed; the empty slice on a no-op,
+// since nothing was rewritten. HandoffPath is never in Modified: unlike the
+// other three, which Finish always finds already on disk and rewrites in
+// place, the handoff file is this call's own output — named by its own
+// field, the same way scaffold.Result's Created/Modified never both name
+// the same path. Next names the lowest-numbered step file (by
+// stepfile.Pattern.Number) whose frontmatter status is not "done", counting
+// the just-finished step as done and ignoring depends-on, so a blocked step
+// can still be Next; the zero FinishNext when every other step is done. A
+// sibling whose frontmatter cannot be read or does not parse counts as not
+// done, so it can be named Next too.
 type FinishResult struct {
-	Feature, Step          string
-	Changed                bool
-	HandoffPath, StatePath string
-	Next                   FinishNext
+	Feature, Step                    string
+	Changed                          bool
+	HandoffPath, StatePath, StepPath string
+	SpecPath                         string
+	Modified                         []string
+	Next                             FinishNext
 }
 
 // Finish closes feature's step: it writes handoff to that step's own
@@ -309,7 +316,11 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 
 	switch r.verdict() {
 	case refinishNoop:
-		return FinishResult{Feature: feature, Step: step, Changed: false, HandoffPath: handoffPath, StatePath: statePath, Next: next}, nil
+		return FinishResult{
+			Feature: feature, Step: step, Changed: false,
+			HandoffPath: handoffPath, StatePath: statePath, StepPath: stepPath, SpecPath: specPath,
+			Modified: []string{}, Next: next,
+		}, nil
 	case refinishHandoffDiverged:
 		return FinishResult{}, alreadyFinishedRefusal(handoffPath, step, "handoff")
 	case refinishStateDiverged:
@@ -322,7 +333,11 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		return FinishResult{}, err
 	}
 
-	return FinishResult{Feature: feature, Step: step, Changed: true, HandoffPath: handoffPath, StatePath: statePath, Next: next}, nil
+	return FinishResult{
+		Feature: feature, Step: step, Changed: true,
+		HandoffPath: handoffPath, StatePath: statePath, StepPath: stepPath, SpecPath: specPath,
+		Modified: []string{statePath, stepPath, specPath}, Next: next,
+	}, nil
 }
 
 // applyFinishWrites lands Finish's four writes — handoff file, state file,

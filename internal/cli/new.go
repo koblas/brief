@@ -24,13 +24,13 @@ with an empty specification skeleton and an empty state file.
 
 A name may not be empty or contain whitespace.
 
-` + jsonFieldsParagraph("feature", "step", "path", "created")
+` + jsonFieldsParagraph("feature", "step", "path", "created", "modified")
 
 // newStepLong is "brief new step"'s help prose.
 var newStepLong = `Scaffolds the next step file for feature and appends its entry to the
 feature's progress list.
 
-` + jsonFieldsParagraph("feature", "step", "path", "created")
+` + jsonFieldsParagraph("feature", "step", "path", "created", "modified")
 
 // newFeatureInvocation is the invocation string every "brief new feature"
 // usage error names as how to fix it.
@@ -43,16 +43,20 @@ const newStepInvocation = "brief new step <feature>"
 // newDocument is "new feature"'s and "new step"'s shared --json success
 // document: the common header first, then the scaffolded feature, the
 // step id (null for "new feature" — no call creates a feature and a step
-// together), the single path the text-mode contract prints, and every
-// path this call created, absolute throughout (R6). Created is never nil,
-// so it encodes "[]" rather than "null" if ever empty.
+// together), the single path the text-mode contract prints, every path
+// this call created, and every path it rewrote in place instead (empty for
+// "new feature", which creates both its files fresh; the specification for
+// "new step", whose progress list it appends an entry to) — absolute
+// throughout (R6). Created and Modified are never nil, so each encodes
+// "[]" rather than "null" if ever empty.
 type newDocument struct {
 	jsonHeader
 
-	Feature string   `json:"feature"`
-	Step    *string  `json:"step"`
-	Path    string   `json:"path"`
-	Created []string `json:"created"`
+	Feature  string   `json:"feature"`
+	Step     *string  `json:"step"`
+	Path     string   `json:"path"`
+	Created  []string `json:"created"`
+	Modified []string `json:"modified"`
 }
 
 // runNew handles "brief new <type> ...": rejects "-h"/"--help" given an
@@ -118,7 +122,7 @@ func runNewFeature(ctx context.Context, wd string, rest []string, out reporter) 
 	}
 
 	if out.json {
-		doc := newDocument{jsonHeader: out.successHeader(), Feature: res.Feature, Path: res.Path, Created: res.Created}
+		doc := newDocument{jsonHeader: out.successHeader(), Feature: res.Feature, Path: res.Path, Created: res.Created, Modified: res.Modified}
 
 		return out.document(doc)
 	}
@@ -156,14 +160,14 @@ func runNewStep(ctx context.Context, wd string, rest []string, out reporter) err
 
 	if out.json {
 		step := res.Step
-		doc := newDocument{jsonHeader: out.successHeader(), Feature: res.Feature, Step: &step, Path: res.Path, Created: res.Created}
+		doc := newDocument{jsonHeader: out.successHeader(), Feature: res.Feature, Step: &step, Path: res.Path, Created: res.Created, Modified: res.Modified}
 
 		return out.document(doc)
 	}
 
 	fmt.Fprintln(out.stdout, displayPath(wd, res.Path))
-	fmt.Fprintf(out.stderr, "brief new step: created %s in %s; fill in its acceptance criteria and checklist, then 'brief start %s'\n",
-		res.Step, res.Feature, res.Feature)
+	fmt.Fprintf(out.stderr, "brief new step: created %s in %s and added it to %s; fill in its acceptance criteria and checklist, then 'brief start %s'\n",
+		res.Step, res.Feature, displayPath(wd, res.Modified[0]), res.Feature)
 
 	return nil
 }
