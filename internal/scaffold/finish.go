@@ -76,8 +76,11 @@ type FinishResult struct {
 // Every check runs, and every write body is computed, before the first
 // byte reaches disk — in the order a refusal must name the first thing
 // wrong (R14a): the step-file pattern compiles; the handoff-file-suffix
-// compiles against it (stepfile.ErrInvalidHandoffSuffix); the feature
-// directory opens; a step file exists whose id equals step; its
+// compiles against it (stepfile.ErrInvalidHandoffSuffix); feature passes
+// validFeatureArgument (the traversal guard: a feature name that escapes
+// the feature directory refuses as ErrNoSuchFeature rather than as a
+// traversal error); the feature directory opens; a step file exists whose
+// id equals step; its
 // frontmatter parses; the handoff argument measures no more than
 // cfg.HandoffCapLines lines (ErrOverCap, named against HandoffSource,
 // counted by markdown.CountLines), immediately followed by the same check
@@ -98,8 +101,7 @@ type FinishResult struct {
 // ahead of the specification read and (refinish).verdict below, so a step
 // that is both un-ticked and a divergent re-finish reports the open item;
 // a checklist with no items, or no checklist heading at all, is never
-// refused this way, matching assemble.Start's read-side degrade for the
-// same heading; the step's own frontmatter then carries no depends-on id
+// refused this way; the step's own frontmatter then carries no depends-on id
 // that is not a done step (ErrUnmetDependency, checkStepDependencies,
 // naming stepPath) — checked immediately after the checklist and ahead of
 // the specification read, so a step both un-ticked and blocked reports the
@@ -110,9 +112,8 @@ type FinishResult struct {
 // it blocks with the "is not finished" copy rather than the wrong "names
 // no step file" one; a done step is never refused this way, whatever its
 // dependencies say — stepfile.DependencyIndex.FirstUnmet short-circuits on
-// the step's own doneness, the same exemption assemble.Status's blocked
-// count applies, keeping a re-finish of a done step whose dependency was
-// reopened by hand a true no-op; the specification is
+// the step's own doneness, keeping a re-finish of a done step whose
+// dependency was reopened by hand a true no-op; the specification is
 // readable; the specification carries the
 // configured progress heading and an entry for step; the state file exists
 // as a regular file. Computing the frontmatter's "status: done" line during
@@ -122,43 +123,17 @@ type FinishResult struct {
 // argument is never fence-checked, only line-counted: it is written
 // verbatim to its own file and nothing reads it structurally.
 //
-// The four writes then land in a fixed order — handoff file, state file,
-// step file, specification — chosen so a crash between them always
-// converges on retry. "status: done" must never land before the handoff
-// file exists: every earlier prefix in this order leaves the step's
-// frontmatter status "open", the sole doneness authority a reader trusts,
-// so a retried Finish takes the full path again and rewrites each earlier
-// write with a byte-identical body. The reverse order does not converge:
-// a step file already marked done, beside a missing or stale handoff
-// file, gives a retry no accurate signal that anything is still wrong. A
-// write failure after validation is returned as-is, never wrapped in
-// *RefusalError — the template's "(no files changed)" tail would
-// misreport a half-applied write.
+// applyFinishWrites lands the four writes in that fixed order — see its own
+// doc comment for why the order matters to convergence after a crash.
 //
-// A re-finish of a step whose frontmatter already says done resolves to
-// one of three outcomes, decided by (refinish).verdict — see its doc
-// comment for the five facts and six rows that make up the decision:
-//
-//   - A true no-op, writing nothing and preserving mtime on all four
-//     files, when the handoff file exists and its bytes equal handoff, the
-//     state bytes equal state, and the spec-with-tick already equals what
-//     is on disk (R11).
-//   - A refusal wrapping ErrAlreadyFinished, naming the recorded handoff
-//     file, when the handoff file exists but its bytes differ from
-//     handoff.
-//   - A refusal wrapping ErrAlreadyFinished, naming cfg.StateFile, when
-//     the handoff matches but state differs from the recorded state
-//     bytes.
-//
-// A done step whose handoff file is missing or unreadable is exempt from
-// both refusals and writes as normal, the same as an un-ticked progress
-// entry — see (refinish).verdict for why neither is a divergence trigger.
-// The step-file conjunct is fm.Done() rather than a byte comparison of the
-// step body: the step-file write body is a pure function of the on-disk
-// body, so a byte comparison would hold in almost exactly the cases
-// fm.Done() holds, and where they differ fm.Done() is the correct
-// predicate — the doneness authority is the parsed value, not the byte
-// shape, and R11 requires mtime preserved.
+// A re-finish of a step whose frontmatter already says done is decided by
+// (refinish).verdict — see its own doc comment for the five facts and six
+// rows that make up the decision. The step-file conjunct verdict reads is
+// fm.Done() rather than a byte comparison of the step body: the step-file
+// write body is a pure function of the on-disk body, so a byte comparison
+// would hold in almost exactly the cases fm.Done() holds, and where they
+// differ fm.Done() is the correct predicate — the doneness authority is
+// the parsed value, not the byte shape, and R11 requires mtime preserved.
 func (s *Server) Finish(_ context.Context, feature, step string, handoff, state []byte) (FinishResult, error) {
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
 	featurePath := filepath.Join(featureDirPath, feature)
@@ -183,16 +158,11 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		}
 	}
 
-	topRoot, err := os.OpenRoot(featureDirPath)
+	topRoot, root, err := openFeatureDir(featureDirPath, featurePath, feature)
 	if err != nil {
-		return FinishResult{}, noSuchFeatureRefusal(featurePath, feature)
+		return FinishResult{}, err
 	}
 	defer func() { _ = topRoot.Close() }()
-
-	root, err := topRoot.OpenRoot(feature)
-	if err != nil {
-		return FinishResult{}, noSuchFeatureRefusal(featurePath, feature)
-	}
 	defer func() { _ = root.Close() }()
 
 	stepFileName, stepNumber, entries, err := findStepFile(root, pattern, step)

@@ -52,8 +52,8 @@ func writeStepFile(t *testing.T, featureDir, name, content string) {
 
 // writeConformingFeature creates featureDir and writes a specification and
 // state file that pass specFault/readStateFile — the same two checks
-// assemble.Start refuses on (MAJOR 1: status must not report a clean row for
-// a feature start would refuse). Every fixture in this file that means to
+// assemble.Start refuses on, so Status must not report a clean row for a
+// feature Start would refuse. Every fixture in this file that means to
 // exercise step-level behavior, not the spec/state gate itself, must route
 // its directory creation through this rather than a bare os.MkdirAll, or the
 // spec/state check now ahead of the step read would win the row's Problem
@@ -618,11 +618,11 @@ func Test_status_orders_features_in_byte_order_not_case_insensitive_order(t *tes
 	assert.Equal(t, []string{"Beta", "Zeta", "alpha"}, []string{rows[0].Name, rows[1].Name, rows[2].Name})
 }
 
-// Test_status_marks_a_feature_whose_specification_is_missing is MAJOR 1's
-// first condition: a feature directory with a conforming state file and a
-// well-formed step, but no specification at all — the shape
-// assemble.Start itself refuses over (specFault) — must not read as a
-// clean row.
+// Test_status_marks_a_feature_whose_specification_is_missing pins
+// featureStatus's own check ahead of its step read: a feature directory
+// with a conforming state file and a well-formed step, but no
+// specification at all — the shape assemble.Start itself refuses over
+// (specFault) — must not read as a clean row.
 func Test_status_marks_a_feature_whose_specification_is_missing(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -647,9 +647,9 @@ func Test_status_marks_a_feature_whose_specification_is_missing(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("write a %s with a %q heading and re-run", cfg.SpecificationFile, cfg.ProgressHeading), rows[0].Problem.Fix)
 }
 
-// Test_status_marks_a_feature_whose_specification_has_no_progress_heading is
-// MAJOR 1's second condition: a specification that reads fine but carries
-// none of cfg.ProgressHeading — specFault's other refusal shape.
+// Test_status_marks_a_feature_whose_specification_has_no_progress_heading
+// pins specFault's other refusal shape: a specification that reads fine
+// but carries none of cfg.ProgressHeading.
 func Test_status_marks_a_feature_whose_specification_has_no_progress_heading(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -671,9 +671,9 @@ func Test_status_marks_a_feature_whose_specification_has_no_progress_heading(t *
 	assert.Equal(t, fmt.Sprintf("add a %q heading to the specification", cfg.ProgressHeading), rows[0].Problem.Fix)
 }
 
-// Test_status_marks_a_feature_whose_state_file_is_missing is MAJOR 1's third
-// condition: a conforming specification and a well-formed step, but no
-// state file — readStateFile's own refusal shape. wantDetail is captured
+// Test_status_marks_a_feature_whose_state_file_is_missing pins
+// readStateFile's own refusal shape: a conforming specification and a
+// well-formed step, but no state file. wantDetail is captured
 // through a real os.Open on the removed path rather than hardcoded, the
 // same technique Test_json_mode_renders_a_refusal_as_one_document (cli
 // package) uses: the OS-native "file does not exist" text is not this
@@ -704,10 +704,33 @@ func Test_status_marks_a_feature_whose_state_file_is_missing(t *testing.T) {
 	assert.Equal(t, "make it readable and re-run", rows[0].Problem.Fix)
 }
 
+// Test_status_prefers_the_specification_fault_over_a_missing_state_file pins
+// featureStatus's own check order at the one point the two tests above never
+// exercise: each of them leaves the other file conforming, so either check
+// order produces the same single-fault row. Dropping both specification and
+// state leaves only the check order to decide which Problem wins.
+func Test_status_prefers_the_specification_fault_over_a_missing_state_file(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), rows[0].Problem.Path)
+	assert.Equal(t, cfg.SpecificationFile+" not found", rows[0].Problem.Detail)
+}
+
 // Test_status_leaves_a_feature_with_a_conforming_specification_and_state_unmarked
-// is MAJOR 1's control arm: the same shape as the three tests above, minus
-// the one fault each removes, stays a clean row — the malformed rows above
-// are not an artifact of the fixture, only of the one file each one drops.
+// is the control arm for the three tests above: the same shape, minus the
+// one fault each removes, stays a clean row — the malformed rows above are
+// not an artifact of the fixture, only of the one file each one drops.
 func Test_status_leaves_a_feature_with_a_conforming_specification_and_state_unmarked(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()

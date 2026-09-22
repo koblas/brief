@@ -36,20 +36,18 @@ type Problem struct {
 
 // RefusalError is the read-side refusal Start returns when it declines to
 // assemble a Brief rather than return one that silently omits context: the
-// embedded Problem names the absolute path, what was wrong with it and how
-// to fix it; Line is the 1-based line number within Path the refusal points
-// at (0 when it names the whole file); and Err is the sentinel this
-// refusal wraps for errors.Is — cli/refusal.go renders these fields into
-// R14a's one-line refusal template, appending ":Line" to the path when Line
-// is set, with no "(no files changed)" tail: a read refusal changes
-// nothing on disk by construction. It is the read-side counterpart of
-// scaffold.RefusalError, duplicated rather than shared because assemble
-// must not import scaffold.
+// embedded Problem names the absolute path, what was wrong with it, how to
+// fix it, and the 1-based line number within Path the refusal points at (0
+// when it names the whole file); Err is the sentinel this refusal wraps for
+// errors.Is. cli/refusal.go renders these fields into R14a's one-line
+// refusal template, appending ":Line" to the path when Problem.Line is set,
+// with no "(no files changed)" tail: a read refusal changes nothing on disk
+// by construction. It is the read-side counterpart of scaffold.RefusalError,
+// duplicated rather than shared because assemble must not import scaffold.
 type RefusalError struct {
 	Problem
 
-	Line int
-	Err  error
+	Err error
 }
 
 // Error renders "<path>: <detail>; <fix>", or "<path>:<line>: <detail>;

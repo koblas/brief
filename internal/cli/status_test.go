@@ -261,6 +261,29 @@ func Test_status_names_the_reason_for_a_malformed_feature_on_stderr(t *testing.T
 	assert.NotContains(t, stderr.String(), "(no files changed)")
 }
 
+// Test_status_names_the_line_of_a_state_file_s_unclosed_fence_on_stderr is
+// text mode's parity with
+// Test_status_json_reports_the_line_of_a_state_file_s_unclosed_fence: the
+// same fault's stderr line must append ":<line>" to the path, the shape
+// start's own refusal text already uses, rather than silently dropping the
+// line number --json still reports.
+func Test_status_names_the_line_of_a_state_file_s_unclosed_fence_on_stderr(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(conformingSpec), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(stateWithUnterminatedFence), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(statusFixtureStepBody("SCENARIO-01")), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"status"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	wantPath := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	assert.Contains(t, stderr.String(), "brief status: demo: "+wantPath+":17: ")
+}
+
 // Test_status_on_a_repository_whose_only_feature_is_malformed_prints_a_row_not_the_no_features_notice
 // is the 10↔11 interaction most likely to rot: SCENARIO-10's notice keys
 // on len(rows) == 0, and a malformed feature always yields a row, so the

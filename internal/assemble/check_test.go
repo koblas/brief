@@ -1311,11 +1311,11 @@ func Test_check_reports_a_feature_whose_step_files_cannot_be_listed(t *testing.T
 }
 
 // Test_check_refuses_a_feature_argument_containing_a_path_separator pins
-// the MINOR fix alongside MAJOR 2/3: "." and ".." would otherwise reopen
-// the feature-directory root itself (or its parent) as if it were a
-// feature, and a multi-component argument would reach a nested directory
-// no "brief new" or "brief finish" call ever named — none of those are a
-// feature this configuration knows about.
+// validFeatureArgument's rejection of a multi-component feature name: "."
+// and ".." would otherwise reopen the feature-directory root itself (or
+// its parent) as if it were a feature, and a multi-component argument
+// would reach a nested directory no "brief new" or "brief finish" call
+// ever named — none of those are a feature this configuration knows about.
 func Test_check_refuses_a_feature_argument_containing_a_path_separator(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()

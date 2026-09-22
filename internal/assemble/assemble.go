@@ -75,22 +75,43 @@ type stepEntry struct {
 // instead, one entry per absent heading, acceptance first then the state
 // headings in cfg.StateHeadings.Ordered() order. Start reads only; it
 // writes nothing to disk.
+//
+// feature is checked by validFeatureArgument before either directory ever
+// opens — the same guard Check applies to a named feature — so a traversal
+// attempt ("../x") or a path-separator name refuses as ErrNoSuchFeature
+// without depending on os.Root.OpenRoot's own error shape for the two to be
+// distinguishable. Once past that guard, only a genuinely absent directory
+// (errors.Is(err, fs.ErrNotExist), on either the configured feature root or
+// feature's own subdirectory) is ErrNoSuchFeature; any other open failure —
+// permission denied, or a regular file where a directory belongs — is a
+// generic wrapped error instead, never misreported as "no such feature".
 func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
+	if !validFeatureArgument(feature) {
+		return Brief{}, ErrNoSuchFeature
+	}
+
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
+	featurePath := filepath.Join(featureDirPath, feature)
 
 	topRoot, err := os.OpenRoot(featureDirPath)
 	if err != nil {
-		return Brief{}, ErrNoSuchFeature
+		if errors.Is(err, fs.ErrNotExist) {
+			return Brief{}, ErrNoSuchFeature
+		}
+
+		return Brief{}, fmt.Errorf("assemble: open feature %s: %w", feature, err)
 	}
 	defer func() { _ = topRoot.Close() }()
 
 	root, err := topRoot.OpenRoot(feature)
 	if err != nil {
-		return Brief{}, ErrNoSuchFeature
+		if errors.Is(err, fs.ErrNotExist) {
+			return Brief{}, ErrNoSuchFeature
+		}
+
+		return Brief{}, fmt.Errorf("assemble: open feature %s: %w", feature, err)
 	}
 	defer func() { _ = root.Close() }()
-
-	featurePath := filepath.Join(featureDirPath, feature)
 
 	if err := s.checkSpecification(root, featurePath); err != nil {
 		return Brief{}, err

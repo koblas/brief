@@ -343,11 +343,11 @@ func Test_finish_refuses_a_replacement_state_body_with_an_unterminated_fence(t *
 	assert.Equal(t, before, after, "a refused finish must leave every file byte-identical")
 }
 
-// Test_Finish_ticks_a_progress_entry_when_the_specification_uses_CRLF
-// reproduces the reviewer's finding directly: tickProgressEntry's heading
-// match, like insertProgressEntry's, used to right-trim only " \t", so a
-// CRLF specification's progress heading never matched and Finish refused
-// with ErrNoProgressHeading on every CRLF feature.
+// Test_Finish_ticks_a_progress_entry_when_the_specification_uses_CRLF pins
+// that tickProgressEntry's heading match, like insertProgressEntry's, must
+// right-trim "\r" along with " \t": a CRLF specification's progress
+// heading must still match, or Finish would refuse every CRLF feature with
+// ErrNoProgressHeading.
 func Test_Finish_ticks_a_progress_entry_when_the_specification_uses_CRLF(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -715,8 +715,8 @@ func Test_refuses_an_unknown_feature_on_finish(t *testing.T) {
 	assert.NoDirExists(t, filepath.Join(root, cfg.FeatureDirectory, "ghost"))
 }
 
-// Test_refuses_an_unknown_step is MAJOR 3: the refusal names the id and
-// feature, and its Fix lists every step id newFinishFixture wrote
+// Test_refuses_an_unknown_step pins the unknown-step refusal's shape: it
+// names the id and feature, and its Fix lists every step id newFinishFixture wrote
 // (STEP-01..03, ascending by number) — the same "known:" convention cli's
 // own unknown-feature refusal carries, rather than a "run 'brief new step'"
 // suggestion that writes files on what is otherwise a read-only refusal.
@@ -856,6 +856,28 @@ func Test_refuses_a_feature_name_that_escapes_the_feature_root_on_finish(t *test
 
 	require.ErrorIs(t, err, scaffold.ErrNoSuchFeature)
 	assert.NoDirExists(t, filepath.Join(root, "escaped"))
+}
+
+// Test_finish_reports_a_generic_failure_for_an_unreadable_feature_entry
+// pins that only a genuinely absent directory is ErrNoSuchFeature: a
+// feature entry that exists but cannot be opened as a
+// directory — here, a regular file standing where "widgets"'s directory
+// belongs — must not read as "no such feature widgets", since widgets
+// plainly does exist. A regular file is the portable, privilege-independent
+// substitute for a permission failure: os.Root.OpenRoot fails with "not a
+// directory" for it, never fs.ErrNotExist.
+func Test_finish_reports_a_generic_failure_for_an_unreadable_feature_entry(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, cfg.FeatureDirectory, "widgets"), []byte("not a directory"), 0o600))
+
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte("s"))
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, scaffold.ErrNoSuchFeature)
 }
 
 // Test_returns_an_error_and_changes_nothing_when_the_feature_directory_is_not_writable

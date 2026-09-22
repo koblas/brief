@@ -175,12 +175,12 @@ func Test_returns_the_next_step_s_acceptance_criteria_and_checklist(t *testing.T
 	assert.True(t, brief.Step.Checklist.Found)
 }
 
-// Test_a_section_distinguishes_present_but_empty_from_not_found_at_all
-// closes the reviewer's finding: stepFromEntry and stateSections used to
-// discard markdown.Section's ok, so a state file missing a configured
-// heading entirely rendered the same empty Body as a heading present with
-// nothing under it. Section.Found now carries that distinction, which the
-// CRLF fix depends on being observable rather than silently collapsed.
+// Test_a_section_distinguishes_present_but_empty_from_not_found_at_all pins
+// that stepFromEntry and stateSections must not discard markdown.Section's
+// ok: a state file missing a configured heading entirely must not render
+// the same empty Body as a heading present with nothing under it.
+// Section.Found carries that distinction, which the CRLF fix depends on
+// being observable rather than silently collapsed.
 func Test_a_section_distinguishes_present_but_empty_from_not_found_at_all(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -512,9 +512,10 @@ func Test_returns_an_error_when_the_state_file_is_missing(t *testing.T) {
 	assert.Empty(t, brief.Inherited)
 }
 
-// Test_refuses_a_state_file_whose_fence_is_unterminated reproduces the
-// reviewer's BLOCKER directly: stateSections finds each configured
-// heading by scanning forward for a terminator, the same as every other
+// Test_refuses_a_state_file_whose_fence_is_unterminated pins the rule that
+// makes an unclosed fence a refusal rather than a silent omission:
+// stateSections finds each configured heading by scanning forward for a
+// terminator, the same as every other
 // caller of markdown.Section, so a fence opened before the first heading
 // and never closed puts every one of them inside it — the control arm
 // (Test_carries_every_state_file_section_as_inherited_context) already
@@ -806,6 +807,30 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 	_, err := srv.Start(t.Context(), "../escaped")
 
 	require.ErrorIs(t, err, assemble.ErrNoSuchFeature)
+}
+
+// Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry pins
+// that only a genuinely absent directory is ErrNoSuchFeature: a feature
+// entry that exists but cannot be opened as a
+// directory — here, a regular file standing where "demo"'s directory
+// belongs — must not read as "no such feature demo", since demo plainly
+// does exist. The portable, privilege-independent substitute for a
+// permission failure is the same technique
+// Test_status_propagates_a_feature_root_that_is_not_a_directory already
+// uses: a regular file makes os.Root.OpenRoot fail with "not a directory",
+// never fs.ErrNotExist.
+func Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, cfg.FeatureDirectory, "demo"), []byte("not a directory"), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	_, err := srv.Start(t.Context(), "demo")
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, assemble.ErrNoSuchFeature)
 }
 
 // fileSnapshot is one file's identity for a disk-unchanged sweep: its

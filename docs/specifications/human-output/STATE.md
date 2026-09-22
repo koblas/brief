@@ -1,103 +1,96 @@
 # human-output — current state
 
-Scenarios complete: SCENARIO-01..14 (all). Last updated by a fix-mode pass: 2 MAJOR findings
-(status's directory→spec→state→step precedence, `knownStepIDs`'s numeric sort — both were
-unpinned: true only because no fixture combined two competing faults) plus cheap
-correctness/test/doc fixes.
+Scenarios complete: SCENARIO-01..14 (all). Last fix-mode pass closed 2 MAJOR findings:
+`featureStatus`'s spec-vs-state precedence was unpinned (no fixture dropped *both* files, so
+either check order produced the same row), and `assemble.Start`/`scaffold.NewStep`/
+`scaffold.Finish` each mapped *any* `os.Root.OpenRoot` failure to "no such feature", so a
+permission-denied or non-directory feature entry still printed the not-found copy — plus cheap
+correctness/test/doc/refactor fixes.
 
 ## Binding decisions
 
 - JSON mode = exact `--json` token before the first `--`, **stripped** by `scanJSONFlag` in
   `run()` ahead of cobra parsing. `--json=<v>` is always a text usage error; its fix hint
-  appends `--json` to a leaf's own real invocation (`brief status --json`), not the bare
-  invocation — the three generic fallbacks (`brief --help`, `brief new --help`,
-  `brief help <command>`) stay bare.
+  appends `--json` to a leaf's own real invocation, not the bare invocation — the three generic
+  fallbacks stay bare.
 - `reporter` (`internal/cli/json.go`) is the one per-Run output seam: `usageError`/`refusal`
   render R3's error document; success is a per-command `<cmd>Document` embedding `jsonHeader`
-  first, by value, never nil slices (`[]` not `null`). `--json` always writes before any
-  text-mode write (R1, mutation-verified). `reporter.document(v)` wraps a success document's own
-  write error.
-- `files_changed`: `null` for a read command; for a write command it is `errors.Is(err,
+  first, never nil slices. `--json` always writes before any text-mode write (R1,
+  mutation-verified).
+- `files_changed`: `null` for a read command; for a write command, `errors.Is(err,
   scaffold.ErrPartialWrite)`, set at every write site, each mutation-verified individually.
 - `classifyRefusal(err)` order: `*config.InvalidConfigError`, `*unknownFeatureError`,
-  `*scaffold.RefusalError` (`errors.Is(refusal.Err, scaffold.ErrNoSuchStep)` renders through
-  `layoutProblemOnly` — `"<problem>; <fix><tail>"`, path in `--json` only — every other
-  `*scaffold.RefusalError` keeps `layoutPathProblem`), `*assemble.RefusalError`, generic
-  `errorKindFailure` — load-bearing (mutation-verified).
+  `*scaffold.RefusalError` (`ErrNoSuchStep` renders through `layoutProblemOnly`, every other
+  through `layoutPathProblem`), `*assemble.RefusalError`, generic `errorKindFailure` —
+  load-bearing (mutation-verified).
 - Unknown step (`finish` only): `no step "<id>" in <feature>; known: <a>, <b>, …`, the same
-  `known:` convention `*unknownFeatureError` carries — built once in `scaffold.Finish`
-  (`knownStepIDs`/`knownStepsFix`), not duplicated in cli. Empty: `known: none; run 'brief new
-  step <feature>' to create one`.
-- **Paths: absolute in `assemble`/`scaffold`/JSON, relative in text (R6)** via `displayPath`.
-- `status.featureStatus` (a `*Server` method) checks, per feature, in fixed order: open/list the
-  directory, `s.specFault`, `s.readStateFile` (reused from `Start`), then step files — first
-  fault wins, mutation-verified by reordering. `assemble.Problem` carries `Line` (copied from the
-  producing `*RefusalError`), rendered in `status --json`'s `problem.line` only when > 0. `check`
-  agrees on zero-step severity: `checkStepFindings`'s `inFlight` starts `true` on no step files
-  (`Total > 0`, matching `Status.Complete()`), not vacuous WARN.
+  `known:` convention `*unknownFeatureError` carries — built once in `scaffold.Finish`, not
+  duplicated in cli.
+- **Paths: absolute in `assemble`/`scaffold`/JSON, relative in text (R6)** via `displayPath`,
+  which also appends `:<line>` to `status`'s stderr line when `Problem.Line > 0` (parity with
+  `start`'s refusal text; mutation-verified).
+- `status.featureStatus` checks, per feature, in fixed order: open/list the directory,
+  `s.specFault`, `s.readStateFile`, then step files — first fault wins, mutation-verified by
+  reordering **and** by a fixture dropping both spec and state (the only shape that
+  distinguishes the two orders). `assemble.Problem` owns `Line` directly — `*RefusalError`
+  embeds `Problem` with no shadowing `Line` (Go resolves a promoted field by name in a keyed
+  composite literal, so no existing literal changed), so `status.go`'s two former
+  `problem.Line = refusal.Line` hand-copies are gone. `check` agrees on zero-step severity:
+  `inFlight` starts `true` on no step files, not vacuous WARN.
+- `assemble.Start`, `scaffold.NewStep` and `scaffold.Finish` reject a feature argument via
+  `validFeatureArgument` (duplicated, `assemble`/`scaffold` must not import each other) *before*
+  either `os.Root.OpenRoot` call, so a traversal name refuses as "no such feature" without
+  depending on `OpenRoot`'s error shape. Past that guard, only `errors.Is(err, fs.ErrNotExist)`
+  on either open is "no such feature"; any other failure is a generic wrapped failure, never
+  misreported as not-found. `scaffold.openFeatureDir` is the shared seam (`NewStep`/`Finish`,
+  extracted to keep `Finish` under `maintidx`, mutation-verified on both call sites);
+  `assemble.Start` inlines its own copy.
 - `scaffold.knownStepIDs` sorts by `pattern.Number`, not `os.ReadDir`'s filename order
   (mutation-verified). `findStepFile` returns `ErrNoSuchStep` unwrapped on no match, any other
-  error (e.g. `ReadDir` failure) wrapped and un-refused; `Finish` builds the unknown-step refusal
-  only on `errors.Is(err, ErrNoSuchStep)`.
-- `finish --json`'s `"next"` is `status`'s own `{"id","title","path"}|null` object
-  (`scaffold.FinishNext`, via `nextOpenStep` + `stepTitleFromFile`); text still names only the
-  id. `finish`/`new step` also carry additive `"modified"` (never nil): `finish` =
-  `[state, step, spec]` on write, `[]` on the R11 no-op, `handoff_path` never included; `new
-  step` = `[spec]`; `new feature` = `[]`.
-- The frontmatter-parse-failure message is one wording everywhere (`assemble.newProblem`,
-  `assemble.checkStepFindings`, `scaffold.Finish`): `"frontmatter does not parse: <underlying>"`.
-- `status`'s NEXT column collapses to the id alone when `Next.Title` is empty **or equals
-  `Next.ID`**. `check`'s "no findings" names the feature when given one.
-- Golden policy: one exact-bytes golden pins key order (`assert.Equal`, never `JSONEq`);
-  decode tables check dynamic fields against a captured value, never a literal.
-  `versionString(readBuildInfo)` is the one version rule (`"(devel)"` fallback), shared text/JSON.
-- Every help document comes from one `root.SetHelpFunc` wrapper; `command` is always `"help"`.
-  **`--json` is a real pflag on every JSON-capable leaf** (`addJSONFlag`); `scanJSONFlag` still
-  strips every `--json` before pflag runs (display-only registration). Every JSON-capable
-  command's `Long` ends with a JSON paragraph from one shared trio in `cli.go`; `status`/`check`
-  additionally carry `jsonScriptHint`.
+  error wrapped and un-refused.
+- `finish --json`'s `"next"` is `status`'s own `{"id","title","path"}|null` object; text still
+  names only the id. `finish`/`new step` carry additive `"modified"` (never nil). The
+  frontmatter-parse-failure message is one wording everywhere: `"frontmatter does not parse:
+  <underlying>"`.
+- `status`'s NEXT column collapses to the id alone when `Next.Title` is empty or equals
+  `Next.ID`. Golden policy: one exact-bytes golden pins key order (`assert.Equal`, never
+  `JSONEq`). `--json` is a real pflag on every JSON-capable leaf; `scanJSONFlag` still strips it
+  before pflag runs.
 
 ## Left unbuilt
 
-- `brief new --json` (bare `new`, no type) success document — it only ever errors.
-- `assemble.RenderJSON` — unowned.
+- `brief new --json` (bare `new`) success document; `assemble.RenderJSON` — unowned.
 - A shared platform helper for "next open step" — lives once in `assemble`, once in `scaffold`,
-  tied only by an agreement test (now also checks `next.path` against `status`'s own).
-- A `blocked` flag in `finish`'s output, and a flag `shorthand` field in help entries.
-- `--version` never appears in the help index; a JSON-mode hint in root's/`new`'s group help.
-- `start --json`'s `shortfalls` renders `null`, not `[]`, when empty.
-- New step's template lacks a `## Scenario` heading (scaffold bug, separate); start's own
-  missing-state-file fix wording ("make it readable"); help `--json` has no json flag for bare
-  `new`; a completion-message stutter; config accepting `state-file == specification-file`;
-  `applyFinishWrites`'s param count / `landed`-`partial` naming (NITs) — all unowned.
+  tied only by an agreement test.
+- A `blocked` flag in `finish`'s output; `--version` absent from the help index; `start --json`'s
+  `shortfalls` renders `null` not `[]` when empty; new step's template lacks a `## Scenario`
+  heading; config accepting `state-file == specification-file` — all unowned NITs.
+- Review-label narrative ("MAJOR N", "reviewer's finding") in test comments outside this pass's
+  cited scope (`internal/cli`, `internal/platform/markdown`, `internal/platform/stepfile`) was
+  left as-is.
 
 ## Traps
 
 - Registering `--json` on every leaf instead of stripping it centrally breaks `brief --json`.
 - `displayPath` must check `filepath.IsAbs` before `Rel`: finish's refusal path can be the
   user's own relative `--state`/`--handoff` argument.
-- A reserved-name collision (`schema`, `command`, `ok`, `exit_code`, `error`) in a future payload
-  struct is silently resolved by encoding/json's equal-depth rule.
-- `known:` (unknown-feature/unknown-step) lists only openable dirs / real step files, sorted by
-  `pattern.Number` for steps — never `os.ReadDir`'s filename order.
-- `os.ReadDir` order is filename order — `nextOpenStep` picks the minimum by `pattern.Number`.
-- pflag sorts a leaf's Flags rows by name: `--json` lands between `--help` and `--state` in
-  finish's table.
-- A status fixture built from step files alone needs a conforming spec + state file too
-  (`writeConformingFeature`/`writeConformingFeatureFiles`, both test packages), else
-  `featureStatus`'s spec/state check wins the row's `Problem` before steps are ever read.
+- `known:` lists only openable dirs / real step files, sorted by `pattern.Number` for steps —
+  never `os.ReadDir`'s filename order.
+- A status fixture built from step files alone needs a conforming spec + state file too, else
+  `featureStatus`'s spec/state check wins the row's `Problem` first; a fixture proving check
+  *order* between two faults must drop both, not just one.
+- A traversal feature name ("../x") against `os.Root.OpenRoot` is **not** `fs.ErrNotExist`
+  (confirmed empirically) — narrowing an open-failure mapping to `fs.ErrNotExist` alone requires
+  rejecting traversal earlier (`validFeatureArgument`), or it silently stops refusing it.
 
 ## Open debts
 
 - Everything in "Left unbuilt" above is unowned and dies unless re-opened.
 - `scaffold.noSuchFeatureRefusal`'s dead `Problem`/`Fix` fields — unowned.
-- A sticky write-error for a usage/refusal/help JSON write failure (today silently discarded) —
-  unowned — dies unless re-opened.
-- A success document's own write failure and a text-mode render failure exit with different
-  codes/messages for the same underlying I/O fault — unowned asymmetry — dies unless re-opened.
+- A sticky write-error for a usage/refusal/help JSON write failure (today silently discarded),
+  and the write-failure/render-failure exit-code asymmetry — both unowned.
 - `writeExclusive` orphaning a file when `WriteString`/`Close` fails after `OpenFile` succeeds —
   correctness MINOR, not constructible via a returned error — unowned.
-- `reporter.refusal`'s compose-method extraction — refactor MINOR — unowned.
-- `scaffold.findStepFile`'s `ReadDir`-failure branch (wrapped error, not the unknown-step
-  refusal) has no deterministic test seam in `scaffold` (unlike `assemble`'s
-  `SetReadDirForTest`) — fixed but unverified by mutation — unowned.
+- `scaffold.findStepFile`'s `ReadDir`-failure branch has no deterministic test seam in
+  `scaffold` (unlike `assemble`'s `SetReadDirForTest`) — fixed but unverified by mutation —
+  unowned.

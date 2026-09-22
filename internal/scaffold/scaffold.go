@@ -131,13 +131,13 @@ func (s *Server) NewFeature(_ context.Context, name string) (Result, error) {
 // call rewrites in place rather than creates.
 //
 // Validation runs in the order a refusal must name the first thing wrong
-// (R14a): the configured step-file-pattern compiles, the feature directory
-// opens (also the traversal guard: a feature name that escapes the
-// feature directory is reported as ErrNoSuchFeature rather than as a
-// traversal error, since Root.OpenRoot cannot distinguish the two),
-// the specification is read, and the specification carries the configured
-// progress heading. Nothing is created until all four pass; only then is
-// the next step number computed and written.
+// (R14a): the configured step-file-pattern compiles, feature passes
+// validFeatureArgument (the traversal guard: a feature name that escapes
+// the feature directory refuses as ErrNoSuchFeature rather than as a
+// traversal error), the feature directory opens, the specification is
+// read, and the specification carries the configured progress heading.
+// Nothing is created until all five pass; only then is the next step
+// number computed and written.
 //
 // The step file is written before the specification: if the specification
 // write then fails, the result is an orphan step file with no progress
@@ -157,16 +157,11 @@ func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 		}
 	}
 
-	topRoot, err := os.OpenRoot(featureDirPath)
+	topRoot, root, err := openFeatureDir(featureDirPath, featurePath, feature)
 	if err != nil {
-		return Result{}, noSuchFeatureRefusal(featurePath, feature)
+		return Result{}, err
 	}
 	defer func() { _ = topRoot.Close() }()
-
-	root, err := topRoot.OpenRoot(feature)
-	if err != nil {
-		return Result{}, noSuchFeatureRefusal(featurePath, feature)
-	}
 	defer func() { _ = root.Close() }()
 
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
@@ -247,6 +242,68 @@ func noSuchFeatureRefusal(path, feature string) error {
 		Fix:     fmt.Sprintf("run 'brief new feature %s' to create it", feature),
 		Err:     ErrNoSuchFeature,
 	}
+}
+
+// openFeatureDir opens feature's own directory under featureDirPath,
+// returning both *os.Root the caller must close (topRoot, the configured
+// feature directory, then root, feature's own subdirectory). It refuses as
+// noSuchFeatureRefusal(featurePath, feature) when feature fails
+// validFeatureArgument, checked before either os.Root.OpenRoot call so a
+// traversal attempt never depends on OpenRoot's own error shape, or when
+// either open fails with errors.Is(err, fs.ErrNotExist) — a genuinely
+// absent directory. Any other open failure — permission denied, or a
+// regular file where a directory belongs — is returned wrapped instead,
+// never misreported as "no such feature". NewStep and Finish share this
+// rather than duplicating the two-level open each carries.
+func openFeatureDir(featureDirPath, featurePath, feature string) (*os.Root, *os.Root, error) {
+	if !validFeatureArgument(feature) {
+		return nil, nil, noSuchFeatureRefusal(featurePath, feature)
+	}
+
+	topRoot, err := os.OpenRoot(featureDirPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, noSuchFeatureRefusal(featurePath, feature)
+		}
+
+		return nil, nil, fmt.Errorf("scaffold: open feature %s: %w", feature, err)
+	}
+
+	root, err := topRoot.OpenRoot(feature)
+	if err != nil {
+		_ = topRoot.Close()
+
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, noSuchFeatureRefusal(featurePath, feature)
+		}
+
+		return nil, nil, fmt.Errorf("scaffold: open feature %s: %w", feature, err)
+	}
+
+	return topRoot, root, nil
+}
+
+// validFeatureArgument reports whether feature is a well-formed single path
+// component: not "." or "..", and free of any os.IsPathSeparator character.
+// NewStep and Finish check it before either of their two os.Root.OpenRoot
+// calls, so a traversal attempt ("../x") or a path-separator name refuses
+// as noSuchFeatureRefusal without depending on OpenRoot's own error shape
+// to distinguish a traversal attempt from a genuinely missing directory —
+// the two are otherwise the same *fs.PathError shape. Mirrors assemble's
+// own validFeatureArgument (internal/assemble/check.go), duplicated rather
+// than shared because scaffold and assemble must not import each other.
+func validFeatureArgument(feature string) bool {
+	if feature == "." || feature == ".." {
+		return false
+	}
+
+	for i := range len(feature) {
+		if os.IsPathSeparator(feature[i]) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // validateFeatureName refuses an empty name, or one carrying a rune

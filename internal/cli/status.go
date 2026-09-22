@@ -151,8 +151,13 @@ func runStatus(ctx context.Context, wd string, rest []string, out reporter) erro
 			continue
 		}
 
+		location := displayPath(wd, row.Problem.Path)
+		if row.Problem.Line > 0 {
+			location = fmt.Sprintf("%s:%d", location, row.Problem.Line)
+		}
+
 		fmt.Fprintf(out.stderr, "brief status: %s: %s: %s; %s\n",
-			row.Name, displayPath(wd, row.Problem.Path), flattenOneLine(row.Problem.Detail), flattenOneLine(row.Problem.Fix))
+			row.Name, location, flattenOneLine(row.Problem.Detail), flattenOneLine(row.Problem.Fix))
 	}
 
 	fmt.Fprintf(out.stderr, "brief status: %s\n", statusSummary(rows))
