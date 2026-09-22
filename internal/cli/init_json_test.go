@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/koblas/brief/internal/cli"
+	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -152,6 +153,42 @@ func Test_init_dry_run_json_reports_empty_created_and_modified(t *testing.T) {
 	entries, readErr := os.ReadDir(wd)
 	require.NoError(t, readErr)
 	assert.Empty(t, entries)
+}
+
+// Test_init_print_json_is_one_exact_document pins R9's own --print --json
+// shape: the common header, then artifacts alone — no host, dry_run,
+// created, modified or roles_to_add — every path absolute, action
+// "create", body the plain config render, and stderr empty exactly as
+// every other success.
+func Test_init_print_json_is_one_exact_document(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "none", "--print", "--json"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	configPath := filepath.Join(wd, ".brief.yaml")
+
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+	assert.NotContains(t, doc, "host")
+	assert.NotContains(t, doc, "dry_run")
+	assert.NotContains(t, doc, "created")
+	assert.NotContains(t, doc, "modified")
+	assert.NotContains(t, doc, "roles_to_add")
+
+	var artifacts []struct {
+		Path   string `json:"path"`
+		Action string `json:"action"`
+		Body   string `json:"body"`
+	}
+	require.NoError(t, json.Unmarshal(doc["artifacts"], &artifacts))
+	require.Len(t, artifacts, 1)
+	assert.Equal(t, configPath, artifacts[0].Path)
+	assert.Equal(t, "create", artifacts[0].Action)
+	assert.Equal(t, string(artifact.ConfigFile()), artifacts[0].Body)
 }
 
 // Test_init_json_refusal_reports_files_changed_false pins R3's refusal

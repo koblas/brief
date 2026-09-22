@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -147,8 +148,9 @@ func Test_init_dry_run_prints_the_plan_and_writes_nothing(t *testing.T) {
 }
 
 // Test_init_refuses_an_unknown_host pins R8's usage-error branch: exit 2,
-// naming the given value and the accepted list. "bogus" is used rather
-// than "claude-code" — S03 does not accept it yet.
+// naming the given value, the accepted list, and --print as the by-hand
+// route. "bogus" is used rather than "claude-code" — S03 does not accept
+// it yet.
 func Test_init_refuses_an_unknown_host(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -157,7 +159,7 @@ func Test_init_refuses_an_unknown_host(t *testing.T) {
 
 	assert.Equal(t, 2, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief init: unknown host "bogus"; expected one of: claude-code, none; run 'brief init --host claude-code'`+"\n", stderr.String())
+	assert.Equal(t, `brief init: unknown host "bogus"; expected one of: claude-code, none; run 'brief init --print' to wire it by hand`+"\n", stderr.String())
 }
 
 // Test_init_refuses_a_stray_positional_argument pins the usage-error
@@ -382,35 +384,24 @@ func Test_init_with_agents_over_an_existing_config_prints_the_roles_lines_to_add
 }
 
 // Test_init_with_agents_and_host_none_is_a_usage_error pins the
-// flag-combination rule (checked on the resolved host): both an explicit
-// "--host none" and a bare "--with-agents" (today's default host,
-// resolved to none until S09's detection) refuse the same way, exit 2,
-// tree unchanged.
+// flag-combination rule (checked on the resolved host): an explicit
+// "--host none" alongside "--with-agents" refuses, exit 2, tree unchanged.
+// A bare "--with-agents" (host resolved by detection) is covered in
+// init_internal_test.go, where the home directory is injected — through
+// cli.Run here it would read the developer's own "~/.claude".
 func Test_init_with_agents_and_host_none_is_a_usage_error(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-	}{
-		{name: "explicit host none", args: []string{"init", "--host", "none", "--with-agents"}},
-		{name: "bare --with-agents", args: []string{"init", "--with-agents"}},
-	}
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			wd := t.TempDir()
-			var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "none", "--with-agents"}, nil, &stdout, &stderr)
 
-			err := cli.Run(t.Context(), wd, c.args, nil, &stdout, &stderr)
+	assert.Equal(t, 2, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, `brief init: --with-agents requires --host claude-code; run 'brief init --host claude-code --with-agents'`+"\n", stderr.String())
 
-			assert.Equal(t, 2, cli.ExitCode(err))
-			assert.Empty(t, stdout.String())
-			assert.Equal(t, `brief init: --with-agents requires --host claude-code; run 'brief init --host claude-code --with-agents'`+"\n", stderr.String())
-
-			entries, readErr := os.ReadDir(wd)
-			require.NoError(t, readErr)
-			assert.Empty(t, entries)
-		})
-	}
+	entries, readErr := os.ReadDir(wd)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries)
 }
 
 // Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file pins
@@ -427,4 +418,152 @@ func Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file(t *test
 
 	require.NoError(t, err)
 	assert.Contains(t, stdout.String(), "kept .claude/skills/brief/.claude-plugin/plugin.json (not a regular file)\n")
+}
+
+// Test_init_dry_run_with_print_is_a_usage_error pins R9's own
+// flag-combination rule, checked before setup ever runs, in either flag
+// order: exit 2, the exact stderr line, stdout empty, tree unchanged.
+func Test_init_dry_run_with_print_is_a_usage_error(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "--dry-run before --print", args: []string{"init", "--dry-run", "--print"}},
+		{name: "--print before --dry-run", args: []string{"init", "--print", "--dry-run"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, c.args, nil, &stdout, &stderr)
+
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, "brief init: --dry-run and --print cannot be combined; run 'brief init --print'\n", stderr.String())
+
+			entries, readErr := os.ReadDir(wd)
+			require.NoError(t, readErr)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
+// Test_init_print_writes_bodies_to_stdout_and_nothing_to_disk pins R9's
+// own text-mode shape: a fresh claude-code install prints one
+// "# <path> (create)" header plus body per artifact, blank-line
+// separated, none after the last, the exact stderr line, exit 0, and an
+// unchanged tree; a CLAUDE.md merge case reports "(merge)"; an
+// already-installed tree reports empty stdout and the "already installed"
+// stderr line instead.
+func Test_init_print_writes_bodies_to_stdout_and_nothing_to_disk(t *testing.T) {
+	t.Run("fresh install", func(t *testing.T) {
+		wd := t.TempDir()
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--print"}, nil, &stdout, &stderr)
+
+		require.NoError(t, err)
+		assert.Equal(t, 0, cli.ExitCode(err))
+		assert.Equal(t, "brief init: printed only, no files changed; apply the output above by hand, or rerun without --print\n", stderr.String())
+
+		want := "# .brief.yaml (create)\n" + string(artifact.ConfigFile()) +
+			"\n# .claude/skills/brief/.claude-plugin/plugin.json (create)\n" + string(artifact.PluginManifest()) +
+			"\n# .claude/skills/brief/skills/start/SKILL.md (create)\n" + string(artifact.SkillStart()) +
+			"\n# .claude/skills/brief/skills/finish/SKILL.md (create)\n" + string(artifact.SkillFinish()) +
+			"\n# .claude/skills/brief/hooks/hooks.json (create)\n" + string(artifact.ClaudeHooks()) +
+			"\n# CLAUDE.md (create)\n" + string(artifact.SnippetBlock("docs/specifications")) + "\n"
+		assert.Equal(t, want, stdout.String())
+
+		entries, readErr := os.ReadDir(wd)
+		require.NoError(t, readErr)
+		assert.Empty(t, entries)
+	})
+
+	t.Run("merges into an existing CLAUDE.md", func(t *testing.T) {
+		wd := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), []byte("# hello\n"), 0o600))
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--print"}, nil, &stdout, &stderr)
+
+		require.NoError(t, err)
+		assert.Contains(t, stdout.String(), "# CLAUDE.md (merge)\n")
+
+		body, readErr := os.ReadFile(filepath.Join(wd, "CLAUDE.md"))
+		require.NoError(t, readErr)
+		assert.Equal(t, []byte("# hello\n"), body)
+	})
+
+	t.Run("already installed prints nothing pending", func(t *testing.T) {
+		wd := t.TempDir()
+		var initStdout, initStderr bytes.Buffer
+		require.NoError(t, cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &initStdout, &initStderr))
+
+		var stdout, stderr bytes.Buffer
+		err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--print"}, nil, &stdout, &stderr)
+
+		require.NoError(t, err)
+		assert.Empty(t, stdout.String())
+		assert.Equal(t, "brief init: already installed; nothing changed\n", stderr.String())
+	})
+}
+
+// Test_init_refuses_an_unwritable_target_and_prints_the_manual_output pins
+// R10 at the CLI boundary: the exact stderr refusal line, stdout
+// byte-equal to a --print run captured on the same tree beforehand, exit
+// 1, and a byte-identical tree; the chmod case is skipped under root. The
+// portable fixture uses an explicit --host claude-code — a bare "init"
+// would also trip host detection on the same ".claude/skills" path.
+func Test_init_refuses_an_unwritable_target_and_prints_the_manual_output(t *testing.T) {
+	t.Run("a regular file blocks a plugin directory ancestor", func(t *testing.T) {
+		control := t.TempDir()
+		var printStdout, printStderr bytes.Buffer
+		require.NoError(t, cli.Run(t.Context(), control, []string{"init", "--host", "claude-code", "--print"}, nil, &printStdout, &printStderr))
+
+		wd := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "skills"), []byte("not a directory"), 0o600))
+		entriesBefore, readErr := os.ReadDir(wd)
+		require.NoError(t, readErr)
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+		assert.Equal(t, 1, cli.ExitCode(err))
+		assert.Equal(t, "brief init: .claude/skills: not a directory; apply the output below by hand (no files changed)\n", stderr.String())
+		assert.Equal(t, printStdout.String(), stdout.String())
+
+		entriesAfter, readErr := os.ReadDir(wd)
+		require.NoError(t, readErr)
+		assert.Equal(t, entriesBefore, entriesAfter)
+	})
+
+	t.Run("an unwritable directory, --json", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root ignores directory write permission")
+		}
+
+		wd := t.TempDir()
+		blocker := filepath.Join(wd, ".claude")
+		require.NoError(t, os.Mkdir(blocker, 0o500))
+		t.Cleanup(func() { _ = os.Chmod(blocker, 0o755) })
+		var stdout, stderr bytes.Buffer
+
+		err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--json"}, nil, &stdout, &stderr)
+
+		assert.Equal(t, 1, cli.ExitCode(err))
+		assert.Empty(t, stderr.String())
+
+		decoded := decodeErrorDocument(t, stdout.Bytes(), "init")
+		assert.Equal(t, "refusal", decoded.Kind)
+		require.NotNil(t, decoded.FilesChanged)
+		assert.False(t, *decoded.FilesChanged)
+		assert.Equal(t, "run 'brief init --print --json' and apply the artifacts by hand", decoded.Fix)
+
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(stdout.Bytes(), &raw))
+		assert.NotContains(t, raw, "artifacts")
+	})
 }

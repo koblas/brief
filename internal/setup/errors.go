@@ -23,6 +23,14 @@ var ErrAgentsNeedHost = errors.New("--with-agents requires --host claude-code")
 // *RefusalError naming that path.
 var ErrNotADirectory = errors.New("not a directory")
 
+// ErrUnwritable is returned when R10's pre-write check (checkWritable)
+// finds a target whose nearest existing ancestor is not a directory, or is
+// a directory that cannot be written to. It travels inside a *RefusalError
+// naming that ancestor; unlike every other refusal, Init still returns a
+// populated Result (Artifacts and Print) alongside it, so a caller can
+// render the --print output the refusal's own Fix points at.
+var ErrUnwritable = errors.New("unwritable target")
+
 // ErrPartialWrite marks a write-path error returned after at least one of
 // Init's own writes already landed on disk — distinct from one returned
 // before any of them did. cli's files_changed (R3) reads this through

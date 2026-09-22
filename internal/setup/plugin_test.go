@@ -1,6 +1,7 @@
 package setup_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -231,13 +232,14 @@ func Test_init_dry_run_for_claude_code_writes_nothing(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr))
 }
 
-// Test_a_plugin_write_failure_after_the_feature_root_is_a_partial_write_and_leaves_no_config
-// pins apply order: an unwritable ".claude/skills/brief" directory (already
-// present as a directory, chmod 0o555) makes the manifest write fail after
-// the feature root already landed, so the error wraps ErrPartialWrite and
-// ".brief.yaml" never gets written. Skipped under root, which ignores
+// Test_an_unwritable_plugin_directory_refuses_before_the_feature_root_is_created
+// pins R10's pre-write check: an unwritable ".claude/skills/brief"
+// directory (already present as a directory, chmod 0o555) is caught before
+// anything is written at all — ErrUnwritable, naming that directory as the
+// blocking ancestor, not ErrPartialWrite — so neither the feature root nor
+// ".brief.yaml" is ever created. Skipped under root, which ignores
 // directory write permission.
-func Test_a_plugin_write_failure_after_the_feature_root_is_a_partial_write_and_leaves_no_config(t *testing.T) {
+func Test_an_unwritable_plugin_directory_refuses_before_the_feature_root_is_created(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory write permission")
 	}
@@ -251,11 +253,15 @@ func Test_a_plugin_write_failure_after_the_feature_root_is_a_partial_write_and_l
 
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 
-	require.ErrorIs(t, err, setup.ErrPartialWrite)
+	require.ErrorIs(t, err, setup.ErrUnwritable)
+	require.NotErrorIs(t, err, setup.ErrPartialWrite)
 
-	info, statErr := os.Stat(filepath.Join(wd, "docs", "specifications"))
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
+	refusal, ok := errors.AsType[*setup.RefusalError](err)
+	require.True(t, ok)
+	assert.Equal(t, pluginDir, refusal.Path)
+
+	_, statErr := os.Stat(filepath.Join(wd, "docs", "specifications"))
+	assert.True(t, os.IsNotExist(statErr))
 
 	_, statErr = os.Stat(filepath.Join(wd, ".brief.yaml"))
 	assert.True(t, os.IsNotExist(statErr))

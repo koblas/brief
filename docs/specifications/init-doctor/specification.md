@@ -110,9 +110,25 @@ feature root (accessible, not counted), environment, host integration — setup 
   line between artifacts (snippet body = the marked block); `--print --json` gives
   `{artifacts:[{path, action, body}]}`. `--dry-run` with `--print`: usage error, exit 2
   (`brief init: --dry-run and --print cannot be combined; run 'brief init --print'`).
+
+  **Amended during SCENARIO-09 planning**: `--print`'s own artifact set is the pending
+  (`ActionCreated`/`ActionMerged`) entries of `Result.Artifacts`, in that same order, the feature
+  root excluded — `ActionUnchanged`/`ActionKept` never appear; a `--force` config rewrite prints
+  as `create` with the variant a real run would write. stdout ends with `brief init: printed
+  only, no files changed; apply the output above by hand, or rerun without --print`; nothing
+  pending prints `brief init: already installed; nothing changed` instead, stdout empty. stderr
+  priority for init's own success line is `--dry-run` line > `--print` line > R8's no-host-detected
+  line > the ordinary next action — each one entirely replaces the others, never combined.
 - R10: **Unwritable target (spec R16)**: every target is checked before any write; on failure
   stderr refusal `brief init: <path>: <problem>; apply the output below by hand (no files
   changed)`, the `--print` output on stdout, exit 1.
+
+  **Amended during SCENARIO-09 planning**: the writability probe runs only when applying for
+  real — never under `--dry-run` or `--print`, both of which already write nothing — and only
+  after every planning refusal already passed. Under `--json` the response is the standard error
+  document alone (kind `refusal`, `files_changed:false`), never an `artifacts` field: R1's one
+  common envelope outranks R10's "print output on stdout", so the JSON `fix` instead reads
+  `run 'brief init --print --json' and apply the artifacts by hand`.
 - R11: **Output.** init/uninstall stdout: one line per artifact, verb from the closed set
   `created | merged | unchanged | kept | removed`, relative path, optional parenthetical detail;
   next action on stderr (`brief init: installed for claude-code; start Claude Code in this
@@ -298,5 +314,5 @@ Scenario: SCENARIO-10 doctor reports Claude Code integration health
 - [x] SCENARIO-06: init installs the Claude Code plugin
 - [x] SCENARIO-07: init adds the CLAUDE.md instruction block
 - [x] SCENARIO-08: --with-agents scaffolds three role agents and binds them
-- [ ] SCENARIO-09: --print, host detection, and unwritable targets
+- [x] SCENARIO-09: --print, host detection, and unwritable targets
 - [ ] SCENARIO-10: doctor reports Claude Code integration health

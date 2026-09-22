@@ -75,7 +75,7 @@ Usage:
   brief status                     print a FEATURE/DONE/BLOCKED/NEXT table of every feature
   brief check [feature] [--hook <host>]
                                    report faults finish would now refuse to write over
-  brief init [--host <name>] [--no-hook] [--with-agents] [--dry-run] [--force]
+  brief init [--host <name>] [--no-hook] [--with-agents] [--dry-run | --print]
                                    install brief's config and agent-host integration
   brief doctor [--json]            check brief's setup: config, feature root, host integration
   brief uninstall [--host <name>] [--dry-run] [--force] [--json]

@@ -56,8 +56,30 @@
 // from defaults; it never rewrites an edited plugin file, only removes one
 // under Uninstall.
 //
+// InitRequest.Host == "" means detect rather than refuse: detectHost
+// resolves HostClaudeCode when the install root (the same root every
+// artifact is planned against) holds a ".claude" directory or a
+// "CLAUDE.md" entry of any type, or when WithHomeDir's own home function —
+// os.UserHomeDir by default — reports a directory whose own ".claude" is a
+// directory; otherwise HostNone. Result.NoHostDetected is true only when
+// detection ran and found nothing, the one signal a caller needs to
+// distinguish that from an explicit HostNone.
+//
+// InitRequest.Print, like DryRun, computes the same plan and writes
+// nothing; Result.Print (printArtifacts) is always populated — never nil
+// — with one PrintArtifact per pending (ActionCreated or ActionMerged)
+// artifact, the feature root excluded, carrying the exact bytes a real run
+// would write there. Before applying anything, a real run (neither DryRun
+// nor Print) also runs checkWritable over every target: a target whose
+// nearest existing ancestor is not a directory, or is a directory that
+// cannot be written to (probeWritable, a deliberate copy of
+// internal/doctor's own probe), refuses as ErrUnwritable — the only Init
+// error path that still returns a populated Result (Artifacts and Print)
+// alongside the error, so a caller can render the by-hand output the
+// refusal's own Fix points at.
+//
 // A caller-facing refusal is a *RefusalError: a path, what was wrong, and
-// how to fix it, wrapping ErrUnknownHost or an
+// how to fix it, wrapping ErrUnknownHost, ErrUnwritable, or an
 // internal/platform/config.InvalidConfigError. A write failure after at
 // least one artifact already landed is wrapped in ErrPartialWrite instead,
 // distinguishing it from a refusal that changed nothing on disk. Init's

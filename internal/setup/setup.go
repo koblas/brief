@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/atomicfile"
@@ -83,17 +84,20 @@ const (
 	ActionMerged Action = "merged"
 )
 
-// Server plans and applies brief's own install write path. It carries no
-// dependencies today; NewServer's functional-options shape is kept ready
-// for the seams later scenarios add (host artifacts, detection).
-type Server struct{}
+// Server plans and applies brief's own install write path. homeDir backs
+// detectHost's own home-directory check (WithHomeDir); every other
+// dependency is read from the real filesystem directly.
+type Server struct {
+	homeDir func() (string, error)
+}
 
 // Option configures a Server built by NewServer.
 type Option func(*Server)
 
-// NewServer returns a Server ready to call Init on.
+// NewServer returns a Server ready to call Init on, homeDir defaulted to
+// os.UserHomeDir.
 func NewServer(opts ...Option) *Server {
-	s := &Server{}
+	s := &Server{homeDir: os.UserHomeDir}
 
 	for _, o := range opts {
 		o(s)
@@ -103,7 +107,10 @@ func NewServer(opts ...Option) *Server {
 }
 
 // InitRequest is Init's own input: Host selects the agent-host integration
-// (Hosts), NoHook omits a claude-code host's hook wiring file entirely (no
+// (Hosts); "" means detect (R8, detectHost) rather than refuse —
+// Result.NoHostDetected reports whether detection found nothing, the only
+// way a caller distinguishes that from an explicit Host: HostNone. NoHook
+// omits a claude-code host's hook wiring file entirely (no
 // plan, no row) while leaving any other plugin file untouched, WithAgents
 // installs the three role-agent files (host.Host.Agents) and, only when
 // this run also creates the config file, binds every role to them (R7) —
@@ -112,13 +119,18 @@ func NewServer(opts ...Option) *Server {
 // HostClaudeCode. DryRun computes the same plan without writing anything,
 // and Force rewrites an existing config from defaults — the bound variant
 // under WithAgents — rather than keeping or refusing it; it never rewrites
-// an edited plugin or agent file, only the config.
+// an edited plugin or agent file, only the config. Print computes the same
+// plan and writes nothing either, like DryRun, but additionally skips the
+// writability pre-check (checkWritable): Result.Print is populated either
+// way, but only a real run — neither DryRun nor Print — ever runs the
+// check or writes anything.
 type InitRequest struct {
 	Host       string
 	NoHook     bool
 	WithAgents bool
 	DryRun     bool
 	Force      bool
+	Print      bool
 }
 
 // Artifact is one thing Init installs or found already installed: Kind and
@@ -157,15 +169,23 @@ type Artifact struct {
 // already bound to anything, brief's own agent or the adopter's own, is
 // never listed. No slice is ever nil; Created, Modified and Removed are
 // empty under DryRun; RolesToAdd is populated even under DryRun.
+// NoHostDetected is true only when InitRequest.Host was "" and detectHost
+// found nothing — the one signal a caller needs to render R8's
+// no-host-detected line instead of the ordinary next action; it is always
+// false when Host was given explicitly, HostNone included. Print is R9's
+// own pending-artifact set (printArtifacts), never nil, populated
+// regardless of DryRun or Print.
 type Result struct {
-	Host       string
-	DryRun     bool
-	Root       string
-	Artifacts  []Artifact
-	Created    []string
-	Modified   []string
-	Removed    []string
-	RolesToAdd []string
+	Host           string
+	DryRun         bool
+	Root           string
+	Artifacts      []Artifact
+	Created        []string
+	Modified       []string
+	Removed        []string
+	RolesToAdd     []string
+	NoHostDetected bool
+	Print          []PrintArtifact
 }
 
 // Init plans then, unless req.DryRun, applies brief's own install: the
@@ -196,12 +216,8 @@ type Result struct {
 // wrapped in ErrPartialWrite; a failure before anything was written is
 // returned as-is.
 func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, error) {
-	if !validHost(req.Host) {
+	if req.Host != "" && !validHost(req.Host) {
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
-	}
-
-	if req.WithAgents && req.Host != HostClaudeCode {
-		return Result{}, ErrAgentsNeedHost
 	}
 
 	nearest, _, err := config.Locate(wd)
@@ -212,6 +228,19 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 	root := wd
 	if nearest != "" {
 		root = filepath.Dir(nearest)
+	}
+
+	var noHostDetected bool
+
+	if req.Host == "" {
+		var detected bool
+
+		req.Host, detected = detectHost(root, s.homeDir)
+		noHostDetected = !detected
+	}
+
+	if req.WithAgents && req.Host != HostClaudeCode {
+		return Result{}, ErrAgentsNeedHost
 	}
 
 	configArt, cfg, err := planConfig(nearest, root, req.Force, req.WithAgents)
@@ -271,21 +300,6 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		artifacts = append(artifacts, snippetArt.Artifact)
 	}
 
-	res := Result{
-		Host:       req.Host,
-		DryRun:     req.DryRun,
-		Root:       root,
-		Artifacts:  artifacts,
-		Created:    []string{},
-		Modified:   []string{},
-		Removed:    []string{},
-		RolesToAdd: rolesToAdd(req.WithAgents, configArt.Action, cfg.Roles),
-	}
-
-	if req.DryRun {
-		return res, nil
-	}
-
 	configBody := artifact.ConfigFile()
 	if req.WithAgents {
 		configBody = artifact.ConfigFileWithRoles()
@@ -294,6 +308,27 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 	writeArts := make([]pluginArtifact, 0, len(pluginArts)+len(agentArts))
 	writeArts = append(writeArts, pluginArts...)
 	writeArts = append(writeArts, agentArts...)
+
+	res := Result{
+		Host:           req.Host,
+		DryRun:         req.DryRun,
+		Root:           root,
+		Artifacts:      artifacts,
+		Created:        []string{},
+		Modified:       []string{},
+		Removed:        []string{},
+		RolesToAdd:     rolesToAdd(req.WithAgents, configArt.Action, cfg.Roles),
+		NoHostDetected: noHostDetected,
+		Print:          printArtifacts(artifacts, configBody, writeArts, snippetArt),
+	}
+
+	if req.DryRun || req.Print {
+		return res, nil
+	}
+
+	if err := checkWritable(writableTargets(featureArt, writeArts, snippetArt, hasSnippet, configArt)); err != nil {
+		return res, err
+	}
 
 	return apply(res, featureArt, writeArts, snippetArt, hasSnippet, configArt, configBody)
 }
@@ -470,12 +505,16 @@ func planAgentFiles(root string, h host.Host) ([]pluginArtifact, error) {
 // regular file whose bytes are artifact.Recognize's OriginCurrent for
 // renderKind reports ActionUnchanged; any other bytes report ActionKept,
 // detail "edited locally" — Init never rewrites a plugin file the way
-// --force rewrites the config.
+// --force rewrites the config. An ENOTDIR Lstat — an ancestor component
+// exists as something other than a directory — is treated the same as
+// "does not exist yet": os.IsNotExist never matches it, but the path still
+// is not there, and the pre-write check (checkWritable) is what refuses on
+// that blocking ancestor, not planning.
 func planPluginFile(path string, kind Kind, renderKind artifact.Kind) (Artifact, error) {
 	info, err := os.Lstat(path)
 
 	switch {
-	case os.IsNotExist(err):
+	case os.IsNotExist(err), errors.Is(err, syscall.ENOTDIR):
 		return Artifact{Kind: kind, Path: path, Action: ActionCreated}, nil
 	case err != nil:
 		return Artifact{}, fmt.Errorf("setup: lstat %s: %w", path, err)

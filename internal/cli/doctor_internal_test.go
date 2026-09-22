@@ -38,14 +38,14 @@ func newDoctorFixture(t *testing.T) (string, string) {
 	return wd, self
 }
 
-// doctorFakeSeams returns the doctor.Option pair every test below passes
-// to run, pointing both the PATH lookup and the running binary at self —
-// the same file, so env-path reports OK deterministically.
-func doctorFakeSeams(self string) []doctor.Option {
-	return []doctor.Option{
+// doctorFakeSeams returns the runSeam every test below passes to run,
+// pointing both the PATH lookup and the running binary at self — the same
+// file, so env-path reports OK deterministically.
+func doctorFakeSeams(self string) []runSeam {
+	return []runSeam{withDoctorOpts(
 		doctor.WithLookPath(func(string) (string, error) { return self, nil }),
 		doctor.WithExecutable(func() (string, error) { return self, nil }),
-	}
+	)}
 }
 
 func noBuildInfo() (*debug.BuildInfo, bool) { return nil, false }
