@@ -159,9 +159,11 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 // directory, a symlink) reports ActionKept, detail "not a regular file",
 // regardless of force — never followed. A regular file whose bytes are
 // artifact.Recognize's OriginCurrent for renderKind is always
-// ActionRemoved, no detail. Any other bytes report ActionKept, detail
-// "edited locally", ForceRemovable true, unless force is set, in which
-// case they report ActionRemoved with that same detail.
+// ActionRemoved, no detail. Any other bytes report detail "edited
+// locally": unless force is set, ActionKept with ForceRemovable true;
+// with force, ActionRemoved with ForceRemovable false — the field is true
+// only while --force could still act on the artifact, never once it
+// already has.
 func planPluginRemoval(path string, kind Kind, renderKind artifact.Kind, force bool) (Artifact, bool, error) {
 	info, err := os.Lstat(path)
 
@@ -183,12 +185,11 @@ func planPluginRemoval(path string, kind Kind, renderKind artifact.Kind, force b
 		return Artifact{Kind: kind, Path: path, Action: ActionRemoved}, true, nil
 	}
 
-	action := ActionKept
 	if force {
-		action = ActionRemoved
+		return Artifact{Kind: kind, Path: path, Action: ActionRemoved, Detail: "edited locally"}, true, nil
 	}
 
-	return Artifact{Kind: kind, Path: path, Action: action, Detail: "edited locally", ForceRemovable: true}, true, nil
+	return Artifact{Kind: kind, Path: path, Action: ActionKept, Detail: "edited locally", ForceRemovable: true}, true, nil
 }
 
 // pluginPruneDirs lists every directory applyUninstall may remove once
@@ -243,8 +244,10 @@ func pruneEmptyPluginDirs(root string) error {
 // current render (artifact.Recognize's OriginCurrent) is always
 // ActionRemoved, no detail. Any other bytes — edited, invalid, or
 // unparseable; Uninstall never decodes to tell those apart — report
-// ActionKept, detail "edited locally", ForceRemovable true, unless Force
-// is set, in which case they report ActionRemoved with that same detail.
+// detail "edited locally": unless Force is set, ActionKept with
+// ForceRemovable true; with Force, ActionRemoved with ForceRemovable
+// false — the field is true only while --force could still act on the
+// artifact, never once it already has.
 func planConfigRemoval(path string, force bool) (Artifact, bool, error) {
 	if path == "" {
 		return Artifact{}, false, nil
@@ -270,12 +273,11 @@ func planConfigRemoval(path string, force bool) (Artifact, bool, error) {
 		return Artifact{Kind: KindConfig, Path: path, Action: ActionRemoved}, true, nil
 	}
 
-	action := ActionKept
 	if force {
-		action = ActionRemoved
+		return Artifact{Kind: KindConfig, Path: path, Action: ActionRemoved, Detail: "edited locally"}, true, nil
 	}
 
-	return Artifact{Kind: KindConfig, Path: path, Action: action, Detail: "edited locally", ForceRemovable: true}, true, nil
+	return Artifact{Kind: KindConfig, Path: path, Action: ActionKept, Detail: "edited locally", ForceRemovable: true}, true, nil
 }
 
 // applyUninstall strips or deletes the CLAUDE.md block first (when

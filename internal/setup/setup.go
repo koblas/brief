@@ -137,11 +137,13 @@ type InitRequest struct {
 // installed: Kind and Path identify it, Action reports what happened, and
 // Detail carries an optional parenthetical ("edited locally", "rewritten
 // from defaults"), empty when there is nothing to add. ForceRemovable is
-// meaningful only for an Uninstall-side ActionKept artifact: true when
-// --force would remove it (an edited file — planPluginRemoval,
+// true exactly on an Uninstall-side ActionKept artifact that --force would
+// turn into ActionRemoved (an edited file — planPluginRemoval,
 // planConfigRemoval, planSnippetRemoval's own OriginEdited/OriginOlder
-// arm), false when nothing can (a non-regular file, never followed or
-// removed regardless of --force) — the typed distinction cli's own
+// arm) — false on every other Action, including that same edited file once
+// --force has already removed it, and on a non-regular file (never
+// followed or removed regardless of --force). It is unused, always false,
+// on every Init-side artifact. This is the typed distinction cli's own
 // uninstallNextAction counts on, rather than matching Detail's own free
 // text: install-side and removal-side kept detail wording are free to
 // differ (planSnippet's own longer "add the block by hand" versus

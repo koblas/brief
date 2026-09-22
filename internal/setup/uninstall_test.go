@@ -87,7 +87,7 @@ func Test_uninstall_force_removes_an_edited_config(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, res.Artifacts, 1)
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally", ForceRemovable: true}, res.Artifacts[0])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally"}, res.Artifacts[0])
 	assert.Equal(t, []string{configPath}, res.Removed)
 
 	_, statErr := os.Stat(configPath)
@@ -128,7 +128,7 @@ func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing
 			removed, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, Force: true})
 			require.NoError(t, err)
 			require.Len(t, removed.Artifacts, 1)
-			assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally", ForceRemovable: true}, removed.Artifacts[0])
+			assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally"}, removed.Artifacts[0])
 			assert.Equal(t, []string{configPath}, removed.Removed)
 
 			_, statErr := os.Stat(configPath)
@@ -393,12 +393,13 @@ func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_di
 // directory tree is pruned same as the happy path.
 func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced(t *testing.T) {
 	tests := []struct {
-		name       string
-		force      bool
-		wantAction setup.Action
+		name               string
+		force              bool
+		wantAction         setup.Action
+		wantForceRemovable bool
 	}{
-		{name: "no force: kept", force: false, wantAction: setup.ActionKept},
-		{name: "force: removed", force: true, wantAction: setup.ActionRemoved},
+		{name: "no force: kept", force: false, wantAction: setup.ActionKept, wantForceRemovable: true},
+		{name: "force: removed", force: true, wantAction: setup.ActionRemoved, wantForceRemovable: false},
 	}
 
 	for _, tt := range tests {
@@ -422,7 +423,7 @@ func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_u
 					startArt = a
 				}
 			}
-			assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: start, Action: tt.wantAction, Detail: "edited locally", ForceRemovable: true}, startArt)
+			assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: start, Action: tt.wantAction, Detail: "edited locally", ForceRemovable: tt.wantForceRemovable}, startArt)
 
 			_, statErr := os.Stat(start)
 			if tt.force {
@@ -570,12 +571,13 @@ func Test_uninstall_removes_agents_and_prunes_the_agents_directory(t *testing.T)
 // Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced.
 func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
 	tests := []struct {
-		name       string
-		force      bool
-		wantAction setup.Action
+		name               string
+		force              bool
+		wantAction         setup.Action
+		wantForceRemovable bool
 	}{
-		{name: "no force: kept", force: false, wantAction: setup.ActionKept},
-		{name: "force: removed", force: true, wantAction: setup.ActionRemoved},
+		{name: "no force: kept", force: false, wantAction: setup.ActionKept, wantForceRemovable: true},
+		{name: "force: removed", force: true, wantAction: setup.ActionRemoved, wantForceRemovable: false},
 	}
 
 	for _, tt := range tests {
@@ -599,7 +601,7 @@ func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
 					plannerArt = a
 				}
 			}
-			assert.Equal(t, setup.Artifact{Kind: setup.KindAgent, Path: planner, Action: tt.wantAction, Detail: "edited locally", ForceRemovable: true}, plannerArt)
+			assert.Equal(t, setup.Artifact{Kind: setup.KindAgent, Path: planner, Action: tt.wantAction, Detail: "edited locally", ForceRemovable: tt.wantForceRemovable}, plannerArt)
 
 			_, statErr := os.Stat(planner)
 			if tt.force {
