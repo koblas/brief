@@ -18,11 +18,11 @@ const agentPlannerDescription = "Turn a feature's specification into ordered sce
 
 // agentImplementerDescription is AgentImplementer's own frontmatter
 // "description".
-const agentImplementerDescription = "Implement one scenario with TDD, from brief start through brief finish."
+const agentImplementerDescription = "Implement a feature's next open step, from brief start through brief finish."
 
 // agentReviewerDescription is AgentReviewer's own frontmatter
 // "description".
-const agentReviewerDescription = "Review one scenario's own output against brief check, read-only."
+const agentReviewerDescription = "Report brief check's findings on a feature's open step, read-only."
 
 // agentPlannerTools is AgentPlanner's own frontmatter "tools": the planner
 // fills plan files, so it needs Edit and Write alongside the read-only
@@ -51,21 +51,24 @@ func AgentPlanner() []byte {
 // with "brief finish <feature> <step> --handoff <path> --state <path>".
 func AgentImplementer() []byte {
 	return renderAgent("implementer", agentImplementerDescription, "",
-		"Run `brief start <feature>` and implement its next open step with "+
-			"TDD, working from its output rather than reading the specification "+
+		"Run `brief start <feature>` and implement its next open step, "+
+			"working from its output rather than reading the specification "+
 			"or earlier steps whole. Close the step with `brief finish <feature> "+
 			"<step> --handoff <path> --state <path>`.")
 }
 
 // AgentReviewer renders "agents/reviewer.md": frontmatter naming the
 // "reviewer" role with agentReviewerTools (no Edit or Write), and a body
-// that runs "brief start <feature>" read-only and "brief check <feature>",
-// then reports — no review policy or persona content of its own.
+// that runs "brief start <feature>" read-only for the open step's own
+// acceptance criteria and inherited constraints, then "brief check
+// <feature>" and reports its findings — no review policy or persona
+// content of its own.
 func AgentReviewer() []byte {
 	return renderAgent("reviewer", agentReviewerDescription, agentReviewerTools,
-		"Run `brief start <feature>` read-only to see the step's own output, "+
-			"then `brief check <feature>` and report what it finds. Never edit "+
-			"or write a file.")
+		"Run `brief start <feature>` to read the open step's acceptance "+
+			"criteria and inherited constraints (it writes nothing), then "+
+			"`brief check <feature>` and report what it finds. Never edit or "+
+			"write a file.")
 }
 
 // renderAgent builds one agents/<role>.md file's exact bytes: a YAML
