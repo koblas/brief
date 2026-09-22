@@ -64,13 +64,14 @@ func writeHostDir(t *testing.T, wd, relPath string) {
 // two candidates (host-snippet's own CLAUDE.md/​.claude/CLAUDE.md choice)
 // needs the stronger check.
 type hostCheckCase struct {
-	name           string
-	setup          func(t *testing.T, wd string, h host.Host)
-	checkID        string
-	wantSeverity   doctor.Severity
-	wantDetail     string
-	wantFix        *string
-	wantPathSuffix string
+	name              string
+	setup             func(t *testing.T, wd string, h host.Host)
+	checkID           string
+	wantSeverity      doctor.Severity
+	wantDetail        string
+	wantFix           *string
+	wantPathSuffix    string
+	wantPathNotSuffix string
 }
 
 // runHostCheckCases builds newHostFixture(t), applies c.setup, runs
@@ -96,6 +97,10 @@ func runHostCheckCases(t *testing.T, cases []hostCheckCase) {
 
 			if c.wantPathSuffix != "" {
 				assert.True(t, strings.HasSuffix(check.Path, c.wantPathSuffix), "path %q must end with %q", check.Path, c.wantPathSuffix)
+			}
+
+			if c.wantPathNotSuffix != "" {
+				assert.False(t, strings.HasSuffix(check.Path, c.wantPathNotSuffix), "path %q must not end with %q", check.Path, c.wantPathNotSuffix)
 			}
 		})
 	}
@@ -555,10 +560,17 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			// (chooseSnippetLocation's own "first candidate that exists at
 			// all" rule) and merge into it, never touching the directory at
 			// ".claude/CLAUDE.md" — doctor must agree, not WARN about a
-			// candidate init would never look at. Mutation-verified:
-			// reverting to scanning every state for notRegular (the pre-C1
-			// shape) turns this SKIP into the WARN case above's own detail,
-			// reddened by this case alone, restored after.
+			// candidate init would never look at. Mutation-verified twice:
+			// (1) reverting to scanning every state for notRegular (the
+			// pre-C1 shape) turns this SKIP into the WARN case above's own
+			// detail; (2) wantPathNotSuffix itself — a plain "CLAUDE.md"
+			// suffix assertion here would pass vacuously against either
+			// candidate's own path, so it must be the stronger negative
+			// check: replacing the SKIP row's own Path selection with
+			// states[len(states)-1].path (always the last candidate) reddens
+			// this case alone via wantPathNotSuffix, leaving the sibling case
+			// below — where the last candidate is also the first-present one
+			// — green for the wrong reason. Each reddened, restored after.
 			name: "root CLAUDE.md exists with no block, .claude/CLAUDE.md is a directory",
 			setup: func(t *testing.T, wd string, _ host.Host) {
 				t.Helper()
@@ -566,11 +578,31 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), []byte("unrelated prose\n"), 0o600))
 				writeHostDir(t, wd, filepath.Join(".claude", "CLAUDE.md"))
 			},
+			checkID:           "host-snippet",
+			wantSeverity:      doctor.SeveritySkip,
+			wantDetail:        "not installed",
+			wantFix:           new(runInitClaudeCode),
+			wantPathNotSuffix: filepath.Join(".claude", "CLAUDE.md"),
+		},
+		{
+			// Mutation-verified: hardcoding states[0].path as the SKIP row's
+			// own Path (rather than the first-present candidate found by the
+			// loop above) reddens this case alone — it would name root's own
+			// missing "CLAUDE.md" instead of the regular, blockless
+			// ".claude/CLAUDE.md" that chooseSnippetLocation, and so planSnippet,
+			// would actually choose here — restored after.
+			name: "no root CLAUDE.md but .claude/CLAUDE.md is a regular file with no block",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), []byte("unrelated prose\n"), 0o600))
+			},
 			checkID:        "host-snippet",
 			wantSeverity:   doctor.SeveritySkip,
 			wantDetail:     "not installed",
 			wantFix:        new(runInitClaudeCode),
-			wantPathSuffix: "CLAUDE.md",
+			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
 		},
 		{
 			name: "a current block with CRLF line endings",

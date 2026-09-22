@@ -363,15 +363,23 @@ func snippetBlockFound(states []snippetCandidateState) bool {
 // Only once no candidate holds a span does existence matter, and only for
 // the one candidate planSnippet itself would then choose — the first
 // candidate that is present at all (states' own priority order), regular
-// or not, mirroring setup's own chooseSnippetLocation exactly: a later
-// candidate's own shape is never consulted, so a regular-but-blockless
-// first candidate reports the ordinary SKIP below even when a farther
-// candidate happens to be a symlink or a directory. Only when that first
-// present candidate is itself notRegular is the row WARN, naming which
-// (nonRegularKind) — brief can neither write nor scan through it, so the
-// fix points at --print (runInitPrintSnippet) rather than a plain re-run.
-// No candidate present at all, or the first present one is a regular
-// blockless file, is SKIP "not installed".
+// or not. This mirrors setup's own chooseSnippetLocation for every case
+// both reach: a later candidate's own shape is never consulted, so a
+// regular-but-blockless first candidate reports the ordinary SKIP below,
+// naming that same candidate's own path, even when a farther candidate
+// happens to be a symlink or a directory. The one divergence: a regular
+// candidate whose bytes could not be read reports present false here
+// (scanSnippetCandidateStates folds a read failure into "nothing here"
+// and keeps scanning, since Diagnose has no error path to surface a
+// mid-scan I/O fault through), where setup's own scan aborts with a hard
+// error on the same failure and never reaches chooseSnippetLocation at
+// all. Only when that first present candidate is itself notRegular is the
+// row WARN, naming which (nonRegularKind) — brief can neither write nor
+// scan through it, so the fix points at --print (runInitPrintSnippet)
+// rather than a plain re-run. No candidate present at all, or the first
+// present one is a regular blockless file, is SKIP "not installed", Path
+// naming that first-present candidate (falling back to the first
+// candidate in priority order only when none is present at all).
 func hostSnippetCheck(states []snippetCandidateState, dir string, dirKnown bool) Check {
 	for _, s := range states {
 		if s.prob != nil {
@@ -394,24 +402,32 @@ func hostSnippetCheck(states []snippetCandidateState, dir string, dirKnown bool)
 	}
 
 	if chosen == nil {
+		var firstPresent *snippetCandidateState
+
 		for i := range states {
 			if !states[i].present {
 				continue
 			}
 
-			if states[i].notRegular {
-				return Check{
-					ID: "host-snippet", Severity: SeverityWarn, Path: states[i].path,
-					Detail: notRegularDetail(states[i].kind),
-					Fix:    new(runInitPrintSnippet),
-				}
-			}
+			firstPresent = &states[i]
 
 			break
 		}
 
+		if firstPresent != nil && firstPresent.notRegular {
+			return Check{
+				ID: "host-snippet", Severity: SeverityWarn, Path: firstPresent.path,
+				Detail: notRegularDetail(firstPresent.kind),
+				Fix:    new(runInitPrintSnippet),
+			}
+		}
+
 		path := ""
-		if len(states) > 0 {
+
+		switch {
+		case firstPresent != nil:
+			path = firstPresent.path
+		case len(states) > 0:
 			path = states[0].path
 		}
 
