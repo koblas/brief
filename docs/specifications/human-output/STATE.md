@@ -1,11 +1,12 @@
 # human-output — current state
 
 Scenarios complete: SCENARIO-01..14 (all). Last fix-mode pass closed 2 MAJOR findings:
-`featureStatus`'s spec-vs-state precedence was unpinned (no fixture dropped *both* files, so
-either check order produced the same row), and `assemble.Start`/`scaffold.NewStep`/
-`scaffold.Finish` each mapped *any* `os.Root.OpenRoot` failure to "no such feature", so a
-permission-denied or non-directory feature entry still printed the not-found copy — plus cheap
-correctness/test/doc/refactor fixes.
+`validFeatureArgument` (both copies) let `""` through to `topRoot.OpenRoot("")`, so
+`start ""` / `new step ""` / `finish "" …` printed an opaque `openat : empty path` failure
+instead of the "no feature" refusal; and `assemble.Start`/`scaffold.NewStep`/`scaffold.Finish`'s
+*first* `OpenRoot` site (the configured feature root itself) had no test proving its
+non-`ErrNotExist` failure stays generic rather than "no such feature" (the second site,
+feature's own subdirectory, already did).
 
 ## Binding decisions
 
@@ -39,11 +40,14 @@ correctness/test/doc/refactor fixes.
   `inFlight` starts `true` on no step files, not vacuous WARN.
 - `assemble.Start`, `scaffold.NewStep` and `scaffold.Finish` reject a feature argument via
   `validFeatureArgument` (duplicated, `assemble`/`scaffold` must not import each other) *before*
-  either `os.Root.OpenRoot` call, so a traversal name refuses as "no such feature" without
-  depending on `OpenRoot`'s error shape. Past that guard, only `errors.Is(err, fs.ErrNotExist)`
-  on either open is "no such feature"; any other failure is a generic wrapped failure, never
-  misreported as not-found. `scaffold.openFeatureDir` is the shared seam (`NewStep`/`Finish`,
-  extracted to keep `Finish` under `maintidx`, mutation-verified on both call sites);
+  either `os.Root.OpenRoot` call: a traversal name, a path-separator name, or `""` refuses as
+  "no such feature" without depending on `OpenRoot`'s error shape (`assemble`'s `Check` guards
+  its own call with `feature != ""` first, since an empty argument there means "every feature").
+  Past that guard, only `errors.Is(err, fs.ErrNotExist)` on either `OpenRoot` call (the
+  configured feature root, then feature's own subdirectory — both now covered by a
+  not-a-directory test) is "no such feature"; any other failure is a generic wrapped failure,
+  never misreported as not-found. `scaffold.openFeatureDir` is the shared seam (`NewStep`/
+  `Finish`, extracted to keep `Finish` under `maintidx`, mutation-verified on both call sites);
   `assemble.Start` inlines its own copy.
 - `scaffold.knownStepIDs` sorts by `pattern.Number`, not `os.ReadDir`'s filename order
   (mutation-verified). `findStepFile` returns `ErrNoSuchStep` unwrapped on no match, any other
@@ -79,9 +83,10 @@ correctness/test/doc/refactor fixes.
 - A status fixture built from step files alone needs a conforming spec + state file too, else
   `featureStatus`'s spec/state check wins the row's `Problem` first; a fixture proving check
   *order* between two faults must drop both, not just one.
-- A traversal feature name ("../x") against `os.Root.OpenRoot` is **not** `fs.ErrNotExist`
-  (confirmed empirically) — narrowing an open-failure mapping to `fs.ErrNotExist` alone requires
-  rejecting traversal earlier (`validFeatureArgument`), or it silently stops refusing it.
+- A traversal feature name ("../x") or `""` against `os.Root.OpenRoot` is **not**
+  `fs.ErrNotExist` (confirmed empirically) — narrowing an open-failure mapping to
+  `fs.ErrNotExist` alone requires rejecting both earlier, in `validFeatureArgument`, or it
+  silently stops refusing them.
 
 ## Open debts
 

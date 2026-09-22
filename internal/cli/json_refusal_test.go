@@ -155,6 +155,30 @@ type refusalMatrixRow struct {
 	filesChanged *bool
 }
 
+// newStartEmptyFeatureCase is refusalMatrixRows' "start empty feature" row,
+// split out to a named function rather than an inline closure so that
+// list's own length does not grow with every row added to it. An empty
+// feature argument refuses through the same *unknownFeatureError path a
+// genuinely absent name does (classifyRefusal's errorKindRefusal branch),
+// not the errorKindFailure a raw os.Root.OpenRoot("") failure would render
+// as.
+func newStartEmptyFeatureCase(t *testing.T) refusalCase {
+	t.Helper()
+
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications")
+
+	return refusalCase{
+		wd:       wd,
+		args:     []string{"start", "--json", ""},
+		textArgs: []string{"start", ""},
+		newStdin: noStdin,
+		wantKind: "refusal",
+		wantPath: &featureDir,
+		wantFix:  "known: none; run 'brief new feature ' to create it",
+	}
+}
+
 // refusalMatrixRows is Test_json_mode_refusal_matrix's own test list: one
 // representative failure per command, and every classifyRefusal shape —
 // config, an enriched not-found (*unknownFeatureError), scaffold, assemble,
@@ -200,6 +224,11 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					wantFix:  "known: none; run 'brief new feature ghost' to create it",
 				}
 			},
+			command: "start",
+		},
+		{
+			name:    "start empty feature",
+			setup:   newStartEmptyFeatureCase,
 			command: "start",
 		},
 		{

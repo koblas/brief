@@ -77,14 +77,20 @@ type stepEntry struct {
 // writes nothing to disk.
 //
 // feature is checked by validFeatureArgument before either directory ever
-// opens — the same guard Check applies to a named feature — so a traversal
-// attempt ("../x") or a path-separator name refuses as ErrNoSuchFeature
-// without depending on os.Root.OpenRoot's own error shape for the two to be
-// distinguishable. Once past that guard, only a genuinely absent directory
-// (errors.Is(err, fs.ErrNotExist), on either the configured feature root or
-// feature's own subdirectory) is ErrNoSuchFeature; any other open failure —
-// permission denied, or a regular file where a directory belongs — is a
-// generic wrapped error instead, never misreported as "no such feature".
+// opens — the same well-formedness check Check applies to a named feature,
+// guarded there by its own `feature != ""` since Check's empty argument
+// means "every feature", not a feature named "" — so a traversal attempt
+// ("../x"), a path-separator name, or an empty string refuses as
+// ErrNoSuchFeature without depending on os.Root.OpenRoot's own error shape
+// for the two to be distinguishable. This is not the guard that catches a
+// genuinely absent feature — Check's is its checkNamedFeature Lstat,
+// Start's is the errors.Is(err, fs.ErrNotExist) check on either OpenRoot
+// call below. Once past validFeatureArgument, only a genuinely absent
+// directory (errors.Is(err, fs.ErrNotExist), on either the configured
+// feature root or feature's own subdirectory) is ErrNoSuchFeature; any
+// other open failure — permission denied, or a regular file where a
+// directory belongs — is a generic wrapped error instead, never
+// misreported as "no such feature".
 func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 	if !validFeatureArgument(feature) {
 		return Brief{}, ErrNoSuchFeature

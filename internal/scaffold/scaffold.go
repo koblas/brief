@@ -284,16 +284,18 @@ func openFeatureDir(featureDirPath, featurePath, feature string) (*os.Root, *os.
 }
 
 // validFeatureArgument reports whether feature is a well-formed single path
-// component: not "." or "..", and free of any os.IsPathSeparator character.
-// NewStep and Finish check it before either of their two os.Root.OpenRoot
-// calls, so a traversal attempt ("../x") or a path-separator name refuses
-// as noSuchFeatureRefusal without depending on OpenRoot's own error shape
-// to distinguish a traversal attempt from a genuinely missing directory —
-// the two are otherwise the same *fs.PathError shape. Mirrors assemble's
-// own validFeatureArgument (internal/assemble/check.go), duplicated rather
-// than shared because scaffold and assemble must not import each other.
+// component: not empty, not "." or "..", and free of any
+// os.IsPathSeparator character. NewStep and Finish check it before either
+// of their two os.Root.OpenRoot calls, so a traversal attempt ("../x"), a
+// path-separator name, or an empty string refuses as noSuchFeatureRefusal
+// without depending on OpenRoot's own error shape to distinguish those from
+// a genuinely missing directory — an empty string otherwise reaches
+// topRoot.OpenRoot("") and surfaces its own opaque "empty path" failure.
+// Mirrors assemble's own validFeatureArgument (internal/assemble/check.go),
+// duplicated rather than shared because scaffold and assemble must not
+// import each other.
 func validFeatureArgument(feature string) bool {
-	if feature == "." || feature == ".." {
+	if feature == "" || feature == "." || feature == ".." {
 		return false
 	}
 

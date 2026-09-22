@@ -858,6 +858,45 @@ func Test_refuses_a_feature_name_that_escapes_the_feature_root_on_finish(t *test
 	assert.NoDirExists(t, filepath.Join(root, "escaped"))
 }
 
+// Test_refuses_an_empty_feature_argument_on_finish pins that an empty
+// feature argument is refused the same way a traversal attempt is —
+// validFeatureArgument rejects it before openFeatureDir's first
+// os.Root.OpenRoot call — rather than reaching topRoot.OpenRoot("") and
+// surfacing its own opaque "empty path" failure, which names no feature and
+// suggests no fix.
+func Test_refuses_an_empty_feature_argument_on_finish(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.Finish(context.Background(), "", "STEP-02", []byte("h"), []byte("s"))
+
+	require.ErrorIs(t, err, scaffold.ErrNoSuchFeature)
+}
+
+// Test_finish_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_directory
+// covers openFeatureDir's first os.Root.OpenRoot call — the configured
+// feature directory itself, not feature's own subdirectory — the same way
+// Test_finish_reports_a_generic_failure_for_an_unreadable_feature_entry
+// already covers the second: a regular file standing where the configured
+// feature directory belongs must fail generically, carrying that path in
+// its message, never as ErrNoSuchFeature.
+func Test_finish_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_directory(t *testing.T) {
+	root := t.TempDir()
+	cfg := fixtureConfig()
+	featureDirPath := filepath.Join(root, cfg.FeatureDirectory)
+	require.NoError(t, os.WriteFile(featureDirPath, []byte("not a directory"), 0o600))
+
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte("s"))
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, scaffold.ErrNoSuchFeature)
+	assert.Contains(t, err.Error(), featureDirPath)
+}
+
 // Test_finish_reports_a_generic_failure_for_an_unreadable_feature_entry
 // pins that only a genuinely absent directory is ErrNoSuchFeature: a
 // feature entry that exists but cannot be opened as a

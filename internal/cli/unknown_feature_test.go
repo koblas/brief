@@ -146,6 +146,58 @@ func Test_a_feature_argument_with_a_path_separator_gets_the_same_not_found_copy(
 	runUnknownFeatureRow(t, wd, row, filepath.Join("docs", "specifications"), "known: alpha, beta")
 }
 
+// emptyFeatureRows mirrors unknownFeatureRows for start, new step and
+// finish with an empty feature argument in place of "ghost". check is
+// excluded: an empty feature there means "check every feature"
+// (checkNamedFeature's own `feature != ""` guard), not a feature literally
+// named "".
+func emptyFeatureRows() []unknownFeatureRow {
+	return []unknownFeatureRow{
+		{
+			name:        "start",
+			command:     "start",
+			wantFeature: "",
+			newArgs:     func(*testing.T) []string { return []string{"start", ""} },
+		},
+		{
+			name:        "new step",
+			command:     "new step",
+			wantFeature: "",
+			wantTail:    noFilesChangedSuffix,
+			newArgs:     func(*testing.T) []string { return []string{"new", "step", ""} },
+		},
+		{
+			name:        "finish",
+			command:     "finish",
+			wantFeature: "",
+			wantTail:    noFilesChangedSuffix,
+			newArgs: func(t *testing.T) []string {
+				t.Helper()
+
+				handoffPath, statePath := writeUnknownFeatureInput(t)
+
+				return []string{"finish", "", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}
+			},
+		},
+	}
+}
+
+// Test_an_empty_feature_argument_gets_the_same_not_found_copy pins that an
+// empty feature argument to start, new step and finish refuses through the
+// same "known:" not-found copy a genuinely absent name gets, rather than
+// the generic os.Root.OpenRoot failure ("open feature : openat: empty
+// path") the underlying package used to surface for it — that failure
+// named no feature and suggested no fix.
+func Test_an_empty_feature_argument_gets_the_same_not_found_copy(t *testing.T) {
+	for _, row := range emptyFeatureRows() {
+		t.Run(row.name, func(t *testing.T) {
+			wd := newTwoFeatureFixture(t)
+
+			runUnknownFeatureRow(t, wd, row, filepath.Join("docs", "specifications"), "known: alpha, beta")
+		})
+	}
+}
+
 // Test_an_unknown_feature_with_no_feature_directory_suggests_creating_one
 // pins the empty-list branch of the not-found copy when the configured
 // feature directory does not exist at all.

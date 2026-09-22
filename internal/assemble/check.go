@@ -226,9 +226,13 @@ func (s *Server) Check(_ context.Context, feature string) ([]Finding, error) {
 // never "\" alone on POSIX, where it is an ordinary filename character.
 // Check rejects everything else before it ever reaches OpenRoot, so a
 // caller cannot walk it into the feature-directory root itself or a
-// directory outside any feature.
+// directory outside any feature. An empty feature is rejected here too:
+// Check's own all-features listing never calls this function with one — it
+// checks `feature != ""` first — so this only ever turns Start's empty
+// argument into ErrNoSuchFeature instead of topRoot.OpenRoot("")'s opaque
+// "empty path" failure.
 func validFeatureArgument(feature string) bool {
-	if feature == "." || feature == ".." {
+	if feature == "" || feature == "." || feature == ".." {
 		return false
 	}
 

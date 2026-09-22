@@ -809,6 +809,45 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 	require.ErrorIs(t, err, assemble.ErrNoSuchFeature)
 }
 
+// Test_returns_an_error_when_the_feature_name_is_empty pins that an empty
+// feature argument is refused the same way a traversal attempt is —
+// validFeatureArgument rejects it before either os.Root.OpenRoot call —
+// rather than reaching topRoot.OpenRoot("") and surfacing its own opaque
+// "empty path" failure, which names no feature and suggests no fix.
+func Test_returns_an_error_when_the_feature_name_is_empty(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
+
+	srv := assemble.NewServer(cfg, root)
+
+	_, err := srv.Start(t.Context(), "")
+
+	require.ErrorIs(t, err, assemble.ErrNoSuchFeature)
+}
+
+// Test_start_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_directory
+// covers Start's first os.Root.OpenRoot call — the configured feature
+// directory itself, not feature's own subdirectory — the same way
+// Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry
+// already covers the second: a regular file standing where the configured
+// feature directory belongs must fail generically, carrying that path in
+// its message, never as ErrNoSuchFeature.
+func Test_start_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_directory(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDirPath := filepath.Join(root, cfg.FeatureDirectory)
+	require.NoError(t, os.WriteFile(featureDirPath, []byte("not a directory"), 0o600))
+
+	srv := assemble.NewServer(cfg, root)
+
+	_, err := srv.Start(t.Context(), "demo")
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, assemble.ErrNoSuchFeature)
+	assert.Contains(t, err.Error(), featureDirPath)
+}
+
 // Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry pins
 // that only a genuinely absent directory is ErrNoSuchFeature: a feature
 // entry that exists but cannot be opened as a
