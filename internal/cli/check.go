@@ -290,7 +290,8 @@ func runCheckHook(ctx context.Context, wd string, rest []string, hookHost string
 
 	editedPath, err := h.HookPath(stdin)
 	if err != nil {
-		fmt.Fprintf(out.stderr, "brief check: malformed hook payload on stdin; run '%s'\n", checkHookInvocation)
+		fmt.Fprintln(out.stderr, "brief check: malformed hook payload on stdin; expected a claude-code "+
+			"PostToolUse payload with tool_input.file_path, nothing was checked")
 
 		return errMalformedHookPayload
 	}

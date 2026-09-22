@@ -115,7 +115,7 @@ func Test_doctor_reports_an_unparseable_config_as_rows_not_a_refusal(t *testing.
 	require.Error(t, err)
 	assert.Equal(t, 1, ExitCode(err))
 	assert.Contains(t, stdout.String(), "ERROR  config-parse  .brief.yaml")
-	assert.Contains(t, stdout.String(), "SKIP  config-values  .brief.yaml  skipped: .brief.yaml did not parse\n")
+	assert.Contains(t, stdout.String(), "SKIP  config-values  .brief.yaml  .brief.yaml did not parse\n")
 	assert.NotContains(t, stderr.String(), "no files changed", "an unparseable config must not render as a refusal")
 }
 
@@ -131,7 +131,7 @@ func Test_doctor_reports_one_row_per_invalid_value_and_exits_1(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, 1, ExitCode(err))
-	assert.Contains(t, stdout.String(), "ERROR  config-values  .brief.yaml  handoff-cap-lines is 0, must be at least 1; fix: fix it or remove it to fall back to the shipped defaults\n")
+	assert.Contains(t, stdout.String(), "ERROR  config-values  .brief.yaml  handoff-cap-lines is 0, must be at least 1; fix: correct the value, or delete the key to use its default\n")
 }
 
 // Test_doctor_json_reports_absolute_paths_null_fix_and_counts pins

@@ -247,7 +247,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &configPath,
-					wantFix:  "fix it or remove it to fall back to the shipped defaults",
+					wantFix:  "correct the value, or delete the key to use its default",
 				}
 			},
 			command: "status",
@@ -268,7 +268,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &configPath,
-					wantFix:  "fix it or remove it to fall back to the shipped defaults",
+					wantFix:  "correct the value, or delete the key to use its default",
 				}
 			},
 			command: "check",
@@ -467,7 +467,7 @@ func newFeatureInvalidConfigCase(t *testing.T) refusalCase {
 		newStdin: noStdin,
 		wantKind: "refusal",
 		wantPath: &configPath,
-		wantFix:  "fix it or remove it to fall back to the shipped defaults",
+		wantFix:  "correct the value, or delete the key to use its default",
 	}
 }
 
@@ -491,7 +491,7 @@ func newFinishInvalidConfigCase(t *testing.T) refusalCase {
 		newStdin: noStdin,
 		wantKind: "refusal",
 		wantPath: &configPath,
-		wantFix:  "fix it or remove it to fall back to the shipped defaults",
+		wantFix:  "correct the value, or delete the key to use its default",
 	}
 }
 

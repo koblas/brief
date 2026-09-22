@@ -20,12 +20,12 @@ const configFileName = ".brief.yaml"
 // configFixText is config-parse and config-values' own fix copy: the same
 // remedy every other command's refusal on an invalid config already
 // offers.
-const configFixText = "fix it or remove it to fall back to the shipped defaults"
+const configFixText = "correct the value, or delete the key to use its default"
 
 // rootDirUnknownDetail is root-dir's own SKIP detail when config-parse
 // failed: the feature directory a bad config might have named cannot be
 // trusted, so root-dir does not guess Default()'s own value in its place.
-const rootDirUnknownDetail = "skipped: feature root unknown, .brief.yaml did not parse"
+const rootDirUnknownDetail = "feature root unknown, .brief.yaml did not parse"
 
 // noConfigChecks builds the config-file, config-parse, config-values and
 // config-shadow rows for a repository with no ".brief.yaml" anywhere:
@@ -38,9 +38,9 @@ func noConfigChecks(wd string) []Check {
 	placeholder := filepath.Join(wd, configFileName)
 
 	return []Check{
-		{ID: "config-file", Severity: SeverityWarn, Path: placeholder, Detail: "no .brief.yaml found", Fix: new("brief init")},
-		{ID: "config-parse", Severity: SeveritySkip, Path: placeholder, Detail: "skipped: no .brief.yaml to parse"},
-		{ID: "config-values", Severity: SeveritySkip, Path: placeholder, Detail: "skipped: no .brief.yaml to check"},
+		{ID: "config-file", Severity: SeverityWarn, Path: placeholder, Detail: "no .brief.yaml found", Fix: new(runInit)},
+		{ID: "config-parse", Severity: SeveritySkip, Path: placeholder, Detail: "no .brief.yaml to parse"},
+		{ID: "config-values", Severity: SeveritySkip, Path: placeholder, Detail: "no .brief.yaml to check"},
 		{ID: "config-shadow", Severity: SeverityOK, Path: placeholder, Detail: "no ancestor configs shadowed"},
 	}
 }
@@ -56,7 +56,7 @@ func unparseableConfigChecks(nearest string, shadowed []string, inspectErr error
 	return []Check{
 		{ID: "config-file", Severity: SeverityOK, Path: nearest, Detail: "found"},
 		{ID: "config-parse", Severity: SeverityError, Path: nearest, Detail: parseErrorDetail(inspectErr), Fix: new(configFixText)},
-		{ID: "config-values", Severity: SeveritySkip, Path: nearest, Detail: "skipped: .brief.yaml did not parse"},
+		{ID: "config-values", Severity: SeveritySkip, Path: nearest, Detail: ".brief.yaml did not parse"},
 		configShadowCheck(nearest, shadowed),
 	}
 }

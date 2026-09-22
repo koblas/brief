@@ -18,7 +18,7 @@ import (
 // ".brief.yaml" sets handoff-cap-lines to 0, which fails validate's cap
 // rule before any command-specific logic runs.
 const invalidConfigRefusalLine = "brief %s: .brief.yaml: handoff-cap-lines is 0, must be at least 1; " +
-	"fix it or remove it to fall back to the shipped defaults (no files changed)\n"
+	"correct the value, or delete the key to use its default (no files changed)\n"
 
 // finishInvalidConfigArgs is Test_every_command_refuses_an_invalid_config_value's
 // "finish" row: --handoff and --state name real, readable files so

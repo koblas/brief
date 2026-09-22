@@ -38,6 +38,12 @@ func hookAdditionalContext(t *testing.T, body []byte) string {
 	return doc.HookSpecificOutput.AdditionalContext
 }
 
+// Test_check_hook_reports_only_the_feature_containing_the_edited_path_as_additional_context
+// pins R12's own scoping: the payload names a path inside "alpha", so only
+// alpha's own findings reach additionalContext, never beta's. alpha carries
+// no step files at all, so check counts it in flight
+// (assemble.checkStepFindings) and its missing STATE.md fires
+// RuleStateMissing (C2) as this single ERROR finding.
 func Test_check_hook_reports_only_the_feature_containing_the_edited_path_as_additional_context(t *testing.T) {
 	wd := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(""), 0o600))
@@ -57,9 +63,6 @@ func Test_check_hook_reports_only_the_feature_containing_the_edited_path_as_addi
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
-	// alpha carries no step files at all, so check counts it in flight
-	// (assemble.checkStepFindings) and its missing STATE.md fires
-	// RuleStateMissing (C2) as this single ERROR finding.
 	assert.Equal(t,
 		"brief check: "+filepath.Join("docs", "specifications", "alpha")+": 1 ERROR finding; run 'brief check alpha'",
 		hookAdditionalContext(t, stdout.Bytes()))
@@ -309,7 +312,7 @@ func Test_check_hook_malformed_payload_in_an_opted_in_repo_exits_1(t *testing.T)
 
 			require.Error(t, err)
 			assert.Equal(t, 1, cli.ExitCode(err))
-			assert.Equal(t, "brief check: malformed hook payload on stdin; run 'brief check --hook claude-code'\n", stderr.String())
+			assert.Equal(t, "brief check: malformed hook payload on stdin; expected a claude-code PostToolUse payload with tool_input.file_path, nothing was checked\n", stderr.String())
 			assert.Empty(t, stdout.String())
 		})
 	}
@@ -372,7 +375,7 @@ func Test_check_hook_honours_a_config_at_the_enclosing_git_repository_root(t *te
 
 	require.Error(t, err)
 	assert.Equal(t, 1, cli.ExitCode(err))
-	assert.Equal(t, "brief check: malformed hook payload on stdin; run 'brief check --hook claude-code'\n", stderr.String())
+	assert.Equal(t, "brief check: malformed hook payload on stdin; expected a claude-code PostToolUse payload with tool_input.file_path, nothing was checked\n", stderr.String())
 	assert.Empty(t, stdout.String())
 }
 

@@ -21,14 +21,17 @@ func flattenOneLine(s string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
 }
 
-// noFilesChangedTail is the "nothing changed on disk" promise appended to
-// a write command's refusal: a *config.InvalidConfigError, a
-// *scaffold.RefusalError, or a *setup.RefusalError, all of which concern a
-// write that never happened — except a *setup.RefusalError wrapping
-// setup.ErrPartialWrite, whose promise is false because an earlier write
-// already landed. A *assemble.RefusalError carries no such promise —
-// assemble never writes, so there is nothing for it to promise — and
-// neither does a bare not-found or a generic failure.
+// noFilesChangedTail is the "nothing changed on disk" promise a refusal's
+// text line appends. classifyRefusal decides it per error, never by type
+// alone: a refusal from a command that writes carries it, unless that
+// specific error means a write already partially landed
+// (setup.ErrPartialWrite) or the error came from a command that never
+// writes at all (assemble's own refusals, a bare not-found, or a generic
+// failure). A *unknownFeatureError inherits its own promise from the
+// sentinel it wraps rather than always carrying one: scaffold.ErrNoSuchFeature's
+// own callers ("new step", "finish") write and refused before touching
+// disk, so it carries the tail; assemble.ErrNoSuchFeature's own caller
+// ("start") is read-only, so it never does.
 const noFilesChangedTail = " (no files changed)"
 
 // refusalTextLayout selects which of refusalClassification.textLine's three
@@ -122,7 +125,7 @@ func classifyRefusal(err error) refusalClassification {
 			kind:    errorKindRefusal,
 			path:    invalidCfg.Path,
 			problem: flattenOneLine(invalidCfg.Err.Error()),
-			fix:     "fix it or remove it to fall back to the shipped defaults",
+			fix:     "correct the value, or delete the key to use its default",
 			tail:    noFilesChangedTail,
 		}
 	}

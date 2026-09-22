@@ -29,15 +29,16 @@ func Locate(startDir string) (string, []string, error) {
 }
 
 // LocateWithin is Locate's own walk, stopping at boundary rather than the
-// filesystem root: the directory holding boundary is still checked, but
-// its parent never is, so a config above boundary is never found. An empty
-// boundary is unbounded, identical to Locate. boundary is expected to name
-// an ancestor of startDir (or startDir itself) — every caller today builds
-// it that way (config.LocateInRepo's repo.Root) — since that is the only
-// shape where the walk ever reaches a directory equal to it; a boundary
-// that is not on startDir's own ancestor chain is silently inert rather
-// than an error, and a boundary filepath.Abs cannot resolve is treated the
-// same way: both fall back to unbounded, identical to Locate.
+// filesystem root: boundary itself is still checked; its parent never is,
+// so a config above boundary is never found. An empty boundary is
+// unbounded, identical to Locate. It refuses, as ErrInvalidConfig, a
+// startDir that does not exist, the same guard Locate's own doc describes —
+// LocateWithin is where that check actually runs. boundary is expected to
+// name an ancestor of startDir, or startDir itself: that is the only shape
+// where the walk ever reaches a directory equal to it. A boundary outside
+// startDir's own ancestor chain is silently inert rather than an error, and
+// a boundary filepath.Abs cannot resolve is treated the same way: both fall
+// back to unbounded, identical to Locate.
 func LocateWithin(startDir, boundary string) (string, []string, error) {
 	abs, err := filepath.Abs(startDir)
 	if err != nil {
