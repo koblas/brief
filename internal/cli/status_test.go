@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// writeConformingFeatureFiles writes a conforming specification and state
+// file under featureDir — the same two files assemble.Start's own read-side
+// checks require (MAJOR 1) — and creates featureDir if it does not already
+// exist. Content is fixed, so calling it more than once for the same
+// featureDir (writeStatusStep does, once per step) never disagrees with
+// itself.
+func writeConformingFeatureFiles(t *testing.T, featureDir string) {
+	t.Helper()
+
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(conformingSpec), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(conformingState), 0o600))
+}
 
 // stepTitle is the heading writeStatusStep writes for id: deliberately
 // distinct from id itself, unlike an earlier fixture that wrote "# <id>" —
@@ -22,12 +37,17 @@ func stepTitle(id string) string {
 }
 
 // writeStatusStep writes one step file for feature under wd's default
-// feature-directory layout, with a heading distinct from its id (stepTitle).
+// feature-directory layout, with a heading distinct from its id (stepTitle),
+// after writing a conforming specification and state file for feature if
+// neither already exists — MAJOR 1: status must not report a clean row for
+// a feature "brief start" would itself refuse, so every status fixture
+// needs the two files Start's own read-side checks require, not just step
+// files.
 func writeStatusStep(t *testing.T, wd, feature, name, id, status string, dependsOn []string) {
 	t.Helper()
 
 	featureDir := filepath.Join(wd, "docs", "specifications", feature)
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeatureFiles(t, featureDir)
 
 	deps := "depends-on: []\n"
 	if len(dependsOn) > 0 {
@@ -168,14 +188,16 @@ func Test_status_says_no_features_were_found_when_the_feature_root_is_empty(t *t
 		stderr.String())
 }
 
-// writeMalformedStatusFeature writes one step file with no frontmatter at
-// all under feature's default layout, so featureDirFor(wd, feature) reads
-// as a malformed feature rather than a conforming one.
+// writeMalformedStatusFeature writes a conforming specification and state
+// file, then one step file with no frontmatter at all, under feature's
+// default layout: the row's Problem must land on the step file's own
+// frontmatter fault, not on a spec/state fault this fixture does not mean
+// to exercise (MAJOR 1 checks spec and state ahead of step files).
 func writeMalformedStatusFeature(t *testing.T, wd, feature string) {
 	t.Helper()
 
 	featureDir := filepath.Join(wd, "docs", "specifications", feature)
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeatureFiles(t, featureDir)
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte("no frontmatter here\n"), 0o600))
 }
 
@@ -389,7 +411,7 @@ func Test_status_summary(t *testing.T) {
 
 			for feature, status := range c.features {
 				featureDir := filepath.Join(wd, "docs", "specifications", feature)
-				require.NoError(t, os.MkdirAll(featureDir, 0o755))
+				writeConformingFeatureFiles(t, featureDir)
 
 				if status != "" {
 					writeStatusStep(t, wd, feature, "SCENARIO-01.md", "SCENARIO-01", status, nil)
@@ -443,4 +465,209 @@ func Test_prints_usage_to_stdout_when_help_is_requested_for_status(t *testing.T)
 	assert.NotEmpty(t, stdout.String())
 	assert.Contains(t, stdout.String(), "malformed")
 	assert.Contains(t, stdout.String(), "exits 0")
+}
+
+// statusFixtureStepBody renders one open step file's body, id echoed as
+// both frontmatter id and title (stepTitle) — used by the MAJOR 1 fixtures
+// below, which each need to control the specification and state files
+// independently of writeConformingFeatureFiles/writeStatusStep.
+func statusFixtureStepBody(id string) string {
+	return "---\n" +
+		"id: " + id + "\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# " + stepTitle(id) + "\n\n" +
+		"## Scenario\n\nsome acceptance text\n\n" +
+		"## Implementation Plan\n\n- [ ] a task\n"
+}
+
+// Test_status_text_marks_a_feature_missing_its_specification is MAJOR 1's
+// first condition at the CLI boundary: a feature directory with a
+// conforming state file and an open step, but no specification.md at all —
+// the shape "brief start" itself refuses over — must not print a clean
+// status row.
+func Test_status_text_marks_a_feature_missing_its_specification(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(conformingState), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(statusFixtureStepBody("SCENARIO-01")), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"status"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"FEATURE  DONE  BLOCKED  NEXT\n"+
+		"demo     -     -        (malformed, see below)\n",
+		stdout.String())
+	assert.Contains(t, stderr.String(),
+		"brief status: demo: "+filepath.Join("docs", "specifications", "demo", "specification.md")+
+			`: specification.md not found; write a specification.md with a "## BDD Acceptance Progress" heading and re-run`)
+	assert.Contains(t, stderr.String(), "brief status: 1 feature: 0 in progress, 0 complete, 1 malformed")
+}
+
+// Test_status_text_marks_a_feature_whose_specification_has_no_progress_heading
+// is MAJOR 1's second condition: a specification that reads fine but names
+// no "## BDD Acceptance Progress" section.
+func Test_status_text_marks_a_feature_whose_specification_has_no_progress_heading(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte("# demo\n\nno progress list here\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(conformingState), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(statusFixtureStepBody("SCENARIO-01")), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"status"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"FEATURE  DONE  BLOCKED  NEXT\n"+
+		"demo     -     -        (malformed, see below)\n",
+		stdout.String())
+	assert.Contains(t, stderr.String(),
+		"brief status: demo: "+filepath.Join("docs", "specifications", "demo", "specification.md")+
+			`: no "## BDD Acceptance Progress" heading found; add a "## BDD Acceptance Progress" heading to the specification`)
+	assert.Contains(t, stderr.String(), "brief status: 1 feature: 0 in progress, 0 complete, 1 malformed")
+}
+
+// Test_status_text_marks_a_feature_missing_its_state_file is MAJOR 1's
+// third condition: a conforming specification and an open step, but no
+// STATE.md at all.
+func Test_status_text_marks_a_feature_missing_its_state_file(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(conformingSpec), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(statusFixtureStepBody("SCENARIO-01")), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"status"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"FEATURE  DONE  BLOCKED  NEXT\n"+
+		"demo     -     -        (malformed, see below)\n",
+		stdout.String())
+	assert.Contains(t, stderr.String(), "brief status: demo: "+filepath.Join("docs", "specifications", "demo", "STATE.md")+": ")
+	assert.Contains(t, stderr.String(), "; make it readable and re-run")
+	assert.Contains(t, stderr.String(), "brief status: 1 feature: 0 in progress, 0 complete, 1 malformed")
+}
+
+// Test_status_json_marks_a_feature_for_each_of_major_1s_three_conditions
+// pins status --json's own row for the same three conditions the text-mode
+// tests above cover, plus a control row (writeStatusStep's own conforming
+// fixture): done/total/blocked null and a non-null "problem" object on
+// every malformed row, matching the well-formed control's non-null counts
+// and null "problem".
+func Test_status_json_marks_a_feature_for_each_of_major_1s_three_conditions(t *testing.T) {
+	cases := []struct {
+		name         string
+		setup        func(t *testing.T, featureDir string)
+		wantDetailIn string
+	}{
+		{
+			name: "missing specification",
+			setup: func(t *testing.T, featureDir string) {
+				t.Helper()
+
+				require.NoError(t, os.MkdirAll(featureDir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(conformingState), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(statusFixtureStepBody("SCENARIO-01")), 0o600))
+			},
+			wantDetailIn: "specification.md not found",
+		},
+		{
+			name: "specification has no progress heading",
+			setup: func(t *testing.T, featureDir string) {
+				t.Helper()
+
+				require.NoError(t, os.MkdirAll(featureDir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte("# demo\n\nno progress list here\n"), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(conformingState), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(statusFixtureStepBody("SCENARIO-01")), 0o600))
+			},
+			wantDetailIn: `no "## BDD Acceptance Progress" heading found`,
+		},
+		{
+			name: "missing state file",
+			setup: func(t *testing.T, featureDir string) {
+				t.Helper()
+
+				require.NoError(t, os.MkdirAll(featureDir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(conformingSpec), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(statusFixtureStepBody("SCENARIO-01")), 0o600))
+			},
+			wantDetailIn: "",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := t.TempDir()
+			c.setup(t, filepath.Join(wd, "docs", "specifications", "demo"))
+
+			var stdout, stderr bytes.Buffer
+			err := cli.Run(t.Context(), wd, []string{"status", "--json"}, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			assert.Empty(t, stderr.String())
+
+			var doc struct {
+				Features []map[string]json.RawMessage `json:"features"`
+			}
+			require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+			require.Len(t, doc.Features, 1)
+
+			row := doc.Features[0]
+			assert.Equal(t, "null", string(row["done"]))
+			assert.Equal(t, "null", string(row["total"]))
+			assert.Equal(t, "null", string(row["blocked"]))
+			assert.Equal(t, "null", string(row["next"]))
+			assert.Equal(t, "false", string(row["complete"]))
+
+			require.NotEqual(t, "null", string(row["problem"]))
+
+			var problem struct {
+				Path   string `json:"path"`
+				Detail string `json:"detail"`
+			}
+			require.NoError(t, json.Unmarshal(row["problem"], &problem))
+
+			if c.wantDetailIn != "" {
+				assert.Equal(t, c.wantDetailIn, problem.Detail)
+			} else {
+				assert.NotEmpty(t, problem.Detail)
+			}
+		})
+	}
+}
+
+// Test_status_json_leaves_a_conforming_feature_s_counts_non_null is MAJOR
+// 1's control arm at the --json boundary: the same shape as the three cases
+// above, minus the one file each removes, gets real counts and a null
+// "problem" — the malformed rows above are not an artifact of the fixture.
+func Test_status_json_leaves_a_conforming_feature_s_counts_non_null(t *testing.T) {
+	wd := t.TempDir()
+	writeStatusStep(t, wd, "demo", "SCENARIO-01.md", "SCENARIO-01", "open", nil)
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"status", "--json"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	var doc struct {
+		Features []map[string]json.RawMessage `json:"features"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+	require.Len(t, doc.Features, 1)
+
+	row := doc.Features[0]
+	assert.Equal(t, "0", string(row["done"]))
+	assert.Equal(t, "1", string(row["total"]))
+	assert.Equal(t, "0", string(row["blocked"]))
+	assert.Equal(t, "null", string(row["problem"]))
 }

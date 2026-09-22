@@ -105,9 +105,15 @@ rewritten per scenario as text changes (user decision).
 
 **Exact human copy ruled by product-vision** (architects use these):
 - status table: `FEATURE  DONE  BLOCKED  NEXT` columns; complete → `(complete)`;
-  malformed → `-  -  (malformed, see below)`; NEXT shows `<id>  <title>`. stderr after table:
-  `brief status: <feature>: <rel path to step file>: <detail>; run 'brief check <feature>' to
-  list every fault`, then `brief status: N features: A in progress, B complete, C malformed`.
+  malformed → `-  -  (malformed, see below)`; NEXT shows `<id>  <title>` (id alone when title
+  equals it). stderr after table: `brief status: <feature>: <rel path>: <detail>; <fix>`, then
+  `brief status: N features: A in progress, B complete, C malformed`. A row is malformed on
+  the same faults `brief start` itself refuses a feature over — a missing/unreadable
+  specification, a specification with no progress heading, a missing/unreadable state file, or
+  a step file that cannot be read or parsed — checked in that order, first fault wins; `<rel
+  path>`/`<detail>`/`<fix>` are that fault's own (a step-frontmatter fault: `run 'brief check
+  <feature>' to list every fault`; a spec/state fault: the same copy `brief start`'s own
+  refusal carries).
 - check: feature header `<name>  (in flight|complete)`, indented rows
   `  <SEVERITY>  <rel path>[:<line>]  <detail>`; stderr summary
   `brief check: N ERROR, M WARN in K features (<count> <rule>, …); ERRORs block finish on

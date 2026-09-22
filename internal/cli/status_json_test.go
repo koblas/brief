@@ -33,7 +33,7 @@ func newStatusJSONFixture(t *testing.T) string {
 
 	writeMalformedStatusFeature(t, wd, "delta")
 
-	require.NoError(t, os.MkdirAll(filepath.Join(wd, "docs", "specifications", "epsilon"), 0o755))
+	writeConformingFeatureFiles(t, filepath.Join(wd, "docs", "specifications", "epsilon"))
 
 	return wd
 }
@@ -184,7 +184,7 @@ func Test_status_json_keeps_the_next_title_raw(t *testing.T) {
 	wd := t.TempDir()
 	rawTitle := "Implement\tSCENARIO-01"
 	featureDir := filepath.Join(wd, "docs", "specifications", "alpha")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	writeConformingFeatureFiles(t, featureDir)
 	step := "---\n" +
 		"id: SCENARIO-01\n" +
 		"status: open\n" +
@@ -222,7 +222,7 @@ func Test_status_json_keeps_the_next_title_raw(t *testing.T) {
 func Test_status_json_counts_are_null_only_on_a_malformed_row(t *testing.T) {
 	wd := t.TempDir()
 	writeMalformedStatusFeature(t, wd, "delta")
-	require.NoError(t, os.MkdirAll(filepath.Join(wd, "docs", "specifications", "epsilon"), 0o755))
+	writeConformingFeatureFiles(t, filepath.Join(wd, "docs", "specifications", "epsilon"))
 
 	var stdout, stderr bytes.Buffer
 	err := cli.Run(t.Context(), wd, []string{"status", "--json"}, nil, &stdout, &stderr)

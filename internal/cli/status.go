@@ -11,9 +11,11 @@ import (
 var statusLong = `Prints a table of every feature: name, steps done over total, how many
 steps are blocked on an unfinished dependency, and the next open step's id
 and title — "(complete)" once every step is done, "-" when there are no
-step files at all. A feature whose step files cannot be read or parsed
-prints "-  -  (malformed, see below)" in its row; stderr names the file
-and the reason, one line per malformed feature, then a summary line
+step files at all. A feature whose specification is missing or carries no
+progress heading, whose state file is missing or unreadable, or whose step
+files cannot be read or parsed — the same faults brief start itself refuses
+over — prints "-  -  (malformed, see below)" in its row; stderr names the
+file and the reason, one line per malformed feature, then a summary line
 counting features in progress, complete and malformed — brief status
 still exits 0, because check (not status) is where that becomes a
 failure. A repository with no features prints nothing and exits 0, with
