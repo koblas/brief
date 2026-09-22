@@ -329,6 +329,13 @@ table; `--show` removed; R15 amended (three positions; unbound roles reported by
 Init/First run amended (plugin directory, commented config always written, `--global`
 deferred); open questions 1–5 marked settled.
 
+**Final verdict (`product-vision`, post-implementation, fix pass 12): SHIP WITH CHANGES.**
+Findings resolved in fix pass 12: `doctor`'s unreadable-directory fix now names the actual
+ancestor missing its search bit (an ancestor walk bounded at the install root), with the write
+bit restored too, since a plain `chmod u+rx` on the named directory still left `brief init`
+unable to write through it; `check --hook`'s help copy reworded (NIT, folded). See STATE.md for
+the open debts this verdict left standing.
+
 ---
 
 ## Scenarios (Gherkin)

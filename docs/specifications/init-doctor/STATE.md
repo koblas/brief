@@ -11,7 +11,11 @@ unreachable "reclassify as absent" arm from both probes' own `ReadFile`-failure 
 renamed `integrationFileState.stat` to `statFailed`; split a maintidx-flagged test; added
 wd≠root, mixed-row and ReadFile-arm coverage for host-plugin/-hook/-agents. Fix pass 11:
 closed the last two untested ReadFile-failure (`statFailed=false`) arms, for host-plugin and
-host-agents specifically (host-hook already had one).
+host-agents specifically (host-hook already had one). Fix pass 12 (product-vision's final
+SHIP WITH CHANGES): `notReadableFix`'s `statFailed` arm now walks its own ancestor chain
+(`blockingDir`) to name the directory actually missing its search bit, not the subject's
+immediate parent, and chmods `u+rwx` (not `u+rx`) so `brief init` can still write through it
+afterward; `check --hook`'s help copy reworded.
 
 ## Binding decisions
 - `config.LocateWithin(dir, boundary)` bounds a walk at `boundary`, itself still checked, its
@@ -44,11 +48,15 @@ host-agents specifically (host-hook already had one).
   as fatal as missing — Claude Code cannot load the skill either way), **WARN** for
   host-hook/host-agents/host-snippet. A row mixing unreadable and genuinely-missing files
   (`integrationFileRowDetail`) names both, in separate fragments, reason/Fix from the first
-  unreadable file. `notReadableFix` chmods the immediate parent dir (`u+rx`) when the `Lstat`
-  itself failed, or the file (`+r`) when only `ReadFile` did, both then
-  `run 'brief init --host claude-code'`, rendered `relPath(wd, ...)` against `absWd` (never
-  `root`) for every host check. host-agents still SKIPs when no agent file is present at all
-  (unreadable still counts as present).
+  unreadable file. `notReadableFix` chmods `u+rwx` (the write bit too — `brief init` must still
+  create entries under the repaired directory) on `blockingDir`'s own result when the `Lstat`
+  itself failed: the deepest ancestor, walking up from the subject's parent and bounded at
+  `root`, whose own `Lstat` resolves — not necessarily the subject's immediate parent, since an
+  unsearchable directory several levels up still blocks every `Lstat` beneath it while its own
+  resolves fine. The file itself (`+r`) is the fix when only `ReadFile` failed. Both then
+  `run 'brief init --host claude-code'`, rendered `relPath(wd, ...)` against `absWd`; every host
+  check, host-snippet included, now threads `root` through to bound the walk. host-agents still
+  SKIPs when no agent file is present at all (unreadable still counts as present).
 - `setup.Artifact.ForceRemovable` is true exactly on an Uninstall-side `ActionKept` artifact
   `--force` would turn into `ActionRemoved` — false on every other Action, including that same
   file once force has already removed it, and on every Init-side artifact.
@@ -150,20 +158,24 @@ host-agents specifically (host-hook already had one).
   check only `os.IsNotExist`, never `syscall.ENOTDIR` — a `.claude` that is a regular file
   makes `brief init`/`uninstall` hard-refuse instead of treating it as absent, the same shape
   fix pass 9 fixed in `internal/doctor`. Checked, not fixed. **Unowned.**
-- `init`'s own refusal on an unreadable CLAUDE.md leaks a Go wrap chain and names the path
+- `init`'s and `uninstall`'s own refusal on an unreadable CLAUDE.md, `.claude/CLAUDE.md` or
+  plugin file (`planPluginFile`/`planPluginRemoval` in setup.go, `scanSnippetCandidates` in
+  snippet.go — all three lstat sites, both directions) leaks a Go wrap chain and names the path
   twice; contract-conformant (a refusal, correct exit code) so not blocking, but
-  product-vision's suggested copy if anyone touches it is `brief init: cannot read CLAUDE.md:
-  permission denied; make it readable, or run 'brief init --host none'`. **Unowned.**
-- `notReadableFix`'s `statFailed` arm names the immediate parent dir of the unreadable subject
-  file; the actual unsearchable directory is usually a higher ancestor (e.g. `chmod 000
-  .claude` → the fix says `chmod u+rx .claude/skills/brief/.claude-plugin`, which fails —
-  `chmod u+rx .claude` is the fix that actually works). The pinned strings in host_test.go
-  encode today's behavior; a real fix needs an ancestor walk, retrying `Lstat` upward until one
-  resolves. **Unowned.**
+  product-vision's suggested copy if anyone touches it is `brief init: cannot read <rel>:
+  permission denied; make it readable, or run 'brief init --host none'` for init and
+  `brief uninstall: cannot read <rel>: permission denied; make it readable, then rerun
+  'brief uninstall'` for uninstall. **Unowned.**
 - `rolesCheck`'s own `fileIsRegular` (host.go) treats any `os.Stat` error, including EACCES,
   as "not found", bypassing `classifyProbeError` entirely — under `chmod 000 .claude` the
   `roles` row says an agent is not found and suggests `brief init --with-agents`, rather than
   reporting it unreadable. **Unowned.**
-- `host_test.go` is still ~1150 lines across host-plugin, host-hook, host-agents, host-snippet
+- `checkEnvPath`'s own `Path` renders `exec.LookPath("brief")`'s result verbatim (host.go's own
+  doc comment states this is deliberate, to never show a resolved path unrelated to the PATH
+  entry configured) — but when a PATH entry itself is relative, LookPath returns a relative
+  path (`../bin/brief`, more `../` the deeper `wd` is), and doctor's text rows render every other
+  Path root- or wd-relative, never cwd-relative in this particular broken way. Should render
+  absolute in text mode. **Unowned.**
+- `host_test.go` is still ~1340 lines across host-plugin, host-hook, host-agents, host-snippet
   ×2 and roles — a further split by check, not just by unreadable-vs-not, is deferred.
   **Unowned.**
