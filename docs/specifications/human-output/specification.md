@@ -136,7 +136,10 @@ rewritten per scenario as text changes (user decision).
 - `check`: `{"counts":{"error","warn"},"features":[{"name","path","in_flight",
   "findings":[{"severity","rule","path","line"|null,"detail"}]}]}`.
 - `start`: existing `assemble.Brief` fields unchanged + header.
-- `finish`: `{"feature","step","changed","handoff_path","state_path","next"|null}`.
+- `finish`: `{"feature","step","changed","handoff_path","state_path",
+  "next":{"id","title","path"}|null}` — same shape as `status`'s own `"next"` (MAJOR 2: the two
+  duplicated "next open step" computations, one in `scaffold`, one in `assemble`, now render an
+  identical object). Text mode is unchanged: it still names only the id.
 - `new feature` / `new step`: `{"feature","step"|null,"path","created":[abs…]}`.
 - `--version`: `{"version"}` (`"(devel)"` when unstamped).
 - `help`: `{"commands":[{"name","usage","summary","description","flags":[{"name","type",

@@ -20,17 +20,18 @@ from stdin; it may be given for at most one of --handoff and --state.
 
 // finishDocument is finish's --json success document: the common header
 // first, then scaffold.FinishResult's own fields, both paths absolute and
-// passed through verbatim. Next is nil (JSON null) when nothing is open
-// rather than an empty string, and Changed is false only on R11's no-op.
+// passed through verbatim. Next is statusNextJSON, the identical
+// id/title/path object status's own "next" renders (MAJOR 2) — nil (JSON
+// null) when nothing is open — and Changed is false only on R11's no-op.
 type finishDocument struct {
 	jsonHeader
 
-	Feature     string  `json:"feature"`
-	Step        string  `json:"step"`
-	Changed     bool    `json:"changed"`
-	HandoffPath string  `json:"handoff_path"`
-	StatePath   string  `json:"state_path"`
-	Next        *string `json:"next"`
+	Feature     string          `json:"feature"`
+	Step        string          `json:"step"`
+	Changed     bool            `json:"changed"`
+	HandoffPath string          `json:"handoff_path"`
+	StatePath   string          `json:"state_path"`
+	Next        *statusNextJSON `json:"next"`
 }
 
 // runFinish implements "brief finish <feature> <step> --handoff <path>
@@ -89,9 +90,9 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 	}
 
 	if out.json {
-		var next *string
-		if res.Next != "" {
-			next = &res.Next
+		var next *statusNextJSON
+		if res.Next.ID != "" {
+			next = &statusNextJSON{ID: res.Next.ID, Title: res.Next.Title, Path: res.Next.Path}
 		}
 
 		doc := finishDocument{
@@ -115,9 +116,9 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 
 	handoffRel, stateRel := displayPath(wd, res.HandoffPath), displayPath(wd, res.StatePath)
 
-	if res.Next != "" {
+	if res.Next.ID != "" {
 		fmt.Fprintf(out.stderr, "brief finish: %s %s done; wrote %s, replaced %s; next: %s — run 'brief start %s'\n",
-			feature, step, handoffRel, stateRel, res.Next, feature)
+			feature, step, handoffRel, stateRel, res.Next.ID, feature)
 	} else {
 		fmt.Fprintf(out.stderr, "brief finish: %s %s done; wrote %s, replaced %s; %s is complete\n",
 			feature, step, handoffRel, stateRel, feature)

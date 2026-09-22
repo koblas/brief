@@ -10,8 +10,22 @@ import (
 
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/conform"
+	"github.com/koblas/brief/internal/platform/markdown"
 	"github.com/koblas/brief/internal/platform/stepfile"
 )
+
+// FinishNext is FinishResult's own "next open step" shape: the same
+// id/title/path triple assemble.NextStep carries (MAJOR 2 — the two must
+// render as the identical JSON object), duplicated rather than shared
+// because scaffold and assemble may not import each other. Title is
+// markdown.Title of the step body after its frontmatter, empty when the
+// step file has no "# " heading; Path is the step file's own absolute
+// path. The zero value (every field "") means "nothing open" — cli's
+// finish --json document renders that as JSON null rather than as this
+// struct's own zero-valued fields.
+type FinishNext struct {
+	ID, Title, Path string
+}
 
 // FinishResult is what Finish returns on success — either after its four
 // writes land, or as R11's no-op, which still returns the populated result
@@ -20,17 +34,18 @@ import (
 // matched what was on disk, so nothing was written. HandoffPath and
 // StatePath are absolute — the step's own handoff file and the feature's
 // state file Finish wrote or, on a no-op, would have — never the caller's
-// own --state/--handoff input path, which Finish never learns. Next is the
-// id of the lowest-numbered step file (by stepfile.Pattern.Number) whose
+// own --state/--handoff input path, which Finish never learns. Next names
+// the lowest-numbered step file (by stepfile.Pattern.Number) whose
 // frontmatter status is not "done", counting the just-finished step as
-// done and ignoring depends-on, so a blocked step can still be Next; ""
-// when every other step is done. A sibling whose frontmatter cannot be
-// read or does not parse counts as not done, so it can be named Next too.
+// done and ignoring depends-on, so a blocked step can still be Next; the
+// zero FinishNext when every other step is done. A sibling whose
+// frontmatter cannot be read or does not parse counts as not done, so it
+// can be named Next too.
 type FinishResult struct {
 	Feature, Step          string
 	Changed                bool
 	HandoffPath, StatePath string
-	Next                   string
+	Next                   FinishNext
 }
 
 // Finish closes feature's step: it writes handoff to that step's own
@@ -288,7 +303,7 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	// next is computed here, in the validation phase and before any write,
 	// so a caller learns brief start's post-finish next step even on R11's
 	// no-op, and so no error path exists for it after the writes land.
-	next := nextOpenStep(root, pattern, entries, stepNumber)
+	next := nextOpenStep(root, pattern, entries, stepNumber, featurePath)
 
 	switch r.verdict() {
 	case refinishNoop:
@@ -557,20 +572,24 @@ func findStepFile(root *os.Root, pattern stepfile.Pattern, step string) (string,
 	return "", 0, entries, ErrNoSuchStep
 }
 
-// nextOpenStep returns the id of brief start's own next-open-step rule —
-// the lowest-numbered step file among entries (by stepfile.Pattern.Number)
-// whose frontmatter status is not "done" — excluding finishedNumber, the
-// step Finish is about to mark done, and ignoring depends-on entirely, so
-// a blocked step is still eligible. It duplicates assemble.Start's own
-// definition (assemble.go's readSteps/Start loop) because scaffold and
+// nextOpenStep returns brief start's own next-open-step rule, rendered as a
+// FinishNext — the lowest-numbered step file among entries (by
+// stepfile.Pattern.Number) whose frontmatter status is not "done" —
+// excluding finishedNumber, the step Finish is about to mark done, and
+// ignoring depends-on entirely, so a blocked step is still eligible. It
+// duplicates assemble.Start's own definition (assemble.go's
+// readSteps/Start loop, and Status's own NextStep) because scaffold and
 // assemble may not import each other; Test_finish_next_agrees_with_start
 // (internal/cli) pins the two in agreement. A sibling that cannot be read
 // or whose frontmatter does not parse is read through siblingFrontmatter,
 // which reports a zero Frontmatter — never done — so it counts as not
-// done and can be named here, the same tolerance
-// checkStepDependencies applies. It returns "" when no step is open.
-func nextOpenStep(root *os.Root, pattern stepfile.Pattern, entries []os.DirEntry, finishedNumber int) string {
+// done and can be named here, the same tolerance checkStepDependencies
+// applies. featurePath, the feature's own absolute directory, is joined
+// onto the winning step's filename to build FinishNext.Path. It returns
+// the zero FinishNext when no step is open.
+func nextOpenStep(root *os.Root, pattern stepfile.Pattern, entries []os.DirEntry, finishedNumber int, featurePath string) FinishNext {
 	best := -1
+	bestName := ""
 
 	for _, e := range entries {
 		if e.IsDir() {
@@ -591,13 +610,39 @@ func nextOpenStep(root *os.Root, pattern stepfile.Pattern, entries []os.DirEntry
 		}
 
 		best = n
+		bestName = e.Name()
 	}
 
 	if best == -1 {
+		return FinishNext{}
+	}
+
+	return FinishNext{ID: pattern.ID(best), Title: stepTitleFromFile(root, bestName), Path: filepath.Join(featurePath, bestName)}
+}
+
+// stepTitleFromFile reads name's body through root and returns
+// markdown.Title of its frontmatter remainder — the body after
+// stepfile.ParseFrontmatter, matching assemble's own stepFromEntry, so a
+// "#" inside YAML frontmatter is never read as a heading. It returns ""
+// when name cannot be read or its frontmatter does not parse, rather than
+// propagating either failure: nextOpenStep already knows, through
+// siblingFrontmatter's own read, that this step is open, so a second read
+// failing here degrades FinishNext.Title to empty rather than losing the
+// id/path a caller still needs.
+func stepTitleFromFile(root *os.Root, name string) string {
+	body, err := root.ReadFile(name)
+	if err != nil {
 		return ""
 	}
 
-	return pattern.ID(best)
+	_, rest, err := stepfile.ParseFrontmatter(body)
+	if err != nil {
+		return ""
+	}
+
+	title, _ := markdown.Title(string(rest))
+
+	return title
 }
 
 // progressRefusal renders tickProgressEntry's error as the R14a refusal

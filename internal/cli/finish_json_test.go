@@ -35,11 +35,36 @@ func Test_finish_json_is_one_exact_document(t *testing.T) {
 	assert.Equal(t, want, stdout.String())
 }
 
+// Test_finish_json_next_is_the_id_title_path_object_when_another_step_is_open
+// is MAJOR 2: finish --json's "next" renders the same {"id","title","path"}
+// object status's own "next" does, not a bare id string — path is dynamic
+// (the fixture's own temp dir), so this case cannot share the literal-"want"
+// table below.
+func Test_finish_json_next_is_the_id_title_path_object_when_another_step_is_open(t *testing.T) {
+	wd := newFinishCLIFixtureWithSteps(t,
+		finishStep{id: "SCENARIO-01", status: "open", dependsOn: "[]"},
+		finishStep{id: "SCENARIO-02", status: "open", dependsOn: "[]"},
+	)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath, "--json"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+
+	stepPath := filepath.Join(wd, "docs", "specifications", "demo", "SCENARIO-02.md")
+	want := `{"id":"SCENARIO-02","title":"SCENARIO-02 Demo step","path":` + jsonString(t, stepPath) + `}`
+	assert.JSONEq(t, want, string(doc["next"]))
+}
+
 // Test_finish_json_decodes_next_and_changed_correctly is the decode-level
-// table for finishDocument's two result-dependent fields: next renders as a
-// string when another step is still open, as JSON null (not an absent key)
-// when nothing else is open, and changed renders false on R11's no-op —
-// the second finish of the same inputs.
+// table for finishDocument's two result-dependent fields: next renders as
+// JSON null (not an absent key) when nothing else is open, and changed
+// renders false on R11's no-op — the second finish of the same inputs.
 func Test_finish_json_decodes_next_and_changed_correctly(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -47,23 +72,6 @@ func Test_finish_json_decodes_next_and_changed_correctly(t *testing.T) {
 		key   string
 		want  string
 	}{
-		{
-			name: "next is a string when another step is open",
-			setup: func(t *testing.T) (string, []string) {
-				t.Helper()
-
-				wd := newFinishCLIFixtureWithSteps(t,
-					finishStep{id: "SCENARIO-01", status: "open", dependsOn: "[]"},
-					finishStep{id: "SCENARIO-02", status: "open", dependsOn: "[]"},
-				)
-				handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
-				statePath := writeInput(t, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
-
-				return wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath, "--json"}
-			},
-			key:  "next",
-			want: `"SCENARIO-02"`,
-		},
 		{
 			name: "next is null when nothing else is open",
 			setup: func(t *testing.T) (string, []string) {

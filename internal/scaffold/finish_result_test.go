@@ -27,7 +27,7 @@ func Test_finish_reports_the_absolute_handoff_and_state_paths_changed_true_and_n
 	assert.True(t, res.Changed)
 	assert.Equal(t, fx.handoffPath(), res.HandoffPath)
 	assert.Equal(t, filepath.Join(fx.featureDir(), fx.cfg.StateFile), res.StatePath)
-	assert.Equal(t, "STEP-03", res.Next)
+	assert.Equal(t, scaffold.FinishNext{ID: "STEP-03", Title: "STEP-03", Path: filepath.Join(fx.featureDir(), "STEP-03.md")}, res.Next)
 }
 
 // Test_finish_no_op_reports_changed_false_and_still_names_next proves the
@@ -45,7 +45,7 @@ func Test_finish_no_op_reports_changed_false_and_still_names_next(t *testing.T) 
 
 	require.NoError(t, err)
 	assert.False(t, second.Changed)
-	assert.Equal(t, "STEP-03", second.Next)
+	assert.Equal(t, scaffold.FinishNext{ID: "STEP-03", Title: "STEP-03", Path: filepath.Join(fx.featureDir(), "STEP-03.md")}, second.Next)
 }
 
 // Test_finish_next_is_empty_when_every_other_step_is_done builds a
@@ -76,7 +76,7 @@ func Test_finish_next_is_empty_when_every_other_step_is_done(t *testing.T) {
 	res, err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), newStateBody(cfg))
 
 	require.NoError(t, err)
-	assert.Empty(t, res.Next)
+	assert.Equal(t, scaffold.FinishNext{}, res.Next)
 }
 
 // Test_finish_names_a_sibling_with_unparseable_frontmatter_as_next builds a
@@ -108,5 +108,5 @@ func Test_finish_names_a_sibling_with_unparseable_frontmatter_as_next(t *testing
 	res, err := srv.Finish(context.Background(), "widgets", "STEP-01", []byte("h"), newStateBody(cfg))
 
 	require.NoError(t, err)
-	assert.Equal(t, "STEP-02", res.Next)
+	assert.Equal(t, scaffold.FinishNext{ID: "STEP-02", Title: "", Path: filepath.Join(featureDir, "STEP-02.md")}, res.Next)
 }

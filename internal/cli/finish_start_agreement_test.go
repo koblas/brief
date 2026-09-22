@@ -21,10 +21,14 @@ import (
 
 // Test_finish_next_agrees_with_start finishes one step, in --json mode,
 // then briefs the same feature, also in --json mode, and asserts that
-// finish's own "next" equals the id start would brief next — on a tree
-// where the next step is blocked by an unmet depends-on, and on a tree
-// where the next step is simply lower-numbered than the one just
-// finished.
+// finish's own "next" (id and title) equals what start would brief next —
+// on a tree where the next step is blocked by an unmet depends-on, and on
+// a tree where the next step is simply lower-numbered than the one just
+// finished. It also briefs status --json for the same feature and asserts
+// finish's own "next.path" agrees with status's own "next.path" — the
+// third field MAJOR 2 adds to finish's object, sourced from a third,
+// independent definition (assemble.Status's own featureStatus loop) that
+// scaffold and assemble may not share either.
 func Test_finish_next_agrees_with_start(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -73,12 +77,15 @@ func Test_finish_next_agrees_with_start(t *testing.T) {
 				nil, &finishStdout, &finishStderr)
 			require.NoError(t, finishErr)
 
-			var finishDoc map[string]json.RawMessage
+			var finishDoc struct {
+				Next *struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+					Path  string `json:"path"`
+				} `json:"next"`
+			}
 			require.NoError(t, json.Unmarshal(finishStdout.Bytes(), &finishDoc))
-
-			var finishNext *string
-			require.NoError(t, json.Unmarshal(finishDoc["next"], &finishNext))
-			require.NotNil(t, finishNext, "the fixture always leaves another step open")
+			require.NotNil(t, finishDoc.Next, "the fixture always leaves another step open")
 
 			var startStdout, startStderr bytes.Buffer
 			startErr := cli.Run(t.Context(), wd, []string{"start", tc.finishFeature, "--json"}, nil, &startStdout, &startStderr)
@@ -86,13 +93,41 @@ func Test_finish_next_agrees_with_start(t *testing.T) {
 
 			var startDoc struct {
 				Step *struct {
-					ID string `json:"id"`
+					ID    string `json:"id"`
+					Title string `json:"title"`
 				} `json:"step"`
 			}
 			require.NoError(t, json.Unmarshal(startStdout.Bytes(), &startDoc))
 			require.NotNil(t, startDoc.Step, "the fixture always leaves another step open")
 
-			assert.Equal(t, startDoc.Step.ID, *finishNext)
+			assert.Equal(t, startDoc.Step.ID, finishDoc.Next.ID)
+			assert.Equal(t, startDoc.Step.Title, finishDoc.Next.Title)
+
+			var statusStdout, statusStderr bytes.Buffer
+			statusErr := cli.Run(t.Context(), wd, []string{"status", "--json"}, nil, &statusStdout, &statusStderr)
+			require.NoError(t, statusErr)
+
+			var statusDoc struct {
+				Features []struct {
+					Name string `json:"name"`
+					Next *struct {
+						Path string `json:"path"`
+					} `json:"next"`
+				} `json:"features"`
+			}
+			require.NoError(t, json.Unmarshal(statusStdout.Bytes(), &statusDoc))
+
+			var statusNextPath string
+
+			for _, f := range statusDoc.Features {
+				if f.Name == tc.finishFeature {
+					require.NotNil(t, f.Next, "the fixture always leaves another step open")
+					statusNextPath = f.Next.Path
+				}
+			}
+
+			require.NotEmpty(t, statusNextPath, "status must report the same feature finish just closed a step in")
+			assert.Equal(t, statusNextPath, finishDoc.Next.Path)
 		})
 	}
 }
