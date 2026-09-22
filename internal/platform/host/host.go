@@ -47,6 +47,13 @@ type Host interface {
 	// it did not exist — no row, nothing written. Uninstall removes the
 	// same files in the reverse of this order.
 	Plugin(withHook bool) []File
+	// Agents returns the three role-agent files "init --with-agents"
+	// installs under this host's own plugin directory, in the order Init
+	// writes them: planner, implementer, reviewer. Unlike Plugin, Agents
+	// carries no flag of its own — Uninstall always plans their removal,
+	// independent of any flag Init was run with, and always in the reverse
+	// of this order.
+	Agents() []File
 	// InstructionFiles returns the repository-root-relative paths (forward
 	// slash separated) of every file this host reads project instructions
 	// from, in the priority order setup's own CLAUDE.md-block location rule

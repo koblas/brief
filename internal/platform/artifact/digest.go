@@ -23,6 +23,12 @@ const (
 	KindSkillFinish Kind = "skill-finish"
 	// KindClaudeHooks is ClaudeHooks's own Kind.
 	KindClaudeHooks Kind = "claude-hooks"
+	// KindAgentPlanner is AgentPlanner's own Kind.
+	KindAgentPlanner Kind = "agent-planner"
+	// KindAgentImplementer is AgentImplementer's own Kind.
+	KindAgentImplementer Kind = "agent-implementer"
+	// KindAgentReviewer is AgentReviewer's own Kind.
+	KindAgentReviewer Kind = "agent-reviewer"
 	// KindSnippet is SnippetBlock's own Kind. Unlike every other Kind, it is
 	// never passed to Render or Recognize: SnippetBlock takes a feature
 	// directory Render's own signature carries no room for, and Recognize's
@@ -51,12 +57,15 @@ const (
 )
 
 // configDigests holds the sha256 digest of every release's own ConfigFile
-// render. It holds exactly one entry today; a future ConfigFile change
-// appends its new digest here rather than replacing the old one, so an
-// earlier release's file is still recognized rather than misclassified as
-// edited.
+// render, plus ConfigFileWithRoles' own — a second render body Recognize
+// treats as OriginCurrent for KindConfig, written only by "init
+// --with-agents" when it creates a fresh config, so both an unbound and a
+// role-bound config a caller ships are recognized rather than reported
+// "edited locally". Render(KindConfig) still returns ConfigFile alone —
+// this list, not Render, is what makes ConfigFileWithRoles recognized.
 var configDigests = [][32]byte{
 	sha256.Sum256(ConfigFile()),
+	sha256.Sum256(ConfigFileWithRoles()),
 }
 
 // pluginManifestDigests holds the sha256 digest of every release's own
@@ -81,6 +90,24 @@ var skillFinishDigests = [][32]byte{
 // ClaudeHooks render.
 var claudeHooksDigests = [][32]byte{
 	sha256.Sum256(ClaudeHooks()),
+}
+
+// agentPlannerDigests holds the sha256 digest of every release's own
+// AgentPlanner render.
+var agentPlannerDigests = [][32]byte{
+	sha256.Sum256(AgentPlanner()),
+}
+
+// agentImplementerDigests holds the sha256 digest of every release's own
+// AgentImplementer render.
+var agentImplementerDigests = [][32]byte{
+	sha256.Sum256(AgentImplementer()),
+}
+
+// agentReviewerDigests holds the sha256 digest of every release's own
+// AgentReviewer render.
+var agentReviewerDigests = [][32]byte{
+	sha256.Sum256(AgentReviewer()),
 }
 
 // Recognize reports body's Origin against kind's own compiled-in digest
@@ -113,6 +140,12 @@ func digestsFor(kind Kind) [][32]byte {
 		return skillFinishDigests
 	case KindClaudeHooks:
 		return claudeHooksDigests
+	case KindAgentPlanner:
+		return agentPlannerDigests
+	case KindAgentImplementer:
+		return agentImplementerDigests
+	case KindAgentReviewer:
+		return agentReviewerDigests
 	case KindSnippet:
 		// Deliberately excluded: SnippetBlock/RecognizeSnippet are the
 		// snippet's own render and recognize functions (see doc.go).

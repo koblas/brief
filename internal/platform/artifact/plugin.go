@@ -138,6 +138,12 @@ func Render(kind Kind) []byte {
 		return SkillFinish()
 	case KindClaudeHooks:
 		return ClaudeHooks()
+	case KindAgentPlanner:
+		return AgentPlanner()
+	case KindAgentImplementer:
+		return AgentImplementer()
+	case KindAgentReviewer:
+		return AgentReviewer()
 	case KindSnippet:
 		// Deliberately excluded: SnippetBlock is the snippet's own render
 		// function, taking the feature directory Render's signature has no

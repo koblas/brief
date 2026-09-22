@@ -115,6 +115,19 @@ func (claudeCode) Plugin(withHook bool) []File {
 	return append([]File(nil), files...)
 }
 
+// claudeCodeAgentFiles lists claudeCode's own Agents, in install order:
+// planner, implementer, reviewer.
+var claudeCodeAgentFiles = []File{
+	{RelPath: PluginDir + "/agents/planner.md", Kind: artifact.KindAgentPlanner},
+	{RelPath: PluginDir + "/agents/implementer.md", Kind: artifact.KindAgentImplementer},
+	{RelPath: PluginDir + "/agents/reviewer.md", Kind: artifact.KindAgentReviewer},
+}
+
+// Agents returns claudeCodeAgentFiles, a fresh copy per call.
+func (claudeCode) Agents() []File {
+	return append([]File(nil), claudeCodeAgentFiles...)
+}
+
 // claudeCodeInstructionFiles lists claudeCode's own InstructionFiles, in
 // priority order: the repository-root CLAUDE.md, then ".claude/CLAUDE.md".
 var claudeCodeInstructionFiles = []string{"CLAUDE.md", ".claude/CLAUDE.md"}

@@ -8,6 +8,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Test_a_config_binding_the_reviewer_role_decodes pins the third role
+// position (R7 as amended): "roles.reviewer" is a known key that decodes
+// onto RoleBindings.Reviewer with no violation, the same as planner and
+// implementer.
+func Test_a_config_binding_the_reviewer_role_decodes(t *testing.T) {
+	root := t.TempDir()
+	writeConfig(t, root, `roles:
+  reviewer: brief:reviewer
+`)
+
+	cfg, _, err := config.Resolve(root)
+
+	require.NoError(t, err)
+	assert.Equal(t, "brief:reviewer", cfg.Roles.Reviewer)
+}
+
 func Test_Default_carries_the_four_shipped_state_headings(t *testing.T) {
 	cfg := config.Default()
 

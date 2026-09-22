@@ -11,6 +11,13 @@ import (
 // write refusal.
 var ErrUnknownHost = errors.New("unknown host")
 
+// ErrAgentsNeedHost is returned when InitRequest.WithAgents is set but the
+// resolved Host is not HostClaudeCode: the three role agents only ever
+// install under a claude-code plugin. Like ErrUnknownHost it is a bare
+// sentinel, not a *RefusalError — an invocation defect cli reports as a
+// usage error rather than as a write refusal.
+var ErrAgentsNeedHost = errors.New("--with-agents requires --host claude-code")
+
 // ErrNotADirectory is returned when the configured feature root already
 // exists as something other than a directory. It travels inside a
 // *RefusalError naming that path.

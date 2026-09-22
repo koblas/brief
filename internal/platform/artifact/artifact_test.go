@@ -57,11 +57,39 @@ func Test_uncommenting_the_config_file_yields_the_shipped_defaults(t *testing.T)
 	assert.Equal(t, want, cfg)
 }
 
+// looksLikeKeyValue reports whether rest — a ConfigFile line with its own
+// leading "#" stripped — is a YAML "key: value" line rather than doc prose:
+// its own leading-whitespace-trimmed run of lower-case letters, digits and
+// hyphens is immediately followed by ":". This is the discriminator
+// Test_every_config_key_is_documented needs and a bare "# " prefix check
+// cannot give it: ConfigFile comments every line with one leading "#", so a
+// nested key under "roles:" ("#  reviewer: \"\"") already starts with "# "
+// from its own two-space YAML indent, indistinguishable from a real doc
+// line by prefix alone.
+func looksLikeKeyValue(rest string) bool {
+	trimmed := strings.TrimLeft(rest, " ")
+
+	idx := strings.IndexByte(trimmed, ':')
+	if idx <= 0 {
+		return false
+	}
+
+	for _, r := range trimmed[:idx] {
+		if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789-", r) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // Test_every_config_key_is_documented enforces the doc/value line pairing
 // structurally: every line of ConfigFile() is commented (R2's "no live
-// line at all"), and every commented value line ("#<yaml>", no space) is
-// immediately preceded by a doc prose line ("# ", hash space) — so no
-// value line documents itself only by accident of being readable YAML.
+// line at all"), and every value line (looksLikeKeyValue on its own bytes
+// with the leading "#" stripped) is immediately preceded by a doc prose
+// line — one starting "# " that does not itself look like a key:value pair
+// — so no value line, nested or not, documents itself only by accident of
+// being readable YAML.
 func Test_every_config_key_is_documented(t *testing.T) {
 	body := strings.TrimRight(string(artifact.ConfigFile()), "\n")
 	lines := strings.Split(body, "\n")
@@ -70,13 +98,55 @@ func Test_every_config_key_is_documented(t *testing.T) {
 	for i, line := range lines {
 		require.Truef(t, strings.HasPrefix(line, "#"), "line %d (%q) must be commented", i, line)
 
-		if strings.HasPrefix(line, "# ") {
+		if !looksLikeKeyValue(strings.TrimPrefix(line, "#")) {
 			continue
 		}
 
 		require.Positivef(t, i, "value line %d (%q) has no preceding doc line", i, line)
-		assert.Truef(t, strings.HasPrefix(lines[i-1], "# "), "value line %d (%q) must be preceded by a doc line, got %q", i, line, lines[i-1])
+
+		prev := lines[i-1]
+		assert.Truef(t, strings.HasPrefix(prev, "# ") && !looksLikeKeyValue(strings.TrimPrefix(prev, "#")),
+			"value line %d (%q) must be preceded by a doc line, got %q", i, line, prev)
 	}
+}
+
+// Test_the_bound_config_file_binds_only_the_roles pins ConfigFileWithRoles
+// (S08's second KindConfig render, written only by "init --with-agents" in
+// the same run it creates the config): it decodes to config.Default() with
+// Roles equal to AgentBindings() and no violations, every key outside
+// "roles:" stays commented exactly as ConfigFile() writes it, both variants
+// recognize as OriginCurrent for KindConfig, and Render(KindConfig) is
+// still the plain ConfigFile() — the bound variant is never the "one true"
+// render, only a second recognized body.
+func Test_the_bound_config_file_binds_only_the_roles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".brief.yaml")
+	require.NoError(t, os.WriteFile(path, artifact.ConfigFileWithRoles(), 0o600))
+
+	cfg, violations, err := config.Inspect(path)
+
+	require.NoError(t, err)
+	assert.Empty(t, violations)
+
+	want := config.Default()
+	want.Roles = artifact.AgentBindings()
+	assert.Equal(t, want, cfg)
+
+	plain := strings.Split(strings.TrimRight(string(artifact.ConfigFile()), "\n"), "\n")
+	bound := strings.Split(strings.TrimRight(string(artifact.ConfigFileWithRoles()), "\n"), "\n")
+	require.Len(t, bound, len(plain))
+
+	for i, line := range bound {
+		if strings.Contains(line, "roles:") || strings.Contains(line, "planner:") || strings.Contains(line, "implementer:") || strings.Contains(line, "reviewer:") {
+			continue
+		}
+
+		assert.Equalf(t, plain[i], line, "line %d must be unchanged outside the roles bindings", i)
+	}
+
+	assert.Equal(t, artifact.OriginCurrent, artifact.Recognize(artifact.KindConfig, artifact.ConfigFile()))
+	assert.Equal(t, artifact.OriginCurrent, artifact.Recognize(artifact.KindConfig, artifact.ConfigFileWithRoles()))
+	assert.Equal(t, artifact.ConfigFile(), artifact.Render(artifact.KindConfig))
 }
 
 // Test_the_current_config_render_is_a_known_digest pins that ConfigFile's
@@ -140,7 +210,14 @@ func Test_recognize_classifies_each_plugin_file_against_its_own_kind(t *testing.
 		{name: "skill finish: one byte edited", kind: artifact.KindSkillFinish, body: editOneByte(artifact.SkillFinish()), want: artifact.OriginEdited},
 		{name: "claude hooks: current render", kind: artifact.KindClaudeHooks, body: artifact.ClaudeHooks(), want: artifact.OriginCurrent},
 		{name: "claude hooks: one byte edited", kind: artifact.KindClaudeHooks, body: editOneByte(artifact.ClaudeHooks()), want: artifact.OriginEdited},
+		{name: "agent planner: current render", kind: artifact.KindAgentPlanner, body: artifact.AgentPlanner(), want: artifact.OriginCurrent},
+		{name: "agent planner: one byte edited", kind: artifact.KindAgentPlanner, body: editOneByte(artifact.AgentPlanner()), want: artifact.OriginEdited},
+		{name: "agent implementer: current render", kind: artifact.KindAgentImplementer, body: artifact.AgentImplementer(), want: artifact.OriginCurrent},
+		{name: "agent implementer: one byte edited", kind: artifact.KindAgentImplementer, body: editOneByte(artifact.AgentImplementer()), want: artifact.OriginEdited},
+		{name: "agent reviewer: current render", kind: artifact.KindAgentReviewer, body: artifact.AgentReviewer(), want: artifact.OriginCurrent},
+		{name: "agent reviewer: one byte edited", kind: artifact.KindAgentReviewer, body: editOneByte(artifact.AgentReviewer()), want: artifact.OriginEdited},
 		{name: "skill start bytes checked against skill finish's kind", kind: artifact.KindSkillFinish, body: artifact.SkillStart(), want: artifact.OriginEdited},
+		{name: "agent planner bytes checked against agent reviewer's kind", kind: artifact.KindAgentReviewer, body: artifact.AgentPlanner(), want: artifact.OriginEdited},
 	}
 
 	for _, c := range cases {

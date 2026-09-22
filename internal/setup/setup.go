@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -49,6 +50,10 @@ const (
 	KindPlugin Kind = "plugin"
 	// KindHook is a host's hook wiring file.
 	KindHook Kind = "hook"
+	// KindAgent is one of a host's three role-agent files, installed only
+	// under InitRequest.WithAgents; Uninstall always plans their removal
+	// regardless of any flag Init was run with.
+	KindAgent Kind = "agent"
 	// KindSnippet is the CLAUDE.md instruction block (R5).
 	KindSnippet Kind = "snippet"
 )
@@ -99,15 +104,21 @@ func NewServer(opts ...Option) *Server {
 
 // InitRequest is Init's own input: Host selects the agent-host integration
 // (Hosts), NoHook omits a claude-code host's hook wiring file entirely (no
-// plan, no row) while leaving any other plugin file untouched, DryRun
-// computes the same plan without writing anything, and Force rewrites an
-// existing config from defaults rather than keeping or refusing it — it
-// never rewrites an edited plugin file, only the config.
+// plan, no row) while leaving any other plugin file untouched, WithAgents
+// installs the three role-agent files (host.Host.Agents) and, only when
+// this run also creates the config file, binds every role to them (R7) —
+// like NoHook, false plans no agent row at all, never reading or writing
+// them; it is refused as ErrAgentsNeedHost unless Host is
+// HostClaudeCode. DryRun computes the same plan without writing anything,
+// and Force rewrites an existing config from defaults — the bound variant
+// under WithAgents — rather than keeping or refusing it; it never rewrites
+// an edited plugin or agent file, only the config.
 type InitRequest struct {
-	Host   string
-	NoHook bool
-	DryRun bool
-	Force  bool
+	Host       string
+	NoHook     bool
+	WithAgents bool
+	DryRun     bool
+	Force      bool
 }
 
 // Artifact is one thing Init installs or found already installed: Kind and
@@ -126,51 +137,71 @@ type Artifact struct {
 // config.Locate's directory, or wd when no config was found — Artifacts
 // lists what was found and what happened to it — for Init, the config
 // file, the feature root, then a claude-code host's own plugin manifest,
-// start skill, finish skill, hook wiring and CLAUDE.md block, the fixed
-// order R11's stdout rows render in; for Uninstall, the CLAUDE.md block
-// first, then a claude-code host's own plugin files (hook, finish skill,
-// start skill, manifest), then the config file last, so a partial uninstall
-// never removes the repository's opt-in marker before everything else.
-// Created names every path Init wrote that did not exist before; Modified
-// names every path either command rewrote in place — Init's own CLAUDE.md
-// merge or replace, Uninstall's own CLAUDE.md block strip that leaves the
-// file non-empty; Removed names every path Uninstall actually deleted —
-// both absolute, in the order each command touched them. A pruned,
-// now-empty plugin directory is never in any of the three. No slice is
-// ever nil; all three are empty under DryRun.
+// start skill, finish skill, hook wiring, and, under WithAgents, the three
+// role-agent files, then the CLAUDE.md block last, the fixed order R11's
+// stdout rows render in; for Uninstall, the CLAUDE.md block first, then a
+// claude-code host's own agent files (reviewer, implementer, planner —
+// always planned, independent of any flag Init was run with) and plugin
+// files (hook, finish skill, start skill, manifest), then the config file
+// last, so a partial uninstall never removes the repository's opt-in
+// marker before everything else. Created names every path Init wrote that
+// did not exist before; Modified names every path either command rewrote
+// in place — Init's own CLAUDE.md merge or replace, Uninstall's own
+// CLAUDE.md block strip that leaves the file non-empty; Removed names
+// every path Uninstall actually deleted — both absolute, in the order each
+// command touched them. A pruned, now-empty plugin directory is never in
+// any of the three. RolesToAdd is Init's own hint (R7): empty unless
+// WithAgents and the config was not written this run, in which case it
+// lists a "roles:" header line plus one "  <role>: brief:<role>" line for
+// every role the kept or unchanged config still leaves unbound — a role
+// already bound to anything, brief's own agent or the adopter's own, is
+// never listed. No slice is ever nil; Created, Modified and Removed are
+// empty under DryRun; RolesToAdd is populated even under DryRun.
 type Result struct {
-	Host      string
-	DryRun    bool
-	Root      string
-	Artifacts []Artifact
-	Created   []string
-	Modified  []string
-	Removed   []string
+	Host       string
+	DryRun     bool
+	Root       string
+	Artifacts  []Artifact
+	Created    []string
+	Modified   []string
+	Removed    []string
+	RolesToAdd []string
 }
 
 // Init plans then, unless req.DryRun, applies brief's own install: the
 // config file, the feature root the kept or freshly written config names,
 // and, for req.Host == HostClaudeCode, that host's own skills-directory
-// plugin files (host.Host.Plugin) and its CLAUDE.md instruction block (R5,
-// planSnippet) — independent of req.NoHook, which only ever omits the hook
-// file. Every refusal — an unknown host, an invalid existing config, a
-// feature root that exists as something other than a directory, a CLAUDE.md
-// marker defect — is decided during planning, before any artifact is
-// touched; DryRun therefore returns exactly the plan a real run would
-// apply, including any refusal, and writes nothing either way.
+// plugin files (host.Host.Plugin), under req.WithAgents its three
+// role-agent files (host.Host.Agents, R7) — with a config this same call
+// creates or --force-rewrites bound to them (artifact.AgentBindings) — and
+// its CLAUDE.md instruction block (R5, planSnippet) — independent of
+// req.NoHook, which only ever omits the hook file. Every refusal — an
+// unknown host, req.WithAgents without a resolved HostClaudeCode
+// (ErrAgentsNeedHost), an invalid existing config, a feature root that
+// exists as something other than a directory, a CLAUDE.md marker defect —
+// is decided during planning, before any artifact is touched; DryRun
+// therefore returns exactly the plan a real run would apply, including any
+// refusal, and writes nothing either way. Result.RolesToAdd is computed
+// even under DryRun.
 //
-// Applying writes the feature root, then every plugin file reporting
-// ActionCreated, then the CLAUDE.md block, then the config file last, so
-// the config file — the repository's opt-in marker — never appears before
-// everything else has landed. A plugin file already present and unedited
-// (ActionUnchanged) or edited locally (ActionKept) is never rewritten,
-// --force included: R3's --force only ever rewrites the config from
-// defaults; the same holds for a CLAUDE.md block reporting ActionKept. A
-// failure after at least one earlier write already landed is wrapped in
-// ErrPartialWrite; a failure before anything was written is returned as-is.
+// Applying writes the feature root, then every plugin and agent file
+// reporting ActionCreated, then the CLAUDE.md block, then the config file
+// last, so the config file — the repository's opt-in marker — never
+// appears before everything else has landed. A plugin or agent file
+// already present and unedited (ActionUnchanged) or edited locally
+// (ActionKept) is never rewritten, --force included: R3's --force only
+// ever rewrites the config from defaults (the bound variant under
+// req.WithAgents); the same holds for a CLAUDE.md block reporting
+// ActionKept. A failure after at least one earlier write already landed is
+// wrapped in ErrPartialWrite; a failure before anything was written is
+// returned as-is.
 func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, error) {
 	if !validHost(req.Host) {
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
+	}
+
+	if req.WithAgents && req.Host != HostClaudeCode {
+		return Result{}, ErrAgentsNeedHost
 	}
 
 	nearest, _, err := config.Locate(wd)
@@ -183,7 +214,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		root = filepath.Dir(nearest)
 	}
 
-	configArt, cfg, err := planConfig(nearest, root, req.Force)
+	configArt, cfg, err := planConfig(nearest, root, req.Force, req.WithAgents)
 	if err != nil {
 		return Result{}, err
 	}
@@ -197,6 +228,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 
 	var (
 		pluginArts []pluginArtifact
+		agentArts  []pluginArtifact
 		snippetArt snippetArtifact
 		hasSnippet bool
 	)
@@ -209,6 +241,13 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 			return Result{}, err
 		}
 
+		if req.WithAgents {
+			agentArts, err = planAgentFiles(root, h)
+			if err != nil {
+				return Result{}, err
+			}
+		}
+
 		snippetArt, err = planSnippet(root, h, cfg.FeatureDirectory)
 		if err != nil {
 			return Result{}, err
@@ -217,11 +256,15 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		hasSnippet = true
 	}
 
-	artifacts := make([]Artifact, 0, 3+len(pluginArts))
+	artifacts := make([]Artifact, 0, 3+len(pluginArts)+len(agentArts))
 	artifacts = append(artifacts, configArt, featureArt)
 
 	for _, p := range pluginArts {
 		artifacts = append(artifacts, p.Artifact)
+	}
+
+	for _, a := range agentArts {
+		artifacts = append(artifacts, a.Artifact)
 	}
 
 	if hasSnippet {
@@ -229,30 +272,76 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 	}
 
 	res := Result{
-		Host:      req.Host,
-		DryRun:    req.DryRun,
-		Root:      root,
-		Artifacts: artifacts,
-		Created:   []string{},
-		Modified:  []string{},
-		Removed:   []string{},
+		Host:       req.Host,
+		DryRun:     req.DryRun,
+		Root:       root,
+		Artifacts:  artifacts,
+		Created:    []string{},
+		Modified:   []string{},
+		Removed:    []string{},
+		RolesToAdd: rolesToAdd(req.WithAgents, configArt.Action, cfg.Roles),
 	}
 
 	if req.DryRun {
 		return res, nil
 	}
 
-	return apply(res, featureArt, pluginArts, snippetArt, hasSnippet, configArt)
+	configBody := artifact.ConfigFile()
+	if req.WithAgents {
+		configBody = artifact.ConfigFileWithRoles()
+	}
+
+	writeArts := make([]pluginArtifact, 0, len(pluginArts)+len(agentArts))
+	writeArts = append(writeArts, pluginArts...)
+	writeArts = append(writeArts, agentArts...)
+
+	return apply(res, featureArt, writeArts, snippetArt, hasSnippet, configArt, configBody)
+}
+
+// rolesToAdd renders Result.RolesToAdd (R7): empty unless withAgents and
+// the config was not written this run (configAction != ActionCreated —
+// bindings are only ever written into a config Init creates in the same
+// run), else a "roles:" header line plus one "  <role>: brief:<role>" line
+// for every role current leaves unbound (empty), in RoleBindings' own
+// field order (planner, implementer, reviewer) — a role already bound to
+// anything, brief's own agent or the adopter's own, is never listed.
+func rolesToAdd(withAgents bool, configAction Action, current config.RoleBindings) []string {
+	if !withAgents || configAction == ActionCreated {
+		return []string{}
+	}
+
+	want := artifact.AgentBindings()
+
+	var lines []string
+
+	for _, r := range []struct{ current, bound, key string }{
+		{current.Planner, want.Planner, "planner"},
+		{current.Implementer, want.Implementer, "implementer"},
+		{current.Reviewer, want.Reviewer, "reviewer"},
+	} {
+		if r.current == "" {
+			lines = append(lines, fmt.Sprintf("  %s: %s", r.key, r.bound))
+		}
+	}
+
+	if len(lines) == 0 {
+		return []string{}
+	}
+
+	return append([]string{"roles:"}, lines...)
 }
 
 // apply writes featureArt, then every pluginArts entry reporting
-// ActionCreated, then snippetArt (when hasSnippet, and it reports
-// ActionCreated or ActionMerged), then configArt last, into res's own
-// Created or Modified list — Created for ActionCreated, Modified for
-// ActionMerged, since a merge rewrites bytes an existing file already held.
-// A write failure is wrapped in ErrPartialWrite iff at least one earlier
-// write already landed in this same call.
-func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippetArt snippetArtifact, hasSnippet bool, configArt Artifact) (Result, error) {
+// ActionCreated (plugin files, then, under WithAgents, the three agent
+// files, both share this one list and its own write order), then
+// snippetArt (when hasSnippet, and it reports ActionCreated or
+// ActionMerged), then configArt last with configBody as its bytes — the
+// plain ConfigFile() or, under WithAgents, ConfigFileWithRoles() — into
+// res's own Created or Modified list — Created for ActionCreated, Modified
+// for ActionMerged, since a merge rewrites bytes an existing file already
+// held. A write failure is wrapped in ErrPartialWrite iff at least one
+// earlier write already landed in this same call.
+func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippetArt snippetArtifact, hasSnippet bool, configArt Artifact, configBody []byte) (Result, error) {
 	var wroteSomething bool
 
 	if featureArt.Action == ActionCreated {
@@ -302,7 +391,7 @@ func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippet
 	}
 
 	if configArt.Action == ActionCreated {
-		if err := writeConfigFile(configArt.Path, artifact.ConfigFile()); err != nil {
+		if err := writeConfigFile(configArt.Path, configBody); err != nil {
 			if wroteSomething {
 				return Result{}, markPartial(err)
 			}
@@ -342,6 +431,28 @@ func planPluginFiles(root string, h host.Host, withHook bool) ([]pluginArtifact,
 		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
 		art, err := planPluginFile(path, kind, f.Kind)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, pluginArtifact{Artifact: art, renderKind: f.Kind})
+	}
+
+	return out, nil
+}
+
+// planAgentFiles plans every file h.Agents() lists, each joined under
+// root, in that same order (planner, implementer, reviewer) — mirroring
+// planPluginFiles, but every entry is tagged KindAgent rather than
+// KindPlugin or KindHook: Agents carries no hook file of its own.
+func planAgentFiles(root string, h host.Host) ([]pluginArtifact, error) {
+	files := h.Agents()
+	out := make([]pluginArtifact, 0, len(files))
+
+	for _, f := range files {
+		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
+
+		art, err := planPluginFile(path, KindAgent, f.Kind)
 		if err != nil {
 			return nil, err
 		}
@@ -420,33 +531,62 @@ func writePluginFile(path string, body []byte) error {
 }
 
 // planConfig decides the config file's own Artifact and, when it can be
-// trusted, the Config governing the feature root: a fresh path (nothing
-// found) always reports ActionCreated against config.Default(). Under
-// --force, only the bytes-equal check ever runs — a config invalid,
-// unparseable, or unreadable for any other reason (a directory at that
-// path, say) still reports ActionCreated, detail "rewritten from
-// defaults", since --force never refuses on the old file's content; the
+// trusted, the Config governing the feature root and Result.RolesToAdd: a
+// fresh path (nothing found) always reports ActionCreated against
+// config.Default() (Roles bound to artifact.AgentBindings() under
+// withAgents — the config this call reports ActionCreated for is always
+// the one apply writes). Under --force, the target is the desired render
+// alone — ConfigFile(), or ConfigFileWithRoles() under withAgents — and
+// only an exact byte match against it (configFileCurrent) is
+// ActionUnchanged; any other content, invalid, unparseable, or unreadable
+// for any other reason (a directory at that path, say), reports
+// ActionCreated, detail "rewritten from defaults" — never refusing on the
+// old file's content, since --force's own promise is to rewrite it; the
 // write attempt itself, not this planning step, is where an unreadable
-// path's own failure surfaces. Without --force, an existing file whose
-// bytes already equal artifact.ConfigFile() (artifact.Recognize's
-// OriginCurrent) is ActionUnchanged; otherwise it is decoded with
-// config.Inspect — a decode failure or any R1 violation refuses, naming
-// the first one in Config's own field order — and a config with none is
-// ActionKept, detail "edited locally", governing the feature root with its
-// own decoded values.
-func planConfig(nearest, root string, force bool) (Artifact, config.Config, error) {
+// path's own failure surfaces. Without --force, an existing file
+// recognized as any current KindConfig render (artifact.Recognize's
+// OriginCurrent — the plain render or the bound one, either) is
+// ActionUnchanged, its own bytes decoded (decodeCurrentConfig) so a bound
+// file's own Roles are never reported unbound; otherwise it is decoded
+// with config.Inspect — a decode failure or any R1 violation refuses,
+// naming the first one in Config's own field order — and a config with
+// none is ActionKept, detail "edited locally", governing the feature root
+// and RolesToAdd with its own decoded values. --with-agents never edits an
+// existing config either way (R7): only the nearest == "" branch above,
+// and --force's own rewrite, ever report ActionCreated.
+func planConfig(nearest, root string, force, withAgents bool) (Artifact, config.Config, error) {
 	if nearest == "" {
 		path := filepath.Join(root, configFileName)
 
-		return Artifact{Kind: KindConfig, Path: path, Action: ActionCreated}, config.Default(), nil
+		cfg := config.Default()
+		if withAgents {
+			cfg.Roles = artifact.AgentBindings()
+		}
+
+		return Artifact{Kind: KindConfig, Path: path, Action: ActionCreated}, cfg, nil
+	}
+
+	desired := artifact.ConfigFile()
+	if withAgents {
+		desired = artifact.ConfigFileWithRoles()
 	}
 
 	if force {
-		if configFileCurrent(nearest) {
-			return Artifact{Kind: KindConfig, Path: nearest, Action: ActionUnchanged}, config.Default(), nil
+		if configFileCurrent(nearest, desired) {
+			cfg, err := decodeCurrentConfig(nearest)
+			if err != nil {
+				return Artifact{}, config.Config{}, err
+			}
+
+			return Artifact{Kind: KindConfig, Path: nearest, Action: ActionUnchanged}, cfg, nil
 		}
 
-		return Artifact{Kind: KindConfig, Path: nearest, Action: ActionCreated, Detail: "rewritten from defaults"}, config.Default(), nil
+		cfg := config.Default()
+		if withAgents {
+			cfg.Roles = artifact.AgentBindings()
+		}
+
+		return Artifact{Kind: KindConfig, Path: nearest, Action: ActionCreated, Detail: "rewritten from defaults"}, cfg, nil
 	}
 
 	existing, err := os.ReadFile(nearest)
@@ -455,7 +595,12 @@ func planConfig(nearest, root string, force bool) (Artifact, config.Config, erro
 	}
 
 	if artifact.Recognize(artifact.KindConfig, existing) == artifact.OriginCurrent {
-		return Artifact{Kind: KindConfig, Path: nearest, Action: ActionUnchanged}, config.Default(), nil
+		cfg, decodeErr := decodeCurrentConfig(nearest)
+		if decodeErr != nil {
+			return Artifact{}, config.Config{}, decodeErr
+		}
+
+		return Artifact{Kind: KindConfig, Path: nearest, Action: ActionUnchanged}, cfg, nil
 	}
 
 	cfg, violations, inspectErr := config.Inspect(nearest)
@@ -471,17 +616,40 @@ func planConfig(nearest, root string, force bool) (Artifact, config.Config, erro
 }
 
 // configFileCurrent reports whether path's own bytes already equal
-// artifact.ConfigFile(), false for any read failure — a directory at path,
-// a permission error, or a genuinely different render all take the same
-// "not current" branch here, since --force's own decision only ever needs
-// to distinguish "already correct" from "needs (re)writing".
-func configFileCurrent(path string) bool {
+// desired exactly, false for any read failure — a directory at path, a
+// permission error, or a genuinely different render all take the same
+// "not current" branch here. Unlike the non-force branch's own
+// artifact.Recognize check, this is an exact match against desired alone,
+// never "any known current render": under --force --with-agents a config
+// holding the plain render is not current — it must be rewritten to the
+// bound one — even though artifact.Recognize would call it OriginCurrent.
+func configFileCurrent(path string, desired []byte) bool {
 	existing, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
 
-	return artifact.Recognize(artifact.KindConfig, existing) == artifact.OriginCurrent
+	return bytes.Equal(existing, desired)
+}
+
+// decodeCurrentConfig decodes nearest — already known to hold one of this
+// package's own compiled-in KindConfig renders (artifact.Recognize's
+// OriginCurrent) — into its Config. A decode failure or R1 violation here
+// would mean a compiled-in render itself stopped decoding cleanly, not a
+// condition a caller can fix; it is still reported as a *RefusalError
+// (configRefusal) rather than panicking, so a defect here fails loudly
+// instead of silently reporting every role unbound.
+func decodeCurrentConfig(nearest string) (config.Config, error) {
+	cfg, violations, err := config.Inspect(nearest)
+	if err != nil {
+		return config.Config{}, configRefusal(nearest, err)
+	}
+
+	if len(violations) > 0 {
+		return config.Config{}, configRefusal(nearest, &config.InvalidConfigError{Path: nearest, Err: violations[0]})
+	}
+
+	return cfg, nil
 }
 
 // configRefusal builds the *RefusalError an invalid or unparseable existing

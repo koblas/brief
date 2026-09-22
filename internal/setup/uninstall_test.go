@@ -471,6 +471,145 @@ func Test_uninstall_keeps_a_plugin_directory_holding_a_file_brief_did_not_write(
 	assert.True(t, info.IsDir())
 }
 
+// Test_uninstall_removes_agents_and_prunes_the_agents_directory pins the
+// "always plans agent removal" rule (R7/R4): unlike Init, Uninstall has no
+// --with-agents flag of its own — an init that installed the three agent
+// files has them removed here regardless, in the reverse of Init's own
+// order (reviewer, implementer, planner), ahead of the plugin's own files,
+// and "agents/" is pruned alongside the plugin's other now-empty
+// directories.
+func Test_uninstall_removes_agents_and_prunes_the_agents_directory(t *testing.T) {
+	wd := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+	require.NoError(t, err)
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+
+	require.NoError(t, err)
+	paths := agentFilePaths(wd)
+
+	var agentActions []setup.Action
+
+	var sawReviewerBeforePlugin bool
+
+	pluginSeen := false
+
+	for _, a := range res.Artifacts {
+		if a.Kind == setup.KindAgent {
+			agentActions = append(agentActions, a.Action)
+		}
+
+		if a.Kind == setup.KindPlugin || a.Kind == setup.KindHook {
+			pluginSeen = true
+		}
+
+		if a.Path == paths.Reviewer && !pluginSeen {
+			sawReviewerBeforePlugin = true
+		}
+	}
+
+	assert.Equal(t, []setup.Action{setup.ActionRemoved, setup.ActionRemoved, setup.ActionRemoved}, agentActions)
+	assert.True(t, sawReviewerBeforePlugin, "the reviewer agent must be planned before any plugin file")
+
+	agentPathList := []string{paths.Reviewer, paths.Implementer, paths.Planner}
+	var order []string
+
+	for _, a := range res.Artifacts {
+		if a.Kind == setup.KindAgent {
+			order = append(order, a.Path)
+		}
+	}
+	assert.Equal(t, agentPathList, order)
+
+	for _, p := range agentPathList {
+		_, statErr := os.Stat(p)
+		assert.True(t, os.IsNotExist(statErr), "%s must be removed", p)
+	}
+
+	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief", "agents"))
+	assert.True(t, os.IsNotExist(statErr), "the now-empty agents/ directory must be pruned")
+}
+
+// Test_uninstall_keeps_an_edited_agent_unless_forced pins the same "edited
+// locally" branch a plugin file gets, for an agent file: kept without
+// --force, removed (still detail "edited locally") with it, mirroring
+// Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced.
+func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
+	tests := []struct {
+		name       string
+		force      bool
+		wantAction setup.Action
+	}{
+		{name: "no force: kept", force: false, wantAction: setup.ActionKept},
+		{name: "force: removed", force: true, wantAction: setup.ActionRemoved},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			srv := setup.NewServer()
+			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+			require.NoError(t, err)
+
+			planner := agentFilePaths(wd).Planner
+			edited := []byte("---\nname: planner\nedited: true\n---\n")
+			require.NoError(t, os.WriteFile(planner, edited, 0o600))
+
+			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode, Force: tt.force})
+
+			require.NoError(t, err)
+
+			var plannerArt setup.Artifact
+			for _, a := range res.Artifacts {
+				if a.Path == planner {
+					plannerArt = a
+				}
+			}
+			assert.Equal(t, setup.Artifact{Kind: setup.KindAgent, Path: planner, Action: tt.wantAction, Detail: "edited locally"}, plannerArt)
+
+			_, statErr := os.Stat(planner)
+			if tt.force {
+				assert.True(t, os.IsNotExist(statErr))
+
+				return
+			}
+
+			require.NoError(t, statErr)
+			body, readErr := os.ReadFile(planner)
+			require.NoError(t, readErr)
+			assert.Equal(t, edited, body)
+		})
+	}
+}
+
+// Test_uninstall_removes_a_bound_config pins the second KindConfig
+// digest's own removal path: a config holding artifact.ConfigFileWithRoles
+// — the bound variant "init --with-agents" wrote — is recognized and
+// removed exactly like the plain render, ActionRemoved with no detail.
+func Test_uninstall_removes_a_bound_config(t *testing.T) {
+	wd := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+	require.NoError(t, err)
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+
+	require.NoError(t, err)
+	configPath := filepath.Join(wd, ".brief.yaml")
+
+	var configArt setup.Artifact
+	for _, a := range res.Artifacts {
+		if a.Path == configPath {
+			configArt = a
+		}
+	}
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, configArt)
+
+	_, statErr := os.Stat(configPath)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
 // Test_uninstall_for_host_none_leaves_the_plugin_in_place pins the
 // host-gated planning: with --host none, uninstall never plans a single
 // plugin file, so the tree it installed under claude-code survives

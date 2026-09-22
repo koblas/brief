@@ -26,13 +26,15 @@ func (h StateHeadings) Ordered() []string {
 	return []string{h.BindingDecisions, h.LeftUnbuilt, h.Traps, h.OpenDebts}
 }
 
-// RoleBindings names the agent bound to each of brief's two positions: the
-// planner, who turns a specification into conforming steps, and the
-// implementer, who calls start and closes with finish. An empty field means
-// that position is unbound.
+// RoleBindings names the agent bound to each of brief's three positions:
+// the planner, who turns a specification into conforming steps; the
+// implementer, who calls start and closes with finish; and the reviewer,
+// who calls start read-only and check to report on a step's own output. An
+// empty field means that position is unbound.
 type RoleBindings struct {
 	Planner     string `yaml:"planner"`
 	Implementer string `yaml:"implementer"`
+	Reviewer    string `yaml:"reviewer"`
 }
 
 // Config is brief's resolved configuration: where feature directories live,

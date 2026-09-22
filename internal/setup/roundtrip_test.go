@@ -199,6 +199,47 @@ func Test_init_then_uninstall_leaves_claude_md_byte_identical(t *testing.T) {
 	}
 }
 
+// Test_init_with_agents_then_uninstall_leaves_the_tree_as_before pins the
+// round trip end to end for --with-agents: against a repository with
+// nothing pre-existing, Init --with-agents then Uninstall reproduces the
+// exact pre-existing tree, plus exactly the empty feature root Init
+// created — the control (afterInit != before) proves this run actually
+// wrote something, and ".claude/skills/brief/" is gone entirely while
+// ".claude/skills/" and ".claude/" themselves — never brief's to remove —
+// survive empty, the same boundary a plain claude-code round trip already
+// pins.
+func Test_init_with_agents_then_uninstall_leaves_the_tree_as_before(t *testing.T) {
+	wd := t.TempDir()
+	before := snapshotTree(t, wd)
+
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+	require.NoError(t, err)
+
+	afterInit := snapshotTree(t, wd)
+	assert.NotEqual(t, before, afterInit, "init --with-agents must actually have written something")
+	assert.Contains(t, afterInit, filepath.Join(".claude", "skills", "brief", "agents", "planner.md"))
+
+	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+	require.NoError(t, err)
+
+	after := snapshotTree(t, wd)
+
+	featureRootRel := filepath.Join("docs", "specifications")
+
+	expected := map[string]treeEntry{}
+	maps.Copy(expected, before)
+	expected["docs"] = treeEntry{isDir: true}
+	expected[featureRootRel] = treeEntry{isDir: true}
+	expected[".claude"] = treeEntry{isDir: true}
+	expected[filepath.Join(".claude", "skills")] = treeEntry{isDir: true}
+
+	assert.Equal(t, expected, after)
+
+	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
+	assert.True(t, os.IsNotExist(statErr), "the plugin directory, agents/ included, must be fully removed")
+}
+
 // Test_init_then_uninstall_deletes_a_pre_existing_empty_CLAUDE_md pins the
 // accepted exception R6's own "brief created it" signal is exposed to: an
 // emptied CLAUDE.md is deleted on uninstall, and that rule cannot tell a

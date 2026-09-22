@@ -106,6 +106,29 @@ func Test_claude_code_plugin_layout_lists_every_file_and_drops_only_the_hook_wit
 	assert.Equal(t, artifact.KindClaudeHooks, withHook[3].Kind)
 }
 
+// Test_claude_code_lists_three_agent_files pins Agents' own contract (R4,
+// R7): three files under host.PluginDir + "/agents/", planner then
+// implementer then reviewer, each carrying its own artifact.Kind and never
+// Hook true — the same file list --with-agents plans and, reversed,
+// Uninstall always plans for removal.
+func Test_claude_code_lists_three_agent_files(t *testing.T) {
+	h := newClaudeCode(t)
+
+	agents := h.Agents()
+
+	require.Len(t, agents, 3)
+	assert.Equal(t, host.PluginDir+"/agents/planner.md", agents[0].RelPath)
+	assert.Equal(t, artifact.KindAgentPlanner, agents[0].Kind)
+	assert.Equal(t, host.PluginDir+"/agents/implementer.md", agents[1].RelPath)
+	assert.Equal(t, artifact.KindAgentImplementer, agents[1].Kind)
+	assert.Equal(t, host.PluginDir+"/agents/reviewer.md", agents[2].RelPath)
+	assert.Equal(t, artifact.KindAgentReviewer, agents[2].Kind)
+
+	for _, a := range agents {
+		assert.False(t, a.Hook)
+	}
+}
+
 // Test_claude_code_lists_its_instruction_files_in_priority_order pins
 // InstructionFiles's own contract (R5): the repository-root CLAUDE.md
 // first, ".claude/CLAUDE.md" second — the order setup's own location rule

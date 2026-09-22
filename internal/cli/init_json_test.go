@@ -32,7 +32,7 @@ func Test_init_json_is_one_exact_document(t *testing.T) {
 	want := `{"schema":1,"command":"init","ok":true,"exit_code":0,"host":"none","dry_run":false,"created":[` +
 		jsonString(t, featureRoot) + `,` + jsonString(t, configPath) + `],"modified":[],"artifacts":[` +
 		`{"kind":"config","path":` + jsonString(t, configPath) + `,"action":"created","detail":null},` +
-		`{"kind":"feature-root","path":` + jsonString(t, featureRoot) + `,"action":"created","detail":null}]}` + "\n"
+		`{"kind":"feature-root","path":` + jsonString(t, featureRoot) + `,"action":"created","detail":null}],"roles_to_add":[]}` + "\n"
 
 	assert.Equal(t, want, stdout.String())
 }
@@ -85,6 +85,41 @@ func Test_init_json_for_claude_code_carries_plugin_and_hook_kinds(t *testing.T) 
 	assert.Equal(t, "plugin", kindByPath[finish])
 	assert.Equal(t, "hook", kindByPath[hooks])
 	assert.Equal(t, "snippet", kindByPath[claudeMD])
+}
+
+// Test_init_with_agents_json_reports_agent_rows_and_roles_to_add pins
+// R11's JSON vocabulary for --with-agents: "kind":"agent" for the three
+// role-agent files, and "roles_to_add" empty — this run authored the
+// bindings itself, so there is nothing left to add — with stderr staying
+// empty exactly as every other --json success does.
+func Test_init_with_agents_json_reports_agent_rows_and_roles_to_add(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents", "--json"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	var doc struct {
+		RolesToAdd []string `json:"roles_to_add"`
+		Artifacts  []struct {
+			Kind string `json:"kind"`
+			Path string `json:"path"`
+		} `json:"artifacts"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+
+	assert.Equal(t, []string{}, doc.RolesToAdd)
+
+	base := filepath.Join(wd, ".claude", "skills", "brief", "agents")
+	kindByPath := map[string]string{}
+	for _, a := range doc.Artifacts {
+		kindByPath[a.Path] = a.Kind
+	}
+	assert.Equal(t, "agent", kindByPath[filepath.Join(base, "planner.md")])
+	assert.Equal(t, "agent", kindByPath[filepath.Join(base, "implementer.md")])
+	assert.Equal(t, "agent", kindByPath[filepath.Join(base, "reviewer.md")])
 }
 
 // Test_init_dry_run_json_reports_empty_created_and_modified pins R9's JSON

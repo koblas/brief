@@ -2,12 +2,26 @@
 // applies the ".brief.yaml" config file, the feature root a repository
 // needs before brief's other commands work in it, and, for
 // HostClaudeCode, that host's own skills-directory plugin files
-// (internal/platform/host.Host.Plugin) and the CLAUDE.md instruction block
-// (R5); Uninstall plans and applies removing everything Init installed.
-// Both plan every artifact and decide every refusal before the first byte
-// is written or removed, so a DryRun request computes exactly what a real
-// run would and a refusal never leaves a partial tree behind on its own
-// account.
+// (internal/platform/host.Host.Plugin), under WithAgents its three
+// role-agent files (host.Host.Agents, R7), and the CLAUDE.md instruction
+// block (R5); Uninstall plans and applies removing everything Init
+// installed, agent files included regardless of any flag Init was run
+// with. Both plan every artifact and decide every refusal before the
+// first byte is written or removed, so a DryRun request computes exactly
+// what a real run would and a refusal never leaves a partial tree behind
+// on its own account.
+//
+// WithAgents binds every role only in a config this same Init call
+// creates or, under --force, rewrites — R7's "an existing config is never
+// edited": a kept or already-current config is never rewritten to add
+// bindings, however unbound its own roles are. Result.RolesToAdd is the
+// hint instead: a "roles:" header plus one "  <role>: brief:<role>" line
+// per role the config still leaves unbound, empty whenever WithAgents did
+// write the bindings itself or there is nothing left to add. ConfigFile
+// and ConfigFileWithRoles (internal/platform/artifact) are two recognized
+// bodies for one artifact.KindConfig; Render still returns the plain one,
+// so only this package's own configDigests-derived Recognize check, and
+// planConfig's decodeCurrentConfig, ever have to tell them apart.
 //
 // The CLAUDE.md block lives at whichever of internal/platform/host's own
 // InstructionFiles candidates already holds a recognized block, else the

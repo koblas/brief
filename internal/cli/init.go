@@ -18,29 +18,39 @@ var initLong = `Installs brief's own config, feature root and, for --host claude
 Claude Code skills-directory plugin under ".claude/skills/brief/": a
 plugin manifest, "/brief:start" and "/brief:finish" skills, and a
 PostToolUse hook running "brief check --hook claude-code" — omit it with
---no-hook. Writes ".brief.yaml" with every key present but commented out,
-documenting each setting in place, and creates the configured feature
-directory. Re-running converges: a valid existing config, and any plugin
+--no-hook. --with-agents additionally installs three role agents (planner,
+implementer, reviewer) under the plugin's own "agents/" directory; it
+requires --host claude-code, and binds every role to them in ".brief.yaml"
+only when this same run creates that file — an existing config is never
+edited, and stderr instead lists the "roles:" lines to add by hand for
+any role still unbound. Writes ".brief.yaml" with every key present but
+commented out, documenting each setting in place (live under
+--with-agents only for "roles:" and its three children, when this run
+creates the file), and creates the configured feature directory.
+Re-running converges: a valid existing config, and any plugin or agent
 file whose bytes are unedited, is kept as-is, and every artifact already
 installed reports "unchanged". An unparseable or invalid existing config
-refuses, naming the fix; --force rewrites it from defaults — it never
-rewrites an edited plugin file. --dry-run prints the same report and
-writes nothing.
+refuses, naming the fix; --force rewrites it from defaults — the bound
+variant under --with-agents — and never rewrites an edited plugin or
+agent file. --dry-run prints the same report and writes nothing.
 
-` + jsonFieldsParagraph("host", "dry_run", "created", "modified", "artifacts")
+` + jsonFieldsParagraph("host", "dry_run", "created", "modified", "artifacts", "roles_to_add")
 
 // initDocument is init's --json success document: the common header first,
 // then the request's own host and dry_run, every path this call created or
 // modified (absolute, never nil, both empty under --dry-run), then one row
-// per artifact in setup.Result's own order — config, feature root.
+// per artifact in setup.Result's own order — config, feature root — and
+// finally roles_to_add, always present, empty unless --with-agents left
+// roles unbound in a config this run did not write.
 type initDocument struct {
 	jsonHeader
 
-	Host      string         `json:"host"`
-	DryRun    bool           `json:"dry_run"`
-	Created   []string       `json:"created"`
-	Modified  []string       `json:"modified"`
-	Artifacts []artifactJSON `json:"artifacts"`
+	Host       string         `json:"host"`
+	DryRun     bool           `json:"dry_run"`
+	Created    []string       `json:"created"`
+	Modified   []string       `json:"modified"`
+	Artifacts  []artifactJSON `json:"artifacts"`
+	RolesToAdd []string       `json:"roles_to_add"`
 }
 
 // initNextAction renders init's own stderr next-action line, minus the
@@ -89,8 +99,11 @@ func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, ro
 // [--with-agents] [--dry-run] [--force] [--json]"; rest is its positional
 // arguments, flags already parsed away and must be empty. host is "" when
 // --host was not given, defaulted to setup.HostNone here — S09 replaces
-// this default with host detection.
-func runInit(ctx context.Context, wd string, rest []string, host string, noHook, dryRun, force bool, out reporter) error {
+// this default with host detection; --with-agents is refused
+// (setup.ErrAgentsNeedHost) against whatever host actually resolves to, so
+// a bare "init --with-agents" is a usage error today and may not be once
+// S09 lands.
+func runInit(ctx context.Context, wd string, rest []string, host string, noHook, withAgents, dryRun, force bool, out reporter) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief init: too many arguments; run '%s'", initInvocation))
 	}
@@ -101,8 +114,12 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 
 	srv := setup.NewServer()
 
-	res, err := srv.Init(ctx, wd, setup.InitRequest{Host: host, NoHook: noHook, DryRun: dryRun, Force: force})
+	res, err := srv.Init(ctx, wd, setup.InitRequest{Host: host, NoHook: noHook, WithAgents: withAgents, DryRun: dryRun, Force: force})
 	if err != nil {
+		if errors.Is(err, setup.ErrAgentsNeedHost) {
+			return out.usageError(fmt.Sprintf("brief init: --with-agents requires --host claude-code; run '%s --with-agents'", initInvocation))
+		}
+
 		if errors.Is(err, setup.ErrUnknownHost) {
 			return out.usageError(fmt.Sprintf("brief init: unknown host %q; expected one of: %s; run '%s'", host, strings.Join(setup.Hosts(), ", "), initInvocation))
 		}
@@ -118,6 +135,7 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 			Created:    res.Created,
 			Modified:   res.Modified,
 			Artifacts:  artifactsJSON(res.Artifacts),
+			RolesToAdd: res.RolesToAdd,
 		}
 
 		return out.document(doc)
@@ -127,7 +145,28 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 		fmt.Fprintln(out.stdout, artifactRow(wd, a))
 	}
 
+	if len(res.RolesToAdd) > 0 {
+		fmt.Fprintf(out.stderr, "brief init: %s was not edited; to bind brief's agents, add these lines to it:\n", displayPath(wd, configArtifactPath(res.Artifacts)))
+
+		for _, line := range res.RolesToAdd {
+			fmt.Fprintln(out.stderr, line)
+		}
+	}
+
 	fmt.Fprintf(out.stderr, "brief init: %s\n", initNextAction(res.Host, res.DryRun, res.Artifacts, wd, res.Root))
 
 	return nil
+}
+
+// configArtifactPath returns artifacts' own setup.KindConfig entry's Path
+// — Init's own Result always plans the config file first — or "" were it
+// somehow absent.
+func configArtifactPath(artifacts []setup.Artifact) string {
+	for _, a := range artifacts {
+		if a.Kind == setup.KindConfig {
+			return a.Path
+		}
+	}
+
+	return ""
 }

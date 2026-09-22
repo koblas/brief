@@ -320,6 +320,99 @@ func Test_init_merging_only_the_snippet_reports_installed_not_nothing_changed(t 
 	assert.Equal(t, artifact.SnippetBlock("docs/specifications"), body)
 }
 
+// Test_init_with_agents_installs_three_agents_and_binds_roles pins the
+// fresh-repository happy path for --with-agents: ten rows in order, the
+// three agents created under "agents/", the config's own bytes equal
+// artifact.ConfigFileWithRoles(), and the ordinary "installed for
+// claude-code" next-action line — no roles hint, since this run authored
+// the bindings itself.
+func Test_init_with_agents_installs_three_agents_and_binds_roles(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, cli.ExitCode(err))
+	assert.Equal(t, ""+
+		"created .brief.yaml\n"+
+		"created docs/specifications/\n"+
+		"created .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"created .claude/skills/brief/skills/start/SKILL.md\n"+
+		"created .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"created .claude/skills/brief/hooks/hooks.json\n"+
+		"created .claude/skills/brief/agents/planner.md\n"+
+		"created .claude/skills/brief/agents/implementer.md\n"+
+		"created .claude/skills/brief/agents/reviewer.md\n"+
+		"created CLAUDE.md\n", stdout.String())
+	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
+
+	body, readErr := os.ReadFile(filepath.Join(wd, ".brief.yaml"))
+	require.NoError(t, readErr)
+	assert.Equal(t, artifact.ConfigFileWithRoles(), body)
+}
+
+// Test_init_with_agents_over_an_existing_config_prints_the_roles_lines_to_add
+// pins R7's stderr hint, exact copy: the config is never edited, and the
+// hint block — "was not edited" line, then "roles:" and the three bare
+// "  <role>: brief:<role>" lines, no "brief init: " prefix on those since
+// they are meant to be pasted verbatim into .brief.yaml — lands before the
+// ordinary next-action line.
+func Test_init_with_agents_over_an_existing_config_prints_the_roles_lines_to_add(t *testing.T) {
+	wd := t.TempDir()
+	configPath := filepath.Join(wd, ".brief.yaml")
+	original := []byte("feature-directory: specs\n")
+	require.NoError(t, os.WriteFile(configPath, original, 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"brief init: .brief.yaml was not edited; to bind brief's agents, add these lines to it:\n"+
+		"roles:\n"+
+		"  planner: brief:planner\n"+
+		"  implementer: brief:implementer\n"+
+		"  reviewer: brief:reviewer\n"+
+		"brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
+
+	body, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, original, body)
+}
+
+// Test_init_with_agents_and_host_none_is_a_usage_error pins the
+// flag-combination rule (checked on the resolved host): both an explicit
+// "--host none" and a bare "--with-agents" (today's default host,
+// resolved to none until S09's detection) refuse the same way, exit 2,
+// tree unchanged.
+func Test_init_with_agents_and_host_none_is_a_usage_error(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "explicit host none", args: []string{"init", "--host", "none", "--with-agents"}},
+		{name: "bare --with-agents", args: []string{"init", "--with-agents"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, c.args, nil, &stdout, &stderr)
+
+			assert.Equal(t, 2, cli.ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, `brief init: --with-agents requires --host claude-code; run 'brief init --host claude-code --with-agents'`+"\n", stderr.String())
+
+			entries, readErr := os.ReadDir(wd)
+			require.NoError(t, readErr)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
 // Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file pins
 // the "not a regular file" row at the CLI boundary: a directory already
 // occupying the manifest's own path is kept, never followed, never

@@ -15,7 +15,11 @@ import (
 // UninstallRequest is Uninstall's own input: Host selects which agent-host
 // integration's own artifacts to plan for removal (Hosts), DryRun computes
 // the same plan without removing anything, and Force removes an edited
-// artifact instead of keeping it.
+// artifact instead of keeping it. Unlike InitRequest, UninstallRequest
+// carries no WithAgents of its own: for HostClaudeCode, the three
+// role-agent files (host.Host.Agents) are always planned for removal,
+// whether or not the install that put them there — or this Uninstall call
+// itself — ever named --with-agents.
 type UninstallRequest struct {
 	Host   string
 	DryRun bool
@@ -23,32 +27,35 @@ type UninstallRequest struct {
 }
 
 // Uninstall plans then, unless req.DryRun, applies the removal of
-// everything Init installed: for req.Host == HostClaudeCode, that host's
-// own plugin files, then the config file; for HostNone, the config file
+// everything Init installed: for req.Host == HostClaudeCode, the CLAUDE.md
+// block, that host's own agent files (host.Host.Agents, always planned)
+// and plugin files, then the config file; for HostNone, the config file
 // alone. Recognition is digest-only (artifact.Recognize) — Uninstall never
-// decodes the config, or a plugin file, the way Init does, so it has no
-// refusal class of its own; an invalid, unparseable, or locally edited
-// file is simply "edited locally", the same as any other byte mismatch.
-// No config found anywhere (config.Locate's own walk-up) and no plugin
-// file found either means zero artifacts, reported by cli as "nothing
-// installed".
+// decodes the config, or a plugin or agent file, the way Init does, so it
+// has no refusal class of its own; an invalid, unparseable, or locally
+// edited file is simply "edited locally", the same as any other byte
+// mismatch. No config found anywhere (config.Locate's own walk-up) and no
+// plugin or agent file found either means zero artifacts, reported by cli
+// as "nothing installed".
 //
 // Artifacts lists, for HostClaudeCode, the CLAUDE.md block first
-// (planSnippetRemoval), then a claude-code host's own files — hook wiring,
-// finish skill, start skill, manifest, the reverse of the order Init
-// installs them in — ahead of the config file, always last: the config,
-// this repository's opt-in marker, is always removed last, so a failure
-// partway through never removes it while something else still is. A
-// plugin file Lstat finds missing (never installed, or a --no-hook init's
-// own hook file) plans no row and no error; a CLAUDE.md candidate found
-// but carrying no recognized block plans no row either. Apply strips or
-// deletes the CLAUDE.md block first, then removes every ActionRemoved
-// plugin artifact in that same order, then, for HostClaudeCode, prunes the
-// plugin's own now-empty directories deepest-first, stopping at
-// host.PluginDir — never above it, and never touching a directory still
-// holding a file brief did not write. A failure after at least one
-// artifact was already removed is wrapped in ErrPartialWrite,
-// distinguishing a partial uninstall from one that changed nothing.
+// (planSnippetRemoval), then the three agent files reversed (reviewer,
+// implementer, planner), then a claude-code host's own plugin files — hook
+// wiring, finish skill, start skill, manifest, the reverse of the order
+// Init installs them in — ahead of the config file, always last: the
+// config, this repository's opt-in marker, is always removed last, so a
+// failure partway through never removes it while something else still is.
+// A plugin or agent file Lstat finds missing (never installed, or a
+// --no-hook init's own hook file) plans no row and no error; a CLAUDE.md
+// candidate found but carrying no recognized block plans no row either.
+// Apply strips or deletes the CLAUDE.md block first, then removes every
+// ActionRemoved artifact in that same order, then, for HostClaudeCode,
+// prunes the plugin's own now-empty directories deepest-first ("agents/"
+// included), stopping at host.PluginDir — never above it, and never
+// touching a directory still holding a file brief did not write. A
+// failure after at least one artifact was already removed is wrapped in
+// ErrPartialWrite, distinguishing a partial uninstall from one that
+// changed nothing.
 func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (Result, error) {
 	if !validHost(req.Host) {
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
@@ -92,6 +99,19 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 		if present {
 			res.Artifacts = append(res.Artifacts, snippetArt.Artifact)
 			hasSnippet = true
+		}
+
+		for _, f := range slices.Backward(h.Agents()) {
+			path := filepath.Join(root, filepath.FromSlash(f.RelPath))
+
+			art, present, err := planPluginRemoval(path, KindAgent, f.Kind, req.Force)
+			if err != nil {
+				return Result{}, err
+			}
+
+			if present {
+				res.Artifacts = append(res.Artifacts, art)
+			}
 		}
 
 		files := h.Plugin(true)
@@ -180,6 +200,7 @@ var pluginPruneDirs = []string{
 	filepath.Join(host.PluginDir, "skills"),
 	filepath.Join(host.PluginDir, "hooks"),
 	filepath.Join(host.PluginDir, ".claude-plugin"),
+	filepath.Join(host.PluginDir, "agents"),
 	host.PluginDir,
 }
 

@@ -25,6 +25,10 @@ feature root (accessible, not counted), environment, host integration — setup 
   invalid config, not only `doctor`: caps > 0; headings non-empty and distinct; step-file
   pattern has exactly one `%d`/`%0Nd` verb; `state-file` ≠ `specification-file`; no path
   separator in file-name values. Refusal names `.brief.yaml`, the key and its value, and a fix.
+  **Amended during SCENARIO-08 planning**: `roles.*` (`planner`, `implementer`, `reviewer`) and
+  `optional-conventions` are free-form and carry no validation rule at load — any string,
+  including empty (unbound); `doctor`'s `roles` row (S10) is where an unbound position is
+  reported, not a load-time refusal.
 - R2: **`init` always writes a commented `.brief.yaml`** — every key present but commented out,
   documenting each setting in place. It infers nothing beyond whether the feature root exists.
   The file is the repository's opt-in marker (the hook is silent without one).
@@ -80,6 +84,22 @@ feature root (accessible, not counted), environment, host integration — setup 
   are written only into a `.brief.yaml` that `init` creates in the same run; an existing config
   is never edited — stderr says which lines to add. An existing `agents/<role>.md` inside the
   plugin that matches no known output is the adopter's customisation: `kept`.
+
+  **Amended during SCENARIO-08 planning**: the hint (stderr, before the next-action line) lists
+  only roles still *unbound* in the kept or unchanged config — `brief init: <rel .brief.yaml> was
+  not edited; to bind brief's agents, add these lines to it:` then `roles:` and one
+  `  <role>: brief:<role>` line per unbound role, no lines at all when every role is already
+  bound to anything (brief's own agent or the adopter's own — R15's "never shadows an existing
+  agent"). `--force --with-agents` rewrites the config to the bound variant
+  (`artifact.ConfigFileWithRoles`); "unchanged" under `--force` means the existing bytes already
+  equal that bound variant exactly, not merely any recognized render. `--with-agents` requires the
+  *resolved* host to be `claude-code`; otherwise a usage error, exit 2: `brief init: --with-agents
+  requires --host claude-code; run 'brief init --host claude-code --with-agents'`. Without
+  `--with-agents`, no agent row is planned at all and an already-installed `agents/` directory is
+  left completely untouched — the same "no flag, no plan, no row" rule `--no-hook` already
+  follows. `uninstall` carries no `--with-agents` flag of its own: it always plans the three
+  agent files for removal, independent of whether the install that wrote them — or this
+  `uninstall` call — ever named the flag.
 - R8: **Host selection.** `--host claude-code|none`. Default: `claude-code` when the repo has
   `.claude/` or `CLAUDE.md`, or `~/.claude` exists; otherwise config + root only, with stderr
   `brief init: no agent host detected; run 'brief init --host claude-code' to install
@@ -106,6 +126,9 @@ feature root (accessible, not counted), environment, host integration — setup 
   detail}]}`, `kind` ∈ config | feature-root | plugin | hook | snippet | agent; uninstall adds
   `removed:[abs]`. init and uninstall carry `writesFilesAnnotation`. Nothing installed on
   uninstall: empty stdout, `brief uninstall: nothing installed for claude-code`, exit 0.
+  **Amended during SCENARIO-08 planning**: init's JSON document gains `roles_to_add:[<lines>]`,
+  always present (`[]` when nothing to add) — the same lines the stderr hint prints, one array
+  element per line; stderr stays empty under `--json` exactly as every other success does.
 - R12: **`check --hook <host>`** reads the host hook payload on stdin, takes the path from
   `tool_input.file_path`, and checks only the feature containing it. No `.brief.yaml` found, or
   a path outside the feature root: silent, exit 0. **Amended during SCENARIO-05 planning** (verified
@@ -274,6 +297,6 @@ Scenario: SCENARIO-10 doctor reports Claude Code integration health
 - [x] SCENARIO-05: check --hook scopes a Claude Code hook call to the edited feature
 - [x] SCENARIO-06: init installs the Claude Code plugin
 - [x] SCENARIO-07: init adds the CLAUDE.md instruction block
-- [ ] SCENARIO-08: --with-agents scaffolds three role agents and binds them
+- [x] SCENARIO-08: --with-agents scaffolds three role agents and binds them
 - [ ] SCENARIO-09: --print, host detection, and unwritable targets
 - [ ] SCENARIO-10: doctor reports Claude Code integration health
