@@ -99,3 +99,13 @@ feature's own subdirectory, already did).
 - `scaffold.findStepFile`'s `ReadDir`-failure branch has no deterministic test seam in
   `scaffold` (unlike `assemble`'s `SetReadDirForTest`) — fixed but unverified by mutation —
   unowned.
+- Final product-vision (SHIP) MINORs, unowned: empty feature name's fix hint reads
+  `run 'brief new feature ' to create it` (drop the create clause when the name is empty);
+  missing `STATE.md` fix says `make it readable and re-run` (should say create it); `start` on an
+  unreadable/non-directory feature leaks `assemble: open feature …: openat …` where `status`
+  gives a clean `path: detail; fix` line; frontmatter detail stutters
+  (`frontmatter does not parse: stepfile: parse frontmatter: yaml: …`).
+- Reviewer MINORs, unowned: `validFeatureArgument` (assemble) doc narrates Check/Start control
+  flow instead of its own contract; `newStartEmptyFeatureCase` doc gives the wrong reason for its
+  extraction (real reason: `maintidx`); scaffold doc comments still narrate `assemble` internals;
+  commit f2d0db4 lacks the Co-Authored-By trailer.
