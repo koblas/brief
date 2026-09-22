@@ -24,8 +24,8 @@ var ErrUsage = errors.New("usage error")
 func init() {
 	// Root help and every "expected one of:" list share one order:
 	// registration order, as newRootCommand's root.AddCommand calls lay it
-	// out — new, start, finish, status, check, init, doctor — rather than cobra's
-	// default alphabetical sort. EnableCommandSorting is a cobra package global:
+	// out — new, start, finish, status, check, init, doctor, uninstall —
+	// rather than cobra's default alphabetical sort. EnableCommandSorting is a cobra package global:
 	// set once here, never per Run or per call, since a per-call write
 	// would race parallel tests' reads.
 	cobra.EnableCommandSorting = false
@@ -289,6 +289,9 @@ const dryRunFlagUsage = "print the plan without writing anything"
 // forceFlagUsage is init's --force flag's usage string.
 const forceFlagUsage = "rewrite an existing .brief.yaml from defaults"
 
+// uninstallDryRunFlagUsage is uninstall's --dry-run flag's usage string.
+const uninstallDryRunFlagUsage = "print the plan without removing anything"
+
 // Run parses args, dispatches to the named command, and renders every
 // user-facing line to stdout or stderr itself. wd is the working directory
 // used to resolve configuration and to relativize any printed path — Run
@@ -375,9 +378,9 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 //
 // Commands are added in the order they should list in root help and in
 // every "expected one of:" message — new, start, finish, status, check,
-// init, doctor — not alphabetically: see this package's init, which turns
-// cobra's default sort off, and expectedCommandList, which reads
-// root.Commands() in that same order. "completion" registers last: it is
+// init, doctor, uninstall — not alphabetically: see this package's init,
+// which turns cobra's default sort off, and expectedCommandList, which
+// reads root.Commands() in that same order. "completion" registers last: it is
 // Hidden (enabled and dispatchable, but excluded from
 // expectedCommandList, which filters on IsAvailableCommand alone) and
 // carries listedInHelpAnnotation instead, so it still gets a root-help
@@ -473,6 +476,22 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		})
 	initCmd.Annotations[writesFilesAnnotation] = "true"
 
+	uninstallCmd := leafCommand("uninstall [--host <name>] [--dry-run] [--force] [--json]", "remove what init installed", uninstallInvocation, uninstallLong,
+		func(fs *pflag.FlagSet) {
+			fs.String("host", "", uninstallHostFlagUsage)
+			fs.Bool("dry-run", false, uninstallDryRunFlagUsage)
+			fs.Bool("force", false, uninstallForceFlagUsage)
+			addJSONFlag(fs)
+		},
+		func(cmd *cobra.Command, args []string) error {
+			host, _ := cmd.Flags().GetString("host")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			force, _ := cmd.Flags().GetBool("force")
+
+			return runUninstall(cmd.Context(), wd, args, host, dryRun, force, out.forCommand(cmd))
+		})
+	uninstallCmd.Annotations[writesFilesAnnotation] = "true"
+
 	root.AddCommand(
 		newCmd,
 		leafCommand("start [--json] <feature>", "print the next open step's context", startInvocation, startLong,
@@ -494,6 +513,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			func(cmd *cobra.Command, args []string) error {
 				return runDoctor(cmd.Context(), wd, args, readBuildInfo, out.forCommand(cmd), extraDoctorOpts...)
 			}),
+		uninstallCmd,
 	)
 
 	completionCmd := leafCommand(

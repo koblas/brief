@@ -308,7 +308,7 @@ func Test_json_after_double_dash_is_a_positional(t *testing.T) {
 		require.ErrorIs(t, err, cli.ErrUsage)
 		assert.Equal(t, 2, cli.ExitCode(err))
 		assert.Empty(t, stdout.String())
-		assert.Equal(t, `brief: unknown command "--"; expected one of: new, start, finish, status, check, init, doctor`, oneLine(t, &stderr))
+		assert.Equal(t, `brief: unknown command "--"; expected one of: new, start, finish, status, check, init, doctor, uninstall`, oneLine(t, &stderr))
 	})
 }
 

@@ -60,8 +60,8 @@ func Test_prints_start_help_as_usage_line_prose_and_flag_table(t *testing.T) {
 // rootHelp is root's exact stdout for "brief --help", "brief -h" and
 // "brief help": the one-sentence description, one row per available
 // command (new's two children in new's place, in registration order),
-// finish's and init's own overlong rows each wrapped to their own line,
-// and the two trailers —
+// finish's, init's and uninstall's own overlong rows each wrapped to their
+// own line, and the two trailers —
 // "Run 'brief <command> --help' for details." then, as the render's last
 // line, "Run 'brief --version' to print the installed version." (R7).
 const rootHelp = `brief manages feature specifications as files in your repository.
@@ -77,6 +77,8 @@ Usage:
   brief init [--host <name>] [--dry-run] [--force] [--json]
                                    install brief's config and agent-host integration
   brief doctor [--json]            check brief's setup: config, feature root, host integration
+  brief uninstall [--host <name>] [--dry-run] [--force] [--json]
+                                   remove what init installed
   brief completion <bash|zsh|fish|powershell>
                                    print a shell completion script
 
@@ -232,6 +234,7 @@ func Test_every_command_help_has_a_usage_line_and_a_flag_table(t *testing.T) {
 		{name: "check", args: []string{"check", "--help"}, path: "brief check"},
 		{name: "finish", args: []string{"finish", "--help"}, path: "brief finish"},
 		{name: "doctor", args: []string{"doctor", "--help"}, path: "brief doctor"},
+		{name: "uninstall", args: []string{"uninstall", "--help"}, path: "brief uninstall"},
 		{name: "completion", args: []string{"completion", "--help"}, path: "brief completion"},
 	}
 
@@ -274,6 +277,7 @@ func Test_help_topic_prints_the_same_bytes_as_the_command_help_flag(t *testing.T
 		{name: "check", path: []string{"check"}},
 		{name: "finish", path: []string{"finish"}},
 		{name: "doctor", path: []string{"doctor"}},
+		{name: "uninstall", path: []string{"uninstall"}},
 		{name: "completion", path: []string{"completion"}},
 	}
 
@@ -332,27 +336,27 @@ func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) 
 		{
 			name:   "unknown top-level topic",
 			args:   []string{"help", "bogus"},
-			stderr: "brief help: unknown command \"bogus\"; expected one of: new, start, finish, status, check, init, doctor\n",
+			stderr: "brief help: unknown command \"bogus\"; expected one of: new, start, finish, status, check, init, doctor, uninstall\n",
 		},
 		{
 			name:   "resolved command with an unresolved trailing word",
 			args:   []string{"help", "new", "bogus"},
-			stderr: "brief help: unknown command \"new bogus\"; expected one of: new, start, finish, status, check, init, doctor\n",
+			stderr: "brief help: unknown command \"new bogus\"; expected one of: new, start, finish, status, check, init, doctor, uninstall\n",
 		},
 		{
 			name:   "resolved command with an extra positional",
 			args:   []string{"help", "start", "extra"},
-			stderr: "brief help: unknown command \"start extra\"; expected one of: new, start, finish, status, check, init, doctor\n",
+			stderr: "brief help: unknown command \"start extra\"; expected one of: new, start, finish, status, check, init, doctor, uninstall\n",
 		},
 		{
 			name:   "resolved command with a trailing flag",
 			args:   []string{"help", "start", "--bogus"},
-			stderr: "brief help: unknown command \"start --bogus\"; expected one of: new, start, finish, status, check, init, doctor\n",
+			stderr: "brief help: unknown command \"start --bogus\"; expected one of: new, start, finish, status, check, init, doctor, uninstall\n",
 		},
 		{
 			name:   "hidden command as topic",
 			args:   []string{"help", "help"},
-			stderr: "brief help: unknown command \"help\"; expected one of: new, start, finish, status, check, init, doctor\n",
+			stderr: "brief help: unknown command \"help\"; expected one of: new, start, finish, status, check, init, doctor, uninstall\n",
 		},
 	}
 
@@ -569,6 +573,7 @@ func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 		{name: "check", args: []string{"check", "--help"}},
 		{name: "init", args: []string{"init", "--help"}},
 		{name: "doctor", args: []string{"doctor", "--help"}},
+		{name: "uninstall", args: []string{"uninstall", "--help"}},
 		{name: "completion", args: []string{"completion", "--help"}},
 		{name: "help", args: []string{"help", "-h"}},
 	}
@@ -790,6 +795,19 @@ func Test_every_command_help_names_its_json_documents_top_level_fields(t *testin
 				wd := t.TempDir()
 
 				return runJSONAndHelp(t, wd, []string{"init", "--host", "none", "--json"}, []string{"init", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
+			name: "uninstall",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := t.TempDir()
+				var initStdout, initStderr bytes.Buffer
+				require.NoError(t, cli.Run(t.Context(), wd, []string{"init", "--host", "none"}, nil, &initStdout, &initStderr))
+
+				return runJSONAndHelp(t, wd, []string{"uninstall", "--host", "none", "--json"}, []string{"uninstall", "--help"})
 			},
 			wantExit: 0,
 		},

@@ -24,16 +24,6 @@ prints the same report and writes nothing.
 
 ` + jsonFieldsParagraph("host", "dry_run", "created", "modified", "artifacts")
 
-// initArtifactJSON is one initDocument "artifacts" row: kind, path, action
-// and detail exactly as setup.Artifact carries them, path always absolute,
-// detail null when empty.
-type initArtifactJSON struct {
-	Kind   string  `json:"kind"`
-	Path   string  `json:"path"`
-	Action string  `json:"action"`
-	Detail *string `json:"detail"`
-}
-
 // initDocument is init's --json success document: the common header first,
 // then the request's own host and dry_run, every path this call created or
 // modified (absolute, never nil, both empty under --dry-run), then one row
@@ -41,45 +31,11 @@ type initArtifactJSON struct {
 type initDocument struct {
 	jsonHeader
 
-	Host      string             `json:"host"`
-	DryRun    bool               `json:"dry_run"`
-	Created   []string           `json:"created"`
-	Modified  []string           `json:"modified"`
-	Artifacts []initArtifactJSON `json:"artifacts"`
-}
-
-// initArtifactsJSON maps artifacts to initDocument's own "artifacts" rows.
-func initArtifactsJSON(artifacts []setup.Artifact) []initArtifactJSON {
-	out := make([]initArtifactJSON, 0, len(artifacts))
-
-	for _, a := range artifacts {
-		var detail *string
-		if a.Detail != "" {
-			d := a.Detail
-			detail = &d
-		}
-
-		out = append(out, initArtifactJSON{Kind: string(a.Kind), Path: a.Path, Action: string(a.Action), Detail: detail})
-	}
-
-	return out
-}
-
-// initRow renders one artifact as R11's text-mode line, minus the trailing
-// newline: "<action> <relative path>[/][ (<detail>)]" — a trailing "/" on
-// the feature root's own row, never on the config file's.
-func initRow(wd string, a setup.Artifact) string {
-	path := displayPath(wd, a.Path)
-	if a.Kind == setup.KindFeatureRoot {
-		path += "/"
-	}
-
-	line := fmt.Sprintf("%s %s", a.Action, path)
-	if a.Detail != "" {
-		line += fmt.Sprintf(" (%s)", a.Detail)
-	}
-
-	return line
+	Host      string         `json:"host"`
+	DryRun    bool           `json:"dry_run"`
+	Created   []string       `json:"created"`
+	Modified  []string       `json:"modified"`
+	Artifacts []artifactJSON `json:"artifacts"`
 }
 
 // initNextAction renders init's own stderr next-action line, minus the
@@ -132,14 +88,14 @@ func runInit(ctx context.Context, wd string, rest []string, host string, dryRun,
 			DryRun:     res.DryRun,
 			Created:    res.Created,
 			Modified:   res.Modified,
-			Artifacts:  initArtifactsJSON(res.Artifacts),
+			Artifacts:  artifactsJSON(res.Artifacts),
 		}
 
 		return out.document(doc)
 	}
 
 	for _, a := range res.Artifacts {
-		fmt.Fprintln(out.stdout, initRow(wd, a))
+		fmt.Fprintln(out.stdout, artifactRow(wd, a))
 	}
 
 	fmt.Fprintf(out.stderr, "brief init: %s\n", initNextAction(res.DryRun, res.Artifacts))

@@ -248,7 +248,7 @@ Scenario: SCENARIO-10 doctor reports Claude Code integration health
 - [x] SCENARIO-01: Invalid config values are refused by every command
 - [x] SCENARIO-02: doctor reports config, feature-root and environment health
 - [x] SCENARIO-03: init writes the config and feature root, and converges
-- [ ] SCENARIO-04: uninstall removes the config init wrote and nothing else
+- [x] SCENARIO-04: uninstall removes the config init wrote and nothing else
 - [ ] SCENARIO-05: check --hook scopes a Claude Code hook call to the edited feature
 - [ ] SCENARIO-06: init installs the Claude Code plugin
 - [ ] SCENARIO-07: init adds the CLAUDE.md instruction block

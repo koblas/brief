@@ -1,84 +1,84 @@
 # init-doctor — current state
 
-Scenarios complete: SCENARIO-01, SCENARIO-02, SCENARIO-03. Last updated by SCENARIO-03.
+Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
 
 ## Binding decisions
 - `config.Locate` is the one walk-up; `config.Inspect` is the one all-violations decoder;
-  `Resolve` = `Locate` + first element of `Inspect`, reporting only `violations(cfg)[0]` in
-  `Config` field order (R14a). No second rule list or walk-up anywhere; `doctor`'s
-  config-values (every element) and `init`'s own refusal (first element) both build on this
-  (SCENARIO-01, SCENARIO-02, SCENARIO-03)
+  `Resolve` = `Locate` + first element of `Inspect`. No second rule list or walk-up anywhere:
+  `doctor`, `init` and `uninstall` all build on this (SCENARIO-01..03)
 - A value error is `*config.InvalidConfigError{Path, Err: *config.ValueError{Key, Value,
   Reason, Err}}`, recovered via `errors.AsType[*config.ValueError]` (SCENARIO-01, SCENARIO-03)
 - `internal/doctor` and `internal/setup` each import only `internal/platform/*` + stdlib —
-  never each other, `scaffold`, or one another as a feature package. Neither has a `Store`
-  port: both read/write the real filesystem directly. Both call `config.Locate` directly,
-  never `resolveRoot`/`Resolve`: `doctor` turns an invalid config into rows, `init` classifies
-  it itself via `Inspect` so `--force` can still rewrite it (SCENARIO-02, SCENARIO-03)
+  never each other, `scaffold`, or one another. Neither has a `Store` port. Both call
+  `config.Locate` directly, never `resolveRoot` — `doctor` turns an invalid config into rows,
+  `init` classifies it itself via `Inspect` so `--force` can rewrite it, `uninstall` never
+  decodes at all (below) (SCENARIO-02, SCENARIO-03)
 - Rendered artifacts and their digest registry live in `internal/platform/artifact`
-  (`ConfigFile()`, `Recognize(Kind, body) Origin`), not in `internal/setup` — S04 and S10 both
-  consume `Recognize`. Every render is deterministic (no version/date/map order); a changed
+  (`ConfigFile()`, `Recognize(Kind, body) Origin`). Every render is deterministic; a changed
   render appends a new digest, old ones stay (S10's "older release" origin) (SCENARIO-03)
-- `.brief.yaml` line shapes: `# ` (hash space) = doc prose, kept forever; `#<yaml>` (hash, no
-  space) = a commented value or structural line — stripping one leading `#` from every line
-  not beginning `# ` reproduces `ConfigFile()`'s own marshalled bytes exactly, decoding to
-  `config.Default()`. No live line at all (no `---`) (SCENARIO-03)
-- `init` plan-then-apply: every refusal (unknown host, invalid/unparseable config, feature
-  root not a directory) is decided before the first write. Apply order is feature root then
-  `.brief.yaml` (the opt-in marker lands last); a failure after the first write wraps
-  `setup.ErrPartialWrite`, which `filesChangedFor` checks alongside `scaffold.ErrPartialWrite`.
-  `DryRun` computes the identical plan and skips only the apply step (SCENARIO-03)
-- `--force` only ever rewrites `.brief.yaml` from `config.Default()` (`created`, detail
-  "rewritten from defaults") and never reads old config content to decide refusal — a read
-  failure (a directory at that path) is treated as "not current" and surfaces at the write
-  attempt instead. JSON `created` = written fresh; `modified` is reserved for S07's CLAUDE.md
-  merge. Existing valid config not byte-equal to the render → `kept`, detail "edited locally",
-  and its own `feature-directory` governs the feature root (SCENARIO-03)
-- Omitted `--host` means `setup.HostNone` ("none") in S03; accepted hosts come from
-  `setup.Hosts()`. S06 appends `claude-code`; S09 replaces the default with R8 detection
-  (SCENARIO-03)
-- `classifyRefusal` checks `*setup.RefusalError` **before** `*config.InvalidConfigError`:
-  `init`'s own refusal wraps an `*InvalidConfigError` as its `Err`, and the reverse order
-  would silently reclassify it, losing the `brief init --force` fix (SCENARIO-03)
-- Command order: `new, start, finish, status, check, init, doctor` (S04 appends `uninstall`)
-- No config anywhere is WARN (fix `brief init`), not ERROR — un-inited repos exit 0.
-  Environment seams enter via `doctor.With*` options and `run`'s trailing `...doctor.Option`
+- `init` plan-then-apply: every refusal decided before the first write; apply order is
+  feature root then `.brief.yaml`; a failure after the first write wraps `setup.ErrPartialWrite`.
+  `--force` only ever rewrites `.brief.yaml` from `config.Default()`, never reads old content to
+  decide refusal (SCENARIO-03)
+- `setup.(*Server).Uninstall(ctx, wd, UninstallRequest{Host, DryRun, Force}) (Result, error)`;
+  `Result` gained `Removed []string` (never nil; `Init` always empty). Artifacts is a list,
+  config last — S06/S07 prepend host artifacts ahead of it so a partial uninstall never removes
+  the repo's opt-in marker while something else still stands; S07's CLAUDE.md removal goes in
+  `Modified` (SCENARIO-04)
+- Uninstall recognition is digest-only (`artifact.Recognize`) — never decodes the config, no
+  refusal class of its own: unparseable/R1-invalid bytes are "edited locally", kept unless
+  `--force`. A non-regular `.brief.yaml` (`os.Lstat`: dir, symlink) is always "kept (not a
+  regular file)", even under `--force`; brief never calls `RemoveAll`. Zero artifacts ⇔
+  "nothing installed"; the feature root is never an Uninstall artifact (SCENARIO-04)
+- Removal order in `applyUninstall`: list order, config last; a failure after ≥1 artifact
+  already removed wraps `ErrPartialWrite`, a single-artifact failure does not (SCENARIO-04)
+- Root rule for both `init` and `uninstall` = `config.Locate`'s nearest: running in a
+  subdirectory operates on the ancestor's config (SCENARIO-03, SCENARIO-04)
+- `classifyRefusal` checks `*setup.RefusalError` before `*config.InvalidConfigError` (init's
+  own refusal wraps one as `Err`) (SCENARIO-03)
+- CLI: `internal/cli/artifact_render.go` holds the one row/JSON renderer both `init` and
+  `uninstall` use (`artifactRow`, `artifactsJSON`) — never forked. `initDocument` never gains
+  `removed`; `uninstallDocument` carries `host, dry_run, created, modified, removed, artifacts`
+  (`created`/`modified` always empty) (SCENARIO-04)
+- Command order: `new, start, finish, status, check, init, doctor, uninstall` — registration
+  order in `newRootCommand`, mirrored in every "expected one of:" list and root help
+  (SCENARIO-03, SCENARIO-04)
+- No config anywhere is WARN (fix `brief init`), not ERROR — un-inited repos exit 0
   (SCENARIO-02)
 
 ## Left unbuilt
-- Line number for a value error (no `yaml.Node` decode) — unowned (SCENARIO-01)
+- Line number for a value error, heading-shape rules, absolute-path/`..` check on
+  `feature-directory` — unowned (SCENARIO-01)
 - Validation of `roles.*` and `optional-conventions` — S08 (SCENARIO-01)
-- Heading-shape rules, absolute-path/`..` check on `feature-directory` — unowned (SCENARIO-01)
 - `host-plugin`, `host-hook`, `host-snippet`, `host-agents`, `roles` doctor rows, env-path's
-  ERROR arm, and `artifact.Recognize`'s `older` origin — S10 (SCENARIO-02, SCENARIO-03)
-- `uninstall` in the command list (inserted after `doctor`) and `setup.(*Server).Uninstall`,
-  `removed` action, JSON `removed` — S04
-- Host `claude-code`, kinds `plugin`/`hook`/`agent`, `--no-hook`, its own stderr copy — S06;
-  `snippet`, `merged` — S07; `--with-agents`, `roles` lines in the config — S08
+  ERROR arm, and `artifact.Recognize`'s `older` origin — S10; uninstall must remove on
+  `OriginOlder` too once it exists (SCENARIO-02, SCENARIO-03, SCENARIO-04)
+- Host `claude-code`, kinds `plugin`/`hook`/`agent`, `--no-hook`, ` for <host>` suffix on
+  uninstall's "nothing installed", empty-plugin-dir cleanup (must not sweep the feature root,
+  see Traps) — S06; `snippet`, `merged`, CLAUDE.md block removal into `Modified` — S07;
+  `--with-agents`, `roles` lines in the config — S08
+- Uninstall with omitted `--host` removing every host's integration — S06/S09 decide
 - `--print`, host detection, `--dry-run`/`--print` exclusivity, R10 writability pre-check — S09
 
 ## Traps
-- Any CLI test that writes a `.brief.yaml` to reach a scaffold/assemble seam is refused at
-  load if invalid — build config directly instead of routing setup through `cli.Run`
-  (SCENARIO-01)
-- `ValueError.Err` must wrap stepfile errors with `%w`; `%q`-formatting a `Value` containing a
-  backslash doubles it in `Error()` text (SCENARIO-01)
-- A `t.TempDir` has no `.git` above it — a "healthy" doctor fixture must create one or env-git
-  flips to WARN; `chmod 0o000`/`0o555` root-dir tests pass vacuously as root — skip under
-  `os.Geteuid() == 0`; `filepath.EvalSymlinks` on the found PATH binary must never leak into
-  `Check.Path` (SCENARIO-02)
-- Root-help rows (`doctor`'s, `init`'s) are exempt from the 80-column test (fixed-column
-  `cmdList`) — `initLong`/`doctorLong` prose is not (SCENARIO-02, SCENARIO-03)
+- A `t.TempDir` has no `.git` above it — a "healthy" doctor fixture must create one;
+  `chmod 0o000`/`0o555` tests pass vacuously as root — skip under `os.Geteuid() == 0`
+  (SCENARIO-02, SCENARIO-04)
 - `doctor.Report.Counts()`'s switch has no `default` arm — S10 adding a fifth `Severity`
-  without a matching `case` makes `counts.Error+Warn+OK+Skip != len(Checks)` uncaught
-  (SCENARIO-02)
-- `--force` over a config with a non-default `feature-directory` leaves the old feature root
-  in place and creates the default one; S04 must still never remove either (SCENARIO-03)
-- An all-comment `.brief.yaml` resolves via `Inspect`'s `io.EOF`-as-empty branch — any future
-  `artifact` render that emits one live line breaks the `Default()` round trip (SCENARIO-03)
+  without a matching `case` makes the count invariant uncaught (SCENARIO-02)
+- `--force init` over a non-default `feature-directory` leaves two feature roots on disk;
+  neither `init` nor `uninstall` (even `--force`) ever removes either (SCENARIO-03, SCENARIO-04)
 - `filesChangedFor` only returns non-nil for commands carrying `writesFilesAnnotation` —
   forgetting it on a new write command makes `files_changed` null instead of `false`/`true`
-  (SCENARIO-03)
+  (SCENARIO-03, SCENARIO-04)
+- R6's "directories left empty are removed" never reaches the feature root — its last
+  sentence carves it out; S06's own directory cleanup must not sweep it (SCENARIO-04)
+- A not-a-regular-file fixture for uninstall must use an **empty** directory: `os.Remove`
+  fails on a non-empty one regardless, so a dropped `Lstat` guard would still error and prove
+  nothing (SCENARIO-04)
+- `hostFlagUsage`/`forceFlagUsage` (init.go) are init-worded — uninstall owns its own
+  `uninstallHostFlagUsage`/`uninstallForceFlagUsage`; don't reuse init's copy on a future
+  host-aware command without checking the wording fits (SCENARIO-04)
 
 ## Open debts
 - `roles.*` / `optional-conventions` validation — S08 must close it, or the spec must say

@@ -52,8 +52,11 @@ const (
 	ActionUnchanged Action = "unchanged"
 	// ActionKept marks an existing, valid config file left as it was
 	// because its bytes differ from Init's own render — a repository
-	// owner's local edit.
+	// owner's local edit — or, for Uninstall, any artifact left on disk
+	// rather than removed.
 	ActionKept Action = "kept"
+	// ActionRemoved marks an artifact Uninstall deleted.
+	ActionRemoved Action = "removed"
 )
 
 // Server plans and applies brief's own install write path. It carries no
@@ -96,17 +99,22 @@ type Artifact struct {
 	Detail string
 }
 
-// Result is what Init returns: Host and DryRun echo the request, Artifacts
-// lists the config file then the feature root — the fixed order R11's
-// stdout rows render in — and Created/Modified name every path this call
-// actually wrote, absolute, in the order it wrote them. Neither slice is
-// ever nil, and both are empty under DryRun.
+// Result is what Init and Uninstall both return: Host and DryRun echo the
+// request, Artifacts lists what was found and what happened to it — for
+// Init, the config file then the feature root, the fixed order R11's
+// stdout rows render in; for Uninstall, any host artifacts (added by a
+// later scenario) then the config file last, so a partial uninstall never
+// removes the repository's opt-in marker before everything else. Created
+// and Modified name every path Init actually wrote, absolute, in the order
+// it wrote them; Removed names every path Uninstall actually deleted, in
+// removal order. No slice is ever nil; all three are empty under DryRun.
 type Result struct {
 	Host      string
 	DryRun    bool
 	Artifacts []Artifact
 	Created   []string
 	Modified  []string
+	Removed   []string
 }
 
 // Init plans then, unless req.DryRun, applies brief's own install: the
@@ -155,6 +163,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		Artifacts: []Artifact{configArt, featureArt},
 		Created:   []string{},
 		Modified:  []string{},
+		Removed:   []string{},
 	}
 
 	if req.DryRun {

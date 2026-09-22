@@ -1,0 +1,314 @@
+package setup_test
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/koblas/brief/internal/platform/artifact"
+	"github.com/koblas/brief/internal/setup"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// Test_uninstall_removes_an_unedited_config_and_keeps_the_feature_root pins
+// R6's ownership rule for the happy path: a config whose bytes still equal
+// this binary's own render is removed, reported ActionRemoved with an empty
+// Detail, and Result.Removed names its absolute path — while the feature
+// root Init created, and a file placed under it, survive untouched.
+func Test_uninstall_removes_an_unedited_config_and_keeps_the_feature_root(t *testing.T) {
+	wd := t.TempDir()
+	srv := setup.NewServer()
+
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
+	require.NoError(t, err)
+
+	featureRoot := filepath.Join(wd, "docs", "specifications")
+	marker := filepath.Join(featureRoot, "marker.txt")
+	require.NoError(t, os.WriteFile(marker, []byte("keep me"), 0o600))
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
+
+	require.NoError(t, err)
+	configPath := filepath.Join(wd, ".brief.yaml")
+
+	require.Len(t, res.Artifacts, 1)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, res.Artifacts[0])
+	assert.Equal(t, []string{configPath}, res.Removed)
+	assert.Empty(t, res.Created)
+	assert.Empty(t, res.Modified)
+
+	_, statErr := os.Stat(configPath)
+	assert.True(t, os.IsNotExist(statErr))
+
+	info, statErr := os.Stat(featureRoot)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+
+	body, readErr := os.ReadFile(marker)
+	require.NoError(t, readErr)
+	assert.Equal(t, "keep me", string(body))
+}
+
+// Test_uninstall_keeps_an_edited_config_and_reports_it pins R6's "edited
+// locally" branch: a config whose bytes decode without violation but
+// differ from artifact.ConfigFile() is left byte-identical (ActionKept)
+// and Result.Removed stays empty.
+func Test_uninstall_keeps_an_edited_config_and_reports_it(t *testing.T) {
+	wd := t.TempDir()
+	configPath := filepath.Join(wd, ".brief.yaml")
+	original := []byte("feature-directory: specs\n")
+	require.NoError(t, os.WriteFile(configPath, original, 0o600))
+	srv := setup.NewServer()
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
+
+	require.NoError(t, err)
+	require.Len(t, res.Artifacts, 1)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "edited locally"}, res.Artifacts[0])
+	assert.Empty(t, res.Removed)
+
+	body, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, original, body)
+}
+
+// Test_uninstall_force_removes_an_edited_config pins --force's own
+// override of the "edited locally" branch: the same fixture the test above
+// keeps, --force instead removes, still reporting the "edited locally"
+// detail.
+func Test_uninstall_force_removes_an_edited_config(t *testing.T) {
+	wd := t.TempDir()
+	configPath := filepath.Join(wd, ".brief.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("feature-directory: specs\n"), 0o600))
+	srv := setup.NewServer()
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, Force: true})
+
+	require.NoError(t, err)
+	require.Len(t, res.Artifacts, 1)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally"}, res.Artifacts[0])
+	assert.Equal(t, []string{configPath}, res.Removed)
+
+	_, statErr := os.Stat(configPath)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+// Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited pins the
+// no-refusal-class divergence from Init: recognition is digest-only, so
+// neither an unparseable file nor an R1-invalid value ever produces an
+// error — both are simply "edited locally", kept without --force and
+// removed with it.
+func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+	}{
+		{name: "unparseable yaml", body: []byte("feature-directory: [unterminated\n")},
+		{name: "R1-invalid value", body: []byte("handoff-cap-lines: 0\n")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			configPath := filepath.Join(wd, ".brief.yaml")
+			require.NoError(t, os.WriteFile(configPath, tt.body, 0o600))
+			srv := setup.NewServer()
+
+			kept, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
+			require.NoError(t, err)
+			require.Len(t, kept.Artifacts, 1)
+			assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "edited locally"}, kept.Artifacts[0])
+			assert.Empty(t, kept.Removed)
+
+			body, readErr := os.ReadFile(configPath)
+			require.NoError(t, readErr)
+			assert.Equal(t, tt.body, body)
+
+			removed, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, Force: true})
+			require.NoError(t, err)
+			require.Len(t, removed.Artifacts, 1)
+			assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally"}, removed.Artifacts[0])
+			assert.Equal(t, []string{configPath}, removed.Removed)
+
+			_, statErr := os.Stat(configPath)
+			assert.True(t, os.IsNotExist(statErr))
+		})
+	}
+}
+
+// Test_uninstall_with_no_config_reports_nothing_installed pins the
+// "nothing installed" equivalence: zero artifacts, every slice empty but
+// non-nil, no error. The control arm is an existing feature root with no
+// config nearby — still zero artifacts, and untouched.
+func Test_uninstall_with_no_config_reports_nothing_installed(t *testing.T) {
+	wd := t.TempDir()
+	featureRoot := filepath.Join(wd, "docs", "specifications")
+	require.NoError(t, os.MkdirAll(featureRoot, 0o755))
+	srv := setup.NewServer()
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
+
+	require.NoError(t, err)
+	assert.NotNil(t, res.Artifacts)
+	assert.Empty(t, res.Artifacts)
+	assert.NotNil(t, res.Removed)
+	assert.Empty(t, res.Removed)
+	assert.NotNil(t, res.Created)
+	assert.Empty(t, res.Created)
+	assert.NotNil(t, res.Modified)
+	assert.Empty(t, res.Modified)
+
+	info, statErr := os.Stat(featureRoot)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+}
+
+// Test_uninstall_dry_run_plans_removal_and_removes_nothing pins R9's own
+// DryRun promise for Uninstall: the row says "removed", Result.Removed
+// stays empty, and the file on disk is untouched, byte-identical.
+func Test_uninstall_dry_run_plans_removal_and_removes_nothing(t *testing.T) {
+	wd := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
+	require.NoError(t, err)
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, DryRun: true})
+
+	require.NoError(t, err)
+	assert.True(t, res.DryRun)
+	require.Len(t, res.Artifacts, 1)
+	assert.Equal(t, setup.ActionRemoved, res.Artifacts[0].Action)
+	assert.Empty(t, res.Removed)
+
+	configPath := filepath.Join(wd, ".brief.yaml")
+	body, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, artifact.ConfigFile(), body)
+}
+
+// Test_uninstall_keeps_a_config_path_that_is_not_a_regular_file pins the
+// Lstat guard: ".brief.yaml" as an empty directory (os.Remove fails on a
+// non-empty one regardless, so an empty one is the fixture that would
+// actually catch a dropped guard) is kept, detail "not a regular file",
+// with or without --force, and the directory survives.
+func Test_uninstall_keeps_a_config_path_that_is_not_a_regular_file(t *testing.T) {
+	wd := t.TempDir()
+	configPath := filepath.Join(wd, ".brief.yaml")
+	require.NoError(t, os.Mkdir(configPath, 0o755))
+	srv := setup.NewServer()
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
+	require.NoError(t, err)
+	require.Len(t, res.Artifacts, 1)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "not a regular file"}, res.Artifacts[0])
+
+	res, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, Force: true})
+	require.NoError(t, err)
+	require.Len(t, res.Artifacts, 1)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "not a regular file"}, res.Artifacts[0])
+
+	info, statErr := os.Stat(configPath)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+}
+
+// Test_uninstall_operates_on_a_config_found_in_an_ancestor pins the shared
+// root rule: a config found walking up from wd (config.Locate) is the one
+// Uninstall removes, not anything relative to wd itself.
+func Test_uninstall_operates_on_a_config_found_in_an_ancestor(t *testing.T) {
+	parent := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), parent, setup.InitRequest{Host: setup.HostNone})
+	require.NoError(t, err)
+
+	child := filepath.Join(parent, "child")
+	require.NoError(t, os.Mkdir(child, 0o755))
+
+	res, err := srv.Uninstall(t.Context(), child, setup.UninstallRequest{Host: setup.HostNone})
+
+	require.NoError(t, err)
+	configPath := filepath.Join(parent, ".brief.yaml")
+	require.Len(t, res.Artifacts, 1)
+	assert.Equal(t, configPath, res.Artifacts[0].Path)
+	assert.Equal(t, setup.ActionRemoved, res.Artifacts[0].Action)
+
+	_, statErr := os.Stat(configPath)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+// Test_uninstall_never_removes_either_feature_root_after_force_init pins
+// R6's last sentence: a non-default feature-directory, then "init --force"
+// (which leaves both the old custom root and the new default one on disk),
+// then "uninstall --force" — neither root is ever removed, including the
+// default one, which is empty.
+func Test_uninstall_never_removes_either_feature_root_after_force_init(t *testing.T) {
+	wd := t.TempDir()
+	configPath := filepath.Join(wd, ".brief.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("feature-directory: specs\n"), 0o600))
+	srv := setup.NewServer()
+
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
+	require.NoError(t, err)
+	customRoot := filepath.Join(wd, "specs")
+	info, statErr := os.Stat(customRoot)
+	require.NoError(t, statErr)
+	require.True(t, info.IsDir())
+
+	_, err = srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, Force: true})
+	require.NoError(t, err)
+	defaultRoot := filepath.Join(wd, "docs", "specifications")
+	info, statErr = os.Stat(defaultRoot)
+	require.NoError(t, statErr)
+	require.True(t, info.IsDir())
+
+	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, Force: true})
+	require.NoError(t, err)
+
+	info, statErr = os.Stat(customRoot)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+
+	info, statErr = os.Stat(defaultRoot)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+}
+
+// Test_uninstall_reports_a_remove_failure_without_partial_write pins the
+// single-artifact failure path: an unwritable parent directory makes
+// os.Remove fail, and because the config is the only artifact this release
+// plans, nothing was ever removed before that failure — so the returned
+// error does not wrap ErrPartialWrite, and the file survives. Skipped under
+// root, which ignores directory write permission.
+func Test_uninstall_reports_a_remove_failure_without_partial_write(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory write permission")
+	}
+
+	wd := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
+	require.NoError(t, err)
+
+	require.NoError(t, os.Chmod(wd, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(wd, 0o755) })
+
+	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, setup.ErrPartialWrite)
+
+	_, statErr := os.Stat(filepath.Join(wd, ".brief.yaml"))
+	assert.NoError(t, statErr)
+}
+
+// Test_uninstall_rejects_an_unknown_host pins the same usage-error branch
+// Init reports: a host outside Hosts() never reaches config.Locate at all.
+func Test_uninstall_rejects_an_unknown_host(t *testing.T) {
+	wd := t.TempDir()
+	srv := setup.NewServer()
+
+	_, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: "bogus"})
+
+	assert.ErrorIs(t, err, setup.ErrUnknownHost)
+}
