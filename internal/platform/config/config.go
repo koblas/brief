@@ -3,8 +3,9 @@ package config
 import "errors"
 
 // ErrInvalidConfig is returned when a ".brief.yaml" file cannot be used as
-// configuration: malformed YAML or an unknown key. Callers branch on it with
-// errors.Is.
+// configuration: malformed YAML, an unknown key, or a known key whose
+// decoded value fails its own rule (see ValueError). Callers branch on it
+// with errors.Is.
 var ErrInvalidConfig = errors.New("invalid brief config")
 
 // StateHeadings holds the heading text for each of the four sections a

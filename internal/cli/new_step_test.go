@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/koblas/brief/internal/cli"
+	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/stepfile"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/stretchr/testify/assert"
@@ -112,19 +113,27 @@ func Test_refuses_on_one_line_when_the_specification_has_no_progress_heading(t *
 	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
 }
 
+// Test_refuses_on_one_line_for_an_invalid_step_file_pattern_from_an_ancestor_config
+// builds the "payments" feature directly through scaffold, bypassing
+// cli.Run and its own config.Resolve call: the ancestor ".brief.yaml"
+// this test writes carries an invalid step-file-pattern, which R1 now
+// refuses at load for every command — including "new feature", which the
+// setup here no longer runs through the CLI. "new step" itself is what
+// this test exercises, and it is the CLI call that resolves the ancestor
+// config and must surface the refusal.
 func Test_refuses_on_one_line_for_an_invalid_step_file_pattern_from_an_ancestor_config(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, ".brief.yaml"), []byte("step-file-pattern: \"SCENARIO-%s.md\"\n"), 0o600))
 
-	var setupStdout, setupStderr bytes.Buffer
-	require.NoError(t, cli.Run(t.Context(), root, []string{"new", "feature", "payments"}, nil, &setupStdout, &setupStderr))
+	_, err := scaffold.NewServer(config.Default(), root).NewFeature(t.Context(), "payments")
+	require.NoError(t, err)
 
 	wd := filepath.Join(root, "a", "b")
 	require.NoError(t, os.MkdirAll(wd, 0o755))
 
 	var stdout, stderr bytes.Buffer
 
-	err := cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, nil, &stdout, &stderr)
+	err = cli.Run(t.Context(), wd, []string{"new", "step", "payments"}, nil, &stdout, &stderr)
 
 	require.ErrorIs(t, err, stepfile.ErrInvalidPattern)
 	assert.Empty(t, stdout.String())

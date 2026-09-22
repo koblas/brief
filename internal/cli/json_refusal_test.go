@@ -435,6 +435,63 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 			command:      "new step",
 			filesChanged: falseVal,
 		},
+		{
+			name:         "new feature invalid config value",
+			setup:        newFeatureInvalidConfigCase,
+			command:      "new feature",
+			filesChanged: falseVal,
+		},
+		{
+			name:         "finish invalid config value",
+			setup:        newFinishInvalidConfigCase,
+			command:      "finish",
+			filesChanged: falseVal,
+		},
+	}
+}
+
+// newFeatureInvalidConfigCase is refusalMatrixRows' "new feature invalid
+// config value" row: a repository whose ".brief.yaml" fails R1's cap rule
+// refuses at load before "new feature" ever reaches scaffold.
+func newFeatureInvalidConfigCase(t *testing.T) refusalCase {
+	t.Helper()
+
+	wd := t.TempDir()
+	configPath := filepath.Join(wd, ".brief.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("handoff-cap-lines: 0\n"), 0o600))
+
+	return refusalCase{
+		wd:       wd,
+		args:     []string{"new", "feature", "payments", "--json"},
+		textArgs: []string{"new", "feature", "payments"},
+		newStdin: noStdin,
+		wantKind: "refusal",
+		wantPath: &configPath,
+		wantFix:  "fix it or remove it to fall back to the shipped defaults",
+	}
+}
+
+// newFinishInvalidConfigCase is refusalMatrixRows' "finish invalid config
+// value" row: --handoff and --state name real, readable files so
+// readSource never intervenes ahead of resolveRoot's own refusal against
+// the same failing ".brief.yaml" newFeatureInvalidConfigCase uses.
+func newFinishInvalidConfigCase(t *testing.T) refusalCase {
+	t.Helper()
+
+	wd := t.TempDir()
+	configPath := filepath.Join(wd, ".brief.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("handoff-cap-lines: 0\n"), 0o600))
+	handoffPath := writeInput(t, "handoff.md", "h\n")
+	statePath := writeInput(t, "state.md", "s\n")
+
+	return refusalCase{
+		wd:       wd,
+		args:     []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath, "--json"},
+		textArgs: []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath},
+		newStdin: noStdin,
+		wantKind: "refusal",
+		wantPath: &configPath,
+		wantFix:  "fix it or remove it to fall back to the shipped defaults",
 	}
 }
 

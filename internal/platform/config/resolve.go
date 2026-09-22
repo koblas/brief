@@ -25,6 +25,15 @@ const configFileName = ".brief.yaml"
 // filepath.Abs alone does not stat the path, so without this guard a
 // mistyped path would silently walk from the nearest existing ancestor and
 // return the shipped profile as if nothing were wrong.
+//
+// A found config file's decoded values are checked against R1's rules —
+// caps at least 1, headings non-empty and pairwise distinct, file names
+// with no path separator, a step-file-pattern with exactly one integer
+// verb, a handoff-file-suffix that collides with nothing — before Resolve
+// returns it. The first violation, in Config's own field-declaration
+// order, is reported as *InvalidConfigError wrapping a *ValueError;
+// nothing from the file is used. A repository with no config file is
+// exempt: Default() is never run back through this check.
 func Resolve(startDir string) (Config, string, error) {
 	abs, err := filepath.Abs(startDir)
 	if err != nil {
@@ -59,7 +68,8 @@ func Resolve(startDir string) (Config, string, error) {
 }
 
 // decodeConfig reads path and decodes it onto Default(), so a key the file
-// omits keeps its shipped value.
+// omits keeps its shipped value, then validates every decoded value
+// against R1's rules before returning it.
 func decodeConfig(path string) (Config, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -82,6 +92,10 @@ func decodeConfig(path string) (Config, error) {
 			return cfg, nil
 		}
 
+		return Config{}, fmt.Errorf("resolve config: %w", &InvalidConfigError{Path: path, Err: err})
+	}
+
+	if err := validate(cfg); err != nil {
 		return Config{}, fmt.Errorf("resolve config: %w", &InvalidConfigError{Path: path, Err: err})
 	}
 
