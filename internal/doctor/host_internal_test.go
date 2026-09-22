@@ -11,12 +11,26 @@ package doctor
 // host_test.go through the real artifact.Recognize/RecognizeSnippet path.
 
 import (
+	"os"
 	"testing"
+	"time"
 
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// fakeFIFOInfo is a minimal os.FileInfo reporting a named-pipe mode — the
+// one non-symlink, non-directory shape nonRegularKind's own default arm
+// falls through to, without depending on syscall.Mkfifo's platform support.
+type fakeFIFOInfo struct{}
+
+func (fakeFIFOInfo) Name() string       { return "CLAUDE.md" }
+func (fakeFIFOInfo) Size() int64        { return 0 }
+func (fakeFIFOInfo) Mode() os.FileMode  { return os.ModeNamedPipe }
+func (fakeFIFOInfo) ModTime() time.Time { return time.Time{} }
+func (fakeFIFOInfo) IsDir() bool        { return false }
+func (fakeFIFOInfo) Sys() any           { return nil }
 
 // Test_originRow_reports_older_as_warn_with_the_init_fix pins the one arm
 // no black-box test can reach: OriginOlder is WARN, "installed by an older
@@ -62,4 +76,29 @@ func Test_originRow_reports_older_as_warn_with_the_init_fix(t *testing.T) {
 			assert.Equal(t, c.olderFix, *fix)
 		})
 	}
+}
+
+// Test_nonRegularKind_reports_no_kind_for_a_fifo pins nonRegularKind's own
+// default arm: a mode that is neither a symlink nor a directory (a fifo,
+// standing in for the one shape a real CLAUDE.md candidate could take that
+// is neither) reports "", the value notRegularDetail's own bare-sentence
+// arm depends on for reachability. Mutation-verified: changing the default
+// case to return a non-empty string (e.g. "fifo") reddens this test alone,
+// restored after.
+func Test_nonRegularKind_reports_no_kind_for_a_fifo(t *testing.T) {
+	got := nonRegularKind(fakeFIFOInfo{})
+
+	assert.Empty(t, got)
+}
+
+// Test_notRegularDetail_omits_the_parenthetical_when_kind_is_empty pins the
+// fold notRegularKind's fifo case (above) reaches in practice: an empty
+// kind renders the bare sentence, never a doubled parenthetical ("not a
+// regular file (); brief block not installed"). Mutation-verified:
+// unconditionally formatting with kind (dropping the `if kind == ""`
+// guard) reddens this test alone, restored after.
+func Test_notRegularDetail_omits_the_parenthetical_when_kind_is_empty(t *testing.T) {
+	got := notRegularDetail("")
+
+	assert.Equal(t, "not a regular file; brief block not installed", got)
 }
