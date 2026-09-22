@@ -34,10 +34,19 @@ func newConcurrentEditRefusal() *setup.RefusalError {
 	}
 }
 
-// newPartialConcurrentEditRefusal wraps newConcurrentEditRefusal the same
-// shape setup.markPartial produces when an earlier artifact already landed:
-// a multi-error chain reaching both the *RefusalError and
-// setup.ErrPartialWrite through Unwrap.
+// newPartialConcurrentEditRefusal stands in for what setup.markPartial
+// produces once an earlier artifact already landed: not markPartial's own
+// unexported type, but an error chain matching it on the two predicates
+// classifyRefusal and filesChangedFor actually branch on —
+// errors.AsType[*setup.RefusalError] finds the inner refusal, and
+// errors.Is(_, setup.ErrPartialWrite) is true. That real pairing — a
+// *setup.RefusalError reaching classifyRefusal already wrapped in
+// ErrPartialWrite — is proven constructible from setup's own write path
+// (not merely type-equivalent) by
+// Test_apply_wraps_ErrPartialWrite_when_an_earlier_write_already_landed in
+// internal/setup/apply_internal_test.go; nothing black-box through cli.Run
+// can reach it, since the race it reports (CLAUDE.md edited between
+// planning and apply) has no seam this package can drive from outside.
 func newPartialConcurrentEditRefusal() error {
 	return fmt.Errorf("%w: %w", newConcurrentEditRefusal(), setup.ErrPartialWrite)
 }

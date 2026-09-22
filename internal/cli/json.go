@@ -190,7 +190,8 @@ func usageFix(msg string, cmd *cobra.Command) string {
 
 // filesChangedFor reports R3's "files_changed" value for cmd, one of the
 // commands carrying writesFilesAnnotation ("new", "new feature", "new
-// step", "finish", "init"): nil (JSON null) for every other command, since
+// step", "finish", "init", "uninstall"): nil (JSON null) for every other
+// command, since
 // a read command never changes anything to report on; for a write
 // command, what actually happened on disk — true when err wraps
 // scaffold.ErrPartialWrite or setup.ErrPartialWrite (at least one write
