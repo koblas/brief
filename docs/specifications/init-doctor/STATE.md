@@ -16,9 +16,10 @@ SHIP WITH CHANGES): `notReadableFix`'s `statFailed` arm now walks its own ancest
 (`blockingDir`) to name the directory actually missing its search bit, not the subject's
 immediate parent, and chmods `u+rwx` (not `u+rx`) so `brief init` can still write through it
 afterward; `check --hook`'s help copy reworded. Fix pass 13 (test-only): pinned
-`blockingDir`'s own `return root` fallback with a host-plugin case chmodding the install root
-itself, and corrected a mutation comment that had understated which mutations redden which
-cases.
+`blockingDir`'s own `return root` fallback with a `Test_diagnose_classifies_host_plugin_unreadable`
+case chmodding the install root itself, and corrected two mutation comments in that split-out
+test whose claims a package-wide (not table-scoped) mutation run showed to be narrower than
+what actually happens.
 
 ## Binding decisions
 - `config.LocateWithin(dir, boundary)` bounds a walk at `boundary`, itself still checked, its

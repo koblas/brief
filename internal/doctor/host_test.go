@@ -245,25 +245,20 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 }
 
 // Test_diagnose_classifies_host_plugin_unreadable pins host-plugin's own
-// unreadable-vs-missing split (P1), split out of
-// Test_diagnose_classifies_host_plugin to keep that table's own maintidx
-// down: an ancestor directory doctor cannot even Lstat into (mode 0o000) is
-// unreadable, never "missing" — every subject file keeps its own "not
-// readable" name rather than the "incomplete: missing" wording a genuinely
-// absent file gets, both ERROR, since Claude Code cannot load the skill
-// through a file it cannot read any more than one that is not there — and
-// the fix always targets the actual directory missing its search bit
-// (blockingDir), never necessarily the subject's own immediate parent.
+// unreadable-vs-missing split (P1): an ancestor directory doctor cannot even
+// Lstat into (mode 0o000) is unreadable, never "missing" — every subject
+// file keeps its own "not readable" name rather than the "incomplete:
+// missing" wording a genuinely absent file gets, both ERROR, since Claude
+// Code cannot load the skill through a file it cannot read any more than
+// one that is not there. The fix targets whichever call actually failed: a
+// failed Lstat targets blockingDir's own result, the directory missing its
+// search bit, never necessarily the subject's immediate parent; a failed
+// ReadFile targets the subject file itself (chmod +r).
 func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 	runHostCheckCases(t, []hostCheckCase{
 		{
 			// Control for every case below: the identical install, fully
-			// readable, OK. Mutation-verified: dropping
-			// integrationFileRowDetail's own call ahead of missingRelPaths
-			// turns this case OK "installed" — every file is unreadable, so
-			// missingRelPaths itself finds nothing left to call missing —
-			// reddening this case and every other case or test that
-			// depends on host-plugin's own unreadable arm, restored after.
+			// readable, OK.
 			name: "every subject file is current",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
@@ -278,6 +273,14 @@ func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 			wantFix:      nil,
 		},
 		{
+			// Control for every case below: "every subject file is
+			// current" above is the identical install, readable, OK.
+			// Mutation-verified: dropping integrationFileRowDetail's own
+			// call ahead of missingRelPaths turns this case OK
+			// "installed" — every file is unreadable, so missingRelPaths
+			// itself finds nothing left to call missing — reddening this
+			// case and every other case or test that depends on
+			// host-plugin's own unreadable arm, restored after.
 			name: "a subject file is unreadable, not missing",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
@@ -307,19 +310,25 @@ func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 			// "a subject file is unreadable, not missing" above chmods
 			// ".claude" itself and expects the walk to stop one level
 			// higher still. Mutation-verified against this package and
-			// internal/cli: hardcoding blockingDir to always return root's
-			// immediate child segment of the resolved ancestor (truncating
-			// any deeper walk back down to ".claude") reddens this case
-			// alone, since every other case's own correct answer already
-			// is that immediate child. Checking each ancestor's own parent
-			// rather than the ancestor itself, and disabling the loop's
-			// success branch entirely so it never returns before dir ==
-			// root, both redden this case too, but nowhere near alone —
-			// each breaks the fix on every host row with its own
-			// unreadable-ancestor arm (host-hook, host-agents,
-			// host-snippet included), six subtests package-wide for the
-			// first mutation, six for the second, restored after every
-			// mutation.
+			// internal/cli, with no -run filter: hardcoding blockingDir to
+			// always return root's immediate child segment of the
+			// resolved ancestor (truncating any deeper walk back down to
+			// ".claude") reddens this case alone package-wide, since every
+			// other case exercising the walk already resolves to that
+			// immediate child or, for "the install root itself is
+			// unsearchable" below, to root itself regardless. Checking
+			// each ancestor's own parent instead of the ancestor itself
+			// reddens this case together with "a subject file is
+			// unreadable, not missing" above, host-hook's and
+			// host-agents' own unreadable-ancestor cases, "the install
+			// root itself is unsearchable" below, and
+			// Test_diagnose_host_plugin_hook_agents_unreadable_fix_is_relative_to_wd.
+			// Disabling the loop's success branch entirely, so it never
+			// returns before dir == root, reddens the same set except
+			// "the install root itself is unsearchable" — whose own
+			// correct answer already is root — and additionally reddens
+			// host-snippet's own "no root CLAUDE.md, .claude itself
+			// cannot be Lstat'd" case. Both restored after.
 			name: "the blocking dir is .claude/skills, .claude itself stays 0755",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
@@ -377,15 +386,17 @@ func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 			// directory, not any of its descendants: blockingDir's own
 			// walk never finds a resolvable ancestor before dir == root,
 			// so it falls through to its own "return root" fallback
-			// rather than the loop's success branch every other case
-			// here exercises. Control: "a subject file is unreadable, not
-			// missing" above leaves root itself searchable and stops one
-			// level lower, at ".claude". Mutation-verified, against this
-			// package and internal/cli: changing that fallback to "return
-			// filepath.Dir(root)" reddens this case alone, package-wide;
-			// the exact resulting fix text was not asserted against, only
-			// that it stops matching "chmod u+rwx ., then …", restored
-			// after.
+			// rather than the loop's success branch the two chmodded-
+			// directory cases above ("a subject file is unreadable, not
+			// missing" and "the blocking dir is .claude/skills") reach.
+			// Control: "a subject file is unreadable, not missing" above
+			// leaves root itself searchable and stops one level lower, at
+			// ".claude". Mutation-verified against this package and
+			// internal/cli, with no -run filter: changing that fallback
+			// to "return filepath.Dir(root)" reddens this case alone,
+			// package-wide; the exact resulting fix text was not asserted
+			// against, only that it stops matching "chmod u+rwx ., then
+			// …", restored after.
 			name: "the install root itself is unsearchable",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
