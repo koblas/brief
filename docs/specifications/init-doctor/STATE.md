@@ -1,7 +1,10 @@
 # init-doctor — current state
 
 Scenarios complete: SCENARIO-01..10 — every spec scenario shipped. Fix pass since: closed an
-install-root git-boundary MAJOR plus a set of MINOR/NIT folds (R3/R11/R12/R13 amended).
+install-root git-boundary MAJOR plus a set of MINOR/NIT folds (R3/R11/R12/R13 amended). Fix
+pass 2: closed a refusal-tail/files_changed inconsistency on a partial write, plus coverage
+gaps (check --hook's git boundary, --json partial-write render, Uninstall's git-boundary
+positive case) and doc/comment folds.
 
 ## Binding decisions
 - `config.LocateWithin(dir, boundary)` is the one bounded walk; `Locate` = `LocateWithin(dir, "")`;
@@ -47,7 +50,9 @@ install-root git-boundary MAJOR plus a set of MINOR/NIT folds (R3/R11/R12/R13 am
   the zero value; cli's `renderPartialWrite` (text) prints `landedArtifacts(res)` — `Artifacts`
   filtered to paths `Created`/`Modified`/`Removed` actually name — before the refusal line, never
   the row for the write that failed; `--json` stays the standard error document,
-  `files_changed:true`, no `artifacts` field (fix pass)
+  `files_changed:true`, no `artifacts` field. `classifyRefusal`'s `*setup.RefusalError` branch
+  drops the "(no files changed)" tail when `errors.Is(err, setup.ErrPartialWrite)` too, so text
+  and `--json`'s message never contradict `files_changed:true` (fix pass, fix pass 2)
 
 ## Left unbuilt
 - Line number for a value error, heading-shape rules — unowned (S01)

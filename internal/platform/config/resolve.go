@@ -31,7 +31,13 @@ func Locate(startDir string) (string, []string, error) {
 // LocateWithin is Locate's own walk, stopping at boundary rather than the
 // filesystem root: the directory holding boundary is still checked, but
 // its parent never is, so a config above boundary is never found. An empty
-// boundary is unbounded, identical to Locate.
+// boundary is unbounded, identical to Locate. boundary is expected to name
+// an ancestor of startDir (or startDir itself) — every caller today builds
+// it that way (config.LocateInRepo's repo.Root) — since that is the only
+// shape where the walk ever reaches a directory equal to it; a boundary
+// that is not on startDir's own ancestor chain is silently inert rather
+// than an error, and resolveBoundary treats a boundary filepath.Abs cannot
+// resolve the same way: both fall back to unbounded, identical to Locate.
 func LocateWithin(startDir, boundary string) (string, []string, error) {
 	abs, err := filepath.Abs(startDir)
 	if err != nil {
@@ -42,13 +48,7 @@ func LocateWithin(startDir, boundary string) (string, []string, error) {
 		return "", nil, fmt.Errorf("resolve config: %w", &InvalidConfigError{Path: abs, Err: statErr})
 	}
 
-	var boundaryAbs string
-
-	if boundary != "" {
-		if b, err := filepath.Abs(boundary); err == nil {
-			boundaryAbs = b
-		}
-	}
+	boundaryAbs := resolveBoundary(boundary)
 
 	var nearest string
 
@@ -78,6 +78,22 @@ func LocateWithin(startDir, boundary string) (string, []string, error) {
 	}
 
 	return nearest, shadowed, nil
+}
+
+// resolveBoundary returns boundary's own absolute path, or "" when boundary
+// is empty or filepath.Abs cannot resolve it — both of which LocateWithin
+// treats as unbounded rather than as an error.
+func resolveBoundary(boundary string) string {
+	if boundary == "" {
+		return ""
+	}
+
+	abs, err := filepath.Abs(boundary)
+	if err != nil {
+		return ""
+	}
+
+	return abs
 }
 
 // LocateInRepo is Locate, bounded to the nearest git repository enclosing

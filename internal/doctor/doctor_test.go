@@ -343,8 +343,8 @@ func Test_diagnose_names_shadowed_ancestor_configs_in_config_shadow_detail(t *te
 }
 
 // Test_diagnose_ignores_an_ancestor_config_outside_the_enclosing_git_repository
-// pins the MAJOR fix at the doctor layer: an ancestor ".brief.yaml" above
-// the nearest enclosing git repository is never reported as this
+// pins the boundary rule at the doctor layer: an ancestor ".brief.yaml"
+// above the nearest enclosing git repository is never reported as this
 // repository's own config-file row — the family reports exactly as it
 // would for no config at all, matching the root init would actually write
 // to.

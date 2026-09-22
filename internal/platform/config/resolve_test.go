@@ -543,10 +543,10 @@ func Test_locate_returns_the_nearest_config_and_the_ancestors_it_shadows(t *test
 }
 
 // Test_LocateInRepo_rejects_an_ancestor_config_outside_the_enclosing_git_repository
-// pins the MAJOR fix: a ".brief.yaml" that sits above the nearest enclosing
-// git repository root is never adopted — reported exactly as if none
-// existed, empty nearest, no shadowed ancestors — even though plain Locate
-// would find it, since it is a HOME-level (or otherwise unrelated)
+// pins the boundary rule: a ".brief.yaml" that sits above the nearest
+// enclosing git repository root is never adopted — reported exactly as if
+// none existed, empty nearest, no shadowed ancestors — even though plain
+// Locate would find it, since it is a HOME-level (or otherwise unrelated)
 // repository's own config, not this one's.
 func Test_LocateInRepo_rejects_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
 	home := t.TempDir()

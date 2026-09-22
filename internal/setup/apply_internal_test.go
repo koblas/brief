@@ -51,6 +51,45 @@ func Test_apply_refuses_when_CLAUDE_md_changed_since_planning(t *testing.T) {
 	assert.Equal(t, "edited after planning", string(body))
 }
 
+// Test_apply_wraps_ErrPartialWrite_when_an_earlier_write_already_landed
+// pins apply's own ordering guarantee at the write path directly: unlike
+// the test above, featureArt is ActionCreated here, so its own
+// os.MkdirAll lands before the concurrent-edit guard ever runs. The
+// returned error must wrap both ErrConcurrentEdit (what went wrong) and
+// ErrPartialWrite (that something already changed) — cli's own
+// files_changed and refusal-tail rendering both key off ErrPartialWrite
+// being reachable here, not merely off the sentinel this markPartial call
+// itself wraps.
+func Test_apply_wraps_ErrPartialWrite_when_an_earlier_write_already_landed(t *testing.T) {
+	wd := t.TempDir()
+	claudePath := filepath.Join(wd, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(claudePath, []byte("edited after planning"), 0o600))
+
+	featureRoot := filepath.Join(wd, "docs", "specifications")
+
+	res := Result{Created: []string{}, Modified: []string{}, Removed: []string{}}
+	featureArt := Artifact{Kind: KindFeatureRoot, Path: featureRoot, Action: ActionCreated}
+	snippetArt := snippetArtifact{
+		Kind: KindSnippet, Path: claudePath, Action: ActionMerged,
+		existing: []byte("stale planning-time bytes"),
+		dir:      "docs/specifications",
+	}
+	configArt := Artifact{Kind: KindConfig, Path: filepath.Join(wd, ".brief.yaml"), Action: ActionUnchanged}
+
+	_, err := apply(res, featureArt, nil, snippetArt, true, configArt, nil)
+
+	require.ErrorIs(t, err, ErrConcurrentEdit)
+	require.ErrorIs(t, err, ErrPartialWrite)
+
+	info, statErr := os.Stat(featureRoot)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+
+	body, readErr := os.ReadFile(claudePath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "edited after planning", string(body))
+}
+
 // Test_applyUninstall_refuses_when_CLAUDE_md_changed_since_planning is
 // Test_apply_refuses_when_CLAUDE_md_changed_since_planning's own sibling
 // for Uninstall's write path.

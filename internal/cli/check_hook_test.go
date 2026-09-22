@@ -331,6 +331,50 @@ func Test_check_hook_is_silent_for_malformed_stdin_when_no_brief_yaml_is_found(t
 	assert.Empty(t, stderr.String())
 }
 
+// Test_check_hook_is_silent_when_the_config_is_outside_the_enclosing_git_repository
+// and its control below share one directory layout — a git repository at
+// "proj" nested inside an ancestor that itself carries a ".brief.yaml" —
+// differing only in where that config file sits: the gate must stay bound
+// to the enclosing git repository (config.LocateInRepo), never Locate's
+// unbounded walk, so a config living above "proj" is invisible even to a
+// malformed payload, exactly as if no repository had opted in at all.
+func Test_check_hook_is_silent_when_the_config_is_outside_the_enclosing_git_repository(t *testing.T) {
+	outer := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outer, ".brief.yaml"), []byte(""), 0o600))
+
+	proj := filepath.Join(outer, "proj")
+	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".git"), 0o755))
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), proj, []string{"check", "--hook", "claude-code"}, strings.NewReader("not json"), &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Empty(t, stderr.String())
+}
+
+// Test_check_hook_honours_a_config_at_the_enclosing_git_repository_root is
+// the control: the very same layout, but the config sits at "proj" itself —
+// the git repository's own root — rather than above it, so the gate
+// proceeds and a malformed payload reports exit 1, the same as
+// Test_check_hook_malformed_payload_in_an_opted_in_repo_exits_1.
+func Test_check_hook_honours_a_config_at_the_enclosing_git_repository_root(t *testing.T) {
+	outer := t.TempDir()
+
+	proj := filepath.Join(outer, "proj")
+	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".git"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".brief.yaml"), []byte(""), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), proj, []string{"check", "--hook", "claude-code"}, strings.NewReader("not json"), &stdout, &stderr)
+
+	require.Error(t, err)
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Equal(t, "brief check: malformed hook payload on stdin; run 'brief check --hook claude-code'\n", stderr.String())
+	assert.Empty(t, stdout.String())
+}
+
 func Test_check_hook_with_json_reports_the_usage_error_as_json(t *testing.T) {
 	wd := t.TempDir()
 

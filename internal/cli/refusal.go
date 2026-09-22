@@ -71,7 +71,9 @@ type refusalClassification struct {
 	// errorKindFailure — whose fix depends on the failing command, filled
 	// in by (reporter).refusal.
 	fix string
-	// tail is noFilesChangedTail for a write refusal, "" otherwise.
+	// tail is noFilesChangedTail for a write refusal, "" otherwise — and
+	// "" even for a write refusal whose err wraps setup.ErrPartialWrite,
+	// since that promise is false once an earlier write already landed.
 	tail string
 	// layout selects textLine's rendering shape; layoutPathProblem (the
 	// zero value) unless set otherwise.
@@ -98,13 +100,18 @@ type refusalClassification struct {
 // errorKindFailure case.
 func classifyRefusal(err error) refusalClassification {
 	if refusal, ok := errors.AsType[*setup.RefusalError](err); ok {
+		tail := noFilesChangedTail
+		if errors.Is(err, setup.ErrPartialWrite) {
+			tail = ""
+		}
+
 		return refusalClassification{
 			kind:    errorKindRefusal,
 			path:    refusal.Path,
 			line:    refusal.Line,
 			problem: flattenOneLine(refusal.Problem),
 			fix:     flattenOneLine(refusal.Fix),
-			tail:    noFilesChangedTail,
+			tail:    tail,
 		}
 	}
 

@@ -590,3 +590,33 @@ func Test_init_partial_write_prints_the_rows_that_landed(t *testing.T) {
 	require.NoError(t, statErr)
 	assert.True(t, info.IsDir())
 }
+
+// Test_init_partial_write_with_json is
+// Test_init_partial_write_prints_the_rows_that_landed's own --json sibling:
+// the same partial write reports the standard error document — files_changed
+// true, since the feature root did land, and no "artifacts" field, the same
+// contract a partial write's text mode observes by printing landed rows
+// instead.
+func Test_init_partial_write_with_json(t *testing.T) {
+	wd := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(wd, ".brief.yaml"), 0o755))
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "none", "--force", "--json"}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stderr.String())
+
+	decoded := decodeErrorDocument(t, stdout.Bytes(), "init")
+	assert.Equal(t, "failure", decoded.Kind)
+	require.NotNil(t, decoded.FilesChanged)
+	assert.True(t, *decoded.FilesChanged)
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &raw))
+	assert.NotContains(t, raw, "artifacts")
+
+	info, statErr := os.Stat(filepath.Join(wd, "docs", "specifications"))
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+}

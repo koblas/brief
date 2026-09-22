@@ -11,7 +11,7 @@ import (
 )
 
 // Test_Init_ignores_an_ancestor_config_outside_the_enclosing_git_repository
-// pins the MAJOR fix: an ancestor ".brief.yaml" (and CLAUDE.md) sitting
+// pins the boundary rule: an ancestor ".brief.yaml" (and CLAUDE.md) sitting
 // above the nearest enclosing git repository — a HOME-level config, say —
 // is never adopted. Init writes a fresh config at wd instead of merging
 // into the ancestor's own CLAUDE.md or installing the plugin under the
@@ -79,6 +79,37 @@ func Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root(t *tes
 	featureRoot := filepath.Join(root, "specs")
 	assert.Equal(t, setup.ActionCreated, res.Artifacts[1].Action)
 	assert.Equal(t, featureRoot, res.Artifacts[1].Path)
+}
+
+// Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root
+// is Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root's
+// own sibling for Uninstall: a config sitting exactly at the nearest
+// enclosing git repository root is still adopted and removed, even though
+// wd is a subdirectory holding neither a config nor a ".git" of its own.
+func Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
+
+	srv := newServer(t)
+
+	_, err := srv.Init(t.Context(), root, setup.InitRequest{Host: setup.HostNone})
+	require.NoError(t, err)
+
+	sub := filepath.Join(root, "sub")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+
+	res, err := srv.Uninstall(t.Context(), sub, setup.UninstallRequest{Host: setup.HostNone})
+
+	require.NoError(t, err)
+	assert.Equal(t, root, res.Root)
+
+	configPath := filepath.Join(root, ".brief.yaml")
+	require.Len(t, res.Artifacts, 1)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, res.Artifacts[0])
+	assert.Equal(t, []string{configPath}, res.Removed)
+
+	_, statErr := os.Stat(configPath)
+	assert.True(t, os.IsNotExist(statErr))
 }
 
 // Test_Uninstall_ignores_an_ancestor_config_outside_the_enclosing_git_repository
