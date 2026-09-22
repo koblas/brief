@@ -391,7 +391,10 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 // but not dir-compared when ".brief.yaml" itself is unparseable; an edited
 // block is OK "edited locally"; no CLAUDE.md at all, or a block whose line
 // endings are CRLF (which can never exactly match the LF marker), is SKIP
-// "not installed".
+// "not installed"; a candidate that exists but is not a regular file — a
+// directory or a symlink — is WARN, naming which, unless the other
+// candidate still holds a real block, in which case that block wins exactly
+// as it would if both candidates were regular files.
 func Test_diagnose_classifies_host_snippet(t *testing.T) {
 	runHostCheckCases(t, []hostCheckCase{
 		{
@@ -486,6 +489,51 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantFix:      new(runInitClaudeCode),
 		},
 		{
+			name: "CLAUDE.md is a directory",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				writeHostDir(t, wd, "CLAUDE.md")
+			},
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "not a regular file (directory); brief block not installed",
+			wantFix:      new("run 'brief init --print' and add the CLAUDE.md block by hand"),
+		},
+		{
+			name: "CLAUDE.md is a symlink",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				elsewhere := filepath.Join(wd, "elsewhere.md")
+				require.NoError(t, os.WriteFile(elsewhere, []byte("elsewhere"), 0o600))
+				require.NoError(t, os.Symlink(elsewhere, filepath.Join(wd, "CLAUDE.md")))
+			},
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "not a regular file (symlink); brief block not installed",
+			wantFix:      new("run 'brief init --print' and add the CLAUDE.md block by hand"),
+		},
+		{
+			name: "CLAUDE.md is a symlink but .claude/CLAUDE.md holds a real block",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				elsewhere := filepath.Join(wd, "elsewhere.md")
+				require.NoError(t, os.WriteFile(elsewhere, []byte("elsewhere"), 0o600))
+				require.NoError(t, os.Symlink(elsewhere, filepath.Join(wd, "CLAUDE.md")))
+
+				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
+				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), block, 0o600))
+			},
+			checkID:        "host-snippet",
+			wantSeverity:   doctor.SeverityOK,
+			wantDetail:     "installed",
+			wantFix:        nil,
+			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+		},
+		{
 			name: "a current block with CRLF line endings",
 			setup: func(t *testing.T, wd string, _ host.Host) {
 				t.Helper()
@@ -577,7 +625,7 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: [not a scalar\n"), 0o600))
 			},
 			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "skipped: .brief.yaml did not parse",
+			wantDetail:   ".brief.yaml did not parse",
 			wantFix:      nil,
 		},
 		{

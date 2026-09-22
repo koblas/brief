@@ -223,14 +223,19 @@ func crlfRefusal(c candidateSnippetFile) error {
 // remains is the bytes Uninstall would leave behind after stripping the
 // span — populated only when Action is ActionRemoved, so apply can tell a
 // rewrite (remains non-empty) from a delete (remains empty) without
-// recomputing it.
+// recomputing it. notRegular marks planSnippet's own ActionKept "not a
+// regular file" branch, the one ActionKept shape printArtifacts still
+// emits a body for (R9): apply never writes through it either way, but
+// unlike an edited-locally kept block, there is no existing content to
+// preserve, so --print still shows the block to add by hand.
 type snippetArtifact struct {
 	Artifact
 
-	existing []byte
-	span     *snippetSpan
-	dir      string
-	remains  []byte
+	existing   []byte
+	span       *snippetSpan
+	dir        string
+	remains    []byte
+	notRegular bool
 }
 
 // planSnippet decides the CLAUDE.md instruction block's own Artifact for
@@ -240,8 +245,11 @@ type snippetArtifact struct {
 // candidate already holding a recognized block; otherwise the first
 // existing candidate, regular or not; otherwise root CLAUDE.md is created.
 // A chosen candidate carrying CRLF line endings refuses. A non-regular
-// chosen candidate is kept, never followed. A regular candidate with no
-// span merges by appending. A regular candidate whose span is
+// chosen candidate is kept, never followed — its own Artifact carries
+// notRegular, the one ActionKept shape printArtifacts still emits a body
+// for, so --print shows the block to add by hand even though apply never
+// writes there. A regular candidate with no span merges by appending. A
+// regular candidate whose span is
 // artifact.RecognizeSnippet's OriginEdited is kept, "edited locally";
 // OriginCurrent for dir (its own trailing "/" trimmed, matching
 // SnippetBlock's own rule) is unchanged; OriginCurrent for any other
@@ -270,7 +278,9 @@ func planSnippet(root string, h host.Host, dir string) (snippetArtifact, error) 
 
 	if !chosen.regular {
 		return snippetArtifact{
-			Kind: KindSnippet, Path: chosen.path, Action: ActionKept, Detail: "not a regular file",
+			Kind: KindSnippet, Path: chosen.path, Action: ActionKept,
+			Detail: "not a regular file; add the block by hand, see 'brief init --print'",
+			dir:    dir, notRegular: true,
 		}, nil
 	}
 
@@ -332,7 +342,8 @@ func planSnippetRemoval(root string, h host.Host, force bool) (snippetArtifact, 
 
 	if !chosen.regular {
 		return snippetArtifact{
-			Kind: KindSnippet, Path: chosen.path, Action: ActionKept, Detail: "not a regular file",
+			Kind: KindSnippet, Path: chosen.path, Action: ActionKept,
+			Detail: "not a regular file; add the block by hand, see 'brief init --print'",
 		}, true, nil
 	}
 

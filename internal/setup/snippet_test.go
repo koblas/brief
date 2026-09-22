@@ -149,7 +149,9 @@ func Test_init_for_claude_code_keeps_a_block_that_matches_no_render(t *testing.T
 
 // Test_init_for_claude_code_keeps_a_CLAUDE_md_that_is_not_a_regular_file
 // pins the Lstat guard, mirroring the plugin files' own: a symlink at
-// CLAUDE.md's own path is kept, never followed, never written.
+// CLAUDE.md's own path is kept, never followed, never written — but its
+// body still prints (Result.Print), so a run this can never write through
+// still shows the adopter what to add by hand.
 func Test_init_for_claude_code_keeps_a_CLAUDE_md_that_is_not_a_regular_file(t *testing.T) {
 	wd := t.TempDir()
 	claudeMD := filepath.Join(wd, "CLAUDE.md")
@@ -168,7 +170,14 @@ func Test_init_for_claude_code_keeps_a_CLAUDE_md_that_is_not_a_regular_file(t *t
 			snippetArt = a
 		}
 	}
-	assert.Equal(t, setup.Artifact{Kind: setup.KindSnippet, Path: claudeMD, Action: setup.ActionKept, Detail: "not a regular file"}, snippetArt)
+	assert.Equal(t, setup.Artifact{
+		Kind: setup.KindSnippet, Path: claudeMD, Action: setup.ActionKept,
+		Detail: "not a regular file; add the block by hand, see 'brief init --print'",
+	}, snippetArt)
+
+	require.Contains(t, res.Print, setup.PrintArtifact{
+		Path: claudeMD, Action: setup.PrintMerge, Body: string(artifact.SnippetBlock("docs/specifications")),
+	})
 
 	info, statErr := os.Lstat(claudeMD)
 	require.NoError(t, statErr)

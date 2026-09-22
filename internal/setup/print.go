@@ -30,11 +30,16 @@ type PrintArtifact struct {
 // Artifacts, in that same order — and the bytes apply would write for each
 // one: pending files only, ActionCreated mapped to PrintCreate and
 // ActionMerged to PrintMerge; the feature root and any ActionUnchanged or
-// ActionKept artifact are excluded. configBody is the variant apply would
-// write (ConfigFile, or under WithAgents ConfigFileWithRoles); writeArts
-// supplies every plugin and agent file's own render body, keyed by path;
-// the snippet's own body always comes from artifact.SnippetBlock(dir), not
-// from writeArts. The result is never nil.
+// ActionKept artifact are excluded — except the CLAUDE.md snippet's own
+// ActionKept "not a regular file" row (snippetArt.notRegular), which prints
+// as PrintMerge anyway: apply never writes through it either, but unlike
+// every other ActionKept artifact there is no existing content on disk to
+// leave alone, so the adopter still needs the block's own bytes to add by
+// hand. configBody is the variant apply would write (ConfigFile, or under
+// WithAgents ConfigFileWithRoles); writeArts supplies every plugin and
+// agent file's own render body, keyed by path; the snippet's own body
+// always comes from artifact.SnippetBlock(dir), not from writeArts. The
+// result is never nil.
 func printArtifacts(artifacts []Artifact, configBody []byte, writeArts []pluginArtifact, snippetArt snippetArtifact) []PrintArtifact {
 	bodies := make(map[string][]byte, len(writeArts))
 	for _, w := range writeArts {
@@ -44,20 +49,20 @@ func printArtifacts(artifacts []Artifact, configBody []byte, writeArts []pluginA
 	out := make([]PrintArtifact, 0, len(artifacts))
 
 	for _, a := range artifacts {
-		var action PrintAction
-
-		switch a.Action {
-		case ActionCreated:
-			action = PrintCreate
-		case ActionMerged:
-			action = PrintMerge
-		case ActionUnchanged, ActionKept, ActionRemoved:
-			continue
-		default:
+		if a.Kind == KindFeatureRoot {
 			continue
 		}
 
-		if a.Kind == KindFeatureRoot {
+		var action PrintAction
+
+		switch {
+		case a.Action == ActionCreated:
+			action = PrintCreate
+		case a.Action == ActionMerged:
+			action = PrintMerge
+		case a.Kind == KindSnippet && a.Action == ActionKept && snippetArt.notRegular:
+			action = PrintMerge
+		default:
 			continue
 		}
 

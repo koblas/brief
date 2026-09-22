@@ -247,20 +247,44 @@ func hostAgentsCheck(root string, h host.Host) Check {
 // mirroring internal/setup's own candidateSnippetFile but read-only: body
 // and span are populated only for a regular file that scanned clean (no
 // marker defect); prob carries the first marker defect artifact.ScanSnippetMarkers
-// found, nil otherwise.
+// found, nil otherwise. notRegular and kind are populated only when the
+// candidate exists but Lstat reports it is not a regular file — kind is
+// "symlink" or "directory" (nonRegularKind), the two shapes host-snippet's
+// own WARN row names.
 type snippetCandidateState struct {
-	path string
-	body []byte
-	span *artifact.SnippetSpan
-	prob *artifact.MarkerProblem
+	path       string
+	body       []byte
+	span       *artifact.SnippetSpan
+	prob       *artifact.MarkerProblem
+	notRegular bool
+	kind       string
+}
+
+// nonRegularKind names the file type behind a CLAUDE.md candidate Lstat
+// reports as not a regular file, for host-snippet's own WARN detail: a
+// symlink (checked first — a symlink to a directory reports both bits, and
+// "symlink" is the more useful of the two to a reader deciding what to do
+// about it) or a directory; any other mode (a fifo, a socket, a device —
+// never observed against a CLAUDE.md path in practice) falls back to the
+// plain "not a regular file".
+func nonRegularKind(info os.FileInfo) string {
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		return "symlink"
+	case info.IsDir():
+		return "directory"
+	default:
+		return "not a regular file"
+	}
 }
 
 // scanSnippetCandidateStates Lstats and scans every h.InstructionFiles()
-// candidate under root, in that order. A missing or non-regular candidate,
-// or one whose bytes could not be read, reports a zero snippetCandidateState
-// (no body, no span, no problem) — the same "nothing here" shape as plain
-// text with no marker, so host-snippet's own SKIP path needs no separate
-// existence check.
+// candidate under root, in that order. A missing candidate, or one whose
+// regular-file bytes could not be read, reports a zero snippetCandidateState
+// (no body, no span, no problem, notRegular false) — the "nothing here"
+// shape host-snippet's own SKIP path expects. A candidate that exists but
+// is not a regular file reports notRegular true and kind set
+// (nonRegularKind), never read.
 func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateState {
 	rel := h.InstructionFiles()
 	out := make([]snippetCandidateState, 0, len(rel))
@@ -269,8 +293,14 @@ func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateStat
 		path := filepath.Join(root, filepath.FromSlash(r))
 
 		info, err := os.Lstat(path)
-		if err != nil || !info.Mode().IsRegular() {
+
+		switch {
+		case err != nil:
 			out = append(out, snippetCandidateState{path: path})
+
+			continue
+		case !info.Mode().IsRegular():
+			out = append(out, snippetCandidateState{path: path, notRegular: true, kind: nonRegularKind(info)})
 
 			continue
 		}
@@ -307,12 +337,18 @@ func snippetBlockFound(states []snippetCandidateState) bool {
 // unparseable). A marker defect in any candidate is ERROR, citing that
 // candidate's own path and line; two candidates each holding a span is
 // ERROR on the second (".claude/CLAUDE.md" — root is the preferred
-// location), "delete that block"; no candidate holding a span is SKIP "not
-// installed"; otherwise the one candidate holding a span is classified by
-// artifact.RecognizeSnippet: OriginEdited is OK "edited locally",
-// OriginOlder is WARN, OriginCurrent is OK "installed" when its own Dir
-// matches dir (or dirKnown is false — nothing to compare against) and WARN
-// naming both directories otherwise.
+// location). Once neither ERROR arm fires, a candidate holding a span still
+// wins regardless of the other candidate's own shape — a real block in
+// ".claude/CLAUDE.md" reports installed even when root's own "CLAUDE.md" is
+// a symlink or a directory — classified by artifact.RecognizeSnippet:
+// OriginEdited is OK "edited locally", OriginOlder is WARN, OriginCurrent
+// is OK "installed" when its own Dir matches dir (or dirKnown is false —
+// nothing to compare against) and WARN naming both directories otherwise.
+// Only once no candidate holds a span does existence matter: the first
+// candidate that exists but is not a regular file (notRegular) is WARN,
+// naming which (nonRegularKind) — brief can neither write nor scan through
+// it, so the fix points at --print (runInitPrintSnippet) rather than a
+// plain re-run; failing that too, SKIP "not installed".
 func hostSnippetCheck(states []snippetCandidateState, dir string, dirKnown bool) Check {
 	for _, s := range states {
 		if s.prob != nil {
@@ -335,6 +371,16 @@ func hostSnippetCheck(states []snippetCandidateState, dir string, dirKnown bool)
 	}
 
 	if chosen == nil {
+		for i := range states {
+			if states[i].notRegular {
+				return Check{
+					ID: "host-snippet", Severity: SeverityWarn, Path: states[i].path,
+					Detail: fmt.Sprintf("not a regular file (%s); brief block not installed", states[i].kind),
+					Fix:    new(runInitPrintSnippet),
+				}
+			}
+		}
+
 		path := ""
 		if len(states) > 0 {
 			path = states[0].path
@@ -446,10 +492,10 @@ func rolesCheckNoConfig() Check {
 }
 
 // rolesCheckUnparseable builds roles' own row when nearest exists but does
-// not parse: SKIP "skipped: .brief.yaml did not parse", Fix nil — nothing
-// to bind until the config itself is fixed.
+// not parse: SKIP ".brief.yaml did not parse", Fix nil — nothing to bind
+// until the config itself is fixed.
 func rolesCheckUnparseable(nearest string) Check {
-	return Check{ID: "roles", Severity: SeveritySkip, Path: nearest, Detail: "skipped: .brief.yaml did not parse"}
+	return Check{ID: "roles", Severity: SeveritySkip, Path: nearest, Detail: ".brief.yaml did not parse"}
 }
 
 // rolesCheck builds roles' own row for a parsed config: every binding
@@ -504,6 +550,12 @@ const runInit = "run 'brief init'"
 
 // runInitClaudeCode is the SKIP fix every "not installed" host row shares.
 const runInitClaudeCode = "run 'brief init --host claude-code'"
+
+// runInitPrintSnippet is host-snippet's own WARN fix for a CLAUDE.md
+// candidate that exists but is not a regular file (a symlink or a
+// directory): a plain re-run can never write through it, so the fix points
+// at --print's own manual-application path (R9) instead.
+const runInitPrintSnippet = "run 'brief init --print' and add the CLAUDE.md block by hand"
 
 // runInitWithAgents is the fix host-agents and roles share whenever the
 // remedy needs --with-agents specifically.

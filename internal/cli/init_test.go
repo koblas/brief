@@ -508,6 +508,21 @@ func Test_init_print_writes_bodies_to_stdout_and_nothing_to_disk(t *testing.T) {
 		assert.Empty(t, stdout.String())
 		assert.Equal(t, "brief init: already installed; nothing changed\n", stderr.String())
 	})
+
+	t.Run("a non-regular CLAUDE.md still prints the block to add by hand", func(t *testing.T) {
+		wd := t.TempDir()
+		var initStdout, initStderr bytes.Buffer
+		require.NoError(t, cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--no-hook"}, nil, &initStdout, &initStderr))
+		require.NoError(t, os.Remove(filepath.Join(wd, "CLAUDE.md")))
+		require.NoError(t, os.Mkdir(filepath.Join(wd, "CLAUDE.md"), 0o755))
+
+		var stdout, stderr bytes.Buffer
+		err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--no-hook", "--print"}, nil, &stdout, &stderr)
+
+		require.NoError(t, err)
+		assert.Equal(t, "# CLAUDE.md (merge)\n"+string(artifact.SnippetBlock("docs/specifications"))+"\n", stdout.String())
+		assert.Equal(t, "brief init: printed only, no files changed; apply the output above by hand, or rerun without --print\n", stderr.String())
+	})
 }
 
 // Test_init_refuses_an_unwritable_target_and_prints_the_manual_output pins
