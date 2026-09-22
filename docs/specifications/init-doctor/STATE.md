@@ -43,7 +43,7 @@ Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
   `host.WriteHookContext`, stderr empty; no ERROR is fully silent; stdout never carries
   `check`'s own findings table. `--hook` excludes a positional feature and `--json`; a
   malformed payload is a usage error, exit 2. Config is located from the injected `wd`,
-  never the payload's `cwd` (SCENARIO-05)
+  never the payload's `cwd`; a relative `file_path` resolves against `wd` (SCENARIO-05)
 - `checkInvocation` stays the generic flag-error hint; `checkHookInvocation` ("brief check
   --hook claude-code") is `--hook`'s own concrete hint, same split as `init`/`uninstall`
 
@@ -57,8 +57,8 @@ Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
 - Host `claude-code`, kinds `plugin`/`hook`/`agent`, `--no-hook`, `hooks/hooks.json`
   rendering, adding `claude-code` to `setup.Hosts()`, ` for <host>` suffix on uninstall's
   "nothing installed", empty-plugin-dir cleanup (must not sweep the feature root) — S06;
-  `snippet`, `merged`, CLAUDE.md block removal into `Modified` — S07; `--with-agents`,
-  `roles` lines in the config — S08
+  `snippet`, `merged`, CLAUDE.md block into `Modified` — S07; `--with-agents`, `roles` lines
+  in the config — S08
 - Uninstall with omitted `--host` removing every host's integration — S06/S09 decide
 - `--print`, host detection, `--dry-run`/`--print` exclusivity, R10 writability pre-check — S09
 - Hook payload's `cwd`, `tool_name`, `hook_event_name` — unowned; add only if a later

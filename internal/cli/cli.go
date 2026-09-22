@@ -300,8 +300,9 @@ const uninstallDryRunFlagUsage = "print the plan without removing anything"
 // user-facing line to stdout or stderr itself. wd is the working directory
 // used to resolve configuration and to relativize any printed path — Run
 // never calls os.Getwd. stdin backs "-" arguments on commands that read one
-// (finish's --handoff/--state); commands that take no such argument never
-// read it. Run delegates to run, passing debug.ReadBuildInfo as the source
+// (finish's --handoff/--state) and check --hook's own payload read;
+// commands that read neither never read it. Run delegates to run, passing
+// debug.ReadBuildInfo as the source
 // "--version" reads.
 func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	return run(ctx, wd, args, stdin, stdout, stderr, debug.ReadBuildInfo)

@@ -63,6 +63,33 @@ func Test_check_hook_reports_only_the_feature_containing_the_edited_path_as_addi
 		hookAdditionalContext(t, stdout.Bytes()))
 }
 
+// Test_check_hook_resolves_a_relative_edited_path_against_wd pins the
+// contract line "a relative file_path resolves against wd": the payload
+// below names its file_path relative, never joined onto wd by the test
+// itself, so a dropped join in runCheckHook would make FeatureContaining
+// reject it (proven separately by
+// Test_FeatureContaining_ReturnsFalseForARelativePath) and this test
+// would see silent, empty stdout instead of the finding below.
+func Test_check_hook_resolves_a_relative_edited_path_against_wd(t *testing.T) {
+	wd := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(""), 0o600))
+
+	alphaDir := filepath.Join(wd, "docs", "specifications", "alpha")
+	require.NoError(t, os.MkdirAll(alphaDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(alphaDir, "specification.md"), []byte(conformingSpec), 0o600))
+
+	relativeEditedPath := filepath.Join("docs", "specifications", "alpha", "specification.md")
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"check", "--hook", "claude-code"}, strings.NewReader(hookPayload(relativeEditedPath)), &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.Equal(t,
+		"brief check: "+filepath.Join("docs", "specifications", "alpha")+": 1 ERROR finding; run 'brief check alpha'",
+		hookAdditionalContext(t, stdout.Bytes()))
+}
+
 func Test_check_hook_pluralizes_the_finding_count(t *testing.T) {
 	wd := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(""), 0o600))

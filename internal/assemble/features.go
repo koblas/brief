@@ -86,13 +86,21 @@ func (s *Server) FeatureContaining(path string) (string, bool) {
 // featureRoot, and whether it names a real directory with at least one
 // more component after it — see FeatureContaining for the full contract.
 // Neither argument is resolved for symlinks here.
+//
+// A rel of "." or ".." (path is featureRoot itself, or its direct parent)
+// is rejected by the len(parts) < 2 check below without needing its own
+// case: filepath.Separator does not appear in either string, so SplitN
+// yields one part. Only a deeper escape — rel beginning "../", which does
+// split into two — needs the explicit HasPrefix guard: without it, the
+// first part would be "..", and an os.Lstat of featureRoot's own parent
+// would pass as a plausible "feature directory".
 func featureContainingLexical(featureRoot, path string) (string, bool) {
 	rel, err := filepath.Rel(featureRoot, path)
 	if err != nil {
 		return "", false
 	}
 
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", false
 	}
 
