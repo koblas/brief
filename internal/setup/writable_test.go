@@ -92,7 +92,6 @@ func Test_the_writability_probe_never_runs_under_dry_run_or_print(t *testing.T) 
 			_, err := srv.Init(t.Context(), wd, c.req)
 
 			require.NoError(t, err)
-			require.NotErrorIs(t, err, setup.ErrUnwritable)
 		})
 	}
 }
