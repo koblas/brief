@@ -1,11 +1,11 @@
 package setup
 
-// White-box package: scanSnippetMarkers, mergeSnippet and removeSnippet are
-// unexported byte-level decision logic (the R5 span rules pinned in
-// SCENARIO-07's plan) whose case count — separator encoding, marker defect
-// classification — is impractical to drive economically through the public
-// Init/Uninstall surface for every combination; snippet_test.go covers the
-// public surface, this file covers the extracted logic directly.
+// White-box package: mergeSnippet and removeSnippet are unexported
+// byte-level decision logic (the R5 separator encoding) whose case count is
+// impractical to drive economically through the public Init/Uninstall
+// surface for every combination; snippet_test.go covers the public surface,
+// this file covers the extracted logic directly. Marker scanning itself is
+// artifact.ScanSnippetMarkers, tested in internal/platform/artifact.
 
 import (
 	"testing"
@@ -36,11 +36,11 @@ func Test_mergeSnippet_encodes_the_separator_so_remove_can_undo_it(t *testing.T)
 		t.Run(c.name, func(t *testing.T) {
 			merged := mergeSnippet([]byte(c.existing), nil, block)
 
-			span, prob := scanSnippetMarkers(merged)
+			rawSpan, prob := artifact.ScanSnippetMarkers(merged)
 			require.Nil(t, prob)
-			require.NotNil(t, span)
+			require.NotNil(t, rawSpan)
 
-			restored := removeSnippet(merged, *span)
+			restored := removeSnippet(merged, *toSnippetSpan(rawSpan))
 
 			assert.Equal(t, c.existing, string(restored))
 		})
@@ -98,12 +98,12 @@ func Test_mergeSnippet_on_an_empty_or_missing_file_matches_create(t *testing.T) 
 func Test_mergeSnippet_replaces_the_span_in_place(t *testing.T) {
 	oldBlock := artifact.SnippetBlock("elsewhere")
 	existing := "before\n\n" + string(oldBlock) + "\nafter"
-	span, prob := scanSnippetMarkers([]byte(existing))
+	rawSpan, prob := artifact.ScanSnippetMarkers([]byte(existing))
 	require.Nil(t, prob)
-	require.NotNil(t, span)
+	require.NotNil(t, rawSpan)
 
 	newBlock := artifact.SnippetBlock("docs/specifications")
-	merged := mergeSnippet([]byte(existing), span, newBlock)
+	merged := mergeSnippet([]byte(existing), toSnippetSpan(rawSpan), newBlock)
 
 	assert.Equal(t, "before\n\n"+string(newBlock)+"\nafter", string(merged))
 }
@@ -115,11 +115,11 @@ func Test_mergeSnippet_replaces_the_span_in_place(t *testing.T) {
 func Test_removeSnippet_at_offset_zero_drops_the_span_and_its_own_newline(t *testing.T) {
 	block := artifact.SnippetBlock("docs/specifications")
 	existing := string(block) + "\nafter"
-	span, prob := scanSnippetMarkers([]byte(existing))
+	rawSpan, prob := artifact.ScanSnippetMarkers([]byte(existing))
 	require.Nil(t, prob)
-	require.NotNil(t, span)
+	require.NotNil(t, rawSpan)
 
-	restored := removeSnippet([]byte(existing), *span)
+	restored := removeSnippet([]byte(existing), *toSnippetSpan(rawSpan))
 
 	assert.Equal(t, "after", string(restored))
 }
@@ -131,65 +131,11 @@ func Test_removeSnippet_at_offset_zero_drops_the_span_and_its_own_newline(t *tes
 func Test_removeSnippet_on_a_block_the_user_moved_drops_only_the_span(t *testing.T) {
 	block := artifact.SnippetBlock("docs/specifications")
 	existing := "before\n" + string(block) + "\nafter"
-	span, prob := scanSnippetMarkers([]byte(existing))
+	rawSpan, prob := artifact.ScanSnippetMarkers([]byte(existing))
 	require.Nil(t, prob)
-	require.NotNil(t, span)
+	require.NotNil(t, rawSpan)
 
-	restored := removeSnippet([]byte(existing), *span)
+	restored := removeSnippet([]byte(existing), *toSnippetSpan(rawSpan))
 
 	assert.Equal(t, "before\nafter", string(restored))
-}
-
-// Test_scanSnippetMarkers_finds_no_span_in_plain_text pins the Zero case:
-// text with no marker line at all reports a nil span and no problem.
-func Test_scanSnippetMarkers_finds_no_span_in_plain_text(t *testing.T) {
-	span, prob := scanSnippetMarkers([]byte("just some prose\nnothing more\n"))
-
-	assert.Nil(t, span)
-	assert.Nil(t, prob)
-}
-
-// Test_scanSnippetMarkers_reports_a_marker_defect_with_its_line pins every
-// named refusal shape (SCENARIO-07's plan Step 6) and the 1-based line
-// number each reports.
-func Test_scanSnippetMarkers_reports_a_marker_defect_with_its_line(t *testing.T) {
-	begin := artifact.SnippetBegin
-	end := artifact.SnippetEnd
-
-	cases := []struct {
-		name     string
-		body     string
-		wantLine int
-	}{
-		{name: "lone begin", body: "one\n" + begin + "\nno end after this\n", wantLine: 2},
-		{name: "lone end", body: "one\n" + end + "\nno begin before this\n", wantLine: 2},
-		{name: "end before begin", body: end + "\ntext\n" + begin + "\n" + end + "\n", wantLine: 1},
-		{name: "second begin, one file", body: begin + "\n" + end + "\n" + begin + "\n" + end + "\n", wantLine: 3},
-		{name: "second begin, no closing end for the first", body: begin + "\n" + begin + "\n" + end + "\n", wantLine: 2},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			span, prob := scanSnippetMarkers([]byte(c.body))
-
-			assert.Nil(t, span)
-			require.NotNil(t, prob)
-			assert.Equal(t, c.wantLine, prob.line)
-		})
-	}
-}
-
-// Test_scanSnippetMarkers_finds_the_span_of_one_valid_block pins the
-// happy-path span: begin marker's line through the end marker's own text,
-// excluding its line terminator.
-func Test_scanSnippetMarkers_finds_the_span_of_one_valid_block(t *testing.T) {
-	block := artifact.SnippetBlock("docs/specifications")
-	body := "before\n\n" + string(block) + "\nafter"
-
-	span, prob := scanSnippetMarkers([]byte(body))
-
-	require.Nil(t, prob)
-	require.NotNil(t, span)
-	assert.Equal(t, string(block), string([]byte(body)[span.start:span.end]))
-	assert.Equal(t, 3, span.beginLine)
 }

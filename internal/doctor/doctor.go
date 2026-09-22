@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/host"
 )
 
 // Severity is a Check's urgency.
@@ -16,28 +17,44 @@ const (
 	// SeverityOK marks a check that found nothing wrong.
 	SeverityOK Severity = "OK"
 	// SeverityWarn marks a check whose subject is degraded or missing in a
-	// way that does not itself block "brief check" or "brief start" —
-	// an un-inited repository, an ancestor config shadowed, brief on PATH
-	// at a different version than the one running.
+	// way that does not itself block "brief check" or "brief start" — an
+	// un-inited repository, an ancestor config shadowed, brief on PATH at
+	// a different version than the one running, a host-plugin/host-hook/
+	// host-snippet/host-agents file installed by an older brief release, a
+	// hook file missing while the rest of the plugin is installed (doctor
+	// cannot tell that apart from --no-hook), a host-agents file missing
+	// or not regular, or a roles position unbound or unresolved (roles are
+	// reported, never enforced — R1 amendment).
 	SeverityWarn Severity = "WARN"
 	// SeverityError marks a check whose subject would make another
 	// command refuse or misbehave: an unparseable config, an invalid
 	// value, a feature root that does not exist, is not a directory, or
-	// is not readable or writable.
+	// is not readable or writable; a host-plugin/host-snippet file missing
+	// or not a regular file while some other integration file is
+	// installed; brief missing from PATH while the integration is
+	// installed, since the hook that runs "brief check" can never find it.
 	SeverityError Severity = "ERROR"
 	// SeveritySkip marks a check that could not run because an earlier
 	// check's own subject was missing or invalid — config-values and
 	// root-dir when config-parse itself failed, or the whole config
-	// family when no ".brief.yaml" exists at all.
+	// family when no ".brief.yaml" exists at all — or because its own
+	// subject was never installed at all: host-plugin, host-hook,
+	// host-snippet and host-agents when no file of their own kind is
+	// present anywhere, and roles when no config was found or every
+	// binding is empty.
 	SeveritySkip Severity = "SKIP"
 )
 
-// Check is one row of a Report: ID is doctor's own stable id
-// (config-file, config-parse, config-values, config-shadow, root-dir,
-// env-git, env-path), Severity is this row's urgency, Path is the
-// absolute path this row concerns ("" when it names none), Detail is the
-// English explanation, and Fix, when non-nil, names the action that would
-// resolve Severity ERROR or WARN.
+// Check is one row of a Report: ID is doctor's own stable id (config-file,
+// config-parse, config-values, config-shadow, root-dir, env-git, env-path,
+// host-plugin, host-hook, host-snippet, host-agents, roles), Severity is
+// this row's urgency, Path is the absolute path this row concerns ("" when
+// it names none), Detail is the English explanation, and Fix, when
+// non-nil, names the action that would resolve it. A SKIP row carries a
+// Fix too when its subject was simply never installed (naming the install
+// command); one whose subject could not be determined at all (root-dir or
+// roles behind an unparseable config) carries a nil Fix, the same as every
+// OK row.
 type Check struct {
 	ID       string
 	Severity Severity
@@ -91,13 +108,15 @@ const devVersion = "(devel)"
 
 // Server diagnoses one repository's setup for brief. Its environment
 // seams default to the real PATH lookup, the real running binary's own
-// path, and a debug/buildinfo.ReadFile adapter; a test overrides them with
-// WithLookPath, WithExecutable and WithBinaryVersion.
+// path, a debug/buildinfo.ReadFile adapter, and os.UserHomeDir; a test
+// overrides them with WithLookPath, WithExecutable, WithBinaryVersion and
+// WithHomeDir.
 type Server struct {
 	lookPath      func(string) (string, error)
 	executable    func() (string, error)
 	binaryVersion func(string) (string, bool)
 	version       string
+	homeDir       func() (string, error)
 }
 
 // Option configures a Server built by NewServer.
@@ -130,17 +149,28 @@ func WithVersion(v string) Option {
 	return func(s *Server) { s.version = v }
 }
 
+// WithHomeDir overrides the function the roles check uses to find the
+// current user's home directory while resolving a bare `<name>` role
+// binding (R7) against `<home>/.claude/agents/<name>.md`. It defaults to
+// os.UserHomeDir; a test injects a fixed, empty directory so roles never
+// depends on the developer's own "~/.claude/agents". A home error, or home
+// returning "", means no home agents are ever found — never a refusal.
+func WithHomeDir(fn func() (string, error)) Option {
+	return func(s *Server) { s.homeDir = fn }
+}
+
 // NewServer builds a Server with opts applied over its production
 // defaults: exec.LookPath, os.Executable, an adapter over
-// debug/buildinfo.ReadFile, and devVersion for the running version (a
-// caller that never calls WithVersion is, correctly, always reported as
-// running an unknown build).
+// debug/buildinfo.ReadFile, devVersion for the running version (a caller
+// that never calls WithVersion is, correctly, always reported as running an
+// unknown build), and os.UserHomeDir.
 func NewServer(opts ...Option) *Server {
 	s := &Server{
 		lookPath:      exec.LookPath,
 		executable:    os.Executable,
 		binaryVersion: readBinaryVersion,
 		version:       devVersion,
+		homeDir:       os.UserHomeDir,
 	}
 
 	for _, o := range opts {
@@ -151,18 +181,26 @@ func NewServer(opts ...Option) *Server {
 }
 
 // Diagnose reports wd's setup health: config-file, config-parse,
-// config-values, config-shadow, root-dir, env-git and env-path, in that
-// fixed order. No ".brief.yaml" anywhere reports config-file as WARN
-// (fix "brief init") and skips the rest of the config family — an
-// un-inited repository is not itself a fault. A found config that fails
-// to decode reports config-parse as ERROR and skips config-values and
-// root-dir, since the feature directory a bad config might have set is
-// unknown; one that decodes reports one ERROR row per invalid value
-// (config.Inspect's own violations, never only the first) and runs
-// root-dir against the decoded feature directory. config-shadow is always
-// OK: a shadowed ancestor config is informational, not a fault. Diagnose
-// never returns an error for any of the above — every fault becomes a
-// Check. It never reads a feature's own contents.
+// config-values, config-shadow, root-dir, env-git, env-path, host-plugin,
+// host-hook, host-snippet, host-agents and roles, in that fixed order. No
+// ".brief.yaml" anywhere reports config-file as WARN (fix "brief init")
+// and skips the rest of the config family — an un-inited repository is
+// not itself a fault. A found config that fails to decode reports
+// config-parse as ERROR and skips config-values and root-dir, since the
+// feature directory a bad config might have set is unknown; one that
+// decodes reports one ERROR row per invalid value (config.Inspect's own
+// violations, never only the first) and runs root-dir against the decoded
+// feature directory. config-shadow is always OK: a shadowed ancestor
+// config is informational, not a fault.
+//
+// The install root the five host rows and roles check against is
+// config.Locate's own directory whenever a config was found — parseable or
+// not — else wd; the host is always Claude Code, with no detection.
+// env-path is ERROR, rather than WARN, when brief is missing from PATH and
+// the integration is installed (any Plugin(true) ∪ Agents() file present,
+// or a CLAUDE.md snippet block found). Diagnose never returns an error for
+// any of the above — every fault becomes a Check. It never reads a
+// feature's own contents.
 func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 	_ = ctx
 
@@ -173,24 +211,57 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 
 	nearest, shadowed, locateErr := config.Locate(absWd)
 
-	var checks []Check
+	root := absWd
+	if locateErr == nil && nearest != "" {
+		root = filepath.Dir(nearest)
+	}
+
+	var (
+		checks     []Check
+		dir        string
+		dirKnown   bool
+		rolesCheck Check
+	)
 
 	switch {
 	case locateErr != nil || nearest == "":
 		checks = append(checks, noConfigChecks(absWd)...)
 		checks = append(checks, checkRootDir(absWd, absWd, config.Default().FeatureDirectory))
+		dir, dirKnown = config.Default().FeatureDirectory, true
+		rolesCheck = rolesCheckNoConfig()
 	default:
 		cfg, violations, inspectErr := config.Inspect(nearest)
 		if inspectErr != nil {
 			checks = append(checks, unparseableConfigChecks(nearest, shadowed, inspectErr)...)
 			checks = append(checks, Check{ID: "root-dir", Severity: SeveritySkip, Detail: rootDirUnknownDetail})
+			rolesCheck = rolesCheckUnparseable(nearest)
 		} else {
 			checks = append(checks, parseableConfigChecks(nearest, shadowed, violations)...)
 			checks = append(checks, checkRootDir(absWd, filepath.Dir(nearest), cfg.FeatureDirectory))
+			dir, dirKnown = cfg.FeatureDirectory, true
+			rolesCheck = s.rolesCheck(root, nearest, [3]roleBinding{
+				{name: "planner", value: cfg.Roles.Planner},
+				{name: "implementer", value: cfg.Roles.Implementer},
+				{name: "reviewer", value: cfg.Roles.Reviewer},
+			})
 		}
 	}
 
-	checks = append(checks, checkEnvGit(absWd), s.checkEnvPath())
+	checks = append(checks, checkEnvGit(absWd))
+
+	h, _ := host.Lookup(host.ClaudeCode)
+	snippetStates := scanSnippetCandidateStates(root, h)
+	filesInstalled := anyIntegrationFilePresent(root, h)
+	integrationInstalled := filesInstalled || snippetBlockFound(snippetStates)
+
+	checks = append(checks,
+		s.checkEnvPath(integrationInstalled),
+		hostPluginCheck(root, h, filesInstalled),
+		hostHookCheck(root, h, filesInstalled),
+		hostSnippetCheck(snippetStates, dir, dirKnown),
+		hostAgentsCheck(root, h),
+		rolesCheck,
+	)
 
 	return Report{Checks: checks}
 }

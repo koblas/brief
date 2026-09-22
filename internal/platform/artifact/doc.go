@@ -22,4 +22,9 @@
 // for which directory". RecognizeSnippet is config-independent: it matches
 // a block brief-written for any feature directory, not only the caller's
 // currently configured one, and reports which directory that was.
+// ScanSnippetMarkers locates a marker block's own span inside an arbitrary
+// file's bytes, or reports the first marker-ordering defect it finds — the
+// one scanner internal/setup and internal/doctor both call, so a lone or
+// misordered marker is reported identically by init/uninstall and by
+// doctor.
 package artifact

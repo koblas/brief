@@ -191,19 +191,27 @@ func checkEnvGit(wd string) Check {
 }
 
 // checkEnvPath builds env-path's own row: "brief" missing from PATH is
-// WARN; found and the same file as the running binary (compared through
-// filepath.EvalSymlinks then os.SameFile, so a symlinked install still
-// matches) is OK without reading either binary's version; a different
-// file carrying the same version as the running binary, when that version
-// is not devVersion, is OK; any other outcome — a different version, an
-// unreadable one, or devVersion on either side — is WARN, naming the PATH
-// binary in its own fix. The row's own Path is always found, exactly as
-// lookPath reported it — the symlink resolution is an internal identity
-// check, never surfaced, so a report never shows the user a resolved path
-// unrelated to the PATH entry they configured.
-func (s *Server) checkEnvPath() Check {
+// ERROR when the Claude Code integration is installed (installed true —
+// any Plugin(true) ∪ Agents() file present, or a CLAUDE.md snippet block
+// found), since the hook that runs "brief check" can never find it; WARN
+// otherwise, unchanged from before installed existed. Found and the same
+// file as the running binary (compared through filepath.EvalSymlinks then
+// os.SameFile, so a symlinked install still matches) is OK without reading
+// either binary's version; a different file carrying the same version as
+// the running binary, when that version is not devVersion, is OK; any
+// other outcome — a different version, an unreadable one, or devVersion on
+// either side — is WARN, naming the PATH binary in its own fix. The row's
+// own Path is always found, exactly as lookPath reported it — the symlink
+// resolution is an internal identity check, never surfaced, so a report
+// never shows the user a resolved path unrelated to the PATH entry they
+// configured.
+func (s *Server) checkEnvPath(installed bool) Check {
 	found, lookErr := s.lookPath("brief")
 	if lookErr != nil {
+		if installed {
+			return Check{ID: "env-path", Severity: SeverityError, Detail: "brief not found on PATH; the Claude Code integration runs it", Fix: new("install brief on PATH")}
+		}
+
 		return Check{ID: "env-path", Severity: SeverityWarn, Detail: "brief not found on PATH", Fix: new("install brief on PATH")}
 	}
 

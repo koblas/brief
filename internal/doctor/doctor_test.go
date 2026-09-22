@@ -6,23 +6,71 @@ import (
 	"testing"
 
 	"github.com/koblas/brief/internal/doctor"
+	"github.com/koblas/brief/internal/platform/artifact"
+	"github.com/koblas/brief/internal/platform/host"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// newHealthyDoctorFixture builds a wd with a valid ".brief.yaml", its
-// default feature root ("docs/specifications"), and a ".git" directory —
-// the baseline every case in this file starts from, mutated by exactly
-// one deviation per test.
+// newHealthyDoctorFixture builds a wd with a valid, role-bound
+// ".brief.yaml", its default feature root ("docs/specifications"), a
+// ".git" directory, and a fully installed Claude Code integration — the
+// plugin manifest, both skills, the hook, the three role agents
+// (host.Lookup(host.ClaudeCode)'s own paths, each written from its own
+// artifact.Render) and a root CLAUDE.md holding SnippetBlock for the
+// configured feature directory. This is the baseline every case in this
+// file starts from, mutated by exactly one deviation per test.
 func newHealthyDoctorFixture(t *testing.T) string {
 	t.Helper()
 
 	wd := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: \"## Progress\"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+		"progress-heading: \"## Progress\"\n"+
+			"roles:\n"+
+			"  planner: brief:planner\n"+
+			"  implementer: brief:implementer\n"+
+			"  reviewer: brief:reviewer\n"), 0o600))
 	require.NoError(t, os.MkdirAll(filepath.Join(wd, "docs", "specifications"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(wd, ".git"), 0o755))
 
+	h, ok := host.Lookup(host.ClaudeCode)
+	require.True(t, ok)
+
+	for _, f := range h.Plugin(true) {
+		writeHostFile(t, wd, f.RelPath, artifact.Render(f.Kind))
+	}
+
+	for _, f := range h.Agents() {
+		writeHostFile(t, wd, f.RelPath, artifact.Render(f.Kind))
+	}
+
+	block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
+	require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), block, 0o600))
+
 	return wd
+}
+
+// writeHostFile writes body to wd/relPath, creating relPath's own parent
+// directories first.
+func writeHostFile(t *testing.T, wd, relPath string, body []byte) {
+	t.Helper()
+
+	path := filepath.Join(wd, filepath.FromSlash(relPath))
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, body, 0o600))
+}
+
+// emptyHomeDir returns a doctor.Option pointing WithHomeDir at a fresh,
+// empty temp directory — every test in this file that builds a Server
+// directly (bypassing NewServer's own os.UserHomeDir default) injects this,
+// so a bare-name role binding never resolves against the developer's own
+// real "~/.claude/agents".
+func emptyHomeDir(t *testing.T) doctor.Option {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	return doctor.WithHomeDir(func() (string, error) { return dir, nil })
 }
 
 // findCheck returns the first Check in report carrying id, failing the
@@ -53,9 +101,11 @@ func checkIDs(report doctor.Report) []string {
 
 // Test_diagnose_reports_every_check_ok_in_a_healthy_repository pins the
 // fixed row order (config-file, config-parse, config-values,
-// config-shadow, root-dir, env-git, env-path) and that a fully healthy
-// repository reports every row OK — not merely "not ERROR or WARN", which
-// a SKIP row (the no-config arm's own shape) would also satisfy.
+// config-shadow, root-dir, env-git, env-path, host-plugin, host-hook,
+// host-snippet, host-agents, roles) and that a fully healthy, fully
+// installed repository reports every row OK — not merely "not ERROR or
+// WARN", which a SKIP row (the no-config arm's own shape) would also
+// satisfy.
 func Test_diagnose_reports_every_check_ok_in_a_healthy_repository(t *testing.T) {
 	wd := newHealthyDoctorFixture(t)
 	self := filepath.Join(wd, "self-brief")
@@ -64,11 +114,15 @@ func Test_diagnose_reports_every_check_ok_in_a_healthy_repository(t *testing.T) 
 	srv := doctor.NewServer(
 		doctor.WithLookPath(func(string) (string, error) { return self, nil }),
 		doctor.WithExecutable(func() (string, error) { return self, nil }),
+		emptyHomeDir(t),
 	)
 
 	report := srv.Diagnose(t.Context(), wd)
 
-	assert.Equal(t, []string{"config-file", "config-parse", "config-values", "config-shadow", "root-dir", "env-git", "env-path"}, checkIDs(report))
+	assert.Equal(t, []string{
+		"config-file", "config-parse", "config-values", "config-shadow", "root-dir", "env-git", "env-path",
+		"host-plugin", "host-hook", "host-snippet", "host-agents", "roles",
+	}, checkIDs(report))
 
 	for _, c := range report.Checks {
 		assert.Equal(t, doctor.SeverityOK, c.Severity, "check %q must be OK in a healthy repo", c.ID)
@@ -193,7 +247,7 @@ func Test_diagnose_classifies_common_setup_problems(t *testing.T) {
 			wd := newHealthyDoctorFixture(t)
 			c.mutate(t, wd)
 
-			srv := doctor.NewServer()
+			srv := doctor.NewServer(emptyHomeDir(t))
 			report := srv.Diagnose(t.Context(), wd)
 
 			check := findCheck(t, report, c.checkID)
@@ -228,7 +282,7 @@ func Test_diagnose_reports_root_dir_readability_and_writability_separately(t *te
 			require.NoError(t, os.Chmod(root, c.mode))
 			t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
 
-			srv := doctor.NewServer()
+			srv := doctor.NewServer(emptyHomeDir(t))
 			report := srv.Diagnose(t.Context(), wd)
 
 			check := findCheck(t, report, "root-dir")
@@ -248,7 +302,7 @@ func Test_diagnose_reports_one_config_values_row_per_violation_in_field_order(t 
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"),
 		[]byte("step-file-pattern: \"SCENARIO-%s.md\"\nhandoff-cap-lines: 0\n"), 0o600))
 
-	srv := doctor.NewServer()
+	srv := doctor.NewServer(emptyHomeDir(t))
 	report := srv.Diagnose(t.Context(), wd)
 
 	var rows []doctor.Check
@@ -280,7 +334,7 @@ func Test_diagnose_names_shadowed_ancestor_configs_in_config_shadow_detail(t *te
 	require.NoError(t, os.MkdirAll(filepath.Join(wd, ".git"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: \"## Near\"\n"), 0o600))
 
-	srv := doctor.NewServer()
+	srv := doctor.NewServer(emptyHomeDir(t))
 	report := srv.Diagnose(t.Context(), wd)
 
 	check := findCheck(t, report, "config-shadow")
@@ -310,7 +364,7 @@ func Test_diagnose_leaves_the_feature_root_byte_identical(t *testing.T) {
 	before, err := os.ReadDir(root)
 	require.NoError(t, err)
 
-	srv := doctor.NewServer()
+	srv := doctor.NewServer(emptyHomeDir(t))
 	report := srv.Diagnose(t.Context(), wd)
 
 	after, err := os.ReadDir(root)
@@ -331,12 +385,15 @@ type envPathCase struct {
 	wantSeverity doctor.Severity
 }
 
-// Test_diagnose_classifies_env_path sweeps env-path's own rules: brief
-// missing from PATH warns; the PATH binary being the same file as the
-// running one is OK without ever reading a version; a different file
-// carrying the same, non-"(devel)" version is OK; a different file
-// carrying a different version, or one whose version cannot be read, both
-// warn.
+// Test_diagnose_classifies_env_path sweeps env-path's own version-comparison
+// rules against a bare fixture (no Claude Code integration installed, so
+// "not on PATH" stays WARN — the ERROR arm is
+// Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed's
+// own concern): brief missing from PATH warns; the PATH binary being the
+// same file as the running one is OK without ever reading a version; a
+// different file carrying the same, non-"(devel)" version is OK; a
+// different file carrying a different version, or one whose version cannot
+// be read, both warn.
 func Test_diagnose_classifies_env_path(t *testing.T) {
 	cases := []envPathCase{
 		{
@@ -417,11 +474,69 @@ func Test_diagnose_classifies_env_path(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd := newHealthyDoctorFixture(t)
+			wd := newHostFixture(t)
 			found := filepath.Join(wd, "found-brief")
 			require.NoError(t, os.WriteFile(found, []byte("found"), 0o600))
 
-			srv := doctor.NewServer(c.opts(t, found)...)
+			srv := doctor.NewServer(append(c.opts(t, found), emptyHomeDir(t))...)
+			report := srv.Diagnose(t.Context(), wd)
+
+			check := findCheck(t, report, "env-path")
+			assert.Equal(t, c.wantSeverity, check.Severity)
+		})
+	}
+}
+
+// Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed
+// pins env-path's own ERROR arm (R13): brief missing from PATH is ERROR
+// when the Claude Code integration is installed — any Plugin(true) ∪
+// Agents() file present, or a snippet block found — and unchanged WARN
+// otherwise. The three cases differ in exactly one variable: what, if
+// anything, is installed.
+func Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed(t *testing.T) {
+	cases := []struct {
+		name         string
+		setup        func(t *testing.T, wd string, h host.Host)
+		wantSeverity doctor.Severity
+	}{
+		{
+			name: "not on PATH, the plugin is installed",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				for _, f := range h.Plugin(true) {
+					writeHostArtifact(t, wd, f)
+				}
+			},
+			wantSeverity: doctor.SeverityError,
+		},
+		{
+			name: "not on PATH, only the CLAUDE.md snippet is installed",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
+				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), block, 0o600))
+			},
+			wantSeverity: doctor.SeverityError,
+		},
+		{
+			name:         "not on PATH, nothing is installed",
+			setup:        func(t *testing.T, _ string, _ host.Host) { t.Helper() },
+			wantSeverity: doctor.SeverityWarn,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := newHostFixture(t)
+			h := claudeCodeHost(t)
+			c.setup(t, wd, h)
+
+			srv := doctor.NewServer(
+				doctor.WithLookPath(func(string) (string, error) { return "", os.ErrNotExist }),
+				emptyHomeDir(t),
+			)
 			report := srv.Diagnose(t.Context(), wd)
 
 			check := findCheck(t, report, "env-path")

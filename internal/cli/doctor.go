@@ -14,10 +14,14 @@ import (
 // doctorLong is "brief doctor"'s help prose.
 var doctorLong = `Checks brief's own setup: the ".brief.yaml" config (present, parses,
 every value valid, and whether it shadows an ancestor config), the
-feature root (exists, is a directory, is readable and writable), and the
-host environment (a ".git" above the working directory, and whether the
-"brief" on PATH matches the one running). It never reads a feature's own
-content — that is brief check's job.
+feature root (exists, is a directory, is readable and writable), the host
+environment (a ".git" above the working directory, and whether the
+"brief" on PATH matches the one running), and, for Claude Code, the
+skills-directory plugin, its hook, the CLAUDE.md instruction block and the
+three role agents — plus whether each role bound in ".brief.yaml" resolves
+to an agent file, reading "~/.claude/agents" for a bare role name found
+nowhere in the repository. It never reads a feature's own content — that
+is brief check's job.
 
 Prints one row per check, in a fixed order:
 

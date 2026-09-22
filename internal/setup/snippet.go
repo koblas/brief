@@ -22,84 +22,15 @@ type snippetSpan struct {
 	beginLine  int
 }
 
-// markerProblem is scanSnippetMarkers's own refusal shape: line is the
-// 1-based line a caller-built *RefusalError should cite, 0 for a defect
-// (CRLF) that names no line. problem and fix are the *RefusalError's own
-// Problem and Fix text.
-type markerProblem struct {
-	line    int
-	problem string
-	fix     string
-}
-
-// scanSnippetMarkers walks body's own lines looking for SnippetBegin and
-// SnippetEnd marker lines — a whole line exactly equal to the marker — and
-// reports exactly one of: a nil span and nil problem when body carries no
-// marker at all; the one valid block's own snippetSpan; or a markerProblem
-// for the first marker defect it finds, in file order — a second begin
-// marker (whether or not the first block was ever closed), a lone begin (no
-// matching end before EOF), a lone end (no begin ever preceded it), or an
-// end before any begin.
-//
-// CRLF line endings are not checked here: a CRLF file's own lines carry a
-// trailing "\r" the LF-based marker constants can never exactly match, so
-// this function reports it the same as body carrying no marker at all — the
-// caller checks CRLF separately, scoped to the one candidate it is actually
-// about to read or write.
-func scanSnippetMarkers(body []byte) (*snippetSpan, *markerProblem) {
-	var (
-		beginLine, beginOffset int
-		pendingEndLine         int
-		open, done             bool
-		found                  *snippetSpan
-	)
-
-	offset := 0
-	lineNo := 0
-
-	for line := range strings.SplitSeq(string(body), "\n") {
-		lineNo++
-		lineStart := offset
-		offset += len(line) + 1 // account for the "\n" split consumed, harmless past EOF
-
-		switch line {
-		case artifact.SnippetBegin:
-			if open || done {
-				return nil, &markerProblem{line: lineNo, problem: "a second brief:begin marker; a file may hold only one brief block", fix: "delete the extra block"}
-			}
-
-			if pendingEndLine > 0 {
-				return nil, &markerProblem{line: pendingEndLine, problem: "brief:end marker appears before any brief:begin", fix: "reorder the markers, or remove them"}
-			}
-
-			beginLine = lineNo
-			beginOffset = lineStart
-			open = true
-		case artifact.SnippetEnd:
-			if !open {
-				if pendingEndLine == 0 && !done {
-					pendingEndLine = lineNo
-				}
-
-				continue
-			}
-
-			open = false
-			done = true
-			found = &snippetSpan{start: beginOffset, end: lineStart + len(line), beginLine: beginLine}
-		}
+// toSnippetSpan converts an *artifact.SnippetSpan — artifact.ScanSnippetMarkers'
+// own exported result — into setup's own private snippetSpan, nil in, nil
+// out.
+func toSnippetSpan(s *artifact.SnippetSpan) *snippetSpan {
+	if s == nil {
+		return nil
 	}
 
-	switch {
-	case open:
-		return nil, &markerProblem{line: beginLine, problem: "brief:begin marker with no matching brief:end", fix: "add " + artifact.SnippetEnd + " after it, or remove the lone marker"}
-	case done:
-		return found, nil
-	case pendingEndLine > 0:
-		return nil, &markerProblem{line: pendingEndLine, problem: "brief:end marker with no matching brief:begin", fix: "add " + artifact.SnippetBegin + " before it, or remove the lone marker"}
-	default:
-		return nil, nil
-	}
+	return &snippetSpan{start: s.Start, end: s.End, beginLine: s.BeginLine}
 }
 
 // mergeSnippet computes the bytes a CLAUDE.md candidate should hold after
@@ -198,7 +129,7 @@ type candidateSnippetFile struct {
 // ".claude/CLAUDE.md"): a missing path reports exists=false; a path that
 // exists but is not a regular file reports exists=true, regular=false,
 // never read; a regular file is read and scanned for a marker defect
-// (scanSnippetMarkers) — a defect anywhere in either candidate refuses
+// (artifact.ScanSnippetMarkers) — a defect anywhere in either candidate refuses
 // immediately, citing that candidate. Once both candidates are scanned
 // clean, two of them each holding a valid block is refused too, citing
 // ".claude/CLAUDE.md" (root is the preferred location) and its own begin
@@ -230,12 +161,12 @@ func scanSnippetCandidates(root string, h host.Host) ([]candidateSnippetFile, er
 			return nil, fmt.Errorf("setup: read %s: %w", path, err)
 		}
 
-		span, prob := scanSnippetMarkers(body)
+		span, prob := artifact.ScanSnippetMarkers(body)
 		if prob != nil {
-			return nil, &RefusalError{Path: path, Line: prob.line, Problem: prob.problem, Fix: prob.fix}
+			return nil, &RefusalError{Path: path, Line: prob.Line, Problem: prob.Problem, Fix: prob.Fix}
 		}
 
-		out = append(out, candidateSnippetFile{path: path, exists: true, regular: true, body: body, span: span})
+		out = append(out, candidateSnippetFile{path: path, exists: true, regular: true, body: body, span: toSnippetSpan(span)})
 	}
 
 	if len(out) == 2 && out[0].span != nil && out[1].span != nil {

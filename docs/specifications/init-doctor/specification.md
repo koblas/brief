@@ -315,4 +315,4 @@ Scenario: SCENARIO-10 doctor reports Claude Code integration health
 - [x] SCENARIO-07: init adds the CLAUDE.md instruction block
 - [x] SCENARIO-08: --with-agents scaffolds three role agents and binds them
 - [x] SCENARIO-09: --print, host detection, and unwritable targets
-- [ ] SCENARIO-10: doctor reports Claude Code integration health
+- [x] SCENARIO-10: doctor reports Claude Code integration health
