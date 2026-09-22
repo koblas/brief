@@ -209,10 +209,20 @@ func filesChangedFor(cmd *cobra.Command, err error) *bool {
 // jsonTakesNoValueMessage renders "--json=<v>"'s always-text usage line
 // (R5) for cmd: root's own bare "brief: '--json' takes no value; run
 // '<hint>'" when cmd is root itself, else "brief <path>: '--json' takes
-// no value; run '<hint>'" naming cmd's own resolved command path.
+// no value; run '<hint>'" naming cmd's own resolved command path. hint
+// names the form that would actually have worked: usageHint's own
+// invocation with " --json" appended, when cmd carries one
+// (cmd.Annotations[invocationAnnotation] — status, check, start, finish,
+// new feature, new step). usageHint's own generic fallbacks ("brief
+// --help", "brief new --help", "brief help <command>") stay bare: none of
+// those three names one JSON-capable leaf invocation to append --json to.
 func jsonTakesNoValueMessage(cmd *cobra.Command) string {
 	path := commandName(cmd)
 	hint := usageHint(cmd)
+
+	if cmd.Annotations[invocationAnnotation] != "" {
+		hint += " --json"
+	}
 
 	if path == "brief" {
 		return takesNoValueMessage("--json", hint)

@@ -327,14 +327,14 @@ func Test_json_with_a_value_is_a_text_usage_error(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "status --json=x", args: []string{"status", "--json=x"}, wantStderr: "brief status: '--json' takes no value; run 'brief status'"},
-		{name: "status --json=", args: []string{"status", "--json="}, wantStderr: "brief status: '--json' takes no value; run 'brief status'"},
-		{name: "start --json=true demo", args: []string{"start", "--json=true", "demo"}, wantStderr: "brief start: '--json' takes no value; run 'brief start <feature>'"},
+		{name: "status --json=x", args: []string{"status", "--json=x"}, wantStderr: "brief status: '--json' takes no value; run 'brief status --json'"},
+		{name: "status --json=", args: []string{"status", "--json="}, wantStderr: "brief status: '--json' takes no value; run 'brief status --json'"},
+		{name: "start --json=true demo", args: []string{"start", "--json=true", "demo"}, wantStderr: "brief start: '--json' takes no value; run 'brief start <feature> --json'"},
 		{name: "new --json=x", args: []string{"new", "--json=x"}, wantStderr: "brief new: '--json' takes no value; run 'brief new --help'"},
 		{name: "help --json=x", args: []string{"help", "--json=x"}, wantStderr: "brief help: '--json' takes no value; run 'brief help <command>'"},
 		{name: "root --json=x", args: []string{"--json=x"}, wantStderr: "brief: '--json' takes no value; run 'brief --help'"},
 		{name: "--version --json=x", args: []string{"--version", "--json=x"}, wantStderr: "brief: '--json' takes no value; run 'brief --help'"},
-		{name: "status --json --json=x", args: []string{"status", "--json", "--json=x"}, wantStderr: "brief status: '--json' takes no value; run 'brief status'"},
+		{name: "status --json --json=x", args: []string{"status", "--json", "--json=x"}, wantStderr: "brief status: '--json' takes no value; run 'brief status --json'"},
 		{name: "status -- --json=x is a positional, not the flag", args: []string{"status", "--", "--json=x"}, wantStderr: "brief status: too many arguments; run 'brief status'"},
 	}
 

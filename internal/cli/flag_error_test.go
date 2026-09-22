@@ -666,12 +666,12 @@ func Test_json_flag_with_a_value_never_reaches_the_bool_flag_rewrite(t *testing.
 		{
 			name:       "--json=maybe",
 			args:       []string{"start", "--json=maybe", "demo"},
-			wantStderr: "brief start: '--json' takes no value; run 'brief start <feature>'",
+			wantStderr: "brief start: '--json' takes no value; run 'brief start <feature> --json'",
 		},
 		{
 			name:       "--json= with an explicit empty value",
 			args:       []string{"start", "--json=", "demo"},
-			wantStderr: "brief start: '--json' takes no value; run 'brief start <feature>'",
+			wantStderr: "brief start: '--json' takes no value; run 'brief start <feature> --json'",
 		},
 	}
 

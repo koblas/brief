@@ -75,10 +75,12 @@ func RenderJSON(w io.Writer, b Brief) error {
 // "(malformed, see below)" in DONE, BLOCKED and NEXT — never a real count,
 // since none was measured. A complete row (row.Complete()) renders
 // "(complete)" in NEXT. Otherwise NEXT is "-" when row.Next is nil, the
-// step's id alone when its Title is empty, or "<id>  <title>" (two literal
-// spaces, not a tab) otherwise. A tab or newline embedded in a feature name
-// or a step title is flattened to a space first, so it cannot corrupt the
-// table's own column alignment.
+// step's id alone when its Title is empty or equal to its ID — a freshly
+// scaffolded step file opens with "# <id>" as its only heading, so this
+// keeps that common case from doubling the id in the column — or
+// "<id>  <title>" (two literal spaces, not a tab) otherwise. A tab or
+// newline embedded in a feature name or a step title is flattened to a
+// space first, so it cannot corrupt the table's own column alignment.
 func RenderStatusText(w io.Writer, rows []FeatureStatus) error {
 	if len(rows) == 0 {
 		return nil
@@ -122,7 +124,7 @@ func statusRowCells(row FeatureStatus) (string, string, string) {
 		next = "(complete)"
 	case row.Next == nil:
 		next = "-"
-	case row.Next.Title == "":
+	case row.Next.Title == "" || row.Next.Title == row.Next.ID:
 		next = flattenTabwriterField(row.Next.ID)
 	default:
 		next = flattenTabwriterField(row.Next.ID) + "  " + flattenTabwriterField(row.Next.Title)

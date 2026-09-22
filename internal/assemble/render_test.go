@@ -257,6 +257,27 @@ func Test_RenderStatusText_prints_a_table_with_header_and_aligned_columns(t *tes
 	}
 }
 
+// Test_RenderStatusText_shows_the_id_alone_when_the_title_equals_it pins the
+// cheap-optional dedup: a freshly scaffolded step file opens with "# <id>"
+// as its only heading, so NEXT must not double the id ("SCENARIO-01
+// SCENARIO-01") — the empty-title case (Test_RenderStatusText_prints_a_
+// table_with_header_and_aligned_columns's own "epsilon" row) already
+// collapses to the id alone; this is the other trigger for that same cell.
+func Test_RenderStatusText_shows_the_id_alone_when_the_title_equals_it(t *testing.T) {
+	rows := []assemble.FeatureStatus{
+		{Name: "alpha", Done: 0, Total: 1, Blocked: 0, Next: &assemble.NextStep{ID: "SCENARIO-01", Title: "SCENARIO-01"}},
+	}
+
+	var out bytes.Buffer
+	err := assemble.RenderStatusText(&out, rows)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"FEATURE  DONE  BLOCKED  NEXT\n"+
+		"alpha    0/1   0        SCENARIO-01\n",
+		out.String())
+}
+
 // Test_RenderStatusText_writes_nothing_for_an_empty_slice is R9's render-side
 // half: zero features means zero bytes, not a bare header — "brief status |
 // wc -l" of 0 must still mean no features.
