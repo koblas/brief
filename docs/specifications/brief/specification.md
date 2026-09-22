@@ -185,6 +185,10 @@ no per-step files, no carried state — is out of scope rather than degraded int
   definitions only for adopters who have none — namespaced, thin, opt-in, removable — and never
   shadows an existing agent. Unbound positions are reported by `check`, not enforced at
   runtime; R10 is what makes non-compliance harmless.
+  **Amended by `docs/specifications/init-doctor/`:** three positions — planner, implementer and
+  a **reviewer** whose definition is limited to calls into the tool (`brief start` read-only,
+  `brief check`); unbound positions are reported by `doctor`, not `check` (roles are setup, not
+  content).
 - **R16 — `init` is additive, idempotent and reversible.** It never removes or rewrites a
   setting it did not add. Every artifact it writes is marked `brief`-owned so `uninstall`
   removes exactly those; an install/uninstall round trip leaves pre-existing files
@@ -217,6 +221,7 @@ no per-step files, no carried state — is out of scope rather than degraded int
 | `brief check [feature]` | Findings, one per line as `path:line: message` |
 | `brief roles` | Each position, the agent bound to it, whether that agent exists |
 | `brief init` / `brief uninstall` | Install or remove config and host integration |
+| `brief doctor` | Setup health: config, feature root, environment, host integration — never feature content (added by `docs/specifications/init-doctor/`) |
 | `brief mcp` | Stdio MCP server over the above |
 
 ## Default profile
@@ -269,7 +274,7 @@ determine rather than guessing.
 
 ```
 brief init [--global] [--host <name>]    # config + host integration
-brief init --dry-run | --print | --show  # preview, emit for manual use, report state
+brief init --dry-run | --print           # preview, emit for manual use
 brief init --with-agents                 # scaffold role agents; omit when binding existing ones
 brief uninstall [--global]
 ```
@@ -288,6 +293,11 @@ sandbox. Host coverage is open-ended: one host first, an internal interface for 
 an unsupported host degrading to `--print` plus manual wiring.
 
 ## First run
+
+**Amended by `docs/specifications/init-doctor/`:** `--show` is dropped (`brief doctor` reports
+installed state), `--global` is deferred to a follow-up, Claude Code integration installs as a
+skills-directory plugin at `.claude/skills/brief/` plus a marked `CLAUDE.md` block, and `init`
+always writes a commented `.brief.yaml` (it is the repository's opt-in marker).
 
 **`init` on a new project produces:** config (or nothing, where the profile already fits), the
 feature-directory root, the `check` hook, the commands, the instruction snippet, and role
@@ -672,6 +682,13 @@ Settled at the scoping gate. Recorded with the reason so they are not re-litigat
    that does not exist.
 
 ## Open questions
+
+Questions 1–5 are **settled by `docs/specifications/init-doctor/`**: (1) `init` infers
+nothing — it writes a commented default `.brief.yaml`; (2) Claude Code first, as a
+skills-directory plugin, other hosts via `--print`; (3) ownership is the plugin directory plus a
+`<!-- brief:begin -->`/`<!-- brief:end -->` block, with compiled-in digests of earlier releases'
+output to tell brief-written from hand-edited; (4) the hook installs by default, `--no-hook`
+skips it; (5) three positions, the reviewer limited to calls into the tool.
 
 1. How much does `init` infer? The floor is a commented default config and a clear error when
    it does not match.
