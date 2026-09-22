@@ -119,6 +119,13 @@ wd≠root, mixed-row and ReadFile-arm coverage for host-plugin/-hook/-agents.
   `Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable`, whose own
   fixture only ever wrote a CLAUDE.md snippet. Flagged for product-vision's final pass, not
   fixed here.
+- In `hostPluginCheck`/`hostAgentsCheck`, an all-unreadable subject-file set has no default
+  ERROR/WARN fallback: `missingRelPaths` skips every `unreadable` state, and
+  `relPathsWithOrigin` only counts `present && regular` ones, so both come back empty.
+  `integrationFileRowDetail`'s own branch is the *only* thing standing between that and the
+  final `return … SeverityOK, "installed"` — delete it (or its call) and the row goes healthy,
+  not merely wrong-severity. Five tests guard this arm today; keep it ahead of both other
+  branches.
 
 ## Open debts
 - setup never rewrites/removes an `OriginOlder` file — harmless while every older digest list
