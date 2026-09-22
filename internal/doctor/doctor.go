@@ -262,10 +262,10 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 
 	checks = append(checks,
 		s.checkEnvPath(integrationInstalled),
-		hostPluginCheck(root, h, filesInstalled),
-		hostHookCheck(root, h, filesInstalled),
+		hostPluginCheck(absWd, root, h, filesInstalled),
+		hostHookCheck(absWd, root, h, filesInstalled),
 		hostSnippetCheck(absWd, snippetStates, dir, dirKnown),
-		hostAgentsCheck(root, h),
+		hostAgentsCheck(absWd, root, h),
 		rolesCheck,
 	)
 

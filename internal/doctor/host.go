@@ -7,49 +7,66 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/host"
 )
 
-// integrationFileState is one Claude Code integration file's own probe
-// result: present is false only when Lstat reports the path does not
-// exist. Any other Lstat outcome — success, of any file type, or a
-// failure such as an inaccessible parent directory — reports present
-// true, since a stat error other than "not found" proves nothing about
-// absence. regular is true only for a present, regular file whose bytes
-// were read and classified into origin — never populated (OriginEdited's
-// zero value) otherwise.
-type integrationFileState struct {
-	relPath string
-	path    string
-	present bool
-	regular bool
-	origin  artifact.Origin
+// classifyProbeError classifies err — from a failed os.Lstat or
+// os.ReadFile against a host integration file or a CLAUDE.md candidate —
+// into the one absent-vs-unreadable decision every probe in this package
+// renders from: fs.ErrNotExist proves the path itself is not there, and
+// so does syscall.ENOTDIR, since it means some ancestor path component is
+// a regular file rather than a directory and nothing can resolve through
+// one. Checked on darwin and linux, devenv.nix's own build targets, where
+// the constant carries this meaning; a windows build of this package was
+// not exercised. Any other error proves nothing about absence, so it is
+// unreadable, its reason readFailureReason's own extracted cause. err is
+// always non-nil.
+func classifyProbeError(err error) (bool, string) {
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return true, ""
+	}
+
+	return false, readFailureReason(err)
 }
 
-// probeIntegrationFile Lstats root/f.RelPath and, for a regular file, reads
-// and artifact.Recognizes its bytes against f.Kind. An Lstat failure other
-// than os.IsNotExist — an inaccessible parent directory, say — reports
-// present true, regular false, the same shape a present-but-not-regular
-// file gets, rather than folding it into "absent": every check keyed off
-// this state (host-plugin/host-hook/host-agents' own "installed" gate,
-// env-path's own integration-installed gate) would otherwise silently
-// downgrade on a permission error it cannot actually attribute to absence.
-// A read failure on a present, regular file is reported the same as "not
-// regular" — a subject file this broken can never be classified as
-// current, older or edited.
+// integrationFileState is one Claude Code integration file's own probe
+// result, classifyProbeError's own split rendered into fields: present is
+// false only when absent; unreadable is true when classifyProbeError read
+// the failure as neither absent nor a resolved file (reason carries its
+// cause, stat whether it was the Lstat call rather than the ReadFile call
+// that failed); regular is true only for a present, unreadable-false file
+// whose bytes were read and classified into origin. present-but-neither-
+// regular-nor-unreadable is host.go's own "not a regular file" shape.
+type integrationFileState struct {
+	relPath    string
+	path       string
+	present    bool
+	regular    bool
+	origin     artifact.Origin
+	unreadable bool
+	reason     string
+	stat       bool
+}
+
+// probeIntegrationFile Lstats root/f.RelPath and, for a regular file,
+// reads and artifact.Recognizes its bytes against f.Kind, rendering every
+// Lstat or ReadFile failure through classifyProbeError.
 func probeIntegrationFile(root string, f host.File) integrationFileState {
 	path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 	state := integrationFileState{relPath: f.RelPath, path: path}
 
 	info, err := os.Lstat(path)
-
-	switch {
-	case os.IsNotExist(err):
-		return state
-	case err != nil:
-		state.present = true
+	if err != nil {
+		absent, reason := classifyProbeError(err)
+		if !absent {
+			state.present = true
+			state.unreadable = true
+			state.reason = reason
+			state.stat = true
+		}
 
 		return state
 	}
@@ -62,6 +79,14 @@ func probeIntegrationFile(root string, f host.File) integrationFileState {
 
 	body, err := os.ReadFile(path)
 	if err != nil {
+		absent, reason := classifyProbeError(err)
+		if absent {
+			return integrationFileState{relPath: f.RelPath, path: path}
+		}
+
+		state.unreadable = true
+		state.reason = reason
+
 		return state
 	}
 
@@ -94,17 +119,72 @@ func anyPresent(states []integrationFileState) bool {
 }
 
 // missingRelPaths returns the relPath of every state that is absent or not
-// a regular file, in states' own order.
+// a regular file, excluding any state classifyProbeError read as
+// unreadable (unreadableRelPaths reports those), in states' own order.
 func missingRelPaths(states []integrationFileState) []string {
 	var out []string
 
 	for _, s := range states {
+		if s.unreadable {
+			continue
+		}
+
 		if !s.present || !s.regular {
 			out = append(out, s.relPath)
 		}
 	}
 
 	return out
+}
+
+// unreadableRelPaths returns the relPath of every state classifyProbeError
+// read as unreadable, in states' own order.
+func unreadableRelPaths(states []integrationFileState) []string {
+	var out []string
+
+	for _, s := range states {
+		if s.unreadable {
+			out = append(out, s.relPath)
+		}
+	}
+
+	return out
+}
+
+// integrationFileRowDetail renders a multi-file host row's own WARN Detail
+// and Fix once any of states holds an unreadable file — host-plugin's and
+// host-agents' own shared precedence, checked ahead of missingRelPaths'
+// own "missing" wording. Every unreadable file is named
+// "not readable (<reason>)" (notReadableReason), reason taken from the
+// first unreadable state in states' own order — every probe failure under
+// one broken directory tree shares the same cause in practice; any file
+// still genuinely missing is named too, in its own fragment, since
+// classifyProbeError only reclassifies the files it actually failed
+// against. Fix is notReadableFix against that same first unreadable
+// state. ok is false when states holds no unreadable file at all.
+func integrationFileRowDetail(wd string, states []integrationFileState) (string, string, bool) {
+	unreadable := unreadableRelPaths(states)
+	if len(unreadable) == 0 {
+		return "", "", false
+	}
+
+	var first integrationFileState
+
+	for _, s := range states {
+		if s.unreadable {
+			first = s
+
+			break
+		}
+	}
+
+	fragments := []string{notReadableReason(first.reason) + ": " + strings.Join(unreadable, ", ")}
+
+	if missing := missingRelPaths(states); len(missing) > 0 {
+		fragments = append(fragments, "missing "+strings.Join(missing, ", "))
+	}
+
+	return strings.Join(fragments, "; "), notReadableFix(wd, first.path, first.stat), true
 }
 
 // relPathsWithOrigin returns the relPath of every present, regular state
@@ -154,13 +234,14 @@ func anyIntegrationFilePresent(root string, h host.Host) bool {
 }
 
 // hostPluginCheck builds host-plugin's own row: not installed anywhere is
-// SKIP; otherwise a missing or non-regular subject file (h.Plugin(false))
-// is ERROR "incomplete", naming every such file; an older render is WARN;
-// an edited one is OK "edited locally"; every subject file current is OK
+// SKIP; otherwise an unreadable subject file (h.Plugin(false)) is WARN
+// (integrationFileRowDetail); a missing or non-regular one is ERROR
+// "incomplete", naming every such file; an older render is WARN; an
+// edited one is OK "edited locally"; every subject file current is OK
 // "installed" — in that precedence (originRow, applied across every
 // subject file at once rather than one row at a time, since a single
 // host-plugin row must summarize all three).
-func hostPluginCheck(root string, h host.Host, installed bool) Check {
+func hostPluginCheck(wd, root string, h host.Host, installed bool) Check {
 	path := filepath.Join(root, host.PluginDir)
 
 	if !installed {
@@ -168,6 +249,10 @@ func hostPluginCheck(root string, h host.Host, installed bool) Check {
 	}
 
 	states := probeIntegrationFiles(root, h.Plugin(false))
+
+	if detail, fix, ok := integrationFileRowDetail(wd, states); ok {
+		return Check{ID: "host-plugin", Severity: SeverityWarn, Path: path, Detail: detail, Fix: new(fix)}
+	}
 
 	if missing := missingRelPaths(states); len(missing) > 0 {
 		return Check{ID: "host-plugin", Severity: SeverityError, Path: path, Detail: "incomplete: missing " + strings.Join(missing, ", "), Fix: new(runInit)}
@@ -202,10 +287,11 @@ func hookFileOf(h host.Host) host.File {
 // hostHookCheck builds host-hook's own row: not installed anywhere is
 // SKIP; a hook file absent while something else is installed is WARN
 // "installed without the check hook" — doctor cannot tell a lost file
-// from --no-hook, so this stays a WARN rather than an ERROR; a present
-// but non-regular hook is ERROR; an older render is WARN; an edited one
-// is OK "edited locally"; a current one is OK "installed".
-func hostHookCheck(root string, h host.Host, installed bool) Check {
+// from --no-hook, so this stays a WARN rather than an ERROR; an unreadable
+// hook file is WARN, naming the reason (notReadableReason); a present but
+// non-regular hook is ERROR; an older render is WARN; an edited one is OK
+// "edited locally"; a current one is OK "installed".
+func hostHookCheck(wd, root string, h host.Host, installed bool) Check {
 	hookFile := hookFileOf(h)
 	state := probeIntegrationFile(root, hookFile)
 
@@ -215,6 +301,10 @@ func hostHookCheck(root string, h host.Host, installed bool) Check {
 		}
 
 		return Check{ID: "host-hook", Severity: SeverityWarn, Path: state.path, Detail: "installed without the check hook", Fix: new("run 'brief init' to add it")}
+	}
+
+	if state.unreadable {
+		return Check{ID: "host-hook", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(wd, state.path, state.stat))}
 	}
 
 	if !state.regular {
@@ -227,19 +317,27 @@ func hostHookCheck(root string, h host.Host, installed bool) Check {
 }
 
 // hostAgentsCheck builds host-agents' own row: none of the three role
-// agent files present is SKIP; otherwise a missing or non-regular one is
-// WARN (never ERROR — an unbound role is reported by the roles row, not
+// agent files present is SKIP; otherwise an unreadable one is WARN
+// (integrationFileRowDetail); a missing or non-regular one is WARN too
+// (never ERROR — an unbound role is reported by the roles row, not
 // enforced here), naming every such file; an older render is WARN; an
 // edited one is OK "edited locally"; all three current is OK "installed".
-// Every fix here names --with-agents: a plain "brief init" never plans an
-// agent file at all, so it can never repair one on its own.
-func hostAgentsCheck(root string, h host.Host) Check {
+// Every fix here names --with-agents, except an unreadable file's own
+// shared chmod-then-reinit fix (notReadableFix): a plain "brief init"
+// never plans an agent file at all, so it can never repair a missing one
+// on its own, but a file that already exists needs no re-plan, only
+// permission repair.
+func hostAgentsCheck(wd, root string, h host.Host) Check {
 	agentFiles := h.Agents()
 	path := filepath.Join(root, host.PluginDir, "agents")
 	states := probeIntegrationFiles(root, agentFiles)
 
 	if !anyPresent(states) {
 		return Check{ID: "host-agents", Severity: SeveritySkip, Path: path, Detail: "not installed", Fix: new(runInitWithAgents)}
+	}
+
+	if detail, fix, ok := integrationFileRowDetail(wd, states); ok {
+		return Check{ID: "host-agents", Severity: SeverityWarn, Path: path, Detail: detail, Fix: new(fix)}
 	}
 
 	if missing := missingRelPaths(states); len(missing) > 0 {
@@ -262,25 +360,18 @@ func hostAgentsCheck(root string, h host.Host) Check {
 }
 
 // snippetCandidateState is one CLAUDE.md candidate's own scan result,
-// mirroring internal/setup's own candidateSnippetFile but read-only:
-// present is false only when Lstat reports the path does not exist — any
-// other Lstat outcome, or a regular candidate whose bytes could not be
-// read, is still present, distinguished by unreadable rather than folded
-// into "nothing here", since a stat or read failure other than "not found"
-// proves nothing about absence. body and span are populated only for a
-// regular file that was both readable and scanned clean (no marker
-// defect); prob carries the first marker defect artifact.ScanSnippetMarkers
-// found, nil otherwise. notRegular and kind are populated only when the
-// candidate exists but Lstat reports it is not a regular file — kind is
-// "symlink" or "directory" (nonRegularKind). unreadable and readErr are
-// populated when either Lstat itself failed for a reason other than "not
-// found" (an inaccessible parent directory, say) or the candidate is
-// present, regular, and os.ReadFile failed — readErr is the underlying
-// reason (a wrapped *fs.PathError's own inner error, e.g. "permission
-// denied") rather than the full "lstat <path>: …"/"open <path>: …" text,
-// since host-snippet's own WARN detail already names the path via the
-// row's Path field. notRegular and unreadable are mutually exclusive: only
-// a regular candidate that Lstat could itself resolve is ever read at all.
+// mirroring internal/setup's own candidateSnippetFile but read-only,
+// classifyProbeError's own split rendered the same way integrationFileState
+// renders it: present is false only when absent; unreadable is true when
+// classifyProbeError read the failure as neither absent nor a resolved
+// file (readErr its cause, statFailed whether it was the Lstat call
+// rather than the ReadFile call that failed); notRegular and kind are
+// populated only when Lstat itself resolved the candidate to a non-regular
+// file (nonRegularKind); body and span are populated only for a regular,
+// readable file scanned clean, prob carrying the first marker defect
+// artifact.ScanSnippetMarkers found otherwise. notRegular and unreadable
+// are mutually exclusive: only a regular candidate Lstat could itself
+// resolve is ever read at all.
 type snippetCandidateState struct {
 	path       string
 	present    bool
@@ -291,6 +382,7 @@ type snippetCandidateState struct {
 	kind       string
 	unreadable bool
 	readErr    string
+	statFailed bool
 }
 
 // nonRegularKind names the file type behind a CLAUDE.md candidate Lstat
@@ -337,40 +429,47 @@ func readFailureReason(err error) string {
 	return pathErr.Err.Error()
 }
 
-// notReadableDetail renders host-snippet's own WARN detail for a candidate
-// that is present and regular but whose bytes os.ReadFile could not read:
-// reason is readFailureReason's own extracted cause, interpolated verbatim
-// so the row states why rather than asserting the block is simply absent —
-// a claim scanning could not actually verify.
-func notReadableDetail(reason string) string {
-	return fmt.Sprintf("not readable (%s); cannot check for brief block", reason)
+// notReadableReason renders "not readable (<reason>)" — the wording every
+// host row shares for a subject classifyProbeError read as unreadable
+// rather than absent or a resolved file. A caller appends its own suffix,
+// or none.
+func notReadableReason(reason string) string {
+	return fmt.Sprintf("not readable (%s)", reason)
 }
 
-// notReadableFix renders host-snippet's own WARN fix for an unreadable
-// candidate: make relPath readable, then re-run init the same way the SKIP
-// "not installed" row already does.
-func notReadableFix(relPath string) string {
-	return fmt.Sprintf("chmod +r %s, then %s", relPath, runInitClaudeCode)
+// notReadableDetail renders host-snippet's own WARN detail for an
+// unreadable candidate: notReadableReason plus host-snippet's own suffix,
+// stating that the block cannot be checked rather than asserting it is
+// simply absent — a claim scanning could not actually verify.
+func notReadableDetail(reason string) string {
+	return notReadableReason(reason) + "; cannot check for brief block"
+}
+
+// notReadableFix renders the shared WARN fix for a subject
+// classifyProbeError read as unreadable: when the failure was in the
+// Lstat call itself (statFailed — an ancestor directory not searchable),
+// the fix targets that immediate parent directory (chmod u+rx); when it
+// was the ReadFile call instead (the file itself, present and regular,
+// not readable), the fix targets the file (chmod +r). Both then re-run
+// 'brief init --host claude-code', the same repair every "not installed"
+// row already points at. path and its fix target are rendered relative to
+// wd, the same wd Diagnose was called with, since every row's own Path is
+// rendered relative to wd too.
+func notReadableFix(wd, path string, statFailed bool) string {
+	if statFailed {
+		return fmt.Sprintf("chmod u+rx %s, then %s", relPath(wd, filepath.Dir(path)), runInitClaudeCode)
+	}
+
+	return fmt.Sprintf("chmod +r %s, then %s", relPath(wd, path), runInitClaudeCode)
 }
 
 // scanSnippetCandidateStates Lstats and scans every h.InstructionFiles()
-// candidate under root, in that order. A missing candidate — Lstat
-// reporting os.IsNotExist — reports a zero snippetCandidateState (no
-// body, no span, no problem, present false), the "nothing here" shape
-// host-snippet's own SKIP path expects. Any other Lstat failure (an
-// inaccessible parent directory, say) reports present true, unreadable
-// true and readErr set (readFailureReason) — the same shape a present,
-// regular candidate whose own os.ReadFile failed gets below, since a stat
-// error other than "not found" proves nothing about absence either. A
-// candidate that exists but is not a regular file reports notRegular true
-// and kind set (nonRegularKind), never read. A candidate that exists, is
-// regular, but whose bytes os.ReadFile could not read reports present true,
-// unreadable true and readErr set — present, since brief does know the
-// file is there, just not what it contains; a read failure of
-// os.IsNotExist itself (the file was deleted between the Lstat and the
-// read) reports the plain missing shape instead, the same as an
-// os.IsNotExist Lstat, since it is no more readable-but-broken than a file
-// that was never there.
+// candidate under root, in that order, rendering every Lstat or ReadFile
+// failure through classifyProbeError exactly as probeIntegrationFile does
+// for a host integration file — the one place both this package's probes
+// make the absent-vs-unreadable call, so it is never made two different
+// ways here. A candidate that exists but is not a regular file reports
+// notRegular true and kind set (nonRegularKind), never read.
 func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateState {
 	rel := h.InstructionFiles()
 	out := make([]snippetCandidateState, 0, len(rel))
@@ -379,31 +478,35 @@ func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateStat
 		path := filepath.Join(root, filepath.FromSlash(r))
 
 		info, err := os.Lstat(path)
+		if err != nil {
+			absent, reason := classifyProbeError(err)
+			if absent {
+				out = append(out, snippetCandidateState{path: path})
 
-		switch {
-		case os.IsNotExist(err):
-			out = append(out, snippetCandidateState{path: path})
+				continue
+			}
+
+			out = append(out, snippetCandidateState{path: path, present: true, unreadable: true, readErr: reason, statFailed: true})
 
 			continue
-		case err != nil:
-			out = append(out, snippetCandidateState{path: path, present: true, unreadable: true, readErr: readFailureReason(err)})
+		}
 
-			continue
-		case !info.Mode().IsRegular():
+		if !info.Mode().IsRegular() {
 			out = append(out, snippetCandidateState{path: path, present: true, notRegular: true, kind: nonRegularKind(info)})
 
 			continue
 		}
 
 		body, err := os.ReadFile(path)
+		if err != nil {
+			absent, reason := classifyProbeError(err)
+			if absent {
+				out = append(out, snippetCandidateState{path: path})
 
-		switch {
-		case os.IsNotExist(err):
-			out = append(out, snippetCandidateState{path: path})
+				continue
+			}
 
-			continue
-		case err != nil:
-			out = append(out, snippetCandidateState{path: path, present: true, unreadable: true, readErr: readFailureReason(err)})
+			out = append(out, snippetCandidateState{path: path, present: true, unreadable: true, readErr: reason})
 
 			continue
 		}
@@ -434,43 +537,22 @@ func snippetBlockFound(states []snippetCandidateState) bool {
 // candidate's own path and line; two candidates each holding a span is
 // ERROR on the second (".claude/CLAUDE.md" — root is the preferred
 // location). Once neither ERROR arm fires, a candidate holding a span still
-// wins regardless of the other candidate's own shape — a real block in
-// ".claude/CLAUDE.md" reports installed even when root's own "CLAUDE.md" is
-// a symlink or a directory — classified by artifact.RecognizeSnippet:
-// OriginEdited is OK "edited locally", OriginOlder is WARN, OriginCurrent
-// is OK "installed" when its own Dir matches dir (or dirKnown is false —
-// nothing to compare against) and WARN naming both directories otherwise.
-// Only once no candidate holds a span does existence matter, and only for
-// the one candidate planSnippet itself would then choose — the first
-// candidate that is present at all (states' own priority order), regular
-// or not, readable or not. This mirrors setup's own chooseSnippetLocation
-// for every case both reach: a later candidate's own shape is never
-// consulted, so a regular-but-blockless first candidate reports the
-// ordinary SKIP below, naming that same candidate's own path, even when a
-// farther candidate happens to be a symlink or a directory. The one
-// divergence: a candidate that could not even be Lstat'd, or a regular
-// candidate whose bytes could not be read, is present here but never
-// reaches chooseSnippetLocation at all, since setup's own scan aborts with
-// a hard error on either failure — brief has no way to write a snippet
-// block through a candidate it cannot even stat or read, so there is
-// nothing for setup's own selection rule to reach. When that first present
-// candidate is itself notRegular, the row is WARN, naming which
-// (nonRegularKind) — brief can neither write nor scan through it, so the
-// fix points at --print (runInitPrintSnippet) rather than a plain re-run.
-// When it is instead unreadable, the row is WARN "not readable (<reason>);
-// cannot check for brief block" (notReadableDetail) — brief does not know
-// whether a block is present, so it reports that rather than the "not
-// installed" a genuinely absent candidate gets, with a fix (notReadableFix)
-// that names making the file readable before the plain re-run — the fix
-// text is rendered relative to wd, the same as every other Check.Fix in
-// this package (checkRootDir's own "mkdir -p"/"chmod u+rwx"), since a row's
-// own Path is rendered relative to wd too (cli.doctorRow's displayPath) and
-// a fix computed against root instead would name the wrong file, or fail
-// outright, whenever wd and root differ. No candidate present at all, or
-// the first present one is a regular, readable, blockless file, is SKIP
-// "not installed", Path naming that first-present candidate (falling back
-// to the first candidate in priority order only when none is present at
-// all).
+// wins regardless of the other candidate's own shape, classified by
+// artifact.RecognizeSnippet: OriginEdited is OK "edited locally",
+// OriginOlder is WARN, OriginCurrent is OK "installed" when its own Dir
+// matches dir (or dirKnown is false) and WARN naming both directories
+// otherwise. Only once no candidate holds a span does existence matter,
+// and only for the one candidate planSnippet itself would then choose —
+// the first candidate present at all (states' own priority order),
+// mirroring setup's own chooseSnippetLocation: notRegular is WARN naming
+// which shape (nonRegularKind), fix pointing at --print
+// (runInitPrintSnippet) since brief can neither write nor scan through
+// it; unreadable is WARN (notReadableDetail, classifyProbeError's own
+// split), fix notReadableFix, since a stat or read failure proves nothing
+// about whether a block is actually there. No candidate present at all,
+// or the first present one is a regular, readable, blockless file, is
+// SKIP "not installed", Path naming that first-present candidate (or the
+// first candidate in priority order when none is present at all).
 func hostSnippetCheck(wd string, states []snippetCandidateState, dir string, dirKnown bool) Check {
 	for _, s := range states {
 		if s.prob != nil {
@@ -517,7 +599,7 @@ func hostSnippetCheck(wd string, states []snippetCandidateState, dir string, dir
 			return Check{
 				ID: "host-snippet", Severity: SeverityWarn, Path: firstPresent.path,
 				Detail: notReadableDetail(firstPresent.readErr),
-				Fix:    new(notReadableFix(relPath(wd, firstPresent.path))),
+				Fix:    new(notReadableFix(wd, firstPresent.path, firstPresent.statFailed)),
 			}
 		}
 

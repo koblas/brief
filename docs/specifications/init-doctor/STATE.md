@@ -2,27 +2,21 @@
 
 Scenarios complete: SCENARIO-01..10 — every spec scenario shipped. Fix passes 1-3: git-
 boundary root scoping (R3), partial-write/`files_changed` consistency, a `*RefusalError`
-type-preservation gap. Fix pass 4: pflag placeholder bug on `--host`/`--hook`; `uninstall`'s
-"removed" line discriminates host-artifact-removed vs config-only vs edited-kept; non-regular
-CLAUDE.md candidate is doctor WARN (was SKIP); `init` names host-detection's own signal
-(`Result.DetectedBy`). Fix pass 5: host-snippet's WARN considers only the one candidate
-`planSnippet` would choose; `uninstall --dry-run` discriminates by the computed plan like a
-real run; the "N file(s) … kept" count moved onto typed `Artifact.ForceRemovable`. Fix pass
-6: three untested fix-pass-5 arms pinned and mutation-verified (`notRegularDetail`'s
-empty-kind fold, `uninstall --dry-run`'s edited-kept and plain "nothing removed" arms);
-host-snippet's SKIP row Path now names the real first-present candidate, not a hardcoded
-root path; the pflag-placeholder test's control values now carry enough trailing usage text
-to stay unique; `ForceRemovable` is false on every force-removed artifact across all three
-producers, rule stated on `Artifact`'s own doc comment. Fix pass 7: an existing-but-unreadable
-CLAUDE.md candidate is its own host-snippet WARN, distinct from "not installed" (an
-unverifiable absence claim) and from the not-a-regular-file WARN; the reviewer gate's PASS
-WITH CHANGES closed on this alone, plus three cheap MINOR folds. Fix pass 8: host-snippet's
-own "not readable" WARN fix is rendered relative to `wd`, not the install root, matching the
-row's own Path (M1); a stat failure other than "not found" — an Lstat that cannot even reach
-the candidate, not just a `ReadFile` on one it already reached — is `unreadable`/`present`,
-never folded into absence, in both `scanSnippetCandidateStates` and `probeIntegrationFile`
-(M2), so an inaccessible `.claude/` can no longer downgrade `env-path` from ERROR to WARN or
-flip doctor's own exit code from 1 to 0.
+type-preservation gap. Fix pass 4: pflag placeholder bug; `uninstall`'s "removed" line
+discriminates host-artifact-removed/config-only/edited-kept; non-regular CLAUDE.md candidate
+is doctor WARN. Fix pass 5: host-snippet's WARN considers only `planSnippet`'s own chosen
+candidate; `uninstall --dry-run` reads the computed plan; "N file(s) … kept" moved onto typed
+`Artifact.ForceRemovable`. Fix pass 6: mutation-verified three fix-pass-5 arms; SKIP row Path
+names the real first-present candidate; `ForceRemovable` false on every force-removed
+artifact. Fix pass 7: an unreadable CLAUDE.md candidate is its own host-snippet WARN. Fix pass
+8: host-snippet's fix renders relative to `wd`; an unreachable candidate is
+`unreadable`/`present`, never absence. Fix pass 9: replaced the per-check absent-vs-unreadable
+logic (patched twice, wrong twice) with one classifier, `doctor.classifyProbeError`, used by
+both `probeIntegrationFile` and `scanSnippetCandidateStates`; `syscall.ENOTDIR` (a path
+component that is a regular file) now reads as absent everywhere, fixing host-plugin/-hook/
+-agents/-snippet all wrongly reporting "incomplete"/"not a regular file"/"missing" instead of
+SKIP when `.claude` itself is a plain file; host-plugin/-hook/-agents gained the same
+unreadable-vs-missing split host-snippet already had.
 
 ## Binding decisions
 - `config.LocateWithin(dir, boundary)` bounds a walk at `boundary`, itself still checked, its
@@ -39,22 +33,22 @@ flip doctor's own exit code from 1 to 0.
   `planSnippetRemoval`'s own removal-side Detail is the plain "not a regular file" — the two
   wordings differ freely since `ForceRemovable`, not Detail text, is what callers key on.
   Doctor's host-snippet WARN/SKIP fire only for the one candidate `planSnippet`/
-  `chooseSnippetLocation` would itself pick — the first candidate present at all, regular or
-  not, readable or not, in `host.InstructionFiles` priority order, never a farther
-  candidate's own shape; SKIP's own Path names that same first-present candidate (falls back
-  to the first candidate in priority order only when none is present at all). A candidate
-  `os.Lstat` cannot even reach, or a present, regular one `os.ReadFile` cannot read
-  (`snippetCandidateState.unreadable`, distinct from `present=false`; `os.IsNotExist` on
-  either call is still the plain absent shape) is its own WARN — "not readable (`<reason>`);
-  cannot check for brief block", `<reason>` from `readFailureReason` (a wrapped
-  `*fs.PathError`'s own inner error, always non-nil since `os.Lstat`/`os.ReadFile` only ever
-  fail with one) — never the "not installed" a genuinely missing candidate gets, since a stat
-  or read failure other than "not found" proves nothing about absence; the block-wins
-  carve-out still overrides it exactly like `notRegular`. Its Fix (`notReadableFix`) is
-  rendered `relPath(wd, ...)` — the same `wd` `Diagnose` was called with, never `root` — since
-  the row's own Path is later rendered relative to `wd` too (`cli.doctorRow`'s `displayPath`);
-  `probeIntegrationFile` (host-plugin/-hook/-agents, and `anyIntegrationFilePresent`'s own
-  "installed" gate) makes the identical absent-vs-unreadable call on the same `os.Lstat`.
+  `chooseSnippetLocation` would itself pick — the first candidate present at all, in
+  `host.InstructionFiles` priority order.
+- **`doctor.classifyProbeError(err) (absent bool, reason string)` is the one place this
+  package decides absent vs unreadable**, called by both `probeIntegrationFile` and
+  `scanSnippetCandidateStates` for every failed `os.Lstat`/`os.ReadFile`: `fs.ErrNotExist` or
+  `syscall.ENOTDIR` (darwin/linux only, devenv.nix's own targets; windows not exercised) is
+  absent; anything else is unreadable, reason via `readFailureReason`. A ReadFile failure the
+  classifier itself reads as absent folds into the plain-missing shape, no separate TOCTOU
+  branch. Every host row renders WARN "not readable (`<reason>`)" for an unreadable subject,
+  never "missing"/"not a regular file"; a row mixing unreadable and genuinely-missing files
+  (`integrationFileRowDetail`) names both in separate fragments, reason/Fix from the first
+  unreadable file (untested against a genuinely mixed cause — none observed in practice).
+  `notReadableFix` chmods the immediate parent dir (`u+rx`) when the Lstat itself failed, or
+  the file (`+r`) when only the ReadFile did, both then `run 'brief init --host claude-code'`,
+  rendered `relPath(wd, ...)`, the same `wd` `Diagnose` was called with. host-agents still
+  SKIPs when no agent file is present at all (unreadable still counts as present).
 - `setup.Artifact.ForceRemovable` is true exactly on an Uninstall-side `ActionKept` artifact
   `--force` would turn into `ActionRemoved` (an edited file: `planPluginRemoval`,
   `planConfigRemoval`, `planSnippetRemoval`'s own non-`OriginCurrent` arm) — false on every
@@ -99,10 +93,11 @@ flip doctor's own exit code from 1 to 0.
   value and it becomes the table placeholder; backtick a generic word instead. Pinned by
   `Test_host_and_hook_flags_render_a_generic_table_placeholder` (help_test.go), mutation-
   verified per flag; a control asserting the reverted placeholder is absent needs enough
-  trailing usage text to stay unique — a bare "--host none" also occurs, unrelated to this
-  bug, in `--no-hook`'s own "(no effect with --host none)" parenthetical.
-- `os.Lstat` on a file-as-directory returns `ENOTDIR`, never `os.IsNotExist` — checked
-  explicitly in `planPluginFile`/`checkWritable`.
+  trailing usage text to stay unique.
+- `os.Lstat` on a file-as-directory returns `syscall.ENOTDIR`, never matched by
+  `os.IsNotExist`/`fs.ErrNotExist` directly — `doctor.classifyProbeError` and
+  `internal/setup`'s own `planPluginFile`/`checkWritable` check it explicitly; other
+  `internal/setup` scans do not (see Open debts).
 - `newHealthyDoctorFixture` and the cli doctor goldens pin the full 12-row order/content; a
   doctor test leaving `WithHomeDir` unset reads the developer's real `~/.claude/agents`.
 - A leaf's Usage line and root `cmdRow` share one `cmd.Use` — the 80-column help test exempts
@@ -113,12 +108,7 @@ flip doctor's own exit code from 1 to 0.
   came from `srv.Uninstall`, or it silently expects false.
 - A `hostCheckCase.wantPathSuffix` shorter than the full disambiguating suffix (e.g. bare
   "CLAUDE.md") can match either candidate's own path — use the full relative suffix, or the
-  negative `wantPathNotSuffix` when a case must pin the root candidate specifically.
-- A `Check.Fix`'s own shell command must be rendered `relPath(wd, ...)`, the same `wd`
-  `Diagnose` was called with — `checkRootDir` already did; `hostSnippetCheck`'s own
-  `notReadableFix` did not until fix pass 8, and every fixture in `host_test.go` sets `wd ==
-  root`, so the bug was invisible to every existing case there; only a fixture calling
-  `Diagnose` from a subdirectory (`root-dir`'s own coverage never does either) catches it.
+  negative `wantPathNotSuffix` when a case must pin one candidate specifically.
 
 ## Open debts
 - setup never rewrites/removes an `OriginOlder` file — harmless while every older digest list
@@ -129,11 +119,17 @@ flip doctor's own exit code from 1 to 0.
 - `hostPluginCheck`/`hostAgentsCheck` duplicate the same origin-check body — refactor-advisor
   MINORs, deferred rather than risk behavior change. **Unowned.**
 - `host_test.go`/`detect_test.go`'s classification tables mostly carry no mutation-verification
-  statement, unlike their siblings (fix passes 5, 6, 7 and 8 each added a couple that do). **Unowned.**
+  statement, unlike their siblings (fix passes 5-9 each added some that do). **Unowned.**
 - `internal/doctor` (`scanSnippetCandidateStates`/`hostSnippetCheck`) and `internal/setup`
   (`scanSnippetCandidates`/`chooseSnippetLocation`) each hand-write the same snippet-candidate-
   selection rule and cannot import each other (dependency rule) — arch-reviewer suggests
   hoisting the shared predicate into `internal/platform/artifact`, which both already import.
+  **Unowned.**
+- `internal/setup`'s own `scanSnippetCandidates` (snippet.go) and both probes in uninstall.go
+  check only `os.IsNotExist`, never `syscall.ENOTDIR`, unlike `planPluginFile`/`checkWritable`
+  in the same package — a `.claude` that is a regular file makes `brief init`/`uninstall` hard-
+  refuse ("setup: lstat …: not a directory") instead of treating it as absent, the same shape
+  fix pass 9 just fixed in `internal/doctor`. Checked, not fixed — out of scope for this pass.
   **Unowned.**
 - `init`'s own refusal on an unreadable CLAUDE.md leaks a Go wrap chain and names the path
   twice — `brief init: setup: read /abs/CLAUDE.md: open /abs/CLAUDE.md: permission denied`;

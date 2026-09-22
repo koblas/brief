@@ -291,11 +291,10 @@ func chmodUnreadableDir(t *testing.T, dir string) {
 // exiting 1, host-snippet must keep discriminating "not readable" from
 // "not installed" (never SKIP), and the ERROR count must not read zero —
 // a stat failure other than "not found" must never read as "nothing
-// installed" one layer up from host-snippet's own row. host-plugin and
-// host-hook also turn ERROR here, a correct side effect of the same fix
-// (their own subject files under ".claude" are equally present-but-
-// unreadable, not absent), so this pins the count staying non-zero rather
-// than exactly one.
+// installed" one layer up from host-snippet's own row, even though
+// host-plugin and host-hook's own subject files, equally present-but-
+// unreadable under the same ".claude", turn WARN "not readable" rather
+// than ERROR: env-path alone still accounts for the non-zero count.
 func Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable(t *testing.T) {
 	wd, _ := newDoctorFixture(t)
 	claudeDir := filepath.Join(wd, ".claude")
@@ -323,6 +322,43 @@ func Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreada
 	assert.Contains(t, stdout.String(), "WARN  host-snippet")
 	assert.NotContains(t, stdout.String(), "SKIP  host-snippet")
 	assert.NotContains(t, stderr.String(), "0 ERROR", "an unreadable .claude must not report zero ERROR rows")
+}
+
+// Test_doctor_reports_every_host_row_skip_when_dot_claude_is_a_regular_file
+// pins P1's ENOTDIR fix at the CLI boundary: a ".claude" that is a plain
+// file, not a directory, makes every Lstat through it fail with ENOTDIR —
+// classifyProbeError must read that as absent, the same as no ".claude" at
+// all, never as present-but-unreadable. Control arm: newDoctorFixture's
+// own bare baseline (no ".claude" whatsoever) reports the identical rows
+// and exit code, proving the file-in-the-way case is not distinguishable
+// from plain absence. Mutation-verified alongside the doctor-level ENOTDIR
+// cases (internal/doctor/host_test.go): the same classifyProbeError arm
+// backs every row asserted here.
+func Test_doctor_reports_every_host_row_skip_when_dot_claude_is_a_regular_file(t *testing.T) {
+	wd, _ := newDoctorFixture(t)
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude"), []byte("not a directory\n"), 0o600))
+
+	lookPathNotFound := doctor.WithLookPath(func(string) (string, error) { return "", os.ErrNotExist })
+	homeDir := doctor.WithHomeDir(func() (string, error) { return t.TempDir(), nil })
+
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), wd, []string{"doctor"}, nil, &stdout, &stderr, noBuildInfo, withDoctorOpts(lookPathNotFound, homeDir))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, ExitCode(err))
+	assert.Contains(t, stdout.String(), "SKIP  host-plugin")
+	assert.Contains(t, stdout.String(), "SKIP  host-hook")
+	assert.Contains(t, stdout.String(), "SKIP  host-snippet")
+	assert.Contains(t, stdout.String(), "SKIP  host-agents")
+	assert.Contains(t, stdout.String(), "WARN  env-path")
+	assert.NotContains(t, stdout.String(), "ERROR")
+
+	controlWd, _ := newDoctorFixture(t)
+	var controlOut, controlErr bytes.Buffer
+	controlRunErr := run(t.Context(), controlWd, []string{"doctor"}, nil, &controlOut, &controlErr, noBuildInfo, withDoctorOpts(lookPathNotFound, homeDir))
+
+	require.NoError(t, controlRunErr)
+	assert.Equal(t, stdout.String(), controlOut.String(), "a '.claude' regular file must report identically to no '.claude' at all")
 }
 
 // Test_doctor_too_many_arguments_is_a_usage_error pins that "brief
