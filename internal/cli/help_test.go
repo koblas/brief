@@ -633,14 +633,23 @@ type genericPlaceholderCase struct {
 // renders that value as the placeholder for every value, the trap
 // hostFlagUsage's own doc comment names. Each case asserts the ruled row
 // byte-exact and, as the control arm, that the concrete-value placeholder
-// a reverted usage string would render is absent.
+// a reverted usage string would render is absent — each concreteValue
+// carries enough of the row's own trailing usage text to stay unique to
+// that reverted rendering; a bare "--host none" alone also occurs,
+// unrelated to this bug, in --no-hook's own "(no effect with --host none)"
+// parenthetical, and would fail this assertion regardless of which usage
+// string init's --host flag carries. Mutation-verified per case:
+// backquoting the case's own concrete value instead of the generic word in
+// its flag's usage constant (hostFlagUsage, uninstallHostFlagUsage,
+// hookFlagUsage) reddens exactly that case, on both the byte-exact flagRow
+// assertion and the concreteValue control, restored after.
 func Test_host_and_hook_flags_render_a_generic_table_placeholder(t *testing.T) {
 	tests := []genericPlaceholderCase{
 		{
 			name:          "init --host",
 			args:          []string{"init", "--help"},
 			flagRow:       "      --host name     the agent host name to install for: claude-code or none\n                      (default: detected)\n",
-			concreteValue: "--host detected",
+			concreteValue: "--host none     the agent host name",
 		},
 		{
 			name:          "uninstall --host",
