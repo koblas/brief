@@ -29,7 +29,12 @@ guesses is the point of this phase.
 1. Ask the user the open questions triage surfaced — the "Why" and "Who" behind the request.
 2. Define **Primary Goal** (main business value).
 3. Identify **Secondary Goals** or constraints (security, performance, audit, etc.).
-4. Run **`product-vision`** on the refined intent, passing the triage brief. Report its verdict:
+4. Run **`product-vision`** on the refined intent, passing the triage brief. Ask it for the
+   verdict **and the literal surface**: every command and flag name, the flag help strings,
+   the success and refusal lines, the fix text, the exit codes, and the `--json` field names.
+   Copy is cheapest to change here. The same line changed after it ships costs a failing
+   test, a production edit, a re-gate, and a reviewer pass — on one feature, nine such lines
+   were the whole final fix pass. Report its verdict:
    - **DON'T BUILD** or **RETHINK** — stop, put it to the user before going further.
    - **SHIP WITH CHANGES** — fold changes into the intent before Phase 2.
    - **SHIP** — continue.
@@ -114,6 +119,13 @@ Only `specification.md` in this phase. Scenario plan files come from the archite
 ## Product Verdict
 <The `product-vision` verdict and, for SHIP WITH CHANGES, the accepted changes. The
 architect folds these into the scenario plans rather than deferring them.>
+
+## Surface & Copy
+<The literal surface `product-vision` ruled on in Phase 1: command and flag names, flag help
+strings, success / refusal / fix lines, exit codes, `--json` field names. The developer
+implements these strings verbatim rather than inventing copy at the keyboard, and the final
+`product-vision` pass reviews against this section. A line invented during implementation is
+a line nobody ruled on — the final pass will send it back.>
 
 ---
 

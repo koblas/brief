@@ -90,6 +90,27 @@ Rules:
 - Say which mutation you ran and which test it reddened. "Mutation-verified" alone is not a
   claim anyone can check.
 
+## Reviewing: scope and completeness
+
+A review gate is not free. One 10-scenario feature spent roughly 550k tokens on reviewers and
+another 780k on the developer passes answering them, and the largest single cause was
+reviewers re-reading whole packages they had already read in an earlier round.
+
+**Read the delta, not the tree.** Your prompt names a commit range or a file list. Start from
+`git diff <range>` and read only what the diff touches. Widen to a whole file when the diff
+alone cannot settle a question — and say in the finding why you had to. A package you already
+reviewed in an earlier round, on a surface this fix did not touch, has nothing new in it.
+
+**Report every finding in the round you find it.** Do not hold a MINOR back "for the next
+pass", do not open with a finding you then withdraw, and do not re-raise a finding the
+previous round already recorded as deferred. A finding that arrives one round late costs a
+whole extra gate: the developer pass, the re-gate, and every reviewer that re-reads the
+result.
+
+**Say what you could not check.** A path you had no way to exercise — an environment you
+cannot change, a host you cannot detect — is reported as unchecked, not silently passed and
+not guessed at. Unchecked is a fact the caller can act on; a guess is one they cannot.
+
 ## Assertions that prove nothing
 
 One feature produced **fourteen** assertions that looked like proof and were not. The
