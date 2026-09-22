@@ -9,7 +9,9 @@ shared `doctor.classifyProbeError` absent-vs-unreadable classifier for all four 
 unreadable arm to WARN. Fix pass 10: restored host-plugin unreadable to ERROR; deleted an
 unreachable "reclassify as absent" arm from both probes' own `ReadFile`-failure handling;
 renamed `integrationFileState.stat` to `statFailed`; split a maintidx-flagged test; added
-wd≠root, mixed-row and ReadFile-arm coverage for host-plugin/-hook/-agents.
+wd≠root, mixed-row and ReadFile-arm coverage for host-plugin/-hook/-agents. Fix pass 11:
+closed the last two untested ReadFile-failure (`statFailed=false`) arms, for host-plugin and
+host-agents specifically (host-hook already had one).
 
 ## Binding decisions
 - `config.LocateWithin(dir, boundary)` bounds a walk at `boundary`, itself still checked, its

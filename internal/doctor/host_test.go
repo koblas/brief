@@ -275,6 +275,39 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 			}, ", "),
 			wantFix: new("chmod u+rx " + host.PluginDir + "/.claude-plugin, then " + runInitClaudeCode),
 		},
+		{
+			// Every directory stays searchable; only the manifest file
+			// itself is chmodded 0o000, so the failure is in the ReadFile
+			// call rather than the Lstat call (statFailed is false) —
+			// mirrors host-hook's own "the hook file itself is unreadable,
+			// its directory is searchable" case. Control: "every subject
+			// file is current" above is the identical install, readable,
+			// OK. Mutation-verified: hardcoding first.statFailed to true
+			// in integrationFileRowDetail's own notReadableFix call
+			// reddens this case alone (the fix reverts to "chmod u+rx
+			// .claude/skills/brief/.claude-plugin, then …"), restored
+			// after.
+			name: "a subject file itself is unreadable, its directory is searchable",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				var manifestPath string
+
+				for _, f := range h.Plugin(true) {
+					writeHostArtifact(t, wd, f)
+
+					if f.Kind == artifact.KindPluginManifest {
+						manifestPath = filepath.Join(wd, filepath.FromSlash(f.RelPath))
+					}
+				}
+
+				chmodUnreadable(t, manifestPath)
+			},
+			checkID:      "host-plugin",
+			wantSeverity: doctor.SeverityError,
+			wantDetail:   "not readable (permission denied): " + host.PluginDir + "/.claude-plugin/plugin.json",
+			wantFix:      new("chmod +r " + host.PluginDir + "/.claude-plugin/plugin.json, then " + runInitClaudeCode),
+		},
 	})
 }
 
@@ -541,6 +574,38 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 				host.PluginDir + "/agents/reviewer.md",
 			}, ", "),
 			wantFix: new("chmod u+rx " + host.PluginDir + "/agents, then " + runInitClaudeCode),
+		},
+		{
+			// Every directory stays searchable; only the planner agent
+			// file itself is chmodded 0o000, so the failure is in the
+			// ReadFile call rather than the Lstat call (statFailed is
+			// false) — mirrors host-plugin's own equivalent case. Control:
+			// "all three agent files are current" above is the identical
+			// install, readable, OK. Mutation-verified: hardcoding
+			// first.statFailed to true in integrationFileRowDetail's own
+			// notReadableFix call reddens this case alone (the fix
+			// reverts to "chmod u+rx .claude/skills/brief/agents,
+			// then …"), restored after.
+			name: "an agent file itself is unreadable, its directory is searchable",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				var plannerPath string
+
+				for _, f := range h.Agents() {
+					writeHostArtifact(t, wd, f)
+
+					if f.Kind == artifact.KindAgentPlanner {
+						plannerPath = filepath.Join(wd, filepath.FromSlash(f.RelPath))
+					}
+				}
+
+				chmodUnreadable(t, plannerPath)
+			},
+			checkID:      "host-agents",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "not readable (permission denied): " + host.PluginDir + "/agents/planner.md",
+			wantFix:      new("chmod +r " + host.PluginDir + "/agents/planner.md, then " + runInitClaudeCode),
 		},
 	})
 }
