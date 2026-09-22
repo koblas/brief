@@ -92,9 +92,15 @@ feature root (accessible, not counted), environment, host integration — setup 
   uninstall: empty stdout, `brief uninstall: nothing installed for claude-code`, exit 0.
 - R12: **`check --hook <host>`** reads the host hook payload on stdin, takes the path from
   `tool_input.file_path`, and checks only the feature containing it. No `.brief.yaml` found, or
-  a path outside the feature root: silent, exit 0. Otherwise `check`'s exit codes; the first
-  stderr line stands alone: `brief check: <feature dir rel>: N ERROR findings; run 'brief check
-  <feature>'`. Payload parsing sits behind an internal host interface.
+  a path outside the feature root: silent, exit 0. **Amended during SCENARIO-05 planning** (verified
+  against code.claude.com/docs/en/hooks: a PostToolUse hook's exit 1 is shown to the user only as a
+  "hook error" notice and never reaches the model; exit 2 is a blocking error; exit 0 with
+  `hookSpecificOutput.additionalContext` JSON on stdout reaches the model as context): when the
+  edited feature has ERROR findings, the hook path exits 0 and writes
+  `{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"brief check: <feature
+  dir rel>: N ERROR finding(s); run 'brief check <feature>'"}}` to stdout, nothing to stderr.
+  No findings or WARN only: silent, exit 0. Payload parsing and output shaping sit behind an
+  internal host interface.
 - R13: **`doctor`** is setup only — never reads feature contents. Stdout: one row per check,
   `<SEVERITY>  <id>  <rel path>  <detail>` with SEVERITY ∈ OK | WARN | ERROR | SKIP. Stderr
   summary: `brief doctor: setup ok; run 'brief check' for feature content` or
