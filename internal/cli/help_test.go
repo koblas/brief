@@ -60,8 +60,8 @@ func Test_prints_start_help_as_usage_line_prose_and_flag_table(t *testing.T) {
 // rootHelp is root's exact stdout for "brief --help", "brief -h" and
 // "brief help": the one-sentence description, one row per available
 // command (new's two children in new's place, in registration order),
-// finish's, init's and uninstall's own overlong rows each wrapped to their
-// own line, and the two trailers —
+// finish's, check's, init's and uninstall's own overlong rows each wrapped
+// to their own line, and the two trailers —
 // "Run 'brief <command> --help' for details." then, as the render's last
 // line, "Run 'brief --version' to print the installed version." (R7).
 const rootHelp = `brief manages feature specifications as files in your repository.
@@ -73,7 +73,8 @@ Usage:
   brief finish <feature> <step> --handoff <path> --state <path>
                                    close a step: handoff, state, then done
   brief status                     print a FEATURE/DONE/BLOCKED/NEXT table of every feature
-  brief check [feature]            report faults finish would now refuse to write over
+  brief check [feature] [--hook <host>]
+                                   report faults finish would now refuse to write over
   brief init [--host <name>] [--dry-run] [--force] [--json]
                                    install brief's config and agent-host integration
   brief doctor [--json]            check brief's setup: config, feature root, host integration

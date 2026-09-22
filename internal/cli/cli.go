@@ -283,6 +283,10 @@ section may be empty`
 // hostFlagUsage is init's --host flag's usage string.
 const hostFlagUsage = "the agent host to install for (`none` in this release)"
 
+// hookFlagUsage is check's --hook flag's usage string. Its embedded newline
+// is pflag's own wrapping cue — see handoffFlagUsage.
+const hookFlagUsage = "read a hook payload from stdin and check only the\nedited feature (`claude-code`)"
+
 // dryRunFlagUsage is init's --dry-run flag's usage string.
 const dryRunFlagUsage = "print the plan without writing anything"
 
@@ -504,9 +508,15 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			func(cmd *cobra.Command, args []string) error {
 				return runStatus(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
-		leafCommand("check [feature]", "report faults finish would now refuse to write over", checkInvocation, checkLong, addJSONFlag,
+		leafCommand("check [feature] [--hook <host>]", "report faults finish would now refuse to write over", checkInvocation, checkLong,
+			func(fs *pflag.FlagSet) {
+				fs.String("hook", "", hookFlagUsage)
+				addJSONFlag(fs)
+			},
 			func(cmd *cobra.Command, args []string) error {
-				return runCheck(cmd.Context(), wd, args, out.forCommand(cmd))
+				hook, _ := cmd.Flags().GetString("hook")
+
+				return runCheck(cmd.Context(), wd, args, hook, stdin, out.forCommand(cmd))
 			}),
 		initCmd,
 		leafCommand("doctor [--json]", "check brief's setup: config, feature root, host integration", doctorInvocation, doctorLong, addJSONFlag,

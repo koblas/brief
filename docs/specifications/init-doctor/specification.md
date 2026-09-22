@@ -255,7 +255,7 @@ Scenario: SCENARIO-10 doctor reports Claude Code integration health
 - [x] SCENARIO-02: doctor reports config, feature-root and environment health
 - [x] SCENARIO-03: init writes the config and feature root, and converges
 - [x] SCENARIO-04: uninstall removes the config init wrote and nothing else
-- [ ] SCENARIO-05: check --hook scopes a Claude Code hook call to the edited feature
+- [x] SCENARIO-05: check --hook scopes a Claude Code hook call to the edited feature
 - [ ] SCENARIO-06: init installs the Claude Code plugin
 - [ ] SCENARIO-07: init adds the CLAUDE.md instruction block
 - [ ] SCENARIO-08: --with-agents scaffolds three role agents and binds them

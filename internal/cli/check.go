@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/koblas/brief/internal/assemble"
+	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/host"
 )
 
 // checkLong is "brief check"'s help prose.
@@ -32,6 +36,16 @@ findings only. A conforming repository, or feature, prints nothing on
 stdout and exits 0, with one line on stderr saying so. brief check reads;
 it never writes.
 
+--hook <host> reads one hook-event payload from stdin instead of taking a
+feature argument, and checks only the feature containing the path that
+payload names. With no ".brief.yaml" found, or a path outside the feature
+directory, it is silent, exit 0. When the edited feature has at least one
+ERROR finding, it writes one JSON document — the host's own hook-context
+protocol, never a findings table — to stdout and exits 0; a host's hook
+runner reads that as context, not as a failure. No ERROR finding is fully
+silent, exit 0. --hook takes no feature argument and cannot be combined
+with --json; an invalid ".brief.yaml" still refuses, exit 1.
+
 ` + jsonFieldsParagraph("counts", "features") + " " + jsonScriptHint
 
 // errCheckFindings marks a run of runCheck that printed at least one
@@ -44,6 +58,11 @@ var errCheckFindings = errors.New("check reported an error-severity finding")
 // checkInvocation is the invocation string every "brief check" usage error
 // names as how to fix it.
 const checkInvocation = "brief check [feature]"
+
+// checkHookInvocation is the invocation string every "check --hook" usage
+// error names as how to fix it — a concrete example, since claude-code is
+// the only host --hook accepts.
+const checkHookInvocation = "brief check --hook claude-code"
 
 // checkCountsJSON is checkDocument's "counts" member: the same
 // countFindings tally checkSummary's text-mode line and runCheck's own
@@ -142,9 +161,16 @@ func countFindings(groups []assemble.FeatureFindings) (int, int) {
 	return errorCount, warnCount
 }
 
-// runCheck implements "brief check [feature]"; rest is its positional
-// arguments, flags already parsed away.
-func runCheck(ctx context.Context, wd string, rest []string, out reporter) error {
+// runCheck implements "brief check [feature] [--hook <host>]"; rest is its
+// positional arguments, flags already parsed away. hookHost is "" unless
+// --hook was given, in which case it dispatches to runCheckHook instead of
+// checking by feature argument; stdin backs --hook's own payload read (no
+// other check path reads it).
+func runCheck(ctx context.Context, wd string, rest []string, hookHost string, stdin io.Reader, out reporter) error {
+	if hookHost != "" {
+		return runCheckHook(ctx, wd, rest, hookHost, stdin, out)
+	}
+
 	if len(rest) > 1 {
 		return out.usageError(fmt.Sprintf("brief check: too many arguments; run '%s'", checkInvocation))
 	}
@@ -209,6 +235,92 @@ func runCheck(ctx context.Context, wd string, rest []string, out reporter) error
 	fmt.Fprintf(out.stderr, "brief check: %s\n", checkSummary(groups, feature))
 
 	return runErr
+}
+
+// runCheckHook implements "brief check --hook <host>" (R12, amended per
+// commit 1b12f18): rest must be empty (a feature argument and --hook are
+// mutually exclusive) and out.json must be false (--hook and --json are
+// mutually exclusive). It reads one hook-event payload from stdin through
+// host, resolves the edited path against wd when relative, and checks only
+// the feature assemble.(*Server).FeatureContaining reports for it.
+//
+// The opt-in gate is config.Locate's own nearest result, not
+// resolveRoot/config.Resolve: a repository with no ".brief.yaml" anywhere
+// above wd is silent, exit 0, even when the default feature directory
+// would otherwise carry findings — Resolve alone would silently check an
+// unopted-in repository by falling back to its own defaults. An invalid
+// existing config still refuses through resolveRoot, exit 1, the same as
+// every other command. A path FeatureContaining reports as outside the
+// feature directory is silent, exit 0.
+//
+// A feature with at least one ERROR finding writes one JSON document —
+// host.WriteHookContext's own hook-context protocol, naming the feature's
+// own directory (relative to wd) and its ERROR count — to stdout and
+// returns nil (exit 0); stdout on this path never carries check's own
+// findings table. A feature with no findings, or WARN findings only, is
+// silent, exit 0.
+func runCheckHook(ctx context.Context, wd string, rest []string, hookHost string, stdin io.Reader, out reporter) error {
+	if len(rest) > 0 {
+		return out.usageError(fmt.Sprintf("brief check: --hook takes no feature argument; run '%s'", checkHookInvocation))
+	}
+
+	if out.json {
+		return out.usageError(fmt.Sprintf("brief check: --hook and --json cannot be combined; run '%s'", checkHookInvocation))
+	}
+
+	h, ok := host.Lookup(hookHost)
+	if !ok {
+		return out.usageError(fmt.Sprintf("brief check: unknown host %q; expected one of: %s; run '%s'", hookHost, strings.Join(host.HookHosts(), ", "), checkHookInvocation))
+	}
+
+	editedPath, err := h.HookPath(stdin)
+	if err != nil {
+		return out.usageError(fmt.Sprintf("brief check: malformed hook payload on stdin; run '%s'", checkHookInvocation))
+	}
+
+	if !filepath.IsAbs(editedPath) {
+		editedPath = filepath.Join(wd, editedPath)
+	}
+
+	if nearest, _, locateErr := config.Locate(wd); locateErr == nil && nearest == "" {
+		return nil
+	}
+
+	cfg, root, err := resolveRoot(wd)
+	if err != nil {
+		return out.refusal(err)
+	}
+
+	srv := assemble.NewServer(cfg, root)
+
+	feature, ok := srv.FeatureContaining(editedPath)
+	if !ok {
+		return nil
+	}
+
+	findings, err := srv.Check(ctx, feature)
+	if err != nil {
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
+	}
+
+	errorCount, _ := countFindings(assemble.GroupByFeature(findings))
+	if errorCount == 0 {
+		return nil
+	}
+
+	noun := "finding"
+	if errorCount != 1 {
+		noun = "findings"
+	}
+
+	featurePath := filepath.Join(root, cfg.FeatureDirectory, feature)
+	summary := fmt.Sprintf("brief check: %s: %d ERROR %s; run 'brief check %s'", displayPath(wd, featurePath), errorCount, noun, feature)
+
+	if err := h.WriteHookContext(out.stdout, summary); err != nil {
+		return fmt.Errorf("brief check: %w", err)
+	}
+
+	return nil
 }
 
 // displayFindings returns a copy of groups with every Finding.Path
