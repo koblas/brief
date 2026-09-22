@@ -124,8 +124,11 @@ feature root (accessible, not counted), environment, host integration — setup 
 
   **Amended during SCENARIO-09 planning**: `--print`'s own artifact set is the pending
   (`ActionCreated`/`ActionMerged`) entries of `Result.Artifacts`, in that same order, the feature
-  root excluded — `ActionUnchanged`/`ActionKept` never appear; a `--force` config rewrite prints
-  as `create` with the variant a real run would write. stdout ends with `brief init: printed
+  root excluded — `ActionUnchanged`/`ActionKept` never appear, with one exception (**amended in
+  fix pass 4**): a CLAUDE.md candidate that is `ActionKept` because it is not a regular file
+  still prints its own body as `merge`, since apply can never write there either but the block
+  still needs to be added by hand. A `--force` config rewrite prints as `create` with the variant
+  a real run would write. stderr ends with `brief init: printed
   only, no files changed; apply the output above by hand, or rerun without --print`; nothing
   pending prints `brief init: already installed; nothing changed` instead, stdout empty. stderr
   priority for init's own success line is `--dry-run` line > `--print` line > R8's no-host-detected
@@ -165,6 +168,20 @@ feature root (accessible, not counted), environment, host integration — setup 
   after "brief's" (`removed brief's claude-code install; …`) rather than trailing it with "for
   claude-code", which read awkwardly; every other next-action line keeps the trailing `for <host>`
   suffix.
+
+  **Amended in fix pass 4**: `uninstall`'s next-action line discriminates by what Uninstall
+  actually removed, not by the requested host — a lone config removal (the shape a default-host
+  `uninstall` leaves after an earlier `init --host none`) reports `brief uninstall: removed
+  brief's config; the feature root and its contents were left in place`, never a claude-code
+  install that was never there; dry run reports `brief uninstall: dry run, nothing removed;
+  rerun without --dry-run to remove brief's <host> install` (or "brief's install" for `none`);
+  everything kept reports `brief uninstall: nothing removed; N file(s) edited locally were kept;
+  run 'brief uninstall --force' to remove them`, N counting only artifacts kept because they were
+  edited, never one kept because it is not a regular file (`--force` cannot remove that either).
+  `init`'s own next-action line and JSON document additionally name host-detection's own signal
+  when `--host` was not given: `brief init: installed for claude-code (detected <.claude|
+  CLAUDE.md|~/.claude>; use --host none to skip); …`, and `--json` gains `detected_by` (null
+  unless detected), inserted right after `host`.
 - R12: **`check --hook <host>`** reads the host hook payload on stdin, takes the path from
   `tool_input.file_path`, and checks only the feature containing it. No `.brief.yaml` found, or
   a path outside the feature root: silent, exit 0. **Amended during SCENARIO-05 planning** (verified
@@ -202,6 +219,13 @@ feature root (accessible, not counted), environment, host integration — setup 
   `.brief.yaml` found above the nearest enclosing git repository is treated as though none
   existed, and the config family reports the "no config anywhere" rows rather than naming that
   ancestor file.
+
+  **Amended in fix pass 4**: a CLAUDE.md candidate that exists but is not a regular file (a
+  symlink or a directory) is host-snippet WARN, detail `not a regular file (symlink|directory);
+  brief block not installed`, fix `run 'brief init --print' and add the CLAUDE.md block by
+  hand` — not the SKIP `not installed` row a genuinely missing candidate reports — unless the
+  other candidate still holds a real block, in which case that block is reported exactly as it
+  would be were both candidates regular files.
 - R14: **Command surface & order.** Root help and every "expected one of:" list:
   `new, start, finish, status, check, init, doctor, uninstall`. Shorts: init `install brief's
   config and agent-host integration`; doctor `check brief's setup: config, feature root, host
