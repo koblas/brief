@@ -60,7 +60,8 @@ func Test_prints_start_help_as_usage_line_prose_and_flag_table(t *testing.T) {
 // rootHelp is root's exact stdout for "brief --help", "brief -h" and
 // "brief help": the one-sentence description, one row per available
 // command (new's two children in new's place, in registration order),
-// finish's overlong row wrapped to its own line, and the two trailers —
+// finish's and init's own overlong rows each wrapped to their own line,
+// and the two trailers —
 // "Run 'brief <command> --help' for details." then, as the render's last
 // line, "Run 'brief --version' to print the installed version." (R7).
 const rootHelp = `brief manages feature specifications as files in your repository.
@@ -73,6 +74,8 @@ Usage:
                                    close a step: handoff, state, then done
   brief status                     print a FEATURE/DONE/BLOCKED/NEXT table of every feature
   brief check [feature]            report faults finish would now refuse to write over
+  brief init [--host <name>] [--dry-run] [--force] [--json]
+                                   install brief's config and agent-host integration
   brief doctor [--json]            check brief's setup: config, feature root, host integration
   brief completion <bash|zsh|fish|powershell>
                                    print a shell completion script
@@ -329,27 +332,27 @@ func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) 
 		{
 			name:   "unknown top-level topic",
 			args:   []string{"help", "bogus"},
-			stderr: "brief help: unknown command \"bogus\"; expected one of: new, start, finish, status, check, doctor\n",
+			stderr: "brief help: unknown command \"bogus\"; expected one of: new, start, finish, status, check, init, doctor\n",
 		},
 		{
 			name:   "resolved command with an unresolved trailing word",
 			args:   []string{"help", "new", "bogus"},
-			stderr: "brief help: unknown command \"new bogus\"; expected one of: new, start, finish, status, check, doctor\n",
+			stderr: "brief help: unknown command \"new bogus\"; expected one of: new, start, finish, status, check, init, doctor\n",
 		},
 		{
 			name:   "resolved command with an extra positional",
 			args:   []string{"help", "start", "extra"},
-			stderr: "brief help: unknown command \"start extra\"; expected one of: new, start, finish, status, check, doctor\n",
+			stderr: "brief help: unknown command \"start extra\"; expected one of: new, start, finish, status, check, init, doctor\n",
 		},
 		{
 			name:   "resolved command with a trailing flag",
 			args:   []string{"help", "start", "--bogus"},
-			stderr: "brief help: unknown command \"start --bogus\"; expected one of: new, start, finish, status, check, doctor\n",
+			stderr: "brief help: unknown command \"start --bogus\"; expected one of: new, start, finish, status, check, init, doctor\n",
 		},
 		{
 			name:   "hidden command as topic",
 			args:   []string{"help", "help"},
-			stderr: "brief help: unknown command \"help\"; expected one of: new, start, finish, status, check, doctor\n",
+			stderr: "brief help: unknown command \"help\"; expected one of: new, start, finish, status, check, init, doctor\n",
 		},
 	}
 
@@ -564,6 +567,7 @@ func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 		{name: "finish", args: []string{"finish", "--help"}},
 		{name: "status", args: []string{"status", "--help"}},
 		{name: "check", args: []string{"check", "--help"}},
+		{name: "init", args: []string{"init", "--help"}},
 		{name: "doctor", args: []string{"doctor", "--help"}},
 		{name: "completion", args: []string{"completion", "--help"}},
 		{name: "help", args: []string{"help", "-h"}},
@@ -606,6 +610,7 @@ func Test_every_command_help_lists_the_json_flag_row(t *testing.T) {
 		{name: "finish", args: []string{"finish", "--help"}},
 		{name: "status", args: []string{"status", "--help"}},
 		{name: "check", args: []string{"check", "--help"}},
+		{name: "init", args: []string{"init", "--help"}},
 		{name: "help", args: []string{"help", "-h"}},
 	}
 
@@ -778,6 +783,17 @@ func Test_every_command_help_names_its_json_documents_top_level_fields(t *testin
 			wantExit: 0,
 		},
 		{
+			name: "init",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := t.TempDir()
+
+				return runJSONAndHelp(t, wd, []string{"init", "--host", "none", "--json"}, []string{"init", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
 			name: "help",
 			run: func(t *testing.T) ([]byte, string, error) {
 				t.Helper()
@@ -831,6 +847,7 @@ func Test_status_and_check_help_say_the_text_layout_may_change(t *testing.T) {
 		{name: "doctor", args: []string{"doctor", "--help"}, carries: true},
 		{name: "start", args: []string{"start", "--help"}, carries: false},
 		{name: "finish", args: []string{"finish", "--help"}, carries: false},
+		{name: "init", args: []string{"init", "--help"}, carries: false},
 	}
 
 	for _, tc := range tests {

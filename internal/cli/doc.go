@@ -34,6 +34,13 @@
 // "expected one of:" list while giving it a root-help row and a
 // "brief help completion" topic.
 //
+// "brief init [--host <name>] [--dry-run] [--force] [--json]" installs
+// internal/setup's own config file and feature root, converging on a
+// second run; its refusal — a *setup.RefusalError, checked ahead of a bare
+// *config.InvalidConfigError so its own "run 'brief init --force'" fix is
+// never lost to the generic one — carries writesFilesAnnotation the same
+// way "new" and "finish" do.
+//
 // "brief help [command] --json", "brief --help --json" and every leaf's
 // own "<command> --help --json" render a help document instead of text:
 // commands[] full index (root's own help) or filtered to the one command

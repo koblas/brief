@@ -121,7 +121,7 @@ func Test_returns_a_usage_error_when_no_command_is_given(t *testing.T) {
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check, doctor", oneLine(t, &stderr))
+	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check, init, doctor", oneLine(t, &stderr))
 }
 
 // Test_returns_a_usage_error_when_the_command_is_unknown pins R7's "no Did
@@ -138,12 +138,12 @@ func Test_returns_a_usage_error_when_the_command_is_unknown(t *testing.T) {
 		{
 			name:    "unrelated typo",
 			command: "bogus",
-			stderr:  `brief: unknown command "bogus"; expected one of: new, start, finish, status, check, doctor`,
+			stderr:  `brief: unknown command "bogus"; expected one of: new, start, finish, status, check, init, doctor`,
 		},
 		{
 			name:    "near-miss of a real command",
 			command: "startt",
-			stderr:  `brief: unknown command "startt"; expected one of: new, start, finish, status, check, doctor`,
+			stderr:  `brief: unknown command "startt"; expected one of: new, start, finish, status, check, init, doctor`,
 		},
 	}
 
@@ -283,7 +283,7 @@ func Test_returns_a_usage_error_when_args_are_nil(t *testing.T) {
 
 	require.ErrorIs(t, err, cli.ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check, doctor", oneLine(t, &stderr))
+	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check, init, doctor", oneLine(t, &stderr))
 }
 
 // Test_prints_root_usage_and_a_nil_error_for_brief_help pins today's
@@ -579,7 +579,7 @@ func Test_treats_a_bare_dash_as_a_plain_unknown_command(t *testing.T) {
 		{
 			name:    "root",
 			args:    []string{"-"},
-			wantErr: `brief: unknown command "-"; expected one of: new, start, finish, status, check, doctor`,
+			wantErr: `brief: unknown command "-"; expected one of: new, start, finish, status, check, init, doctor`,
 		},
 		{
 			name:    "new",
@@ -589,7 +589,7 @@ func Test_treats_a_bare_dash_as_a_plain_unknown_command(t *testing.T) {
 		{
 			name:    "help",
 			args:    []string{"help", "-"},
-			wantErr: `brief help: unknown command "-"; expected one of: new, start, finish, status, check, doctor`,
+			wantErr: `brief help: unknown command "-"; expected one of: new, start, finish, status, check, init, doctor`,
 		},
 	}
 

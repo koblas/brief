@@ -89,17 +89,17 @@ func Test_expected_command_list_names_every_visible_registered_command(t *testin
 		{
 			name:   "no command given",
 			args:   []string{},
-			stderr: "brief: no command given; expected one of: new, start, finish, status, check, doctor, extra\n",
+			stderr: "brief: no command given; expected one of: new, start, finish, status, check, init, doctor, extra\n",
 		},
 		{
 			name:   "unknown command",
 			args:   []string{"bogus"},
-			stderr: `brief: unknown command "bogus"; expected one of: new, start, finish, status, check, doctor, extra` + "\n",
+			stderr: `brief: unknown command "bogus"; expected one of: new, start, finish, status, check, init, doctor, extra` + "\n",
 		},
 		{
 			name:   "unknown help topic",
 			args:   []string{"help", "bogus"},
-			stderr: `brief help: unknown command "bogus"; expected one of: new, start, finish, status, check, doctor, extra` + "\n",
+			stderr: `brief help: unknown command "bogus"; expected one of: new, start, finish, status, check, init, doctor, extra` + "\n",
 		},
 	}
 
@@ -131,5 +131,5 @@ func Test_expected_command_list_includes_a_command_once_it_is_not_hidden(t *test
 
 	require.ErrorIs(t, err, ErrUsage)
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief: unknown command "bogus"; expected one of: new, start, finish, status, check, doctor, extra, hiddenextra`+"\n", stderr.String())
+	assert.Equal(t, `brief: unknown command "bogus"; expected one of: new, start, finish, status, check, init, doctor, extra, hiddenextra`+"\n", stderr.String())
 }

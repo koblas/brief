@@ -148,17 +148,17 @@ func Test_completion_is_absent_from_every_expected_command_list(t *testing.T) {
 		{
 			name:       "bare brief",
 			args:       []string{},
-			wantStderr: "brief: no command given; expected one of: new, start, finish, status, check, doctor\n",
+			wantStderr: "brief: no command given; expected one of: new, start, finish, status, check, init, doctor\n",
 		},
 		{
 			name:       "unknown command",
 			args:       []string{"bogus"},
-			wantStderr: `brief: unknown command "bogus"; expected one of: new, start, finish, status, check, doctor` + "\n",
+			wantStderr: `brief: unknown command "bogus"; expected one of: new, start, finish, status, check, init, doctor` + "\n",
 		},
 		{
 			name:       "unknown help topic",
 			args:       []string{"help", "bogus"},
-			wantStderr: `brief help: unknown command "bogus"; expected one of: new, start, finish, status, check, doctor` + "\n",
+			wantStderr: `brief help: unknown command "bogus"; expected one of: new, start, finish, status, check, init, doctor` + "\n",
 		},
 	}
 

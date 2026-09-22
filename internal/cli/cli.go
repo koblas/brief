@@ -24,7 +24,7 @@ var ErrUsage = errors.New("usage error")
 func init() {
 	// Root help and every "expected one of:" list share one order:
 	// registration order, as newRootCommand's root.AddCommand calls lay it
-	// out — new, start, finish, status, check, doctor — rather than cobra's
+	// out — new, start, finish, status, check, init, doctor — rather than cobra's
 	// default alphabetical sort. EnableCommandSorting is a cobra package global:
 	// set once here, never per Run or per call, since a per-call write
 	// would race parallel tests' reads.
@@ -172,10 +172,10 @@ const commandNounAnnotation = "commandNoun"
 
 // writesFilesAnnotation is the cobra.Command.Annotations key marking a
 // command whose successful run can modify the tree — "new", "new
-// feature", "new step" and "finish" — so filesChangedFor knows R3's
-// files_changed is false (not null) on a usage error or a refusal that
-// changed nothing for one of these, true when at least one write landed
-// before the failure, and null for every other command.
+// feature", "new step", "finish" and "init" — so filesChangedFor knows
+// R3's files_changed is false (not null) on a usage error or a refusal
+// that changed nothing for one of these, true when at least one write
+// landed before the failure, and null for every other command.
 const writesFilesAnnotation = "writesFiles"
 
 // jsonFlagUsage is every JSON-capable command's own --json flag's usage
@@ -280,6 +280,15 @@ file; it replaces the file, it is never appended to; it
 must carry the configured state headings, though a
 section may be empty`
 
+// hostFlagUsage is init's --host flag's usage string.
+const hostFlagUsage = "the agent host to install for (`none` in this release)"
+
+// dryRunFlagUsage is init's --dry-run flag's usage string.
+const dryRunFlagUsage = "print the plan without writing anything"
+
+// forceFlagUsage is init's --force flag's usage string.
+const forceFlagUsage = "rewrite an existing .brief.yaml from defaults"
+
 // Run parses args, dispatches to the named command, and renders every
 // user-facing line to stdout or stderr itself. wd is the working directory
 // used to resolve configuration and to relativize any printed path — Run
@@ -366,7 +375,7 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 //
 // Commands are added in the order they should list in root help and in
 // every "expected one of:" message — new, start, finish, status, check,
-// doctor — not alphabetically: see this package's init, which turns
+// init, doctor — not alphabetically: see this package's init, which turns
 // cobra's default sort off, and expectedCommandList, which reads
 // root.Commands() in that same order. "completion" registers last: it is
 // Hidden (enabled and dispatchable, but excluded from
@@ -448,6 +457,22 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		})
 	finishCmd.Annotations[writesFilesAnnotation] = "true"
 
+	initCmd := leafCommand("init [--host <name>] [--dry-run] [--force] [--json]", "install brief's config and agent-host integration", initInvocation, initLong,
+		func(fs *pflag.FlagSet) {
+			fs.String("host", "", hostFlagUsage)
+			fs.Bool("dry-run", false, dryRunFlagUsage)
+			fs.Bool("force", false, forceFlagUsage)
+			addJSONFlag(fs)
+		},
+		func(cmd *cobra.Command, args []string) error {
+			host, _ := cmd.Flags().GetString("host")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			force, _ := cmd.Flags().GetBool("force")
+
+			return runInit(cmd.Context(), wd, args, host, dryRun, force, out.forCommand(cmd))
+		})
+	initCmd.Annotations[writesFilesAnnotation] = "true"
+
 	root.AddCommand(
 		newCmd,
 		leafCommand("start [--json] <feature>", "print the next open step's context", startInvocation, startLong,
@@ -464,6 +489,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			func(cmd *cobra.Command, args []string) error {
 				return runCheck(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
+		initCmd,
 		leafCommand("doctor [--json]", "check brief's setup: config, feature root, host integration", doctorInvocation, doctorLong, addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
 				return runDoctor(cmd.Context(), wd, args, readBuildInfo, out.forCommand(cmd), extraDoctorOpts...)

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/koblas/brief/internal/scaffold"
+	"github.com/koblas/brief/internal/setup"
 	"github.com/spf13/cobra"
 )
 
@@ -189,19 +190,20 @@ func usageFix(msg string, cmd *cobra.Command) string {
 
 // filesChangedFor reports R3's "files_changed" value for cmd, one of the
 // commands carrying writesFilesAnnotation ("new", "new feature", "new
-// step", "finish"): nil (JSON null) for every other command, since a read
-// command never changes anything to report on; for a write command, what
-// actually happened on disk — true when err wraps scaffold.ErrPartialWrite
-// (at least one write landed before the failure that reached cli), false
-// otherwise (a usage error, a refusal that changed nothing, or a failure
-// before the first write). err is nil for a usage error, which never
-// reaches a write at all.
+// step", "finish", "init"): nil (JSON null) for every other command, since
+// a read command never changes anything to report on; for a write
+// command, what actually happened on disk — true when err wraps
+// scaffold.ErrPartialWrite or setup.ErrPartialWrite (at least one write
+// landed before the failure that reached cli), false otherwise (a usage
+// error, a refusal that changed nothing, or a failure before the first
+// write). err is nil for a usage error, which never reaches a write at
+// all.
 func filesChangedFor(cmd *cobra.Command, err error) *bool {
 	if cmd.Annotations[writesFilesAnnotation] == "" {
 		return nil
 	}
 
-	f := errors.Is(err, scaffold.ErrPartialWrite)
+	f := errors.Is(err, scaffold.ErrPartialWrite) || errors.Is(err, setup.ErrPartialWrite)
 
 	return &f
 }
