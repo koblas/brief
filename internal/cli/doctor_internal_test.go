@@ -291,10 +291,11 @@ func chmodUnreadableDir(t *testing.T, dir string) {
 // exiting 1, host-snippet must keep discriminating "not readable" from
 // "not installed" (never SKIP), and the ERROR count must not read zero —
 // a stat failure other than "not found" must never read as "nothing
-// installed" one layer up from host-snippet's own row, even though
-// host-plugin and host-hook's own subject files, equally present-but-
-// unreadable under the same ".claude", turn WARN "not readable" rather
-// than ERROR: env-path alone still accounts for the non-zero count.
+// installed" one layer up from host-snippet's own row. host-plugin's own
+// subject files, equally present-but-unreadable under the same ".claude",
+// turn ERROR too (fix pass 10), so this repro's non-zero ERROR count no
+// longer rests on env-path alone; host-hook stays WARN regardless, since
+// doctor cannot tell a lost hook file from --no-hook either way.
 func Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable(t *testing.T) {
 	wd, _ := newDoctorFixture(t)
 	claudeDir := filepath.Join(wd, ".claude")
@@ -322,6 +323,38 @@ func Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreada
 	assert.Contains(t, stdout.String(), "WARN  host-snippet")
 	assert.NotContains(t, stdout.String(), "SKIP  host-snippet")
 	assert.NotContains(t, stderr.String(), "0 ERROR", "an unreadable .claude must not report zero ERROR rows")
+}
+
+// Test_doctor_reports_host_plugin_error_when_the_plugin_directory_is_unreadable
+// pins fix pass 10's restore: an unreadable host-plugin subject file must
+// surface as ERROR, not the WARN fix pass 9 gave it, since a Claude Code
+// install "brief doctor" cannot read is one it cannot load either — a
+// bare "brief doctor" run against it must exit non-zero, unlike env-path,
+// which stays OK throughout this test (brief is found on PATH). Control
+// arm: the identical, readable install exits 0.
+func Test_doctor_reports_host_plugin_error_when_the_plugin_directory_is_unreadable(t *testing.T) {
+	wd := t.TempDir()
+	var initStdout, initStderr bytes.Buffer
+	require.NoError(t, Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &initStdout, &initStderr))
+
+	self := filepath.Join(wd, "self-brief")
+	require.NoError(t, os.WriteFile(self, []byte("self"), 0o600))
+	seams := doctorFakeSeams(t, self)
+
+	var controlOut, controlErr bytes.Buffer
+	controlRunErr := run(t.Context(), wd, []string{"doctor"}, nil, &controlOut, &controlErr, noBuildInfo, seams...)
+	require.NoError(t, controlRunErr, "control arm: a readable .claude must exit 0")
+	assert.Equal(t, 0, ExitCode(controlRunErr))
+
+	chmodUnreadableDir(t, filepath.Join(wd, ".claude"))
+
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), wd, []string{"doctor"}, nil, &stdout, &stderr, noBuildInfo, seams...)
+
+	require.Error(t, err)
+	assert.NotEqual(t, 0, ExitCode(err))
+	assert.Contains(t, stdout.String(), "ERROR  host-plugin")
+	assert.NotContains(t, stdout.String(), "ERROR  env-path")
 }
 
 // Test_doctor_reports_every_host_row_skip_when_dot_claude_is_a_regular_file

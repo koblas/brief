@@ -244,13 +244,16 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 		{
 			// An ancestor directory doctor cannot even Lstat into (mode
 			// 0o000) is unreadable, never "missing": every subject file
-			// keeps its own name, and the row stays WARN rather than the
-			// pre-fix ERROR "incomplete". Control: "every subject file is
-			// current" above is the identical install, readable, OK.
-			// Mutation-verified: dropping integrationFileRowDetail's own
-			// call ahead of missingRelPaths (falling through to the
-			// "incomplete: missing" branch) reddens this case alone,
-			// restored after.
+			// keeps its own "not readable" name rather than the
+			// "incomplete: missing" wording a genuinely absent file gets —
+			// both are ERROR, since Claude Code cannot load the skill
+			// through a file it cannot read any more than one that is not
+			// there. Control: "every subject file is current" above is
+			// the identical install, readable, OK. Mutation-verified:
+			// dropping integrationFileRowDetail's own call ahead of
+			// missingRelPaths (falling through to the "incomplete:
+			// missing" branch) reddens this case alone via its Detail
+			// text, restored after.
 			name: "a subject file is unreadable, not missing",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
@@ -262,7 +265,7 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 				chmodUnreadableDir(t, filepath.Join(wd, ".claude"))
 			},
 			checkID:      "host-plugin",
-			wantSeverity: doctor.SeverityWarn,
+			wantSeverity: doctor.SeverityError,
 			wantDetail: "not readable (permission denied): " + strings.Join([]string{
 				host.PluginDir + "/.claude-plugin/plugin.json",
 				host.PluginDir + "/skills/start/SKILL.md",
@@ -509,6 +512,84 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 	})
 }
 
+// Test_diagnose_host_plugin_hook_agents_unreadable_fix_is_relative_to_wd
+// pins the same wd-vs-root split fix pass 8 gave host-snippet's own "not
+// readable" fix (Test_diagnose_host_snippet_unreadable_fix_is_relative_to_wd)
+// for host-plugin, host-hook and host-agents: Diagnose run from a
+// subdirectory below root must recommend "chmod u+rx ../<dir>", not the
+// bare root-relative form every hostCheckCase table in this file pins
+// (wd == root there). Mutation-verified: passing root instead of absWd as
+// wd into hostPluginCheck/hostHookCheck/hostAgentsCheck in doctor.go's own
+// Diagnose reddens all three assertions here — the fix text stops
+// changing between wd == root and wd != root — while leaving every table
+// in this file green.
+func Test_diagnose_host_plugin_hook_agents_unreadable_fix_is_relative_to_wd(t *testing.T) {
+	wd := newHostFixture(t)
+	h := claudeCodeHost(t)
+
+	for _, f := range h.Plugin(true) {
+		writeHostArtifact(t, wd, f)
+	}
+
+	for _, f := range h.Agents() {
+		writeHostArtifact(t, wd, f)
+	}
+
+	chmodUnreadableDir(t, filepath.Join(wd, ".claude"))
+
+	subdir := filepath.Join(wd, "docs")
+
+	srv := doctor.NewServer(emptyHomeDir(t))
+	report := srv.Diagnose(t.Context(), subdir)
+
+	pluginCheck := findCheck(t, report, "host-plugin")
+	assert.Equal(t, doctor.SeverityError, pluginCheck.Severity)
+	require.NotNil(t, pluginCheck.Fix)
+	assert.Equal(t, "chmod u+rx ../"+host.PluginDir+"/.claude-plugin, then "+runInitClaudeCode, *pluginCheck.Fix)
+
+	hookCheck := findCheck(t, report, "host-hook")
+	assert.Equal(t, doctor.SeverityWarn, hookCheck.Severity)
+	require.NotNil(t, hookCheck.Fix)
+	assert.Equal(t, "chmod u+rx ../"+host.PluginDir+"/hooks, then "+runInitClaudeCode, *hookCheck.Fix)
+
+	agentsCheck := findCheck(t, report, "host-agents")
+	assert.Equal(t, doctor.SeverityWarn, agentsCheck.Severity)
+	require.NotNil(t, agentsCheck.Fix)
+	assert.Equal(t, "chmod u+rx ../"+host.PluginDir+"/agents, then "+runInitClaudeCode, *agentsCheck.Fix)
+}
+
+// Test_diagnose_host_plugin_detail_names_unreadable_and_missing_together
+// pins integrationFileRowDetail's own mixed-row wording: a host-plugin row
+// spanning one unreadable subject file and one genuinely missing sibling
+// must name both, in separate fragments, never silently drop the missing
+// one behind the unreadable one's own "not readable" wording. Only
+// ".claude-plugin" (holding plugin.json) is chmodded unreadable here;
+// "skills/start" and "skills/finish" are never created at all, so their
+// own SKILL.md files read as plain-missing, not unreadable.
+// Mutation-verified: deleting integrationFileRowDetail's own "; missing …"
+// append reddens this case alone — the fragment disappears from Detail —
+// restored after.
+func Test_diagnose_host_plugin_detail_names_unreadable_and_missing_together(t *testing.T) {
+	wd := newHostFixture(t)
+	h := claudeCodeHost(t)
+
+	for _, f := range h.Plugin(true) {
+		if f.Kind == artifact.KindPluginManifest {
+			writeHostArtifact(t, wd, f)
+		}
+	}
+
+	chmodUnreadableDir(t, filepath.Join(wd, host.PluginDir, ".claude-plugin"))
+
+	srv := doctor.NewServer(emptyHomeDir(t))
+	report := srv.Diagnose(t.Context(), wd)
+
+	check := findCheck(t, report, "host-plugin")
+	assert.Equal(t, doctor.SeverityError, check.Severity)
+	assert.Contains(t, check.Detail, "not readable (permission denied): "+host.PluginDir+"/.claude-plugin/plugin.json")
+	assert.Contains(t, check.Detail, "; missing "+host.PluginDir+"/skills/start/SKILL.md, "+host.PluginDir+"/skills/finish/SKILL.md")
+}
+
 // chmodUnreadable chmods path to 0o000 and registers a t.Cleanup that
 // restores it to 0o600 before TempDir's own removal runs — an unreadable
 // file left at 0o000 would otherwise make RemoveAll fail on some
@@ -554,11 +635,10 @@ func chmodUnreadableDir(t *testing.T, dir string) {
 // block is OK "edited locally"; no CLAUDE.md at all, or a block whose line
 // endings are CRLF (which can never exactly match the LF marker), is SKIP
 // "not installed"; a candidate that exists but is not a regular file — a
-// directory or a symlink — is WARN, naming which; a candidate that exists,
-// is regular, but could not be read is WARN naming the underlying reason,
-// never the "not installed" a genuinely absent candidate gets; either
-// unreadable arm yields to the other candidate's own real block, which
-// wins exactly as it would if both candidates were regular files.
+// directory or a symlink — is WARN, naming which. The unreadable-vs-absent
+// split — a candidate Lstat or ReadFile cannot resolve, or an ancestor
+// path component that is itself a regular file — is pinned separately in
+// Test_diagnose_classifies_host_snippet_unreadable.
 func Test_diagnose_classifies_host_snippet(t *testing.T) {
 	runHostCheckCases(t, []hostCheckCase{
 		{
@@ -698,83 +778,6 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
 		},
 		{
-			name: "CLAUDE.md exists but is not readable",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				path := filepath.Join(wd, "CLAUDE.md")
-				require.NoError(t, os.WriteFile(path, []byte("unrelated prose\n"), 0o600))
-				chmodUnreadable(t, path)
-			},
-			checkID:           "host-snippet",
-			wantSeverity:      doctor.SeverityWarn,
-			wantDetail:        "not readable (permission denied); cannot check for brief block",
-			wantFix:           new("chmod +r CLAUDE.md, then " + runInitClaudeCode),
-			wantPathNotSuffix: filepath.Join(".claude", "CLAUDE.md"),
-		},
-		{
-			// P1: an ancestor directory doctor cannot even Lstat into (mode
-			// 0o000) is unreadable at the Lstat call itself, not the
-			// ReadFile call — the fix must target the broken directory
-			// (chmod u+rx), not a "chmod +r" on a file it never reached.
-			// Mutation-verified: hardcoding statFailed to false in
-			// notReadableFix's own caller reddens this case alone (the fix
-			// text reverts to "chmod +r .claude/CLAUDE.md, then …"), restored
-			// after.
-			name: "no root CLAUDE.md, .claude itself cannot be Lstat'd",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				claudeDir := filepath.Join(wd, ".claude")
-				require.NoError(t, os.MkdirAll(claudeDir, 0o755))
-				chmodUnreadableDir(t, claudeDir)
-			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeverityWarn,
-			wantDetail:     "not readable (permission denied); cannot check for brief block",
-			wantFix:        new("chmod u+rx .claude, then " + runInitClaudeCode),
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
-		},
-		{
-			// P1: mirrors host-plugin's own ENOTDIR case — a ".claude" that
-			// is a regular file proves absence (both candidates read as
-			// absent), never present-but-unreadable.
-			name: "the .claude root is a regular file, not a directory",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude"), []byte("not a directory\n"), 0o600))
-			},
-			checkID:      "host-snippet",
-			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "not installed",
-			wantFix:      new(runInitClaudeCode),
-		},
-		{
-			// Pins the block-wins carve-out against an unreadable root
-			// candidate specifically (P1): brief cannot tell whether root's
-			// own CLAUDE.md carries a block, but .claude/CLAUDE.md's own
-			// real block still wins, exactly as it does against a
-			// notRegular root candidate above.
-			name: "CLAUDE.md is not readable but .claude/CLAUDE.md holds a real block",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				path := filepath.Join(wd, "CLAUDE.md")
-				require.NoError(t, os.WriteFile(path, []byte("unrelated prose\n"), 0o600))
-				chmodUnreadable(t, path)
-
-				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
-				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), block, 0o600))
-			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeverityOK,
-			wantDetail:     "installed",
-			wantFix:        nil,
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
-		},
-		{
 			// Mutation-verified: hardcoding states[0] instead of looping
 			// (`if states[0].notRegular` in place of the `for` loop) turns
 			// this WARN into the fallback SKIP "not installed" — reddened
@@ -853,6 +856,99 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "not installed",
 			wantFix:      new(runInitClaudeCode),
+		},
+	})
+}
+
+// Test_diagnose_classifies_host_snippet_unreadable pins host-snippet's own
+// unreadable-vs-absent split (P1): a candidate that exists, is regular,
+// but could not be read is WARN naming the underlying reason, never the
+// "not installed" a genuinely absent candidate gets; an ancestor
+// directory doctor cannot even Lstat into is WARN too, its fix targeting
+// that directory rather than a file it never reached; an ancestor path
+// component that is itself a regular file (ENOTDIR) proves absence
+// instead, the same "not installed" a genuinely missing CLAUDE.md gets;
+// either unreadable arm yields to the other candidate's own real block,
+// which wins exactly as it would against a notRegular candidate.
+func Test_diagnose_classifies_host_snippet_unreadable(t *testing.T) {
+	runHostCheckCases(t, []hostCheckCase{
+		{
+			name: "CLAUDE.md exists but is not readable",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				path := filepath.Join(wd, "CLAUDE.md")
+				require.NoError(t, os.WriteFile(path, []byte("unrelated prose\n"), 0o600))
+				chmodUnreadable(t, path)
+			},
+			checkID:           "host-snippet",
+			wantSeverity:      doctor.SeverityWarn,
+			wantDetail:        "not readable (permission denied); cannot check for brief block",
+			wantFix:           new("chmod +r CLAUDE.md, then " + runInitClaudeCode),
+			wantPathNotSuffix: filepath.Join(".claude", "CLAUDE.md"),
+		},
+		{
+			// P1: an ancestor directory doctor cannot even Lstat into (mode
+			// 0o000) is unreadable at the Lstat call itself, not the
+			// ReadFile call — the fix must target the broken directory
+			// (chmod u+rx), not a "chmod +r" on a file it never reached.
+			// Mutation-verified: hardcoding statFailed to false in
+			// notReadableFix's own caller reddens this case alone (the fix
+			// text reverts to "chmod +r .claude/CLAUDE.md, then …"), restored
+			// after.
+			name: "no root CLAUDE.md, .claude itself cannot be Lstat'd",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				claudeDir := filepath.Join(wd, ".claude")
+				require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+				chmodUnreadableDir(t, claudeDir)
+			},
+			checkID:        "host-snippet",
+			wantSeverity:   doctor.SeverityWarn,
+			wantDetail:     "not readable (permission denied); cannot check for brief block",
+			wantFix:        new("chmod u+rx .claude, then " + runInitClaudeCode),
+			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+		},
+		{
+			// P1: mirrors host-plugin's own ENOTDIR case — a ".claude" that
+			// is a regular file proves absence (both candidates read as
+			// absent), never present-but-unreadable.
+			name: "the .claude root is a regular file, not a directory",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude"), []byte("not a directory\n"), 0o600))
+			},
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "not installed",
+			wantFix:      new(runInitClaudeCode),
+		},
+		{
+			// Pins the block-wins carve-out against an unreadable root
+			// candidate specifically (P1): brief cannot tell whether root's
+			// own CLAUDE.md carries a block, but .claude/CLAUDE.md's own
+			// real block still wins, exactly as it does against a
+			// notRegular root candidate in
+			// Test_diagnose_classifies_host_snippet.
+			name: "CLAUDE.md is not readable but .claude/CLAUDE.md holds a real block",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				path := filepath.Join(wd, "CLAUDE.md")
+				require.NoError(t, os.WriteFile(path, []byte("unrelated prose\n"), 0o600))
+				chmodUnreadable(t, path)
+
+				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
+				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), block, 0o600))
+			},
+			checkID:        "host-snippet",
+			wantSeverity:   doctor.SeverityOK,
+			wantDetail:     "installed",
+			wantFix:        nil,
+			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
 		},
 	})
 }

@@ -13,17 +13,17 @@ import (
 	"github.com/koblas/brief/internal/platform/host"
 )
 
-// classifyProbeError classifies err — from a failed os.Lstat or
-// os.ReadFile against a host integration file or a CLAUDE.md candidate —
-// into the one absent-vs-unreadable decision every probe in this package
-// renders from: fs.ErrNotExist proves the path itself is not there, and
-// so does syscall.ENOTDIR, since it means some ancestor path component is
-// a regular file rather than a directory and nothing can resolve through
-// one. Checked on darwin and linux, devenv.nix's own build targets, where
-// the constant carries this meaning; a windows build of this package was
-// not exercised. Any other error proves nothing about absence, so it is
-// unreadable, its reason readFailureReason's own extracted cause. err is
-// always non-nil.
+// classifyProbeError classifies err — from a failed os.Lstat against a
+// host integration file or a CLAUDE.md candidate — into the one
+// absent-vs-unreadable decision every Lstat probe in this package renders
+// from: fs.ErrNotExist proves the path itself is not there, and so does
+// syscall.ENOTDIR, since it means some ancestor path component is a
+// regular file rather than a directory and nothing can resolve through
+// one; any other error proves nothing about absence, so it is unreadable,
+// its reason readFailureReason's own extracted cause. err is always
+// non-nil. Checked on darwin and linux, devenv.nix's own build targets,
+// where ENOTDIR carries this meaning; a windows build of this package was
+// not exercised.
 func classifyProbeError(err error) (bool, string) {
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		return true, ""
@@ -34,9 +34,9 @@ func classifyProbeError(err error) (bool, string) {
 
 // integrationFileState is one Claude Code integration file's own probe
 // result, classifyProbeError's own split rendered into fields: present is
-// false only when absent; unreadable is true when classifyProbeError read
-// the failure as neither absent nor a resolved file (reason carries its
-// cause, stat whether it was the Lstat call rather than the ReadFile call
+// false only when absent; unreadable is true when the file's own Lstat or
+// ReadFile call failed without proving absence (reason carries its cause,
+// statFailed whether it was the Lstat call rather than the ReadFile call
 // that failed); regular is true only for a present, unreadable-false file
 // whose bytes were read and classified into origin. present-but-neither-
 // regular-nor-unreadable is host.go's own "not a regular file" shape.
@@ -48,12 +48,15 @@ type integrationFileState struct {
 	origin     artifact.Origin
 	unreadable bool
 	reason     string
-	stat       bool
+	statFailed bool
 }
 
 // probeIntegrationFile Lstats root/f.RelPath and, for a regular file,
-// reads and artifact.Recognizes its bytes against f.Kind, rendering every
-// Lstat or ReadFile failure through classifyProbeError.
+// reads and artifact.Recognizes its bytes against f.Kind. A Lstat failure
+// renders through classifyProbeError; a ReadFile failure against a file
+// Lstat itself just resolved as regular is always unreadable, reachable
+// only by a race between the two calls, and is never reclassified as
+// absent.
 func probeIntegrationFile(root string, f host.File) integrationFileState {
 	path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 	state := integrationFileState{relPath: f.RelPath, path: path}
@@ -65,7 +68,7 @@ func probeIntegrationFile(root string, f host.File) integrationFileState {
 			state.present = true
 			state.unreadable = true
 			state.reason = reason
-			state.stat = true
+			state.statFailed = true
 		}
 
 		return state
@@ -79,13 +82,8 @@ func probeIntegrationFile(root string, f host.File) integrationFileState {
 
 	body, err := os.ReadFile(path)
 	if err != nil {
-		absent, reason := classifyProbeError(err)
-		if absent {
-			return integrationFileState{relPath: f.RelPath, path: path}
-		}
-
 		state.unreadable = true
-		state.reason = reason
+		state.reason = readFailureReason(err)
 
 		return state
 	}
@@ -151,17 +149,17 @@ func unreadableRelPaths(states []integrationFileState) []string {
 	return out
 }
 
-// integrationFileRowDetail renders a multi-file host row's own WARN Detail
-// and Fix once any of states holds an unreadable file — host-plugin's and
-// host-agents' own shared precedence, checked ahead of missingRelPaths'
-// own "missing" wording. Every unreadable file is named
-// "not readable (<reason>)" (notReadableReason), reason taken from the
-// first unreadable state in states' own order — every probe failure under
-// one broken directory tree shares the same cause in practice; any file
-// still genuinely missing is named too, in its own fragment, since
-// classifyProbeError only reclassifies the files it actually failed
-// against. Fix is notReadableFix against that same first unreadable
-// state. ok is false when states holds no unreadable file at all.
+// integrationFileRowDetail renders a multi-file host row's own Detail and
+// Fix once any of states holds an unreadable file, checked ahead of
+// missingRelPaths' own "missing" wording; the caller decides the row's
+// own Severity. Every unreadable file is named "not readable (<reason>)"
+// (notReadableReason), reason taken from the first unreadable state in
+// states' own order — every probe failure under one broken directory tree
+// shares the same cause in practice; any file still genuinely missing is
+// named too, in its own fragment, since classifyProbeError only
+// reclassifies the files it actually failed against. Fix is
+// notReadableFix against that same first unreadable state. ok is false
+// when states holds no unreadable file at all.
 func integrationFileRowDetail(wd string, states []integrationFileState) (string, string, bool) {
 	unreadable := unreadableRelPaths(states)
 	if len(unreadable) == 0 {
@@ -184,7 +182,7 @@ func integrationFileRowDetail(wd string, states []integrationFileState) (string,
 		fragments = append(fragments, "missing "+strings.Join(missing, ", "))
 	}
 
-	return strings.Join(fragments, "; "), notReadableFix(wd, first.path, first.stat), true
+	return strings.Join(fragments, "; "), notReadableFix(wd, first.path, first.statFailed), true
 }
 
 // relPathsWithOrigin returns the relPath of every present, regular state
@@ -234,13 +232,15 @@ func anyIntegrationFilePresent(root string, h host.Host) bool {
 }
 
 // hostPluginCheck builds host-plugin's own row: not installed anywhere is
-// SKIP; otherwise an unreadable subject file (h.Plugin(false)) is WARN
-// (integrationFileRowDetail); a missing or non-regular one is ERROR
-// "incomplete", naming every such file; an older render is WARN; an
-// edited one is OK "edited locally"; every subject file current is OK
-// "installed" — in that precedence (originRow, applied across every
-// subject file at once rather than one row at a time, since a single
-// host-plugin row must summarize all three).
+// SKIP; otherwise an unreadable subject file (h.Plugin(false)) is ERROR
+// (integrationFileRowDetail) — the same severity a missing or non-regular
+// one gets, since Claude Code cannot load the skill through a file it
+// cannot read any more than one that is not there; a missing or
+// non-regular one is ERROR "incomplete", naming every such file; an older
+// render is WARN; an edited one is OK "edited locally"; every subject
+// file current is OK "installed" — in that precedence (originRow, applied
+// across every subject file at once rather than one row at a time, since
+// a single host-plugin row must summarize all three).
 func hostPluginCheck(wd, root string, h host.Host, installed bool) Check {
 	path := filepath.Join(root, host.PluginDir)
 
@@ -251,7 +251,7 @@ func hostPluginCheck(wd, root string, h host.Host, installed bool) Check {
 	states := probeIntegrationFiles(root, h.Plugin(false))
 
 	if detail, fix, ok := integrationFileRowDetail(wd, states); ok {
-		return Check{ID: "host-plugin", Severity: SeverityWarn, Path: path, Detail: detail, Fix: new(fix)}
+		return Check{ID: "host-plugin", Severity: SeverityError, Path: path, Detail: detail, Fix: new(fix)}
 	}
 
 	if missing := missingRelPaths(states); len(missing) > 0 {
@@ -304,7 +304,7 @@ func hostHookCheck(wd, root string, h host.Host, installed bool) Check {
 	}
 
 	if state.unreadable {
-		return Check{ID: "host-hook", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(wd, state.path, state.stat))}
+		return Check{ID: "host-hook", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(wd, state.path, state.statFailed))}
 	}
 
 	if !state.regular {
@@ -464,12 +464,14 @@ func notReadableFix(wd, path string, statFailed bool) string {
 }
 
 // scanSnippetCandidateStates Lstats and scans every h.InstructionFiles()
-// candidate under root, in that order, rendering every Lstat or ReadFile
-// failure through classifyProbeError exactly as probeIntegrationFile does
-// for a host integration file — the one place both this package's probes
-// make the absent-vs-unreadable call, so it is never made two different
-// ways here. A candidate that exists but is not a regular file reports
-// notRegular true and kind set (nonRegularKind), never read.
+// candidate under root, in that order. A Lstat failure renders through
+// classifyProbeError, the one place this function's own absent-vs-
+// unreadable call is made. A ReadFile failure against a candidate Lstat
+// itself just resolved as regular is always unreadable, reachable only by
+// a race between the two calls, and is never reclassified as absent — the
+// same split probeIntegrationFile applies for a host integration file. A
+// candidate that exists but is not a regular file reports notRegular true
+// and kind set (nonRegularKind), never read.
 func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateState {
 	rel := h.InstructionFiles()
 	out := make([]snippetCandidateState, 0, len(rel))
@@ -499,14 +501,7 @@ func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateStat
 
 		body, err := os.ReadFile(path)
 		if err != nil {
-			absent, reason := classifyProbeError(err)
-			if absent {
-				out = append(out, snippetCandidateState{path: path})
-
-				continue
-			}
-
-			out = append(out, snippetCandidateState{path: path, present: true, unreadable: true, readErr: reason})
+			out = append(out, snippetCandidateState{path: path, present: true, unreadable: true, readErr: readFailureReason(err)})
 
 			continue
 		}

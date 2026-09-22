@@ -29,10 +29,11 @@ const (
 	// SeverityError marks a check whose subject would make another
 	// command refuse or misbehave: an unparseable config, an invalid
 	// value, a feature root that does not exist, is not a directory, or
-	// is not readable or writable; a host-plugin/host-snippet file missing
-	// or not a regular file while some other integration file is
-	// installed; brief missing from PATH while the integration is
-	// installed, since the hook that runs "brief check" can never find it.
+	// is not readable or writable; a host-plugin file missing, not a
+	// regular file, or unreadable, or a host-snippet file missing or not a
+	// regular file, while some other integration file is installed; brief
+	// missing from PATH while the integration is installed, since the
+	// hook that runs "brief check" can never find it.
 	SeverityError Severity = "ERROR"
 	// SeveritySkip marks a check that could not run because an earlier
 	// check's own subject was missing or invalid — config-values and
