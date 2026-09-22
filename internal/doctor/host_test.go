@@ -284,14 +284,17 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 			// subject file's immediate parent and not at root. Control:
 			// "a subject file is unreadable, not missing" above chmods
 			// ".claude" itself and expects the walk to stop one level
-			// higher still. Mutation-verified: stopping blockingDir's walk
-			// one level early (returning filepath.Dir(dir) instead of dir
-			// on Lstat failure, i.e. testing .claude/skills/brief's own
-			// parent instead of .claude/skills) reddens this case alone
-			// (the fix becomes "chmod u+rwx .claude/skills/brief, then
-			// …"), restored after; stopping one level late (never
-			// returning until root) reddens it into "chmod u+rwx .claude,
-			// then …" instead, restored after.
+			// higher still. Mutation-verified: hardcoding blockingDir to
+			// always return root's immediate child segment of the
+			// resolved ancestor (i.e. truncating any deeper walk back
+			// down to ".claude") reddens this case alone, since the
+			// control's own correct answer already is that immediate
+			// child; checking the parent of each ancestor rather than the
+			// ancestor itself (stopping the walk one level early) and
+			// disabling the loop's success branch entirely so it never
+			// returns before dir == root (stopping one level late) each
+			// redden this case together with the control, restored after
+			// every mutation.
 			name: "the blocking dir is .claude/skills, .claude itself stays 0755",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
@@ -343,6 +346,37 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 			wantSeverity: doctor.SeverityError,
 			wantDetail:   "not readable (permission denied): " + host.PluginDir + "/.claude-plugin/plugin.json",
 			wantFix:      new("chmod +r " + host.PluginDir + "/.claude-plugin/plugin.json, then " + runInitClaudeCode),
+		},
+		{
+			// The install root itself (wd) is the one unsearchable
+			// directory, not any of its descendants: blockingDir's own
+			// walk never finds a resolvable ancestor before dir == root,
+			// so it falls through to its own "return root" fallback
+			// rather than the loop's success branch every other case
+			// here exercises. Control: "a subject file is unreadable, not
+			// missing" above leaves root itself searchable and stops one
+			// level lower, at ".claude". Mutation-verified: changing that
+			// fallback to "return filepath.Dir(root)" reddens this case
+			// alone, turning the fix into "chmod u+rwx <root's own
+			// parent>, then …", restored after.
+			name: "the install root itself is unsearchable",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				for _, f := range h.Plugin(true) {
+					writeHostArtifact(t, wd, f)
+				}
+
+				chmodUnreadableDir(t, wd)
+			},
+			checkID:      "host-plugin",
+			wantSeverity: doctor.SeverityError,
+			wantDetail: "not readable (permission denied): " + strings.Join([]string{
+				host.PluginDir + "/.claude-plugin/plugin.json",
+				host.PluginDir + "/skills/start/SKILL.md",
+				host.PluginDir + "/skills/finish/SKILL.md",
+			}, ", "),
+			wantFix: new("chmod u+rwx ., then " + runInitClaudeCode),
 		},
 	})
 }

@@ -15,7 +15,10 @@ host-agents specifically (host-hook already had one). Fix pass 12 (product-visio
 SHIP WITH CHANGES): `notReadableFix`'s `statFailed` arm now walks its own ancestor chain
 (`blockingDir`) to name the directory actually missing its search bit, not the subject's
 immediate parent, and chmods `u+rwx` (not `u+rx`) so `brief init` can still write through it
-afterward; `check --hook`'s help copy reworded.
+afterward; `check --hook`'s help copy reworded. Fix pass 13 (test-only): pinned
+`blockingDir`'s own `return root` fallback with a host-plugin case chmodding the install root
+itself, and corrected a mutation comment that had understated which mutations redden which
+cases.
 
 ## Binding decisions
 - `config.LocateWithin(dir, boundary)` bounds a walk at `boundary`, itself still checked, its
