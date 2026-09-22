@@ -23,15 +23,17 @@ func flattenOneLine(s string) string {
 
 // noFilesChangedTail is the "nothing changed on disk" promise a refusal's
 // text line appends. classifyRefusal decides it per error, never by type
-// alone: a refusal from a command that writes carries it, unless that
-// specific error means a write already partially landed
-// (setup.ErrPartialWrite) or the error came from a command that never
-// writes at all (assemble's own refusals, a bare not-found, or a generic
-// failure). A *unknownFeatureError inherits its own promise from the
-// sentinel it wraps rather than always carrying one: scaffold.ErrNoSuchFeature's
-// own callers ("new step", "finish") write and refused before touching
-// disk, so it carries the tail; assemble.ErrNoSuchFeature's own caller
-// ("start") is read-only, so it never does.
+// alone: every typed refusal carries it except the named exceptions —
+// *setup.RefusalError drops it only when the specific error means a write
+// already partially landed (setup.ErrPartialWrite); *config.InvalidConfigError
+// always carries it, whether or not the command that hit it writes anything
+// itself, since config resolution runs before every command's own writes,
+// never after; a bare not-found or a generic failure carries none, having
+// nothing to promise about. A *unknownFeatureError inherits its own promise
+// from the sentinel it wraps rather than always carrying one:
+// scaffold.ErrNoSuchFeature's own callers ("new step", "finish") write and
+// refused before touching disk, so it carries the tail; assemble.ErrNoSuchFeature's
+// own callers ("start", "check") are read-only, so it never does.
 const noFilesChangedTail = " (no files changed)"
 
 // refusalTextLayout selects which of refusalClassification.textLine's three

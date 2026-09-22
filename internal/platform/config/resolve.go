@@ -20,10 +20,11 @@ const configFileName = ".brief.yaml"
 // exists anywhere above startDir), and shadowed names every farther
 // ancestor's own config file, nearest-first, that Resolve and Inspect
 // never read because the nearest one already won. It refuses, as
-// ErrInvalidConfig, a startDir that does not exist — filepath.Abs alone
-// does not stat the path, so without this guard a mistyped path would
-// silently walk from the nearest existing ancestor and report as if
-// nothing were wrong. It is LocateWithin(startDir, "") — unbounded.
+// *InvalidConfigError (errors.Is(err, ErrInvalidConfig) holds too), a
+// startDir that does not exist — filepath.Abs alone does not stat the
+// path, so without this guard a mistyped path would silently walk from
+// the nearest existing ancestor and report as if nothing were wrong. It
+// is LocateWithin(startDir, "") — unbounded.
 func Locate(startDir string) (string, []string, error) {
 	return LocateWithin(startDir, "")
 }
@@ -31,10 +32,12 @@ func Locate(startDir string) (string, []string, error) {
 // LocateWithin is Locate's own walk, stopping at boundary rather than the
 // filesystem root: boundary itself is still checked; its parent never is,
 // so a config above boundary is never found. An empty boundary is
-// unbounded, identical to Locate. It refuses, as ErrInvalidConfig, a
-// startDir that does not exist, the same guard Locate's own doc describes —
-// LocateWithin is where that check actually runs. boundary is expected to
-// name an ancestor of startDir, or startDir itself: that is the only shape
+// unbounded, identical to Locate. It refuses, as *InvalidConfigError
+// (errors.Is(err, ErrInvalidConfig) holds too — cli/refusal.go and
+// doctor/checks.go both type-assert the concrete type to reach Path and
+// Err), a startDir that does not exist, the same guard Locate's own doc
+// describes — LocateWithin is where that check actually runs. boundary is
+// expected to name an ancestor of startDir, or startDir itself: that is the only shape
 // where the walk ever reaches a directory equal to it. A boundary outside
 // startDir's own ancestor chain is silently inert rather than an error, and
 // a boundary filepath.Abs cannot resolve is treated the same way: both fall
