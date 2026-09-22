@@ -320,6 +320,7 @@ func Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreada
 	require.Error(t, err)
 	assert.Equal(t, 1, ExitCode(err))
 	assert.Contains(t, stdout.String(), "ERROR  env-path")
+	assert.Contains(t, stdout.String(), "ERROR  host-plugin")
 	assert.Contains(t, stdout.String(), "WARN  host-snippet")
 	assert.NotContains(t, stdout.String(), "SKIP  host-snippet")
 	assert.NotContains(t, stderr.String(), "0 ERROR", "an unreadable .claude must not report zero ERROR rows")

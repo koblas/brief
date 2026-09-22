@@ -54,9 +54,10 @@ type integrationFileState struct {
 // probeIntegrationFile Lstats root/f.RelPath and, for a regular file,
 // reads and artifact.Recognizes its bytes against f.Kind. A Lstat failure
 // renders through classifyProbeError; a ReadFile failure against a file
-// Lstat itself just resolved as regular is always unreadable, reachable
-// only by a race between the two calls, and is never reclassified as
-// absent.
+// Lstat itself just resolved as regular is always unreadable — typically
+// the file's own mode denying read, but never reclassified as absent,
+// since only a race between the two calls could make that reclassification
+// correct.
 func probeIntegrationFile(root string, f host.File) integrationFileState {
 	path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 	state := integrationFileState{relPath: f.RelPath, path: path}
@@ -467,11 +468,12 @@ func notReadableFix(wd, path string, statFailed bool) string {
 // candidate under root, in that order. A Lstat failure renders through
 // classifyProbeError, the one place this function's own absent-vs-
 // unreadable call is made. A ReadFile failure against a candidate Lstat
-// itself just resolved as regular is always unreadable, reachable only by
-// a race between the two calls, and is never reclassified as absent — the
-// same split probeIntegrationFile applies for a host integration file. A
-// candidate that exists but is not a regular file reports notRegular true
-// and kind set (nonRegularKind), never read.
+// itself just resolved as regular is always unreadable — typically the
+// file's own mode denying read, but never reclassified as absent, since
+// only a race between the two calls could make that reclassification
+// correct — the same split probeIntegrationFile applies for a host
+// integration file. A candidate that exists but is not a regular file
+// reports notRegular true and kind set (nonRegularKind), never read.
 func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateState {
 	rel := h.InstructionFiles()
 	out := make([]snippetCandidateState, 0, len(rel))

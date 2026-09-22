@@ -399,6 +399,37 @@ func Test_diagnose_classifies_host_hook(t *testing.T) {
 			wantDetail:   "not readable (permission denied)",
 			wantFix:      new("chmod u+rx " + host.PluginDir + "/hooks, then " + runInitClaudeCode),
 		},
+		{
+			// The unreadable-directory case above fails at the Lstat call
+			// itself (statFailed); this one leaves every directory
+			// searchable and chmods the hook file directly, so the failure
+			// is in the ReadFile call instead — the fix must target the
+			// file (chmod +r), not its parent directory.
+			// Mutation-verified: dropping probeIntegrationFile's own
+			// `state.unreadable = true` in its ReadFile-failure arm reddens
+			// this case alone (the row falls to ERROR "not a regular
+			// file"), restored after.
+			name: "the hook file itself is unreadable, its directory is searchable",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				var hookPath string
+
+				for _, f := range h.Plugin(true) {
+					writeHostArtifact(t, wd, f)
+
+					if f.Hook {
+						hookPath = filepath.Join(wd, filepath.FromSlash(f.RelPath))
+					}
+				}
+
+				chmodUnreadable(t, hookPath)
+			},
+			checkID:      "host-hook",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "not readable (permission denied)",
+			wantFix:      new("chmod +r " + host.PluginDir + "/hooks/hooks.json, then " + runInitClaudeCode),
+		},
 	})
 }
 
