@@ -234,6 +234,7 @@ func Test_every_command_help_has_a_usage_line_and_a_flag_table(t *testing.T) {
 		{name: "status", args: []string{"status", "--help"}, path: "brief status"},
 		{name: "check", args: []string{"check", "--help"}, path: "brief check"},
 		{name: "finish", args: []string{"finish", "--help"}, path: "brief finish"},
+		{name: "init", args: []string{"init", "--help"}, path: "brief init"},
 		{name: "doctor", args: []string{"doctor", "--help"}, path: "brief doctor"},
 		{name: "uninstall", args: []string{"uninstall", "--help"}, path: "brief uninstall"},
 		{name: "completion", args: []string{"completion", "--help"}, path: "brief completion"},
@@ -277,6 +278,7 @@ func Test_help_topic_prints_the_same_bytes_as_the_command_help_flag(t *testing.T
 		{name: "status", path: []string{"status"}},
 		{name: "check", path: []string{"check"}},
 		{name: "finish", path: []string{"finish"}},
+		{name: "init", path: []string{"init"}},
 		{name: "doctor", path: []string{"doctor"}},
 		{name: "uninstall", path: []string{"uninstall"}},
 		{name: "completion", path: []string{"completion"}},
@@ -555,17 +557,20 @@ func Test_prints_finish_flag_prose_in_its_flag_table(t *testing.T) {
 // leaf's flags to overrun 80 columns unless its usage string carries its
 // own embedded wrap points, the way jsonFlagUsage and
 // handoffFlagUsage/stateFlagUsage do. The generated Usage line itself is
-// exempt: it renders cmd.Use verbatim, cobra offers no wrap point for it
-// (Use must stay one line — Name() and argument parsing both split on its
-// first space), and R14 pins init's own Use to its full accepted-flag
-// syntax, which runs past 80 columns; root's own cmdRow already tolerates
-// that same string unwrapped. Root and "new" are out of scope here: their
-// cmdList rows are fixed-column-padded, not wrapped to a terminal width,
-// an existing and separately reviewed layout (rootHelp, newHelp) this fix
-// does not touch. The help stub's own sole-argument "-h" render is a leaf
-// shape too, covered here alongside the rest. require.NotEmpty on stdout
-// guards the loop below from passing vacuously against an empty or
-// truncated render.
+// exempt, keyed by position — the one content line immediately after the
+// literal "Usage:" line, never by a "  brief " prefix match, which would
+// also exempt any wrapped continuation line or table row that happens to
+// start the same way: it renders cmd.Use verbatim, cobra offers no wrap
+// point for it (Use must stay one line — Name() and argument parsing both
+// split on its first space), and R14 pins init's own Use to its full
+// accepted-flag syntax, which runs past 80 columns; root's own cmdRow
+// already tolerates that same string unwrapped. Root and "new" are out of
+// scope here: their cmdList rows are fixed-column-padded, not wrapped to a
+// terminal width, an existing and separately reviewed layout (rootHelp,
+// newHelp) this fix does not touch. The help stub's own sole-argument "-h"
+// render is a leaf shape too, covered here alongside the rest.
+// require.NotEmpty on stdout guards the loop below from passing vacuously
+// against an empty or truncated render.
 func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 	tests := []struct {
 		name string
@@ -593,13 +598,76 @@ func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 
 			require.NoError(t, err)
 			require.NotEmpty(t, stdout.String())
-			for line := range strings.SplitSeq(stdout.String(), "\n") {
-				if strings.HasPrefix(line, "  brief ") {
+			lines := strings.Split(stdout.String(), "\n")
+			for i, line := range lines {
+				if i > 0 && lines[i-1] == "Usage:" {
 					continue
 				}
 
 				assert.LessOrEqual(t, len(line), 80, "line %q of %q help must fit in 80 columns", line, tc.name)
 			}
+		})
+	}
+}
+
+// genericPlaceholderCase is one row of
+// Test_host_and_hook_flags_render_a_generic_table_placeholder: args is the
+// "--help" invocation, flagRow is the exact Flags table row (name, value
+// placeholder, and first line of usage) that row must render, and
+// concreteValue is the one accepted flag value pflag's own UnquoteUsage
+// bug (see hostFlagUsage's own doc comment) would substitute as the table
+// placeholder in its place, were the usage string's backquoted word that
+// value instead of a generic one.
+type genericPlaceholderCase struct {
+	name          string
+	args          []string
+	flagRow       string
+	concreteValue string
+}
+
+// Test_host_and_hook_flags_render_a_generic_table_placeholder pins the
+// rendered Flags table row for init's, uninstall's and check's own
+// `name`/`host`-placeholder flags: pflag's UnquoteUsage renders a usage
+// string's own backquoted word as that flag's table placeholder verbatim,
+// so backquoting one of the accepted values instead of a generic word
+// renders that value as the placeholder for every value, the trap
+// hostFlagUsage's own doc comment names. Each case asserts the ruled row
+// byte-exact and, as the control arm, that the concrete-value placeholder
+// a reverted usage string would render is absent.
+func Test_host_and_hook_flags_render_a_generic_table_placeholder(t *testing.T) {
+	tests := []genericPlaceholderCase{
+		{
+			name:          "init --host",
+			args:          []string{"init", "--help"},
+			flagRow:       "      --host name     the agent host name to install for: claude-code or none\n                      (default: detected)\n",
+			concreteValue: "--host detected",
+		},
+		{
+			name:          "uninstall --host",
+			args:          []string{"uninstall", "--help"},
+			flagRow:       "      --host name   the agent host name to remove for: claude-code or none\n                    (default: claude-code)\n",
+			concreteValue: "--host claude-code   the agent host",
+		},
+		{
+			name:          "check --hook",
+			args:          []string{"check", "--help"},
+			flagRow:       "      --hook host   read a hook payload from stdin and check only the\n                    edited feature (host; claude-code only)\n",
+			concreteValue: "--hook claude-code   read a hook payload",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			assert.Empty(t, stderr.String())
+			out := stdout.String()
+			assert.Contains(t, out, tc.flagRow)
+			assert.NotContains(t, out, tc.concreteValue)
 		})
 	}
 }
