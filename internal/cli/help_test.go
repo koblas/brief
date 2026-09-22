@@ -660,8 +660,8 @@ func Test_host_and_hook_flags_render_a_generic_table_placeholder(t *testing.T) {
 		{
 			name:          "check --hook",
 			args:          []string{"check", "--help"},
-			flagRow:       "      --hook host   read a hook payload from stdin and check only the\n                    edited feature (host; claude-code only)\n",
-			concreteValue: "--hook claude-code   read a hook payload",
+			flagRow:       "      --hook host   read a host hook payload from stdin and check only the\n                    edited feature (claude-code only)\n",
+			concreteValue: "--hook claude-code   read a claude-code hook",
 		},
 	}
 

@@ -311,7 +311,7 @@ const withAgentsFlagUsage = "install the three role agents (the resolved\nhost m
 // is pflag's own wrapping cue — see handoffFlagUsage. The backquoted "host"
 // is the generic placeholder (see hostFlagUsage); host.HookHosts() names
 // only "claude-code" today, so that is what the parenthetical states.
-const hookFlagUsage = "read a hook payload from stdin and check only the\nedited feature (`host`; claude-code only)"
+const hookFlagUsage = "read a `host` hook payload from stdin and check only the\nedited feature (claude-code only)"
 
 // dryRunFlagUsage is init's --dry-run flag's usage string.
 const dryRunFlagUsage = "print the plan without writing anything"
