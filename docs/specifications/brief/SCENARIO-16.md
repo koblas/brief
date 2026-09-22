@@ -1,3 +1,9 @@
+---
+id: SCENARIO-16
+status: done
+depends-on: []
+---
+
 # SCENARIO-16: Finishing a done step with different inputs is refused
 
 ## Scenario

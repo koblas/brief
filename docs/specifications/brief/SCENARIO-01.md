@@ -1,3 +1,9 @@
+---
+id: SCENARIO-01
+status: done
+depends-on: []
+---
+
 # SCENARIO-01: Configuration resolves from the working directory upward
 
 ## Scenario

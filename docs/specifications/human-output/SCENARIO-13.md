@@ -1,3 +1,9 @@
+---
+id: SCENARIO-13
+status: done
+depends-on: []
+---
+
 # SCENARIO-13: help --json is a machine-readable command index
 
 ## Scenario

@@ -1,3 +1,9 @@
+---
+id: SCENARIO-03
+status: done
+depends-on: []
+---
+
 # SCENARIO-03: start --json success carries the common header
 
 ## Scenario

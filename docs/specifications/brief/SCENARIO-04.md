@@ -1,3 +1,9 @@
+---
+id: SCENARIO-04
+status: done
+depends-on: []
+---
+
 # SCENARIO-04: A start brief carries everything a step needs
 
 ## Scenario

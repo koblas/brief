@@ -1,3 +1,9 @@
+---
+id: SCENARIO-05
+status: done
+depends-on: []
+---
+
 # SCENARIO-05: -v stays an unknown shorthand
 
 ## Scenario

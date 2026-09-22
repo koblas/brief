@@ -1,3 +1,9 @@
+---
+id: SCENARIO-12
+status: done
+depends-on: []
+---
+
 # SCENARIO-12: Shell completion script
 
 ## Scenario

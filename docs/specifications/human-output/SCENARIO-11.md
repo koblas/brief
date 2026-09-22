@@ -1,3 +1,9 @@
+---
+id: SCENARIO-11
+status: done
+depends-on: []
+---
+
 # SCENARIO-11: finish reports what it wrote and what's next
 
 ## Scenario

@@ -1,3 +1,9 @@
+---
+id: SCENARIO-15
+status: done
+depends-on: []
+---
+
 # SCENARIO-15: Start emits a structured payload on request
 
 ## Scenario

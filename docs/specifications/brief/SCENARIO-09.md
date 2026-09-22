@@ -1,3 +1,9 @@
+---
+id: SCENARIO-09
+status: done
+depends-on: []
+---
+
 # SCENARIO-09: Status reports one four-field line per feature
 
 ## Scenario

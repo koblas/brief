@@ -1,3 +1,9 @@
+---
+id: SCENARIO-10
+status: done
+depends-on: []
+---
+
 # SCENARIO-10: Status on a repository with no features succeeds silently
 
 ## Scenario

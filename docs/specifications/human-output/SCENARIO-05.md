@@ -1,3 +1,9 @@
+---
+id: SCENARIO-05
+status: done
+depends-on: []
+---
+
 # SCENARIO-05: An unknown feature lists the known ones
 
 ## Scenario
