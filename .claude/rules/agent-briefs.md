@@ -30,6 +30,25 @@ Rules:
 - Before declaring a scenario done, run `go test ./...` from the repo root once, unpiped.
   The exit code of an unpiped command is the evidence.
 
+## Scenario plan files are brief step files
+
+`docs/specifications/<feature>/SCENARIO-XX.md` is read by `brief` itself (`brief status`,
+`brief check`). The architect writes it starting with frontmatter, then the heading, with the
+checklist under `## Implementation Plan`:
+
+```markdown
+---
+id: SCENARIO-XX
+status: open
+---
+
+# SCENARIO-XX: <title>
+```
+
+The developer sets `status: done` when the scenario is complete, alongside ticking it in
+`specification.md`. Every `- [ ]` under `## Implementation Plan` must be ticked by then —
+`brief check` reports an unticked item on a done step.
+
 ## IDE diagnostics are advisory
 
 The IDE indexes mid-edit, and during mutation windows. It routinely reports compile errors
@@ -45,17 +64,22 @@ targeted check — that is how a live mutation left by a crashed run was caught.
 A guard, a test, or an "absence" claim is proven by breaking the thing and seeing the
 specific test go red — not by the suite being green.
 
-**Stash the mutation so a crash cannot leave it behind:**
+**Copy the file aside so a crash cannot leave the mutation behind:**
 
 ```bash
-git stash push -m "mutation: <what>" -- <file>   # or cp to $TMPDIR
-# run the targeted test, observe RED
-git stash pop                                     # or restore the copy
-diff <original> <file>                            # prove byte-identical
+cp <file> "$TMPDIR/<name>.orig"      # take a FRESH copy immediately before each mutation
+# apply the mutation, run the targeted test, observe RED
+cp "$TMPDIR/<name>.orig" <file>      # restore
+diff "$TMPDIR/<name>.orig" <file>    # prove byte-identical
 ```
 
 An interrupted run once died holding a gutted security guard, and the tree looked merely
-"failing" rather than "deliberately broken". Stashing makes that recoverable.
+"failing" rather than "deliberately broken". The copy makes that recoverable.
+
+**Never use `git stash` for this.** Pipeline work runs in git worktrees, and every worktree
+shares one stash stack with the main checkout and any other session: a bare `git stash pop`
+can apply someone else's entry. Never reuse an old `$TMPDIR` copy either — a stale copy once
+silently reverted a file to a previous commit's contents.
 
 Rules:
 
