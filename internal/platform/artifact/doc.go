@@ -6,10 +6,11 @@
 // deterministic: no version, no date, no map order, so a digest actually
 // proves something.
 //
-// internal/setup consumes this package to decide whether an existing
-// ".brief.yaml" can be kept, rewritten or must refuse; internal/doctor will
-// consume it the same way for host-integration rows. Neither consumer's
-// logic — what to do with an origin — belongs here: this package only
-// renders bytes and classifies bytes, never a filesystem path or a
-// command's own decision.
+// internal/setup consumes this package to decide whether an existing file
+// — the config, or a Claude Code plugin file (PluginManifest, SkillStart,
+// SkillFinish, ClaudeHooks) — can be kept, written or must refuse;
+// internal/doctor will consume it the same way for host-integration rows.
+// Neither consumer's logic — what to do with an origin — belongs here:
+// this package only renders bytes and classifies bytes, never a
+// filesystem path or a command's own decision.
 package artifact

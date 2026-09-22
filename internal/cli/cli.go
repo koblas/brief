@@ -281,7 +281,10 @@ must carry the configured state headings, though a
 section may be empty`
 
 // hostFlagUsage is init's --host flag's usage string.
-const hostFlagUsage = "the agent host to install for (`none` in this release)"
+const hostFlagUsage = "the agent host to install for (claude-code or `none`)"
+
+// noHookFlagUsage is init's --no-hook flag's usage string.
+const noHookFlagUsage = "install the plugin without its PostToolUse hook"
 
 // hookFlagUsage is check's --hook flag's usage string. Its embedded newline
 // is pflag's own wrapping cue — see handoffFlagUsage.
@@ -465,19 +468,21 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		})
 	finishCmd.Annotations[writesFilesAnnotation] = "true"
 
-	initCmd := leafCommand("init [--host <name>] [--dry-run] [--force] [--json]", "install brief's config and agent-host integration", initInvocation, initLong,
+	initCmd := leafCommand("init [--host <name>] [--no-hook] [--dry-run] [--force] [--json]", "install brief's config and agent-host integration", initInvocation, initLong,
 		func(fs *pflag.FlagSet) {
 			fs.String("host", "", hostFlagUsage)
+			fs.Bool("no-hook", false, noHookFlagUsage)
 			fs.Bool("dry-run", false, dryRunFlagUsage)
 			fs.Bool("force", false, forceFlagUsage)
 			addJSONFlag(fs)
 		},
 		func(cmd *cobra.Command, args []string) error {
 			host, _ := cmd.Flags().GetString("host")
+			noHook, _ := cmd.Flags().GetBool("no-hook")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			force, _ := cmd.Flags().GetBool("force")
 
-			return runInit(cmd.Context(), wd, args, host, dryRun, force, out.forCommand(cmd))
+			return runInit(cmd.Context(), wd, args, host, noHook, dryRun, force, out.forCommand(cmd))
 		})
 	initCmd.Annotations[writesFilesAnnotation] = "true"
 

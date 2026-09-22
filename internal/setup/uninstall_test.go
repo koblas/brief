@@ -312,3 +312,180 @@ func Test_uninstall_rejects_an_unknown_host(t *testing.T) {
 
 	assert.ErrorIs(t, err, setup.ErrUnknownHost)
 }
+
+// Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_directories
+// pins R6's own removal order and directory pruning: the plugin's four
+// rows report hooks.json, finish skill, start skill, manifest — the
+// reverse of Init's own write order — then the config last, every row
+// ActionRemoved, and afterward ".claude/skills/brief/" is gone while
+// ".claude/skills/" and ".claude/" (the host's own directories, never
+// brief's to remove) still stand.
+func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_directories(t *testing.T) {
+	wd := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
+	require.NoError(t, err)
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+
+	require.NoError(t, err)
+	paths := pluginFilePaths(wd)
+	configPath := filepath.Join(wd, ".brief.yaml")
+
+	require.Len(t, res.Artifacts, 5)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindHook, Path: paths.Hooks, Action: setup.ActionRemoved}, res.Artifacts[0])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionRemoved}, res.Artifacts[1])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionRemoved}, res.Artifacts[2])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionRemoved}, res.Artifacts[3])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, res.Artifacts[4])
+	assert.Equal(t, []string{paths.Hooks, paths.Finish, paths.Start, paths.Manifest, configPath}, res.Removed)
+
+	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
+	assert.True(t, os.IsNotExist(statErr))
+
+	info, statErr := os.Stat(filepath.Join(wd, ".claude", "skills"))
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+
+	info, statErr = os.Stat(filepath.Join(wd, ".claude"))
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+}
+
+// Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced
+// pins R6's "edited locally" branch for a plugin file: without --force the
+// edited start skill (and the directories holding it) survive; with
+// --force it is removed, detail "edited locally", and the plugin's own
+// directory tree is pruned same as the happy path.
+func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced(t *testing.T) {
+	tests := []struct {
+		name       string
+		force      bool
+		wantAction setup.Action
+	}{
+		{name: "no force: kept", force: false, wantAction: setup.ActionKept},
+		{name: "force: removed", force: true, wantAction: setup.ActionRemoved},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wd := t.TempDir()
+			srv := setup.NewServer()
+			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
+			require.NoError(t, err)
+
+			start := pluginFilePaths(wd).Start
+			edited := []byte("---\nedited by hand\n---\n")
+			require.NoError(t, os.WriteFile(start, edited, 0o600))
+
+			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode, Force: tt.force})
+
+			require.NoError(t, err)
+
+			var startArt setup.Artifact
+			for _, a := range res.Artifacts {
+				if a.Path == start {
+					startArt = a
+				}
+			}
+			assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: start, Action: tt.wantAction, Detail: "edited locally"}, startArt)
+
+			_, statErr := os.Stat(start)
+			if tt.force {
+				assert.True(t, os.IsNotExist(statErr))
+
+				_, statErr = os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
+				assert.True(t, os.IsNotExist(statErr))
+
+				return
+			}
+
+			require.NoError(t, statErr)
+			body, readErr := os.ReadFile(start)
+			require.NoError(t, readErr)
+			assert.Equal(t, edited, body)
+
+			info, statErr := os.Stat(filepath.Dir(start))
+			require.NoError(t, statErr, "the directory holding the kept file must survive")
+			assert.True(t, info.IsDir())
+		})
+	}
+}
+
+// Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directory
+// pins the missing-file branch: hooks.json never existed (a --no-hook
+// init), so it plans no row and no error, and the remaining three files
+// still remove cleanly with the plugin directory pruned.
+func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directory(t *testing.T) {
+	wd := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, NoHook: true})
+	require.NoError(t, err)
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+
+	require.NoError(t, err)
+	require.Len(t, res.Artifacts, 4)
+	for _, a := range res.Artifacts {
+		assert.NotEqual(t, setup.KindHook, a.Kind)
+		assert.Equal(t, setup.ActionRemoved, a.Action)
+	}
+
+	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+// Test_uninstall_keeps_a_plugin_directory_holding_a_file_brief_did_not_write
+// pins the pruning boundary: an adopter's own file under
+// "skills/extra/notes.md" keeps "skills/" and "brief/" standing even
+// though every one of brief's own files in this same run is removed — the
+// control proving pruning runs at all.
+func Test_uninstall_keeps_a_plugin_directory_holding_a_file_brief_did_not_write(t *testing.T) {
+	wd := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
+	require.NoError(t, err)
+
+	extraDir := filepath.Join(wd, ".claude", "skills", "brief", "skills", "extra")
+	require.NoError(t, os.MkdirAll(extraDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(extraDir, "notes.md"), []byte("mine"), 0o600))
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+
+	require.NoError(t, err)
+	for _, a := range res.Artifacts {
+		assert.Equal(t, setup.ActionRemoved, a.Action, "brief's own file %s must still be removed", a.Path)
+	}
+
+	_, statErr := os.Stat(filepath.Join(extraDir, "notes.md"))
+	require.NoError(t, statErr, "the adopter's own file must survive")
+
+	info, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief", "skills"))
+	require.NoError(t, statErr, "skills/ must survive: it still holds extra/")
+	assert.True(t, info.IsDir())
+
+	info, statErr = os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
+	require.NoError(t, statErr, "brief/ must survive: it still holds skills/")
+	assert.True(t, info.IsDir())
+}
+
+// Test_uninstall_for_host_none_leaves_the_plugin_in_place pins the
+// host-gated planning: with --host none, uninstall never plans a single
+// plugin file, so the tree it installed under claude-code survives
+// completely — only the control arm, uninstalling the same tree under
+// claude-code, actually removes it.
+func Test_uninstall_for_host_none_leaves_the_plugin_in_place(t *testing.T) {
+	wd := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
+	require.NoError(t, err)
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
+
+	require.NoError(t, err)
+	require.Len(t, res.Artifacts, 1)
+	assert.Equal(t, setup.KindConfig, res.Artifacts[0].Kind)
+
+	_, statErr := os.Stat(pluginFilePaths(wd).Manifest)
+	require.NoError(t, statErr, "the plugin must survive an uninstall scoped to --host none")
+}

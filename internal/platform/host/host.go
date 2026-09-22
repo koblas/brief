@@ -3,6 +3,8 @@ package host
 import (
 	"errors"
 	"io"
+
+	"github.com/koblas/brief/internal/platform/artifact"
 )
 
 // ErrMalformedPayload is returned by Host.HookPath when r is empty, not
@@ -11,7 +13,20 @@ import (
 // refusal.
 var ErrMalformedPayload = errors.New("malformed hook payload")
 
-// Host adapts one agent host's own hook protocol.
+// File names one file a host's skills-directory plugin installs: RelPath
+// is its path relative to the repository's install root (forward-slash
+// separated; a caller joins it with filepath.Join, which normalizes for
+// its own platform), Kind is the artifact.Kind whose Render and Recognize
+// this file's bytes belong to, and Hook marks the file as the host's own
+// hook wiring — the one file Plugin(false) leaves out.
+type File struct {
+	RelPath string
+	Kind    artifact.Kind
+	Hook    bool
+}
+
+// Host adapts one agent host's own hook protocol and skills-directory
+// plugin layout.
 type Host interface {
 	// Name reports the value check --hook <name> selects this Host with.
 	Name() string
@@ -25,6 +40,13 @@ type Host interface {
 	// response: content a hook returns so it reaches the host's model as
 	// context rather than as an error.
 	WriteHookContext(w io.Writer, summary string) error
+	// Plugin returns every file this host's skills-directory plugin
+	// installs, in the order Init writes them: the plugin manifest, then
+	// each skill file, then the hook file last when withHook is true.
+	// withHook false omits the hook file entirely, so it is planned as if
+	// it did not exist — no row, nothing written. Uninstall removes the
+	// same files in the reverse of this order.
+	Plugin(withHook bool) []File
 }
 
 // hookHosts lists every Host HookHosts and Lookup search, constructed once

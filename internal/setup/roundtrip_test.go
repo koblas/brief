@@ -98,3 +98,42 @@ func Test_init_then_uninstall_leaves_the_tree_as_before_except_the_feature_root(
 	require.True(t, ok, "feature root must survive uninstall")
 	assert.True(t, entry.isDir)
 }
+
+// Test_init_then_uninstall_for_claude_code_leaves_pre_existing_claude_files_byte_identical
+// pins R6 end to end for the plugin: against a repository already carrying
+// a host's own files at ".claude/settings.json" and
+// ".claude/skills/other/SKILL.md" (both above host.PluginDir, so brief
+// never touches them), Init then Uninstall for claude-code reproduces the
+// exact pre-existing tree plus the feature root Init created — the control
+// proving the snapshot actually changed after Init, so "unchanged after
+// round trip" is not vacuously true of a run that wrote nothing.
+func Test_init_then_uninstall_for_claude_code_leaves_pre_existing_claude_files_byte_identical(t *testing.T) {
+	wd := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude", "skills", "other"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "settings.json"), []byte(`{"env":{}}`+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "skills", "other", "SKILL.md"), []byte("---\ndescription: mine\n---\nhello\n"), 0o600))
+
+	before := snapshotTree(t, wd)
+
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
+	require.NoError(t, err)
+
+	afterInit := snapshotTree(t, wd)
+	assert.NotEqual(t, before, afterInit, "init must actually have written the plugin")
+	assert.Contains(t, afterInit, filepath.Join(".claude", "skills", "brief", ".claude-plugin", "plugin.json"))
+
+	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+	require.NoError(t, err)
+
+	after := snapshotTree(t, wd)
+
+	featureRootRel := filepath.Join("docs", "specifications")
+
+	expected := map[string]treeEntry{}
+	maps.Copy(expected, before)
+	expected["docs"] = treeEntry{isDir: true}
+	expected[featureRootRel] = treeEntry{isDir: true}
+
+	assert.Equal(t, expected, after)
+}

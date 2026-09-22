@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/host"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,4 +75,33 @@ func Test_claude_code_writes_the_summary_as_post_tool_use_additional_context(t *
 
 	assert.Equal(t, "PostToolUse", doc.HookSpecificOutput.HookEventName)
 	assert.Equal(t, summary, doc.HookSpecificOutput.AdditionalContext)
+}
+
+// Test_claude_code_plugin_layout_lists_every_file_and_drops_only_the_hook_without_it
+// pins Plugin's own contract: every file lives under host.PluginDir, the
+// hook file (and only the hook file) carries Hook true, withHook false
+// drops exactly that one entry and leaves the other three untouched, and
+// the files carry the artifact.Kind their own render belongs to.
+func Test_claude_code_plugin_layout_lists_every_file_and_drops_only_the_hook_without_it(t *testing.T) {
+	h := newClaudeCode(t)
+
+	withHook := h.Plugin(true)
+	withoutHook := h.Plugin(false)
+
+	require.Len(t, withHook, 4)
+	assert.Equal(t, withHook[:3], withoutHook)
+
+	for _, f := range withHook[:3] {
+		assert.False(t, f.Hook)
+	}
+	assert.True(t, withHook[3].Hook)
+
+	for _, f := range withHook {
+		assert.True(t, strings.HasPrefix(f.RelPath, host.PluginDir+"/"), "%s must live under %s", f.RelPath, host.PluginDir)
+	}
+
+	assert.Equal(t, artifact.KindPluginManifest, withHook[0].Kind)
+	assert.Equal(t, artifact.KindSkillStart, withHook[1].Kind)
+	assert.Equal(t, artifact.KindSkillFinish, withHook[2].Kind)
+	assert.Equal(t, artifact.KindClaudeHooks, withHook[3].Kind)
 }

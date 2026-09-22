@@ -11,19 +11,22 @@ import (
 
 // uninstallInvocation is the invocation string every "brief uninstall"
 // usage error names as how to fix it.
-const uninstallInvocation = "brief uninstall --host none"
+const uninstallInvocation = "brief uninstall --host claude-code"
 
 // uninstallLong is "brief uninstall"'s help prose.
-var uninstallLong = `Removes what "brief init" installed: the ".brief.yaml" config file this
-binary would have written (recognized by digest, never by decoding it) is
-removed; a file whose bytes were edited locally is kept and reported
-instead, unless --force. The feature root and everything under it are
-never removed. --dry-run prints the same report and removes nothing.
+var uninstallLong = `Removes what "brief init" installed: the ".brief.yaml" config file, and,
+by default (--host claude-code), the Claude Code plugin under
+".claude/skills/brief/" — every file this binary would have written
+(recognized by digest, never by decoding it) is removed; a file whose
+bytes were edited locally is kept and reported instead, unless --force.
+The feature root and everything under it are never removed, nor is
+".claude/" or ".claude/skills/" above the plugin's own directory.
+--dry-run prints the same report and removes nothing.
 
 ` + jsonFieldsParagraph("host", "dry_run", "created", "modified", "removed", "artifacts")
 
 // uninstallHostFlagUsage is uninstall's own --host flag's usage string.
-const uninstallHostFlagUsage = "the agent host to remove for (`none` in this release)"
+const uninstallHostFlagUsage = "the agent host to remove for (claude-code or `none`)"
 
 // uninstallForceFlagUsage is uninstall's own --force flag's usage string.
 const uninstallForceFlagUsage = "remove a config file edited locally instead of keeping it"
@@ -48,8 +51,21 @@ type uninstallDocument struct {
 // minus the "brief uninstall: " prefix: R11's stderr contract, first match
 // wins — dry run, then "nothing installed" for zero artifacts, then
 // "removed" when at least one artifact reports setup.ActionRemoved, else
-// "nothing removed" naming --force.
-func uninstallNextAction(dryRun bool, artifacts []setup.Artifact) string {
+// "nothing removed" naming --force — with " for <host>" appended unless
+// host is setup.HostNone, since uninstall's default host is
+// setup.HostClaudeCode and a run scoped to "none" removes only the config.
+func uninstallNextAction(host string, dryRun bool, artifacts []setup.Artifact) string {
+	base := uninstallBaseNextAction(dryRun, artifacts)
+	if host == setup.HostNone {
+		return base
+	}
+
+	return base + " for " + host
+}
+
+// uninstallBaseNextAction renders uninstallNextAction's own text before the
+// " for <host>" suffix is considered.
+func uninstallBaseNextAction(dryRun bool, artifacts []setup.Artifact) string {
 	if dryRun {
 		return "dry run, no files changed; rerun without --dry-run to apply"
 	}
@@ -70,14 +86,16 @@ func uninstallNextAction(dryRun bool, artifacts []setup.Artifact) string {
 // runUninstall implements "brief uninstall [--host <name>] [--dry-run]
 // [--force] [--json]"; rest is its positional arguments, flags already
 // parsed away and must be empty. host is "" when --host was not given,
-// defaulted to setup.HostNone here, the same default runInit uses.
+// defaulted to setup.HostClaudeCode here: uninstall's own plan for
+// claude-code is a superset of none's, so an omitted --host removes
+// everything brief installed.
 func runUninstall(ctx context.Context, wd string, rest []string, host string, dryRun, force bool, out reporter) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief uninstall: too many arguments; run '%s'", uninstallInvocation))
 	}
 
 	if host == "" {
-		host = setup.HostNone
+		host = setup.HostClaudeCode
 	}
 
 	srv := setup.NewServer()
@@ -109,7 +127,7 @@ func runUninstall(ctx context.Context, wd string, rest []string, host string, dr
 		fmt.Fprintln(out.stdout, artifactRow(wd, a))
 	}
 
-	fmt.Fprintf(out.stderr, "brief uninstall: %s\n", uninstallNextAction(res.DryRun, res.Artifacts))
+	fmt.Fprintf(out.stderr, "brief uninstall: %s\n", uninstallNextAction(res.Host, res.DryRun, res.Artifacts))
 
 	return nil
 }

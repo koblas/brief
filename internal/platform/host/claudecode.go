@@ -5,10 +5,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/koblas/brief/internal/platform/artifact"
 )
 
 // ClaudeCode is the host name "brief check --hook claude-code" accepts.
 const ClaudeCode = "claude-code"
+
+// PluginDir is the path, relative to a repository's install root, every
+// claude-code skills-directory plugin file lives under (R4).
+const PluginDir = ".claude/skills/brief"
+
+// claudeCodePluginFiles lists claudeCode's own Plugin(true) files, in
+// install order: the manifest, the start skill, the finish skill, then the
+// PostToolUse hook wiring last.
+var claudeCodePluginFiles = []File{
+	{RelPath: PluginDir + "/.claude-plugin/plugin.json", Kind: artifact.KindPluginManifest},
+	{RelPath: PluginDir + "/skills/start/SKILL.md", Kind: artifact.KindSkillStart},
+	{RelPath: PluginDir + "/skills/finish/SKILL.md", Kind: artifact.KindSkillFinish},
+	{RelPath: PluginDir + "/hooks/hooks.json", Kind: artifact.KindClaudeHooks, Hook: true},
+}
 
 // claudeCode adapts Claude Code's PostToolUse hook protocol
 // (code.claude.com/docs/en/hooks): a JSON payload on stdin carrying
@@ -85,4 +101,16 @@ func (claudeCode) WriteHookContext(w io.Writer, summary string) error {
 	}
 
 	return nil
+}
+
+// Plugin returns claudeCodePluginFiles, minus its trailing hook entry when
+// withHook is false. The returned slice is always a fresh copy, so a
+// caller mutating it never affects a later call.
+func (claudeCode) Plugin(withHook bool) []File {
+	files := claudeCodePluginFiles
+	if !withHook {
+		files = files[:len(files)-1]
+	}
+
+	return append([]File(nil), files...)
 }

@@ -12,25 +12,32 @@ import (
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/atomicfile"
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/host"
 )
 
 // configFileName is the config file Init writes and looks for — the same
 // name internal/platform/config resolves.
 const configFileName = ".brief.yaml"
 
-// HostNone is the one host InitRequest.Host accepts in this release: no
-// agent-host integration is installed, only the config and the feature
-// root.
+// HostNone is one host InitRequest.Host accepts: no agent-host integration
+// is installed, only the config and the feature root.
 const HostNone = "none"
 
-// Hosts returns every host InitRequest.Host accepts, in the order a usage
-// error's "expected one of:" clause lists them.
+// HostClaudeCode is the other host InitRequest.Host accepts: a Claude Code
+// skills-directory plugin (host.ClaudeCode) is installed alongside the
+// config and the feature root.
+const HostClaudeCode = host.ClaudeCode
+
+// Hosts returns every host InitRequest.Host and UninstallRequest.Host
+// accept, in the order a usage error's "expected one of:" clause lists
+// them.
 func Hosts() []string {
-	return []string{HostNone}
+	return []string{HostClaudeCode, HostNone}
 }
 
-// Kind names what an Artifact reports: the config file, or the feature
-// root directory.
+// Kind names what an Artifact reports: the config file, the feature root
+// directory, a Claude Code plugin file (manifest or skill), or its hook
+// wiring.
 type Kind string
 
 const (
@@ -38,6 +45,10 @@ const (
 	KindConfig Kind = "config"
 	// KindFeatureRoot is the configured feature directory.
 	KindFeatureRoot Kind = "feature-root"
+	// KindPlugin is a host's plugin manifest or skill file.
+	KindPlugin Kind = "plugin"
+	// KindHook is a host's hook wiring file.
+	KindHook Kind = "hook"
 )
 
 // Action names what Init did, or would do, to one Artifact.
@@ -79,11 +90,14 @@ func NewServer(opts ...Option) *Server {
 }
 
 // InitRequest is Init's own input: Host selects the agent-host integration
-// (Hosts, HostNone in this release), DryRun computes the same plan without
-// writing anything, and Force rewrites an existing config from defaults
-// rather than keeping or refusing it.
+// (Hosts), NoHook omits a claude-code host's hook wiring file entirely (no
+// plan, no row) while leaving any other plugin file untouched, DryRun
+// computes the same plan without writing anything, and Force rewrites an
+// existing config from defaults rather than keeping or refusing it — it
+// never rewrites an edited plugin file, only the config.
 type InitRequest struct {
 	Host   string
+	NoHook bool
 	DryRun bool
 	Force  bool
 }
@@ -100,17 +114,23 @@ type Artifact struct {
 }
 
 // Result is what Init and Uninstall both return: Host and DryRun echo the
-// request, Artifacts lists what was found and what happened to it — for
-// Init, the config file then the feature root, the fixed order R11's
-// stdout rows render in; for Uninstall, any host artifacts (added by a
-// later scenario) then the config file last, so a partial uninstall never
-// removes the repository's opt-in marker before everything else. Created
-// and Modified name every path Init actually wrote, absolute, in the order
-// it wrote them; Removed names every path Uninstall actually deleted, in
-// removal order. No slice is ever nil; all three are empty under DryRun.
+// request, Root is the absolute install root both operated against —
+// config.Locate's directory, or wd when no config was found — Artifacts
+// lists what was found and what happened to it — for Init, the config
+// file, the feature root, then a claude-code host's own plugin manifest,
+// start skill, finish skill and hook wiring, the fixed order R11's stdout
+// rows render in; for Uninstall, a claude-code host's own files (hook,
+// finish skill, start skill, manifest) then the config file last, so a
+// partial uninstall never removes the repository's opt-in marker before
+// everything else. Created and Modified name every path Init actually
+// wrote, absolute, in the order it wrote them; Removed names every path
+// Uninstall actually deleted, in removal order — a pruned, now-empty
+// plugin directory is never one of them. No slice is ever nil; all three
+// are empty under DryRun.
 type Result struct {
 	Host      string
 	DryRun    bool
+	Root      string
 	Artifacts []Artifact
 	Created   []string
 	Modified  []string
@@ -118,18 +138,22 @@ type Result struct {
 }
 
 // Init plans then, unless req.DryRun, applies brief's own install: the
-// config file and the feature root the kept or freshly written config
-// names. Every refusal — an unknown host, an invalid existing config, a
-// feature root that exists as something other than a directory — is
-// decided during planning, before either artifact is touched; DryRun
-// therefore returns exactly the plan a real run would apply, including any
-// refusal, and writes nothing either way.
+// config file, the feature root the kept or freshly written config names,
+// and, for req.Host == HostClaudeCode, that host's own skills-directory
+// plugin files (host.Host.Plugin). Every refusal — an unknown host, an
+// invalid existing config, a feature root that exists as something other
+// than a directory — is decided during planning, before any artifact is
+// touched; DryRun therefore returns exactly the plan a real run would
+// apply, including any refusal, and writes nothing either way.
 //
-// Applying writes the feature root first and the config file last, so the
-// config file — the repository's opt-in marker — never appears before
-// everything else has landed. A failure writing the config file after the
-// feature root was created is wrapped in ErrPartialWrite; a failure before
-// anything was written is returned as-is.
+// Applying writes the feature root, then every plugin file reporting
+// ActionCreated, then the config file last, so the config file — the
+// repository's opt-in marker — never appears before everything else has
+// landed. A plugin file already present and unedited (ActionUnchanged) or
+// edited locally (ActionKept) is never rewritten, --force included: R3's
+// --force only ever rewrites the config from defaults. A failure after at
+// least one earlier write already landed is wrapped in ErrPartialWrite; a
+// failure before anything was written is returned as-is.
 func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, error) {
 	if !validHost(req.Host) {
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
@@ -157,10 +181,28 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return Result{}, err
 	}
 
+	var pluginArts []pluginArtifact
+	if req.Host == HostClaudeCode {
+		h, _ := host.Lookup(host.ClaudeCode)
+
+		pluginArts, err = planPluginFiles(root, h, !req.NoHook)
+		if err != nil {
+			return Result{}, err
+		}
+	}
+
+	artifacts := make([]Artifact, 0, 2+len(pluginArts))
+	artifacts = append(artifacts, configArt, featureArt)
+
+	for _, p := range pluginArts {
+		artifacts = append(artifacts, p.Artifact)
+	}
+
 	res := Result{
 		Host:      req.Host,
 		DryRun:    req.DryRun,
-		Artifacts: []Artifact{configArt, featureArt},
+		Root:      root,
+		Artifacts: artifacts,
 		Created:   []string{},
 		Modified:  []string{},
 		Removed:   []string{},
@@ -170,14 +212,15 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return res, nil
 	}
 
-	return apply(res, featureArt, configArt)
+	return apply(res, featureArt, pluginArts, configArt)
 }
 
-// apply writes featureArt then configArt, in that order, into res's own
-// Created list, when each reports ActionCreated. A config-file write
-// failure is wrapped in ErrPartialWrite iff the feature root was already
-// written in this same call.
-func apply(res Result, featureArt, configArt Artifact) (Result, error) {
+// apply writes featureArt, then every pluginArts entry reporting
+// ActionCreated, then configArt last, into res's own Created list, when
+// each itself reports ActionCreated. A write failure is wrapped in
+// ErrPartialWrite iff at least one earlier write already landed in this
+// same call.
+func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, configArt Artifact) (Result, error) {
 	var wroteSomething bool
 
 	if featureArt.Action == ActionCreated {
@@ -186,6 +229,23 @@ func apply(res Result, featureArt, configArt Artifact) (Result, error) {
 		}
 
 		res.Created = append(res.Created, featureArt.Path)
+		wroteSomething = true
+	}
+
+	for _, p := range pluginArts {
+		if p.Action != ActionCreated {
+			continue
+		}
+
+		if err := writePluginFile(p.Path, artifact.Render(p.renderKind)); err != nil {
+			if wroteSomething {
+				return Result{}, markPartial(err)
+			}
+
+			return Result{}, err
+		}
+
+		res.Created = append(res.Created, p.Path)
 		wroteSomething = true
 	}
 
@@ -202,6 +262,109 @@ func apply(res Result, featureArt, configArt Artifact) (Result, error) {
 	}
 
 	return res, nil
+}
+
+// pluginArtifact pairs one plugin file's Artifact with the
+// artifact.Kind its Render/Recognize digest list is checked against — a
+// different vocabulary from Artifact.Kind's own setup-level Kind (KindPlugin
+// or KindHook), kept out of Artifact itself since nothing outside this
+// package ever needs it.
+type pluginArtifact struct {
+	Artifact
+
+	renderKind artifact.Kind
+}
+
+// planPluginFiles plans every file h.Plugin(withHook) lists, each joined
+// under root, in that same order.
+func planPluginFiles(root string, h host.Host, withHook bool) ([]pluginArtifact, error) {
+	files := h.Plugin(withHook)
+	out := make([]pluginArtifact, 0, len(files))
+
+	for _, f := range files {
+		kind := KindPlugin
+		if f.Hook {
+			kind = KindHook
+		}
+
+		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
+
+		art, err := planPluginFile(path, kind, f.Kind)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, pluginArtifact{Artifact: art, renderKind: f.Kind})
+	}
+
+	return out, nil
+}
+
+// planPluginFile decides one plugin file's own Artifact, mirroring
+// planConfigRemoval's own Lstat-first shape: missing reports ActionCreated;
+// a path that exists but is not a regular file (a directory, a symlink)
+// reports ActionKept, detail "not a regular file", never followed; a
+// regular file whose bytes are artifact.Recognize's OriginCurrent for
+// renderKind reports ActionUnchanged; any other bytes report ActionKept,
+// detail "edited locally" — Init never rewrites a plugin file the way
+// --force rewrites the config.
+func planPluginFile(path string, kind Kind, renderKind artifact.Kind) (Artifact, error) {
+	info, err := os.Lstat(path)
+
+	switch {
+	case os.IsNotExist(err):
+		return Artifact{Kind: kind, Path: path, Action: ActionCreated}, nil
+	case err != nil:
+		return Artifact{}, fmt.Errorf("setup: lstat %s: %w", path, err)
+	case !info.Mode().IsRegular():
+		return Artifact{Kind: kind, Path: path, Action: ActionKept, Detail: "not a regular file"}, nil
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("setup: read %s: %w", path, err)
+	}
+
+	if artifact.Recognize(renderKind, body) == artifact.OriginCurrent {
+		return Artifact{Kind: kind, Path: path, Action: ActionUnchanged}, nil
+	}
+
+	return Artifact{Kind: kind, Path: path, Action: ActionKept, Detail: "edited locally"}, nil
+}
+
+// writePluginFile creates path's parent directories (0o755) and then
+// atomically writes body to path (0o644), through
+// internal/platform/atomicfile so a reader never observes a truncated or
+// half-renamed plugin file.
+func writePluginFile(path string, body []byte) error {
+	dir := filepath.Dir(path)
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("setup: create %s: %w", dir, err)
+	}
+
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("setup: open %s: %w", dir, err)
+	}
+	defer func() { _ = root.Close() }()
+
+	w, err := atomicfile.Create(root, filepath.Base(path), 0o644)
+	if err != nil {
+		return fmt.Errorf("setup: write %s: %w", path, err)
+	}
+
+	if _, err := w.Write(body); err != nil {
+		_ = w.Close()
+
+		return fmt.Errorf("setup: write %s: %w", path, err)
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("setup: write %s: %w", path, err)
+	}
+
+	return nil
 }
 
 // planConfig decides the config file's own Artifact and, when it can be

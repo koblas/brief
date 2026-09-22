@@ -1,6 +1,7 @@
 package artifact_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // Test_config_file_resolves_to_the_shipped_defaults guards the trap an
@@ -103,6 +105,152 @@ func Test_Recognize(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			assert.Equal(t, c.want, artifact.Recognize(artifact.KindConfig, c.body))
+		})
+	}
+}
+
+// editOneByte returns a copy of body with its last byte changed, the
+// smallest possible edit that still differs from body — a fixture for
+// proving Recognize rejects even a one-byte mismatch.
+func editOneByte(body []byte) []byte {
+	out := append([]byte(nil), body...)
+	out[len(out)-1]++
+
+	return out
+}
+
+// Test_recognize_classifies_each_plugin_file_against_its_own_kind pins
+// Recognize for every plugin Kind this package renders: its own current
+// render is OriginCurrent, a one-byte edit of it is OriginEdited, and — the
+// discriminator proving Recognize checks the kind, not just any known
+// digest — another Kind's own current render, checked against a different
+// Kind, is OriginEdited too.
+func Test_recognize_classifies_each_plugin_file_against_its_own_kind(t *testing.T) {
+	cases := []struct {
+		name string
+		kind artifact.Kind
+		body []byte
+		want artifact.Origin
+	}{
+		{name: "plugin manifest: current render", kind: artifact.KindPluginManifest, body: artifact.PluginManifest(), want: artifact.OriginCurrent},
+		{name: "plugin manifest: one byte edited", kind: artifact.KindPluginManifest, body: editOneByte(artifact.PluginManifest()), want: artifact.OriginEdited},
+		{name: "skill start: current render", kind: artifact.KindSkillStart, body: artifact.SkillStart(), want: artifact.OriginCurrent},
+		{name: "skill start: one byte edited", kind: artifact.KindSkillStart, body: editOneByte(artifact.SkillStart()), want: artifact.OriginEdited},
+		{name: "skill finish: current render", kind: artifact.KindSkillFinish, body: artifact.SkillFinish(), want: artifact.OriginCurrent},
+		{name: "skill finish: one byte edited", kind: artifact.KindSkillFinish, body: editOneByte(artifact.SkillFinish()), want: artifact.OriginEdited},
+		{name: "claude hooks: current render", kind: artifact.KindClaudeHooks, body: artifact.ClaudeHooks(), want: artifact.OriginCurrent},
+		{name: "claude hooks: one byte edited", kind: artifact.KindClaudeHooks, body: editOneByte(artifact.ClaudeHooks()), want: artifact.OriginEdited},
+		{name: "skill start bytes checked against skill finish's kind", kind: artifact.KindSkillFinish, body: artifact.SkillStart(), want: artifact.OriginEdited},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, artifact.Recognize(c.kind, c.body))
+		})
+	}
+}
+
+// Test_hooks_file_runs_brief_check_on_post_tool_use_edits pins ClaudeHooks'
+// own JSON shape: a PostToolUse entry matching "Edit|Write|MultiEdit" that
+// runs "brief check --hook claude-code" as a "command" hook.
+func Test_hooks_file_runs_brief_check_on_post_tool_use_edits(t *testing.T) {
+	var doc struct {
+		Hooks struct {
+			PostToolUse []struct {
+				Matcher string `json:"matcher"`
+				Hooks   []struct {
+					Type    string `json:"type"`
+					Command string `json:"command"`
+				} `json:"hooks"`
+			} `json:"PostToolUse"`
+		} `json:"hooks"`
+	}
+	require.NoError(t, json.Unmarshal(artifact.ClaudeHooks(), &doc))
+
+	require.Len(t, doc.Hooks.PostToolUse, 1)
+	assert.Equal(t, "Edit|Write|MultiEdit", doc.Hooks.PostToolUse[0].Matcher)
+	require.Len(t, doc.Hooks.PostToolUse[0].Hooks, 1)
+	assert.Equal(t, "command", doc.Hooks.PostToolUse[0].Hooks[0].Type)
+	assert.Equal(t, "brief check --hook claude-code", doc.Hooks.PostToolUse[0].Hooks[0].Command)
+}
+
+// Test_plugin_manifest_names_the_plugin_brief_and_carries_no_version pins
+// R4: the manifest names the plugin "brief" and carries no "version" key —
+// a skills-directory plugin does not require one, and omitting it keeps
+// the render identical release to release.
+func Test_plugin_manifest_names_the_plugin_brief_and_carries_no_version(t *testing.T) {
+	var manifest map[string]any
+	require.NoError(t, json.Unmarshal(artifact.PluginManifest(), &manifest))
+
+	assert.Equal(t, "brief", manifest["name"])
+	assert.NotContains(t, manifest, "version")
+}
+
+// skillFile is one SKILL.md file's frontmatter and body, parsed by
+// parseSkillFile.
+type skillFile struct {
+	Description            string `yaml:"description"`
+	DisableModelInvocation bool   `yaml:"disable-model-invocation"`
+	AllowedTools           string `yaml:"allowed-tools"`
+	ArgumentHint           string `yaml:"argument-hint"`
+}
+
+// parseSkillFile splits body into its YAML frontmatter (between "---"
+// lines) and the markdown body following it. The returned keys map
+// reports every key the frontmatter carries, so a test can assert an
+// absence ("name", "user-invocable") that skillFile's own fixed field set
+// cannot represent.
+func parseSkillFile(t *testing.T, body []byte) (skillFile, map[string]any, string) {
+	t.Helper()
+
+	s := string(body)
+	require.True(t, strings.HasPrefix(s, "---\n"), "must open with a frontmatter fence")
+
+	after := strings.TrimPrefix(s, "---\n")
+	idx := strings.Index(after, "\n---\n")
+	require.GreaterOrEqual(t, idx, 0, "must close the frontmatter fence")
+
+	frontmatter := after[:idx]
+	rest := after[idx+len("\n---\n"):]
+
+	var fm skillFile
+	require.NoError(t, yaml.Unmarshal([]byte(frontmatter), &fm))
+
+	var keys map[string]any
+	require.NoError(t, yaml.Unmarshal([]byte(frontmatter), &keys))
+
+	return fm, keys, rest
+}
+
+// Test_skill_files_are_user_invoked_and_scoped_to_their_command pins R4's
+// SKILL.md shape for both start and finish: a non-empty description,
+// disable-model-invocation true, allowed-tools scoped to that command's
+// own "brief <cmd> *" Bash prefix, the matching argument-hint, no "name"
+// or "user-invocable" key (both already hold the value brief wants), and a
+// body that runs the command with $ARGUMENTS.
+func Test_skill_files_are_user_invoked_and_scoped_to_their_command(t *testing.T) {
+	cases := []struct {
+		name         string
+		body         []byte
+		allowedTools string
+		argumentHint string
+		runs         string
+	}{
+		{name: "start", body: artifact.SkillStart(), allowedTools: "Bash(brief start *)", argumentHint: "<feature>", runs: "brief start $ARGUMENTS"},
+		{name: "finish", body: artifact.SkillFinish(), allowedTools: "Bash(brief finish *)", argumentHint: "<feature> <step> --handoff <path> --state <path>", runs: "brief finish $ARGUMENTS"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fm, keys, body := parseSkillFile(t, c.body)
+
+			assert.NotEmpty(t, fm.Description)
+			assert.True(t, fm.DisableModelInvocation)
+			assert.Equal(t, c.allowedTools, fm.AllowedTools)
+			assert.Equal(t, c.argumentHint, fm.ArgumentHint)
+			assert.NotContains(t, keys, "name")
+			assert.NotContains(t, keys, "user-invocable")
+			assert.Contains(t, body, c.runs)
 		})
 	}
 }

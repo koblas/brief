@@ -37,6 +37,53 @@ func Test_init_json_is_one_exact_document(t *testing.T) {
 	assert.Equal(t, want, stdout.String())
 }
 
+// Test_init_json_for_claude_code_carries_plugin_and_hook_kinds pins the
+// JSON "kind" vocabulary (R11): "plugin" for the manifest and both skills,
+// "hook" for hooks.json, "host" echoing "claude-code", and every created
+// path listed in write order (feature root, then the four plugin files,
+// config last) — files only, never a directory.
+func Test_init_json_for_claude_code_carries_plugin_and_hook_kinds(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--json"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	var doc struct {
+		Host      string   `json:"host"`
+		Created   []string `json:"created"`
+		Artifacts []struct {
+			Kind   string `json:"kind"`
+			Path   string `json:"path"`
+			Action string `json:"action"`
+		} `json:"artifacts"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+
+	assert.Equal(t, "claude-code", doc.Host)
+
+	base := filepath.Join(wd, ".claude", "skills", "brief")
+	manifest := filepath.Join(base, ".claude-plugin", "plugin.json")
+	start := filepath.Join(base, "skills", "start", "SKILL.md")
+	finish := filepath.Join(base, "skills", "finish", "SKILL.md")
+	hooks := filepath.Join(base, "hooks", "hooks.json")
+	featureRoot := filepath.Join(wd, "docs", "specifications")
+	configPath := filepath.Join(wd, ".brief.yaml")
+
+	assert.Equal(t, []string{featureRoot, manifest, start, finish, hooks, configPath}, doc.Created)
+
+	kindByPath := map[string]string{}
+	for _, a := range doc.Artifacts {
+		kindByPath[a.Path] = a.Kind
+	}
+	assert.Equal(t, "plugin", kindByPath[manifest])
+	assert.Equal(t, "plugin", kindByPath[start])
+	assert.Equal(t, "plugin", kindByPath[finish])
+	assert.Equal(t, "hook", kindByPath[hooks])
+}
+
 // Test_init_dry_run_json_reports_empty_created_and_modified pins R9's JSON
 // shape: dry_run true, both created and modified "[]" (never null), and
 // nothing written to disk.

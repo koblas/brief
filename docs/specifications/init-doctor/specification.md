@@ -35,7 +35,9 @@ feature root (accessible, not counted), environment, host integration — setup 
 - R4: **Claude Code integration is a skills-directory plugin** at `.claude/skills/brief/`:
   `.claude-plugin/plugin.json` (`"name": "brief"`), `skills/start/SKILL.md` (`/brief:start`),
   `skills/finish/SKILL.md` (`/brief:finish`) — both `disable-model-invocation: true` with
-  `allowed-tools` scoped to `Bash(brief start:*)` / `Bash(brief finish:*)` — `hooks/hooks.json`
+  `allowed-tools` scoped to `Bash(brief start *)` / `Bash(brief finish *)` and an `argument-hint`
+  (**amended during SCENARIO-06 planning**, verified against code.claude.com/docs/en/skills: the
+  permission pattern is `Bash(<prefix> *)`) — `hooks/hooks.json`
   (`PostToolUse`, matcher `Edit|Write|MultiEdit`, command `brief check --hook claude-code`), and,
   with `--with-agents`, `agents/{planner,implementer,reviewer}.md`. The hook is installed by
   default; `--no-hook` omits it. `brief` never edits `.claude/settings.json`,
@@ -83,8 +85,12 @@ feature root (accessible, not counted), environment, host integration — setup 
   changed)`, the `--print` output on stdout, exit 1.
 - R11: **Output.** init/uninstall stdout: one line per artifact, verb from the closed set
   `created | merged | unchanged | kept | removed`, relative path, optional parenthetical detail;
-  next action on stderr (`brief init: installed for claude-code; run /reload-plugins, then 'brief
-  new feature <name>'`; re-run: `brief init: already installed; nothing changed`; dry run:
+  next action on stderr (`brief init: installed for claude-code; start Claude Code in this
+  directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'`,
+  or `... installed for claude-code in <rel>; start Claude Code in <rel> (or run /reload-plugins
+  in a session already there), ...` when the install root is not the working directory —
+  **amended during SCENARIO-06 planning**: Claude Code loads project skills-dir plugins only from
+  the session's primary working directory, no walk-up; re-run: `brief init: already installed; nothing changed`; dry run:
   `brief init: dry run, no files changed; rerun without --dry-run to apply`). JSON (common
   envelope): `{host, dry_run, created:[abs], modified:[abs], artifacts:[{kind, path, action,
   detail}]}`, `kind` ∈ config | feature-root | plugin | hook | snippet | agent; uninstall adds
@@ -256,7 +262,7 @@ Scenario: SCENARIO-10 doctor reports Claude Code integration health
 - [x] SCENARIO-03: init writes the config and feature root, and converges
 - [x] SCENARIO-04: uninstall removes the config init wrote and nothing else
 - [x] SCENARIO-05: check --hook scopes a Claude Code hook call to the edited feature
-- [ ] SCENARIO-06: init installs the Claude Code plugin
+- [x] SCENARIO-06: init installs the Claude Code plugin
 - [ ] SCENARIO-07: init adds the CLAUDE.md instruction block
 - [ ] SCENARIO-08: --with-agents scaffolds three role agents and binds them
 - [ ] SCENARIO-09: --print, host detection, and unwritable targets

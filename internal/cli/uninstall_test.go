@@ -73,8 +73,25 @@ func Test_uninstall_force_removes_an_edited_config(t *testing.T) {
 }
 
 // Test_uninstall_with_nothing_installed_reports_it pins R11's zero-artifact
-// branch: empty stdout, "nothing installed" on stderr, exit nil.
+// branch for uninstall's own default host, claude-code: empty stdout,
+// "nothing installed for claude-code" on stderr, exit nil.
 func Test_uninstall_with_nothing_installed_reports_it(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief uninstall: nothing installed for claude-code\n", stderr.String())
+}
+
+// Test_uninstall_host_none_with_nothing_installed_omits_the_host_suffix is
+// the control arm for the test above: scoped to --host none, the same
+// zero-artifact outcome reports "nothing installed" with no " for <host>"
+// suffix, proving the suffix names the host rather than always appearing.
+func Test_uninstall_host_none_with_nothing_installed_omits_the_host_suffix(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
 
@@ -109,6 +126,66 @@ func Test_uninstall_dry_run_prints_the_plan_and_removes_nothing(t *testing.T) {
 	assert.NoError(t, statErr)
 }
 
+// Test_uninstall_for_claude_code_removes_the_plugin_then_the_config pins
+// the user-visible contract: rows in removal order — hooks.json, finish
+// skill, start skill, manifest, then ".brief.yaml" last — every one
+// "removed", and the claude-code next-action suffix.
+func Test_uninstall_for_claude_code_removes_the_plugin_then_the_config(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"removed .claude/skills/brief/hooks/hooks.json\n"+
+		"removed .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"removed .claude/skills/brief/skills/start/SKILL.md\n"+
+		"removed .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"removed .brief.yaml\n", stdout.String())
+	assert.Equal(t, "brief uninstall: removed brief's install; the feature root and its contents were left in place for claude-code\n", stderr.String())
+
+	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+// Test_uninstall_for_claude_code_keeps_an_edited_skill_and_removes_it_under_force
+// pins the mixed-row case at the CLI boundary: one file kept, the rest
+// removed, then --force removes it too.
+func Test_uninstall_for_claude_code_keeps_an_edited_skill_and_removes_it_under_force(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	start := filepath.Join(wd, ".claude", "skills", "brief", "skills", "start", "SKILL.md")
+	require.NoError(t, os.WriteFile(start, []byte("---\nedited: true\n---\n"), 0o600))
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "kept .claude/skills/brief/skills/start/SKILL.md (edited locally)\n")
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code", "--force"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "removed .claude/skills/brief/skills/start/SKILL.md (edited locally)\n")
+
+	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
 // Test_uninstall_refuses_an_unknown_host pins R8's usage-error branch,
 // mirrored from init: exit 2, naming the given value and the accepted
 // list.
@@ -120,7 +197,7 @@ func Test_uninstall_refuses_an_unknown_host(t *testing.T) {
 
 	assert.Equal(t, 2, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief uninstall: unknown host "bogus"; expected one of: none; run 'brief uninstall --host none'`+"\n", stderr.String())
+	assert.Equal(t, `brief uninstall: unknown host "bogus"; expected one of: claude-code, none; run 'brief uninstall --host claude-code'`+"\n", stderr.String())
 }
 
 // Test_uninstall_refuses_a_stray_positional_argument pins the usage-error

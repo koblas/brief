@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -37,6 +38,54 @@ func Test_uninstall_json_is_one_exact_document(t *testing.T) {
 		`{"kind":"config","path":` + jsonString(t, configPath) + `,"action":"removed","detail":null}]}` + "\n"
 
 	assert.Equal(t, want, stdout.String())
+}
+
+// Test_uninstall_json_for_claude_code_removes_plugin_and_hook_files pins
+// the same "kind" vocabulary on removal: "hook" for hooks.json, "plugin"
+// for the rest, "host" echoing "claude-code", and removed naming files
+// only, in removal order — never the pruned, now-empty plugin directory.
+func Test_uninstall_json_for_claude_code_removes_plugin_and_hook_files(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code", "--json"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	var doc struct {
+		Host      string   `json:"host"`
+		Removed   []string `json:"removed"`
+		Artifacts []struct {
+			Kind   string `json:"kind"`
+			Path   string `json:"path"`
+			Action string `json:"action"`
+		} `json:"artifacts"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+
+	assert.Equal(t, "claude-code", doc.Host)
+
+	base := filepath.Join(wd, ".claude", "skills", "brief")
+	manifest := filepath.Join(base, ".claude-plugin", "plugin.json")
+	start := filepath.Join(base, "skills", "start", "SKILL.md")
+	finish := filepath.Join(base, "skills", "finish", "SKILL.md")
+	hooks := filepath.Join(base, "hooks", "hooks.json")
+	configPath := filepath.Join(wd, ".brief.yaml")
+
+	assert.Equal(t, []string{hooks, finish, start, manifest, configPath}, doc.Removed)
+
+	kindByPath := map[string]string{}
+	for _, a := range doc.Artifacts {
+		kindByPath[a.Path] = a.Kind
+	}
+	assert.Equal(t, "hook", kindByPath[hooks])
+	assert.Equal(t, "plugin", kindByPath[manifest])
 }
 
 // Test_uninstall_json_nothing_installed_is_an_empty_document pins the

@@ -157,7 +157,7 @@ func Test_init_refuses_an_unknown_host(t *testing.T) {
 
 	assert.Equal(t, 2, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
-	assert.Equal(t, `brief init: unknown host "bogus"; expected one of: none; run 'brief init --host none'`+"\n", stderr.String())
+	assert.Equal(t, `brief init: unknown host "bogus"; expected one of: claude-code, none; run 'brief init --host claude-code'`+"\n", stderr.String())
 }
 
 // Test_init_refuses_a_stray_positional_argument pins the usage-error
@@ -170,4 +170,129 @@ func Test_init_refuses_a_stray_positional_argument(t *testing.T) {
 
 	assert.Equal(t, 2, cli.ExitCode(err))
 	assert.Contains(t, stderr.String(), "too many arguments")
+}
+
+// Test_init_for_claude_code_installs_the_plugin_and_says_where_to_start_claude_code
+// pins the user-visible contract for a fresh repository: all six rows in
+// order, the claude-code next-action line naming "this directory" since
+// the install root is wd itself, and every plugin file's bytes on disk
+// equal to its own artifact render.
+func Test_init_for_claude_code_installs_the_plugin_and_says_where_to_start_claude_code(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, cli.ExitCode(err))
+	assert.Equal(t, ""+
+		"created .brief.yaml\n"+
+		"created docs/specifications/\n"+
+		"created .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"created .claude/skills/brief/skills/start/SKILL.md\n"+
+		"created .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"created .claude/skills/brief/hooks/hooks.json\n", stdout.String())
+	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
+
+	manifest, err2 := os.ReadFile(filepath.Join(wd, ".claude", "skills", "brief", ".claude-plugin", "plugin.json"))
+	require.NoError(t, err2)
+	assert.Equal(t, artifact.PluginManifest(), manifest)
+}
+
+// Test_init_from_a_subdirectory_names_the_install_root_in_the_next_action
+// pins the root ≠ wd form: run from a child directory of a repository
+// already configured at the parent, the next-action line names the
+// parent, relative to wd, in both places the root=wd control arm above
+// says "this directory"/"here".
+func Test_init_from_a_subdirectory_names_the_install_root_in_the_next_action(t *testing.T) {
+	parent := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(parent, ".brief.yaml"), []byte("feature-directory: specs\n"), 0o600))
+	child := filepath.Join(parent, "child")
+	require.NoError(t, os.Mkdir(child, 0o755))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), child, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, "brief init: installed for claude-code in ..; start Claude Code in .. (or run /reload-plugins in a session already there), then 'brief new feature <name>'\n", stderr.String())
+}
+
+// Test_init_no_hook_omits_the_hook_row pins --no-hook: the same five rows
+// minus hooks.json, and no hooks.json file on disk.
+func Test_init_no_hook_omits_the_hook_row(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--no-hook"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"created .brief.yaml\n"+
+		"created docs/specifications/\n"+
+		"created .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"created .claude/skills/brief/skills/start/SKILL.md\n"+
+		"created .claude/skills/brief/skills/finish/SKILL.md\n", stdout.String())
+
+	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief", "hooks", "hooks.json"))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+// Test_no_hook_with_host_none_is_accepted_and_changes_nothing pins
+// --no-hook's own no-op under --host none: no plugin was ever planned, so
+// --no-hook has nothing to omit, and init still installs just the config
+// and feature root.
+func Test_no_hook_with_host_none_is_accepted_and_changes_nothing(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "none", "--no-hook"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, "created .brief.yaml\ncreated docs/specifications/\n", stdout.String())
+}
+
+// Test_init_rerunning_for_claude_code_reports_unchanged_and_edited_files_kept
+// pins convergence and "edited locally" together at the CLI boundary: a
+// second run reports every row "unchanged" except the finish skill, edited
+// between runs, reported "kept (edited locally)" — even under --force,
+// which only ever rewrites the config.
+func Test_init_rerunning_for_claude_code_reports_unchanged_and_edited_files_kept(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	finish := filepath.Join(wd, ".claude", "skills", "brief", "skills", "finish", "SKILL.md")
+	require.NoError(t, os.WriteFile(finish, []byte("---\nedited: true\n---\n"), 0o600))
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--force"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"unchanged .brief.yaml\n"+
+		"unchanged docs/specifications/\n"+
+		"unchanged .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"unchanged .claude/skills/brief/skills/start/SKILL.md\n"+
+		"kept .claude/skills/brief/skills/finish/SKILL.md (edited locally)\n"+
+		"unchanged .claude/skills/brief/hooks/hooks.json\n", stdout.String())
+	assert.Equal(t, "brief init: already installed; nothing changed\n", stderr.String())
+}
+
+// Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file pins
+// the "not a regular file" row at the CLI boundary: a directory already
+// occupying the manifest's own path is kept, never followed, never
+// written.
+func Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file(t *testing.T) {
+	wd := t.TempDir()
+	manifest := filepath.Join(wd, ".claude", "skills", "brief", ".claude-plugin", "plugin.json")
+	require.NoError(t, os.MkdirAll(manifest, 0o755))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "kept .claude/skills/brief/.claude-plugin/plugin.json (not a regular file)\n")
 }

@@ -5,15 +5,25 @@ import (
 	"slices"
 )
 
-// Kind names one of the file shapes this package renders — currently only
-// the ".brief.yaml" config; a host's plugin manifest, hook, snippet and
-// agent files each add their own Kind and digest list as init grows to
-// write them.
+// Kind names one of the file shapes this package renders: the ".brief.yaml"
+// config, a Claude Code plugin's manifest, its two skill files and its
+// hook wiring — a snippet and agent files each add their own Kind and
+// digest list as init grows to write them.
 type Kind string
 
-// KindConfig is ConfigFile's own Kind: the digest list Recognize checks
-// when kind is KindConfig holds every release's own ConfigFile digest.
-const KindConfig Kind = "config"
+const (
+	// KindConfig is ConfigFile's own Kind: the digest list Recognize checks
+	// when kind is KindConfig holds every release's own ConfigFile digest.
+	KindConfig Kind = "config"
+	// KindPluginManifest is PluginManifest's own Kind.
+	KindPluginManifest Kind = "plugin-manifest"
+	// KindSkillStart is SkillStart's own Kind.
+	KindSkillStart Kind = "skill-start"
+	// KindSkillFinish is SkillFinish's own Kind.
+	KindSkillFinish Kind = "skill-finish"
+	// KindClaudeHooks is ClaudeHooks's own Kind.
+	KindClaudeHooks Kind = "claude-hooks"
+)
 
 // Origin classifies an existing file's bytes against a Kind's compiled-in
 // digest list: OriginCurrent for a byte-for-byte match against today's own
@@ -41,11 +51,36 @@ var configDigests = [][32]byte{
 	sha256.Sum256(ConfigFile()),
 }
 
+// pluginManifestDigests holds the sha256 digest of every release's own
+// PluginManifest render.
+var pluginManifestDigests = [][32]byte{
+	sha256.Sum256(PluginManifest()),
+}
+
+// skillStartDigests holds the sha256 digest of every release's own
+// SkillStart render.
+var skillStartDigests = [][32]byte{
+	sha256.Sum256(SkillStart()),
+}
+
+// skillFinishDigests holds the sha256 digest of every release's own
+// SkillFinish render.
+var skillFinishDigests = [][32]byte{
+	sha256.Sum256(SkillFinish()),
+}
+
+// claudeHooksDigests holds the sha256 digest of every release's own
+// ClaudeHooks render.
+var claudeHooksDigests = [][32]byte{
+	sha256.Sum256(ClaudeHooks()),
+}
+
 // Recognize reports body's Origin against kind's own compiled-in digest
 // list: OriginCurrent when body's sha256 digest matches this binary's own
-// current render for kind, OriginEdited otherwise. kind is KindConfig
-// today; an unrecognized Kind (none exist yet) reports OriginEdited, since
-// there is no digest list to match against.
+// current render for kind, OriginEdited otherwise. An unrecognized Kind
+// reports OriginEdited, since there is no digest list to match against —
+// including a Kind's bytes checked against a different Kind's own list,
+// which never matches.
 func Recognize(kind Kind, body []byte) Origin {
 	sum := sha256.Sum256(body)
 
@@ -62,6 +97,14 @@ func digestsFor(kind Kind) [][32]byte {
 	switch kind {
 	case KindConfig:
 		return configDigests
+	case KindPluginManifest:
+		return pluginManifestDigests
+	case KindSkillStart:
+		return skillStartDigests
+	case KindSkillFinish:
+		return skillFinishDigests
+	case KindClaudeHooks:
+		return claudeHooksDigests
 	default:
 		return nil
 	}
