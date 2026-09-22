@@ -163,20 +163,27 @@ func Test_a_feature_root_that_is_a_file_refuses_before_writing_the_config(t *tes
 // in this fixture, lands before the config write is attempted and fails —
 // ".brief.yaml" is itself a directory, so nothing can be renamed over it —
 // so the returned error wraps setup.ErrPartialWrite rather than reporting
-// as if nothing were written.
+// as if nothing were written. The returned Result is populated, not the
+// zero value, so a caller can still report what actually landed: the
+// feature root's own artifact and Created entry, both present.
 func Test_force_with_the_config_path_as_a_directory_reports_a_partial_write(t *testing.T) {
 	wd := t.TempDir()
 	configPath := filepath.Join(wd, ".brief.yaml")
 	require.NoError(t, os.Mkdir(configPath, 0o755))
 	srv := newServer(t)
 
-	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, Force: true})
+	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, Force: true})
 
 	require.ErrorIs(t, err, setup.ErrPartialWrite)
 
 	info, statErr := os.Stat(filepath.Join(wd, "docs", "specifications"))
 	require.NoError(t, statErr)
 	assert.True(t, info.IsDir())
+
+	featureRoot := filepath.Join(wd, "docs", "specifications")
+	assert.Contains(t, res.Created, featureRoot)
+	require.Len(t, res.Artifacts, 2)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated}, res.Artifacts[1])
 }
 
 // Test_dry_run_returns_the_plan_and_writes_nothing pins R9: DryRun reports

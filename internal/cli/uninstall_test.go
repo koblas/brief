@@ -152,7 +152,7 @@ func Test_uninstall_for_claude_code_removes_the_plugin_then_the_config(t *testin
 		"removed .claude/skills/brief/skills/start/SKILL.md\n"+
 		"removed .claude/skills/brief/.claude-plugin/plugin.json\n"+
 		"removed .brief.yaml\n", stdout.String())
-	assert.Equal(t, "brief uninstall: removed brief's install; the feature root and its contents were left in place for claude-code\n", stderr.String())
+	assert.Equal(t, "brief uninstall: removed brief's claude-code install; the feature root and its contents were left in place\n", stderr.String())
 
 	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
 	assert.True(t, os.IsNotExist(statErr))
@@ -262,7 +262,7 @@ func Test_uninstall_reaches_the_removed_line_from_the_snippet_alone(t *testing.T
 
 	require.NoError(t, err)
 	assert.Equal(t, "removed CLAUDE.md\n", stdout.String())
-	assert.Equal(t, "brief uninstall: removed brief's install; the feature root and its contents were left in place for claude-code\n", stderr.String())
+	assert.Equal(t, "brief uninstall: removed brief's claude-code install; the feature root and its contents were left in place\n", stderr.String())
 }
 
 // Test_uninstall_refuses_a_lone_marker_naming_the_file_and_line pins R5's
@@ -310,4 +310,36 @@ func Test_uninstall_refuses_a_stray_positional_argument(t *testing.T) {
 
 	assert.Equal(t, 2, cli.ExitCode(err))
 	assert.Contains(t, stderr.String(), "too many arguments")
+}
+
+// Test_uninstall_partial_write_prints_the_rows_that_landed pins the
+// partial-write case (setup.ErrPartialWrite): the CLAUDE.md block is
+// removed before the agents directory — made unwritable — blocks the next
+// removal, so text mode prints the CLAUDE.md "removed" row that actually
+// landed on stdout before the refusal line on stderr; no agent row, which
+// never landed, is ever printed. Skipped under root, which ignores
+// directory write permission.
+func Test_uninstall_partial_write_prints_the_rows_that_landed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory write permission")
+	}
+
+	wd := t.TempDir()
+	var initStdout, initStderr bytes.Buffer
+	require.NoError(t, cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &initStdout, &initStderr))
+
+	agentsDir := filepath.Join(wd, ".claude", "skills", "brief", "agents")
+	require.NoError(t, os.Chmod(agentsDir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(agentsDir, 0o755) })
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Equal(t, "removed CLAUDE.md\n", stdout.String())
+	assert.Contains(t, stderr.String(), "brief uninstall: ")
+	assert.NotContains(t, stdout.String(), "agents")
+
+	_, statErr := os.Stat(filepath.Join(wd, "CLAUDE.md"))
+	assert.True(t, os.IsNotExist(statErr))
 }

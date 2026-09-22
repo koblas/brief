@@ -72,8 +72,8 @@
 // would write there. Before applying anything, a real run (neither DryRun
 // nor Print) also runs checkWritable over every target: a target whose
 // nearest existing ancestor is not a directory, or is a directory that
-// cannot be written to (probeWritable, a deliberate copy of
-// internal/doctor's own probe), refuses as ErrUnwritable — the only Init
+// cannot be written to (internal/platform/writable.Probe, shared with
+// internal/doctor's own root-dir check), refuses as ErrUnwritable — the only Init
 // error path that still returns a populated Result (Artifacts and Print)
 // alongside the error, so a caller can render the by-hand output the
 // refusal's own Fix points at.

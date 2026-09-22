@@ -118,6 +118,11 @@ const runInitWithAgents = "run 'brief init --with-agents'"
 // (Plugin(true) ∪ Agents()), a missing or non-regular subject file
 // (Plugin(false)) is ERROR "incomplete", naming it; an edited one is OK
 // "edited locally"; every subject file current is OK "installed".
+// Mutation-verified: disabling hostPluginCheck's own missing-file
+// precedence branch reddens exactly the three "missing"/"is a directory"
+// cases here — never "edited locally" or "every subject file is
+// current" — proving this table actually discriminates on it rather than
+// passing regardless.
 func Test_diagnose_classifies_host_plugin(t *testing.T) {
 	runHostCheckCases(t, []hostCheckCase{
 		{
@@ -313,7 +318,10 @@ func Test_diagnose_classifies_host_hook(t *testing.T) {
 // exists, is WARN (never ERROR — an unbound agent is not itself a fault);
 // an older render is WARN naming it; an edited one is OK "edited locally";
 // all three current is OK "installed". Every fix here names --with-agents,
-// since a plain "brief init" never touches agent files.
+// since a plain "brief init" never touches agent files. Mutation-verified:
+// disabling hostAgentsCheck's own missing-file precedence branch reddens
+// exactly "one of the three agent files is missing" here — never "edited
+// locally" or "all three agent files are current".
 func Test_diagnose_classifies_host_agents(t *testing.T) {
 	runHostCheckCases(t, []hostCheckCase{
 		{

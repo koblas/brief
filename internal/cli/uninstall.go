@@ -51,36 +51,42 @@ type uninstallDocument struct {
 // minus the "brief uninstall: " prefix: R11's stderr contract, first match
 // wins — dry run, then "nothing installed" for zero artifacts, then
 // "removed" when at least one artifact reports setup.ActionRemoved, else
-// "nothing removed" naming --force — with " for <host>" appended unless
-// host is setup.HostNone, since uninstall's default host is
-// setup.HostClaudeCode and a run scoped to "none" removes only the config.
+// "nothing removed" naming --force. host reads naturally in each case
+// unless it is setup.HostNone (uninstall's default host is
+// setup.HostClaudeCode, and a run scoped to "none" removes only the
+// config): every case but "removed" appends " for <host>"; "removed" names
+// it right after "brief's" instead ("removed brief's claude-code install;
+// …"), since a trailing "for claude-code" read awkwardly there.
 func uninstallNextAction(host string, dryRun bool, artifacts []setup.Artifact) string {
-	base := uninstallBaseNextAction(dryRun, artifacts)
+	if dryRun {
+		return withHostSuffix("dry run, no files changed; rerun without --dry-run to apply", host)
+	}
+
+	if len(artifacts) == 0 {
+		return withHostSuffix("nothing installed", host)
+	}
+
+	for _, a := range artifacts {
+		if a.Action == setup.ActionRemoved {
+			if host == setup.HostNone {
+				return "removed brief's install; the feature root and its contents were left in place"
+			}
+
+			return fmt.Sprintf("removed brief's %s install; the feature root and its contents were left in place", host)
+		}
+	}
+
+	return withHostSuffix("nothing removed; run 'brief uninstall --force' to remove edited files", host)
+}
+
+// withHostSuffix appends " for <host>" to base, unless host is
+// setup.HostNone, in which case base is returned unchanged.
+func withHostSuffix(base, host string) string {
 	if host == setup.HostNone {
 		return base
 	}
 
 	return base + " for " + host
-}
-
-// uninstallBaseNextAction renders uninstallNextAction's own text before the
-// " for <host>" suffix is considered.
-func uninstallBaseNextAction(dryRun bool, artifacts []setup.Artifact) string {
-	if dryRun {
-		return "dry run, no files changed; rerun without --dry-run to apply"
-	}
-
-	if len(artifacts) == 0 {
-		return "nothing installed"
-	}
-
-	for _, a := range artifacts {
-		if a.Action == setup.ActionRemoved {
-			return "removed brief's install; the feature root and its contents were left in place"
-		}
-	}
-
-	return "nothing removed; run 'brief uninstall --force' to remove edited files"
 }
 
 // runUninstall implements "brief uninstall [--host <name>] [--dry-run]
@@ -104,6 +110,10 @@ func runUninstall(ctx context.Context, wd string, rest []string, host string, dr
 	if err != nil {
 		if errors.Is(err, setup.ErrUnknownHost) {
 			return out.usageError(fmt.Sprintf("brief uninstall: unknown host %q; expected one of: %s; run '%s'", host, strings.Join(setup.Hosts(), ", "), uninstallInvocation))
+		}
+
+		if errors.Is(err, setup.ErrPartialWrite) {
+			return renderPartialWrite(res, err, wd, out)
 		}
 
 		return out.refusal(err)

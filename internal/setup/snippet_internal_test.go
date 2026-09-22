@@ -8,6 +8,8 @@ package setup
 // artifact.ScanSnippetMarkers, tested in internal/platform/artifact.
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/artifact"
@@ -138,4 +140,78 @@ func Test_removeSnippet_on_a_block_the_user_moved_drops_only_the_span(t *testing
 	restored := removeSnippet([]byte(existing), *toSnippetSpan(rawSpan))
 
 	assert.Equal(t, "before\nafter", string(restored))
+}
+
+// Test_verifySnippetUnchanged pins the read-modify-write guard apply and
+// applyUninstall both run immediately before touching CLAUDE.md: nil, the
+// happy path, when the file's current bytes still match what planning
+// read (or, for a fresh create, the file is still absent); a
+// *RefusalError wrapping ErrConcurrentEdit, naming rerunCommand in its own
+// Fix, for every other combination planning could not have foreseen — the
+// file's bytes changed, it now exists when planning found nothing, or it
+// no longer exists at all.
+func Test_verifySnippetUnchanged(t *testing.T) {
+	t.Run("unchanged existing bytes is nil", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "CLAUDE.md")
+		require.NoError(t, os.WriteFile(path, []byte("stable"), 0o600))
+
+		err := verifySnippetUnchanged(path, true, []byte("stable"), "brief init")
+
+		assert.NoError(t, err)
+	})
+
+	t.Run("still absent when planning found nothing is nil", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "CLAUDE.md")
+
+		err := verifySnippetUnchanged(path, false, nil, "brief init")
+
+		assert.NoError(t, err)
+	})
+
+	t.Run("bytes changed since planning refuses", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "CLAUDE.md")
+		require.NoError(t, os.WriteFile(path, []byte("edited by someone else"), 0o600))
+
+		err := verifySnippetUnchanged(path, true, []byte("stable"), "brief init")
+
+		require.ErrorIs(t, err, ErrConcurrentEdit)
+
+		var refusal *RefusalError
+		require.ErrorAs(t, err, &refusal)
+		assert.Equal(t, path, refusal.Path)
+		assert.Equal(t, "rerun 'brief init'", refusal.Fix)
+	})
+
+	t.Run("created out from under planning refuses", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "CLAUDE.md")
+		require.NoError(t, os.WriteFile(path, []byte("raced into existence"), 0o600))
+
+		err := verifySnippetUnchanged(path, false, nil, "brief uninstall")
+
+		require.ErrorIs(t, err, ErrConcurrentEdit)
+	})
+
+	t.Run("removed out from under planning refuses", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "CLAUDE.md")
+
+		err := verifySnippetUnchanged(path, true, []byte("stable"), "brief uninstall")
+
+		require.ErrorIs(t, err, ErrConcurrentEdit)
+	})
+
+	t.Run("an unrelated read failure is returned unwrapped", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "sub", "CLAUDE.md")
+		require.NoError(t, os.MkdirAll(path, 0o755))
+
+		err := verifySnippetUnchanged(path, true, []byte("stable"), "brief init")
+
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrConcurrentEdit)
+	})
 }

@@ -396,3 +396,37 @@ func writeSnippetFile(path string, body []byte) error {
 
 	return nil
 }
+
+// verifySnippetUnchanged re-reads path immediately before Init or Uninstall
+// writes to it and reports ErrConcurrentEdit (wrapped in a *RefusalError,
+// fix naming rerunCommand) unless its bytes still match exactly what
+// planning read: existedBefore true and existing byte-identical to the
+// current bytes, or existedBefore false and path still absent. A read
+// failure other than "does not exist" is returned unwrapped — the same
+// shape planSnippet's own reads use. This is apply's/applyUninstall's own
+// read-modify-write guard: planning and applying are not atomic with
+// respect to a concurrent brief invocation, or a person editing CLAUDE.md
+// by hand, in between.
+func verifySnippetUnchanged(path string, existedBefore bool, existing []byte, rerunCommand string) error {
+	current, err := os.ReadFile(path)
+
+	switch {
+	case err == nil:
+		if existedBefore && bytes.Equal(current, existing) {
+			return nil
+		}
+	case os.IsNotExist(err):
+		if !existedBefore {
+			return nil
+		}
+	default:
+		return fmt.Errorf("setup: read %s: %w", path, err)
+	}
+
+	return &RefusalError{
+		Path:    path,
+		Problem: "changed since it was planned",
+		Fix:     "rerun '" + rerunCommand + "'",
+		Err:     ErrConcurrentEdit,
+	}
+}

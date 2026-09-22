@@ -36,6 +36,17 @@ feature root (accessible, not counted), environment, host integration — setup 
   is installed; exit 0. Unparseable or invalid existing config → refusal, exit 1, no files
   changed. `--force` means only "rewrite `.brief.yaml` from defaults". A second run of the same
   invocation reports every artifact `unchanged`.
+
+  **Amended in the git-boundary fix**: the install root `init`, `uninstall` and `doctor` all
+  share is the nearest `.brief.yaml` walking up from the working directory (`config.Locate`'s own
+  walk), but only when that config sits at or below the nearest enclosing git repository (walked
+  from the working directory for a `.git` directory or file). A config found *above* that
+  boundary — a `HOME`-level `.brief.yaml`, say, from a repository nested under an unrelated tree
+  holding its own stray config — is treated exactly as though none existed: `init` writes a fresh
+  `.brief.yaml` at the working directory rather than adopting or merging into the ancestor
+  repository's own files (its `CLAUDE.md` included), and `uninstall`/`doctor` likewise never read
+  or report on it. With no enclosing git repository anywhere above the working directory, there is
+  no boundary to enforce and the walk is unbounded, exactly as before this rule existed.
 - R4: **Claude Code integration is a skills-directory plugin** at `.claude/skills/brief/`:
   `.claude-plugin/plugin.json` (`"name": "brief"`), `skills/start/SKILL.md` (`/brief:start`),
   `skills/finish/SKILL.md` (`/brief:finish`) — both `disable-model-invocation: true` with
@@ -145,6 +156,15 @@ feature root (accessible, not counted), environment, host integration — setup 
   **Amended during SCENARIO-08 planning**: init's JSON document gains `roles_to_add:[<lines>]`,
   always present (`[]` when nothing to add) — the same lines the stderr hint prints, one array
   element per line; stderr stays empty under `--json` exactly as every other success does.
+
+  **Amended in the git-boundary fix**: a partial write (a write-path failure after at least one
+  artifact already landed) prints the rows that actually landed — never the full plan, and never a
+  row for the write that failed — on stdout before the refusal line on stderr; `--json` stays the
+  standard error document, `files_changed:true`, no `artifacts` field, matching R10's own
+  unwritable-target contract. `uninstall`'s own "removed" next-action line names the host right
+  after "brief's" (`removed brief's claude-code install; …`) rather than trailing it with "for
+  claude-code", which read awkwardly; every other next-action line keeps the trailing `for <host>`
+  suffix.
 - R12: **`check --hook <host>`** reads the host hook payload on stdin, takes the path from
   `tool_input.file_path`, and checks only the feature containing it. No `.brief.yaml` found, or
   a path outside the feature root: silent, exit 0. **Amended during SCENARIO-05 planning** (verified
@@ -156,6 +176,14 @@ feature root (accessible, not counted), environment, host integration — setup 
   dir rel>: N ERROR finding(s); run 'brief check <feature>'"}}` to stdout, nothing to stderr.
   No findings or WARN only: silent, exit 0. Payload parsing and output shaping sit behind an
   internal host interface.
+
+  **Amended in the git-boundary fix**: the opt-in gate (no `.brief.yaml` found anywhere at or
+  below the nearest enclosing git repository, R3) runs *before* the stdin payload is parsed at
+  all — a malformed payload against an un-opted-in repository is silent, exit 0, exactly like a
+  well-formed one, rather than being reported as a fault the repository never asked to have
+  checked. Inside a repository that did opt in, a malformed payload is exit 1 (a PostToolUse
+  hook's own non-blocking failure) with one stderr line, never usage-error's exit 2 — the payload
+  is host-supplied, not user-typed.
 - R13: **`doctor`** is setup only — never reads feature contents. Stdout: one row per check,
   `<SEVERITY>  <id>  <rel path>  <detail>` with SEVERITY ∈ OK | WARN | ERROR | SKIP. Stderr
   summary: `brief doctor: setup ok; run 'brief check' for feature content` or
@@ -169,6 +197,11 @@ feature root (accessible, not counted), environment, host integration — setup 
   host-snippet, host-agents, roles. SKIP when a check could not run (e.g. config-values when the
   config does not parse) or its subject is not installed. Older-release files → WARN with fix
   `brief init`; locally edited → OK, detail `edited locally`.
+
+  **Amended in the git-boundary fix**: `doctor`'s own install root shares R3's rule exactly — a
+  `.brief.yaml` found above the nearest enclosing git repository is treated as though none
+  existed, and the config family reports the "no config anywhere" rows rather than naming that
+  ancestor file.
 - R14: **Command surface & order.** Root help and every "expected one of:" list:
   `new, start, finish, status, check, init, doctor, uninstall`. Shorts: init `install brief's
   config and agent-host integration`; doctor `check brief's setup: config, feature root, host

@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/repo"
+	"github.com/koblas/brief/internal/platform/writable"
 )
 
 // configFileName is the config file Locate looks for — the same name
@@ -140,7 +142,7 @@ func relPath(wd, p string) string {
 // checkRootDir builds root-dir's own row: the feature directory
 // (filepath.Join(root, featureDirectory)) must exist, be a directory, be
 // readable (open then close, never list entries — root-dir never counts
-// features) and be writable (probeWritable, the only write doctor
+// features) and be writable (writable.Probe, the only write doctor
 // performs), checked in that order so an unreadable directory is reported
 // as such rather than falling through to the write probe.
 func checkRootDir(wd, root, featureDirectory string) Check {
@@ -161,30 +163,21 @@ func checkRootDir(wd, root, featureDirectory string) Check {
 	}
 	_ = f.Close()
 
-	if !probeWritable(path) {
+	if !writable.Probe(path) {
 		return Check{ID: "root-dir", Severity: SeverityError, Path: path, Detail: "not writable", Fix: new("chmod u+rwx " + relPath(wd, path))}
 	}
 
 	return Check{ID: "root-dir", Severity: SeverityOK, Path: path, Detail: "exists, readable and writable"}
 }
 
-// checkEnvGit builds env-git's own row: walking up from wd for a ".git"
-// entry, directory or file (a linked worktree's ".git" is a file naming
-// its real gitdir elsewhere) — found is OK, none anywhere is WARN with
-// fix "git init".
+// checkEnvGit builds env-git's own row from repo.Root's own walk up from wd
+// for a ".git" entry, directory or file (a linked worktree's ".git" is a
+// file naming its real gitdir elsewhere) — found is OK, none anywhere is
+// WARN with fix "git init". The same walk bounds Diagnose's own install
+// root (R3, config.LocateInRepo).
 func checkEnvGit(wd string) Check {
-	for dir := wd; ; {
-		candidate := filepath.Join(dir, ".git")
-		if _, err := os.Stat(candidate); err == nil {
-			return Check{ID: "env-git", Severity: SeverityOK, Path: candidate, Detail: "found"}
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-
-		dir = parent
+	if root, ok := repo.Root(wd); ok {
+		return Check{ID: "env-git", Severity: SeverityOK, Path: filepath.Join(root, ".git"), Detail: "found"}
 	}
 
 	return Check{ID: "env-git", Severity: SeverityWarn, Detail: "no .git found above the working directory", Fix: new("git init")}

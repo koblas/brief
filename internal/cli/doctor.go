@@ -136,7 +136,7 @@ func doctorSummary(counts doctor.Counts) string {
 // runDoctor implements "brief doctor [--json]"; rest is its positional
 // arguments, flags already parsed away, and must be empty. It never calls
 // resolveRoot: an invalid or unparseable ".brief.yaml" is reported as
-// rows (R13), never a refusal. config.Locate's own nonexistent-startDir
+// rows (R13), never a refusal. config.LocateInRepo's own nonexistent-startDir
 // guard — unreachable when wd comes from os.Getwd — is the one refusal
 // runDoctor emits; every other setup fault becomes a Check. extraOpts are
 // appended after runDoctor's own doctor.WithVersion, so a caller (a test)
@@ -146,7 +146,7 @@ func runDoctor(ctx context.Context, wd string, rest []string, readBuildInfo func
 		return out.usageError(fmt.Sprintf("brief doctor: too many arguments; run '%s'", doctorInvocation))
 	}
 
-	if _, _, err := config.Locate(wd); err != nil {
+	if _, _, err := config.LocateInRepo(wd); err != nil {
 		return out.refusal(err)
 	}
 

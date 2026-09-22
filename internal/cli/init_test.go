@@ -567,3 +567,26 @@ func Test_init_refuses_an_unwritable_target_and_prints_the_manual_output(t *test
 		assert.NotContains(t, raw, "artifacts")
 	})
 }
+
+// Test_init_partial_write_prints_the_rows_that_landed pins the partial-write
+// case (setup.ErrPartialWrite): apply's own write order lands the feature
+// root before the config write — a directory at ".brief.yaml" — fails, so
+// text mode prints the feature root's own "created" row on stdout, the same
+// row a successful run would, before the refusal line on stderr; the config
+// row, which never landed, is never printed.
+func Test_init_partial_write_prints_the_rows_that_landed(t *testing.T) {
+	wd := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(wd, ".brief.yaml"), 0o755))
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "none", "--force"}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Equal(t, "created docs/specifications/\n", stdout.String())
+	assert.Contains(t, stderr.String(), "brief init: ")
+	assert.NotContains(t, stdout.String(), ".brief.yaml")
+
+	info, statErr := os.Stat(filepath.Join(wd, "docs", "specifications"))
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+}

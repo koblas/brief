@@ -279,6 +279,21 @@ func (r reporter) successHeader() jsonHeader {
 // error. Both modes return the same error satisfying
 // errors.Is(err, ErrUsage).
 func (r reporter) usageError(msg string) error {
+	return r.usageErrorWithFix(msg, usageFix(msg, r.cmd))
+}
+
+// usageErrorWithFix renders msg exactly like usageError, but uses fix
+// verbatim for JSON's own "fix" field rather than deriving it from msg via
+// usageFix. usageFix's own "; run '...'" extraction assumes msg ends at the
+// closing quote — true of every ordinary usage line — and falls back to
+// r.cmd's own invocation otherwise (pinned behavior:
+// Test_json_mode_usage_error_fix_stops_at_the_quote_when_the_line_has_trailing_prose).
+// init's own unknown-host line is the one message that both carries a
+// "; run '...'" clause and trails prose after its closing quote ("... to
+// wire it by hand"), so that fallback would silently substitute a
+// different fix than the one the message itself names; this lets that one
+// call site supply the correct fix directly instead.
+func (r reporter) usageErrorWithFix(msg, fix string) error {
 	if r.json {
 		command := commandName(r.cmd)
 		doc := errorDocument{
@@ -286,7 +301,7 @@ func (r reporter) usageError(msg string) error {
 			Error: jsonError{
 				Kind:         errorKindUsage,
 				Message:      msg,
-				Fix:          usageFix(msg, r.cmd),
+				Fix:          fix,
 				FilesChanged: filesChangedFor(r.cmd, nil),
 			},
 		}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/koblas/brief/internal/platform/repo"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,8 +23,16 @@ const configFileName = ".brief.yaml"
 // ErrInvalidConfig, a startDir that does not exist — filepath.Abs alone
 // does not stat the path, so without this guard a mistyped path would
 // silently walk from the nearest existing ancestor and report as if
-// nothing were wrong.
+// nothing were wrong. It is LocateWithin(startDir, "") — unbounded.
 func Locate(startDir string) (string, []string, error) {
+	return LocateWithin(startDir, "")
+}
+
+// LocateWithin is Locate's own walk, stopping at boundary rather than the
+// filesystem root: the directory holding boundary is still checked, but
+// its parent never is, so a config above boundary is never found. An empty
+// boundary is unbounded, identical to Locate.
+func LocateWithin(startDir, boundary string) (string, []string, error) {
 	abs, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve config: %w", err)
@@ -31,6 +40,14 @@ func Locate(startDir string) (string, []string, error) {
 
 	if _, statErr := os.Stat(abs); statErr != nil {
 		return "", nil, fmt.Errorf("resolve config: %w", &InvalidConfigError{Path: abs, Err: statErr})
+	}
+
+	var boundaryAbs string
+
+	if boundary != "" {
+		if b, err := filepath.Abs(boundary); err == nil {
+			boundaryAbs = b
+		}
 	}
 
 	var nearest string
@@ -48,6 +65,10 @@ func Locate(startDir string) (string, []string, error) {
 			}
 		}
 
+		if boundaryAbs != "" && dir == boundaryAbs {
+			break
+		}
+
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break
@@ -57,6 +78,23 @@ func Locate(startDir string) (string, []string, error) {
 	}
 
 	return nearest, shadowed, nil
+}
+
+// LocateInRepo is Locate, bounded to the nearest git repository enclosing
+// startDir (repo.Root): a ".brief.yaml" found above that repository's own
+// root is never adopted — reported exactly as if none existed, empty
+// nearest, no shadowed ancestors — since init, uninstall and doctor's own
+// install root must never leave the repository startDir is inside. When no
+// enclosing git repository exists anywhere above startDir, this is
+// identical to Locate: there is no repository boundary to enforce, so
+// today's unbounded ancestor walk stands.
+func LocateInRepo(startDir string) (string, []string, error) {
+	boundary := ""
+	if root, ok := repo.Root(startDir); ok {
+		boundary = root
+	}
+
+	return LocateWithin(startDir, boundary)
 }
 
 // Resolve walks upward from startDir to the filesystem root looking for a

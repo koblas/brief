@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"github.com/koblas/brief/internal/platform/writable"
 )
 
 // writableTargets lists every path a real (non-DryRun, non-Print) Init
@@ -64,7 +66,7 @@ func checkWritable(targets []string) error {
 			return &RefusalError{Path: anc, Problem: "not a directory", Fix: "apply the output below by hand", Err: ErrUnwritable}
 		}
 
-		if !probeWritable(anc) {
+		if !writable.Probe(anc) {
 			return &RefusalError{Path: anc, Problem: "not writable", Fix: "apply the output below by hand", Err: ErrUnwritable}
 		}
 	}
@@ -100,22 +102,4 @@ func nearestExistingAncestor(target string) (string, os.FileInfo, error) {
 
 		dir = parent
 	}
-}
-
-// probeWritable reports whether dir can be written to: it creates a
-// temporary file inside dir, closes it, and removes it immediately — a
-// deliberate copy of internal/doctor's own probe. setup may not import
-// doctor (neither sits above the other in the dependency rule), so this is
-// duplicated rather than shared sideways.
-func probeWritable(dir string) bool {
-	f, err := os.CreateTemp(dir, ".brief-init-probe-*")
-	if err != nil {
-		return false
-	}
-
-	name := f.Name()
-	_ = f.Close()
-	_ = os.Remove(name)
-
-	return true
 }

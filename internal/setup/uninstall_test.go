@@ -214,8 +214,9 @@ func Test_uninstall_keeps_a_config_path_that_is_not_a_regular_file(t *testing.T)
 }
 
 // Test_uninstall_operates_on_a_config_found_in_an_ancestor pins the shared
-// root rule: a config found walking up from wd (config.Locate) is the one
-// Uninstall removes, not anything relative to wd itself.
+// root rule: a config found walking up from wd (config.LocateInRepo, no
+// enclosing git repository in this fixture so the walk is unbounded) is the
+// one Uninstall removes, not anything relative to wd itself.
 func Test_uninstall_operates_on_a_config_found_in_an_ancestor(t *testing.T) {
 	parent := t.TempDir()
 	srv := setup.NewServer()
@@ -300,6 +301,38 @@ func Test_uninstall_reports_a_remove_failure_without_partial_write(t *testing.T)
 
 	_, statErr := os.Stat(filepath.Join(wd, ".brief.yaml"))
 	assert.NoError(t, statErr)
+}
+
+// Test_uninstall_reports_the_populated_result_on_a_partial_write pins the
+// multi-artifact failure path: the CLAUDE.md block (removedAny's own first
+// write) is removed before the agents directory — made unwritable — blocks
+// the next removal, so the returned error wraps ErrPartialWrite and the
+// returned Result is populated, not the zero value: it still names the
+// CLAUDE.md removal that actually landed. Skipped under root, which
+// ignores directory write permission.
+func Test_uninstall_reports_the_populated_result_on_a_partial_write(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory write permission")
+	}
+
+	wd := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+	require.NoError(t, err)
+
+	agentsDir := filepath.Join(wd, ".claude", "skills", "brief", "agents")
+	require.NoError(t, os.Chmod(agentsDir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(agentsDir, 0o755) })
+
+	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+
+	require.ErrorIs(t, err, setup.ErrPartialWrite)
+
+	claudePath := filepath.Join(wd, "CLAUDE.md")
+	assert.Contains(t, res.Removed, claudePath)
+
+	_, statErr := os.Stat(claudePath)
+	assert.True(t, os.IsNotExist(statErr))
 }
 
 // Test_uninstall_rejects_an_unknown_host pins the same usage-error branch

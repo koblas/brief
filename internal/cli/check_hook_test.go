@@ -237,12 +237,15 @@ func Test_check_hook_reports_additional_context_when_the_same_feature_has_an_ope
 // Test_check_hook_usage_errors covers every text-mode usage-error shape
 // "check --hook" reports before it ever reads the repository: exit 2, the
 // pinned stderr line, empty stdout. Each case discriminates on its own
-// mutation: the host it validates, the flag combination it rejects, or the
-// payload shape host.ClaudeCode's own HookPath refuses. "--hook with
-// --json" is not a case here: R5 routes every usage error to stdout as a
-// JSON document under --json, a different assertion shape entirely —
-// covered by Test_check_hook_with_json_reports_the_usage_error_as_json
-// below.
+// mutation: the host it validates, or the flag combination it rejects. A
+// malformed stdin payload is not a case here: it is no longer a usage
+// error (exit 2) at all — see
+// Test_check_hook_malformed_payload_in_an_opted_in_repo_exits_1 and
+// Test_check_hook_is_silent_for_malformed_stdin_when_no_brief_yaml_is_found
+// below for its own two shapes. "--hook with --json" is not a case here
+// either: R5 routes every usage error to stdout as a JSON document under
+// --json, a different assertion shape entirely — covered by
+// Test_check_hook_with_json_reports_the_usage_error_as_json below.
 func Test_check_hook_usage_errors(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -262,24 +265,6 @@ func Test_check_hook_usage_errors(t *testing.T) {
 			stdin:      "",
 			wantStderr: "brief check: --hook takes no feature argument; run 'brief check --hook claude-code'\n",
 		},
-		{
-			name:       "empty stdin",
-			args:       []string{"check", "--hook", "claude-code"},
-			stdin:      "",
-			wantStderr: "brief check: malformed hook payload on stdin; run 'brief check --hook claude-code'\n",
-		},
-		{
-			name:       "stdin is not JSON",
-			args:       []string{"check", "--hook", "claude-code"},
-			stdin:      "not json",
-			wantStderr: "brief check: malformed hook payload on stdin; run 'brief check --hook claude-code'\n",
-		},
-		{
-			name:       "stdin has no tool_input.file_path",
-			args:       []string{"check", "--hook", "claude-code"},
-			stdin:      `{"cwd":"/repo"}`,
-			wantStderr: "brief check: malformed hook payload on stdin; run 'brief check --hook claude-code'\n",
-		},
 	}
 
 	for _, c := range cases {
@@ -295,6 +280,55 @@ func Test_check_hook_usage_errors(t *testing.T) {
 			assert.Empty(t, stdout.String())
 		})
 	}
+}
+
+// Test_check_hook_malformed_payload_in_an_opted_in_repo_exits_1 covers
+// every payload shape host.ClaudeCode's own HookPath refuses, inside a
+// repository that opted in (a ".brief.yaml" exists at wd): exit 1, not
+// usage-error's exit 2 — the payload is host-supplied, not user-typed —
+// one stderr line, empty stdout.
+func Test_check_hook_malformed_payload_in_an_opted_in_repo_exits_1(t *testing.T) {
+	cases := []struct {
+		name  string
+		stdin string
+	}{
+		{name: "empty stdin", stdin: ""},
+		{name: "stdin is not JSON", stdin: "not json"},
+		{name: "stdin has no tool_input.file_path", stdin: `{"cwd":"/repo"}`},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(""), 0o600))
+
+			var stdout, stderr bytes.Buffer
+			err := cli.Run(t.Context(), wd, []string{"check", "--hook", "claude-code"}, strings.NewReader(c.stdin), &stdout, &stderr)
+
+			require.Error(t, err)
+			assert.Equal(t, 1, cli.ExitCode(err))
+			assert.Equal(t, "brief check: malformed hook payload on stdin; run 'brief check --hook claude-code'\n", stderr.String())
+			assert.Empty(t, stdout.String())
+		})
+	}
+}
+
+// Test_check_hook_is_silent_for_malformed_stdin_when_no_brief_yaml_is_found
+// is the control proving the opt-in gate runs before the payload is ever
+// parsed: the very same malformed stdin that
+// Test_check_hook_malformed_payload_in_an_opted_in_repo_exits_1 reports as
+// an error is silent, exit 0, in a repository with no ".brief.yaml" — the
+// one variable that changes between the two is whether the repository
+// opted in, never the payload.
+func Test_check_hook_is_silent_for_malformed_stdin_when_no_brief_yaml_is_found(t *testing.T) {
+	wd := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"check", "--hook", "claude-code"}, strings.NewReader("not json"), &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Empty(t, stderr.String())
 }
 
 func Test_check_hook_with_json_reports_the_usage_error_as_json(t *testing.T) {

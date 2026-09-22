@@ -24,7 +24,7 @@ const (
 	// hook file missing while the rest of the plugin is installed (doctor
 	// cannot tell that apart from --no-hook), a host-agents file missing
 	// or not regular, or a roles position unbound or unresolved (roles are
-	// reported, never enforced — R1 amendment).
+	// reported, never enforced).
 	SeverityWarn Severity = "WARN"
 	// SeverityError marks a check whose subject would make another
 	// command refuse or misbehave: an unparseable config, an invalid
@@ -194,8 +194,14 @@ func NewServer(opts ...Option) *Server {
 // config is informational, not a fault.
 //
 // The install root the five host rows and roles check against is
-// config.Locate's own directory whenever a config was found — parseable or
-// not — else wd; the host is always Claude Code, with no detection.
+// config.LocateInRepo's own directory whenever a config was found —
+// parseable or not — else wd; a config found above the nearest enclosing
+// git repository (walked from wd) is treated as though none existed, the
+// same install-root rule init and uninstall apply (R3) — its config family
+// then reports noConfigChecks rather than naming that ancestor file. With
+// no enclosing git repository anywhere above wd, root-finding keeps its own
+// plain ancestor walk, unbounded. The host is always Claude Code, with no
+// detection.
 // env-path is ERROR, rather than WARN, when brief is missing from PATH and
 // the integration is installed (any Plugin(true) ∪ Agents() file present,
 // or a CLAUDE.md snippet block found). Diagnose never returns an error for
@@ -209,7 +215,7 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 		absWd = wd
 	}
 
-	nearest, shadowed, locateErr := config.Locate(absWd)
+	nearest, shadowed, locateErr := config.LocateInRepo(absWd)
 
 	root := absWd
 	if locateErr == nil && nearest != "" {

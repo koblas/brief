@@ -34,9 +34,11 @@ type UninstallRequest struct {
 // decodes the config, or a plugin or agent file, the way Init does, so it
 // has no refusal class of its own; an invalid, unparseable, or locally
 // edited file is simply "edited locally", the same as any other byte
-// mismatch. No config found anywhere (config.Locate's own walk-up) and no
-// plugin or agent file found either means zero artifacts, reported by cli
-// as "nothing installed".
+// mismatch. No config found anywhere (config.LocateInRepo's own bounded
+// walk-up, R3 — an ancestor config above the nearest enclosing git
+// repository is treated as though it did not exist, the same rule Init
+// applies to its own install root) and no plugin or agent file found either
+// means zero artifacts, reported by cli as "nothing installed".
 //
 // Artifacts lists, for HostClaudeCode, the CLAUDE.md block first
 // (planSnippetRemoval), then the three agent files reversed (reviewer,
@@ -61,7 +63,7 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
 	}
 
-	nearest, _, err := config.Locate(wd)
+	nearest, _, err := config.LocateInRepo(wd)
 	if err != nil {
 		return Result{}, err
 	}
@@ -290,12 +292,16 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 	var removedAny bool
 
 	if hasSnippet && snippetArt.Action == ActionRemoved {
+		if err := verifySnippetUnchanged(snippetArt.Path, true, snippetArt.existing, "brief uninstall"); err != nil {
+			return Result{}, err
+		}
+
 		if len(snippetArt.remains) == 0 {
 			if err := os.Remove(snippetArt.Path); err != nil {
-				wrapped := fmt.Errorf("setup: remove %s: %w", snippetArt.Path, err)
+				wrapped := fmt.Errorf("setup: %w", err)
 
 				if removedAny {
-					return Result{}, markPartial(wrapped)
+					return res, markPartial(wrapped)
 				}
 
 				return Result{}, wrapped
@@ -305,7 +311,7 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 		} else {
 			if err := writeSnippetFile(snippetArt.Path, snippetArt.remains); err != nil {
 				if removedAny {
-					return Result{}, markPartial(err)
+					return res, markPartial(err)
 				}
 
 				return Result{}, err
@@ -323,10 +329,10 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 		}
 
 		if err := os.Remove(a.Path); err != nil {
-			wrapped := fmt.Errorf("setup: remove %s: %w", a.Path, err)
+			wrapped := fmt.Errorf("setup: %w", err)
 
 			if removedAny {
-				return Result{}, markPartial(wrapped)
+				return res, markPartial(wrapped)
 			}
 
 			return Result{}, wrapped
@@ -339,7 +345,7 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 	if hostName == HostClaudeCode {
 		if err := pruneEmptyPluginDirs(root); err != nil {
 			if removedAny {
-				return Result{}, markPartial(err)
+				return res, markPartial(err)
 			}
 
 			return Result{}, err

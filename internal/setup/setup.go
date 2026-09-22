@@ -146,8 +146,9 @@ type Artifact struct {
 
 // Result is what Init and Uninstall both return: Host and DryRun echo the
 // request, Root is the absolute install root both operated against —
-// config.Locate's directory, or wd when no config was found — Artifacts
-// lists what was found and what happened to it — for Init, the config
+// config.LocateInRepo's directory, or wd when no config was found, or when
+// the config found lies above the nearest enclosing git repository (R3) —
+// Artifacts lists what was found and what happened to it — for Init, the config
 // file, the feature root, then a claude-code host's own plugin manifest,
 // start skill, finish skill, hook wiring, and, under WithAgents, the three
 // role-agent files, then the CLAUDE.md block last, the fixed order R11's
@@ -204,6 +205,14 @@ type Result struct {
 // refusal, and writes nothing either way. Result.RolesToAdd is computed
 // even under DryRun.
 //
+// The install root is config.LocateInRepo's own directory (R3): a found
+// config is adopted only when it sits at or below the nearest enclosing git
+// repository, walked from wd; one found above that boundary — a HOME-level
+// config, say — is treated as though none existed, and Init writes a fresh
+// one at wd instead of adopting or merging into a repository elsewhere on
+// disk. With no enclosing git repository anywhere above wd, Init keeps its
+// own plain ancestor walk, unbounded, exactly as before this rule existed.
+//
 // Applying writes the feature root, then every plugin and agent file
 // reporting ActionCreated, then the CLAUDE.md block, then the config file
 // last, so the config file — the repository's opt-in marker — never
@@ -220,7 +229,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
 	}
 
-	nearest, _, err := config.Locate(wd)
+	nearest, _, err := config.LocateInRepo(wd)
 	if err != nil {
 		return Result{}, err
 	}
@@ -395,7 +404,7 @@ func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippet
 
 		if err := writePluginFile(p.Path, artifact.Render(p.renderKind)); err != nil {
 			if wroteSomething {
-				return Result{}, markPartial(err)
+				return res, markPartial(err)
 			}
 
 			return Result{}, err
@@ -406,11 +415,21 @@ func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippet
 	}
 
 	if hasSnippet && (snippetArt.Action == ActionCreated || snippetArt.Action == ActionMerged) {
+		existedBefore := snippetArt.Action == ActionMerged
+
+		if err := verifySnippetUnchanged(snippetArt.Path, existedBefore, snippetArt.existing, "brief init"); err != nil {
+			if wroteSomething {
+				return res, markPartial(err)
+			}
+
+			return Result{}, err
+		}
+
 		body := mergeSnippet(snippetArt.existing, snippetArt.span, artifact.SnippetBlock(snippetArt.dir))
 
 		if err := writeSnippetFile(snippetArt.Path, body); err != nil {
 			if wroteSomething {
-				return Result{}, markPartial(err)
+				return res, markPartial(err)
 			}
 
 			return Result{}, err
@@ -428,7 +447,7 @@ func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippet
 	if configArt.Action == ActionCreated {
 		if err := writeConfigFile(configArt.Path, configBody); err != nil {
 			if wroteSomething {
-				return Result{}, markPartial(err)
+				return res, markPartial(err)
 			}
 
 			return Result{}, err

@@ -114,8 +114,7 @@ func relPathsWithOrigin(states []integrationFileState, origin artifact.Origin) [
 // This is the one place every host row's own origin precedence lives, so
 // the four can never drift from each other; it is also the only way to
 // reach the OriginOlder arm at all today, since every compiled-in older
-// digest list ships empty (STATE.md) — see
-// Test_originRow_reports_older_as_warn_with_the_init_fix.
+// digest list ships empty.
 func originRow(origin artifact.Origin, olderFix, suffix string) (Severity, string, *string) {
 	switch origin {
 	case artifact.OriginOlder:

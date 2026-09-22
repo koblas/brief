@@ -14,8 +14,8 @@ func WithHomeDir(fn func() (string, error)) Option {
 }
 
 // detectHost resolves InitRequest.Host == "" (R8): HostClaudeCode when root
-// — config.Locate's own directory, the same root Init plans every artifact
-// against, never wd itself when they differ — holds a ".claude" directory,
+// — config.LocateInRepo's own directory, the same root Init plans every
+// artifact against, never wd itself when they differ — holds a ".claude" directory,
 // or a "CLAUDE.md" entry of any type, or when home reports (without error)
 // a directory whose own ".claude" is a directory; HostNone with
 // detected=false otherwise. A home error, or home returning "", is treated

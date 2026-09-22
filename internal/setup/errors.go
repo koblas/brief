@@ -38,6 +38,14 @@ var ErrUnwritable = errors.New("unwritable target")
 // changed nothing.
 var ErrPartialWrite = errors.New("partial write")
 
+// ErrConcurrentEdit is returned when CLAUDE.md's own bytes, re-read
+// immediately before Init or Uninstall writes to it, no longer match the
+// bytes planning read — another process (a concurrent brief invocation, or
+// a person editing the file by hand) changed it in between. It travels
+// inside a *RefusalError naming the CLAUDE.md path; no write to it is ever
+// attempted once this fires.
+var ErrConcurrentEdit = errors.New("changed since it was planned")
+
 // RefusalError reports a refusal that changed nothing on disk: the path it
 // concerns, what was wrong with it, and how to fix it. cli renders these
 // fields into R14a's one-line refusal template.

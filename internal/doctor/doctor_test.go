@@ -327,11 +327,11 @@ func Test_diagnose_reports_one_config_values_row_per_violation_in_field_order(t 
 // itself stays OK: a shadowed ancestor is not a fault.
 func Test_diagnose_names_shadowed_ancestor_configs_in_config_shadow_detail(t *testing.T) {
 	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
 	rootConfig := filepath.Join(root, ".brief.yaml")
 	require.NoError(t, os.WriteFile(rootConfig, []byte("progress-heading: \"## Root\"\n"), 0o600))
 	wd := filepath.Join(root, "near")
 	require.NoError(t, os.MkdirAll(filepath.Join(wd, "docs", "specifications"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(wd, ".git"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: \"## Near\"\n"), 0o600))
 
 	srv := doctor.NewServer(emptyHomeDir(t))
@@ -340,6 +340,27 @@ func Test_diagnose_names_shadowed_ancestor_configs_in_config_shadow_detail(t *te
 	check := findCheck(t, report, "config-shadow")
 	assert.Equal(t, doctor.SeverityOK, check.Severity)
 	assert.Contains(t, check.Detail, rootConfig)
+}
+
+// Test_diagnose_ignores_an_ancestor_config_outside_the_enclosing_git_repository
+// pins the MAJOR fix at the doctor layer: an ancestor ".brief.yaml" above
+// the nearest enclosing git repository is never reported as this
+// repository's own config-file row — the family reports exactly as it
+// would for no config at all, matching the root init would actually write
+// to.
+func Test_diagnose_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".brief.yaml"), []byte("progress-heading: \"## Home\"\n"), 0o600))
+	proj := filepath.Join(home, "proj")
+	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".git"), 0o755))
+
+	srv := doctor.NewServer(emptyHomeDir(t))
+	report := srv.Diagnose(t.Context(), proj)
+
+	check := findCheck(t, report, "config-file")
+	assert.Equal(t, doctor.SeverityWarn, check.Severity)
+	assert.Equal(t, filepath.Join(proj, ".brief.yaml"), check.Path)
+	assert.Equal(t, "no .brief.yaml found", check.Detail)
 }
 
 // direntNames returns entries' own names, for comparing a directory

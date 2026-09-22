@@ -194,11 +194,17 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 		}
 
 		if errors.Is(err, setup.ErrUnknownHost) {
-			return out.usageError(fmt.Sprintf("brief init: unknown host %q; expected one of: %s; run 'brief init --print' to wire it by hand", host, strings.Join(setup.Hosts(), ", ")))
+			const fix = "run 'brief init --print' to wire it by hand"
+
+			return out.usageErrorWithFix(fmt.Sprintf("brief init: unknown host %q; expected one of: %s; %s", host, strings.Join(setup.Hosts(), ", "), fix), fix)
 		}
 
 		if errors.Is(err, setup.ErrUnwritable) {
 			return renderUnwritable(res, err, wd, out)
+		}
+
+		if errors.Is(err, setup.ErrPartialWrite) {
+			return renderPartialWrite(res, err, wd, out)
 		}
 
 		return out.refusal(err)

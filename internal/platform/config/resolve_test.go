@@ -542,6 +542,110 @@ func Test_locate_returns_the_nearest_config_and_the_ancestors_it_shadows(t *test
 	})
 }
 
+// Test_LocateInRepo_rejects_an_ancestor_config_outside_the_enclosing_git_repository
+// pins the MAJOR fix: a ".brief.yaml" that sits above the nearest enclosing
+// git repository root is never adopted — reported exactly as if none
+// existed, empty nearest, no shadowed ancestors — even though plain Locate
+// would find it, since it is a HOME-level (or otherwise unrelated)
+// repository's own config, not this one's.
+func Test_LocateInRepo_rejects_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
+	home := t.TempDir()
+	writeConfig(t, home, "progress-heading: \"## Home Progress\"\n")
+	proj := filepath.Join(home, "proj")
+	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".git"), 0o755))
+
+	plainNearest, plainShadowed, plainErr := config.Locate(proj)
+	require.NoError(t, plainErr)
+	require.NotEmpty(t, plainNearest, "control: plain Locate must find the ancestor config")
+	require.Empty(t, plainShadowed)
+
+	nearest, shadowed, err := config.LocateInRepo(proj)
+
+	require.NoError(t, err)
+	assert.Empty(t, nearest)
+	assert.Empty(t, shadowed)
+}
+
+// Test_LocateInRepo_adopts_a_config_at_the_enclosing_git_repository_root is
+// the control for the case above: a config sitting exactly at, or below,
+// the nearest enclosing git repository root is still adopted, walking up
+// from a subdirectory that holds neither a config nor a ".git" of its own.
+func Test_LocateInRepo_adopts_a_config_at_the_enclosing_git_repository_root(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
+	configPath := writeConfig(t, root, "progress-heading: \"## Repo Progress\"\n")
+	sub := filepath.Join(root, "sub")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+
+	nearest, shadowed, err := config.LocateInRepo(sub)
+
+	require.NoError(t, err)
+	assert.Equal(t, configPath, nearest)
+	assert.Empty(t, shadowed)
+}
+
+// Test_LocateInRepo_behaves_like_Locate_with_no_enclosing_git_repository
+// pins the "no boundary" arm: when no ".git" exists anywhere above
+// startDir, LocateInRepo keeps today's plain ancestor walk — an ancestor
+// config is still adopted exactly as Locate itself would report it.
+func Test_LocateInRepo_behaves_like_Locate_with_no_enclosing_git_repository(t *testing.T) {
+	root := t.TempDir()
+	configPath := writeConfig(t, root, "progress-heading: \"## No Git Progress\"\n")
+	start := filepath.Join(root, "a", "b")
+	require.NoError(t, os.MkdirAll(start, 0o755))
+
+	nearest, shadowed, err := config.LocateInRepo(start)
+
+	require.NoError(t, err)
+	assert.Equal(t, configPath, nearest)
+	assert.Empty(t, shadowed)
+}
+
+// Test_LocateWithin_stops_the_walk_at_boundary pins LocateWithin's own
+// primitive: a boundary directory that is walked but never exceeded — a
+// config above it is never found, one at or below it still is.
+func Test_LocateWithin_stops_the_walk_at_boundary(t *testing.T) {
+	t.Run("a config above the boundary is not found", func(t *testing.T) {
+		root := t.TempDir()
+		writeConfig(t, root, "progress-heading: \"## Above\"\n")
+		boundary := filepath.Join(root, "repo")
+		start := filepath.Join(boundary, "sub")
+		require.NoError(t, os.MkdirAll(start, 0o755))
+
+		nearest, shadowed, err := config.LocateWithin(start, boundary)
+
+		require.NoError(t, err)
+		assert.Empty(t, nearest)
+		assert.Empty(t, shadowed)
+	})
+
+	t.Run("a config at the boundary is found", func(t *testing.T) {
+		boundary := t.TempDir()
+		configPath := writeConfig(t, boundary, "progress-heading: \"## At Boundary\"\n")
+		start := filepath.Join(boundary, "sub")
+		require.NoError(t, os.MkdirAll(start, 0o755))
+
+		nearest, shadowed, err := config.LocateWithin(start, boundary)
+
+		require.NoError(t, err)
+		assert.Equal(t, configPath, nearest)
+		assert.Empty(t, shadowed)
+	})
+
+	t.Run("an empty boundary is unbounded, identical to Locate", func(t *testing.T) {
+		root := t.TempDir()
+		configPath := writeConfig(t, root, "progress-heading: \"## Unbounded\"\n")
+		start := filepath.Join(root, "a", "b")
+		require.NoError(t, os.MkdirAll(start, 0o755))
+
+		nearest, shadowed, err := config.LocateWithin(start, "")
+
+		require.NoError(t, err)
+		assert.Equal(t, configPath, nearest)
+		assert.Empty(t, shadowed)
+	})
+}
+
 // Test_resolve_refuses_with_the_first_violation_inspect_reports pins the
 // agreement between Resolve and Inspect: Resolve's own refusal names the
 // same key Inspect's own violations[0] would, for a config carrying two

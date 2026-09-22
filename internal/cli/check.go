@@ -237,21 +237,32 @@ func runCheck(ctx context.Context, wd string, rest []string, hookHost string, st
 	return runErr
 }
 
-// runCheckHook implements "brief check --hook <host>" (R12, amended per
-// commit 1b12f18): rest must be empty (a feature argument and --hook are
-// mutually exclusive) and out.json must be false (--hook and --json are
-// mutually exclusive). It reads one hook-event payload from stdin through
-// host, resolves the edited path against wd when relative, and checks only
-// the feature assemble.(*Server).FeatureContaining reports for it.
+// errMalformedHookPayload marks a "check --hook" run whose stdin payload
+// could not be parsed inside an opted-in repository (R12): exit 1, a
+// PostToolUse hook's own non-blocking failure, never usage-error's exit 2 —
+// the payload is host-supplied, not user-typed, so a malformed one is a
+// runtime fault rather than a misuse of the CLI.
+var errMalformedHookPayload = errors.New("brief check: malformed hook payload on stdin")
+
+// runCheckHook implements "brief check --hook <host>" (R12): rest must be
+// empty (a feature argument and --hook are mutually exclusive) and
+// out.json must be false (--hook and --json are mutually exclusive). It
+// reads one hook-event payload from stdin through host, resolves the
+// edited path against wd when relative, and checks only the feature
+// assemble.(*Server).FeatureContaining reports for it.
 //
-// The opt-in gate is config.Locate's own nearest result, not
-// resolveRoot/config.Resolve: a repository with no ".brief.yaml" anywhere
-// above wd is silent, exit 0, even when the default feature directory
-// would otherwise carry findings — Resolve alone would silently check an
-// unopted-in repository by falling back to its own defaults. An invalid
-// existing config still refuses through resolveRoot, exit 1, the same as
-// every other command. A path FeatureContaining reports as outside the
-// feature directory is silent, exit 0.
+// The opt-in gate — config.LocateInRepo's own nearest result, not
+// resolveRoot/config.Resolve — runs before the payload is even parsed: a
+// repository with no ".brief.yaml" anywhere above wd (or one found only
+// above the nearest enclosing git repository, R3) is silent, exit 0, for
+// any stdin whatsoever, valid or not — Resolve alone would silently check
+// an unopted-in repository by falling back to its own defaults, and
+// parsing first would report a malformed payload even for a repository
+// that never opted in. Only once the gate passes is the payload parsed; a
+// malformed one there is errMalformedHookPayload, exit 1, one stderr line.
+// An invalid existing config still refuses through resolveRoot, exit 1,
+// the same as every other command. A path FeatureContaining reports as
+// outside the feature directory is silent, exit 0.
 //
 // A feature with at least one ERROR finding writes one JSON document —
 // host.WriteHookContext's own hook-context protocol, naming the feature's
@@ -273,17 +284,19 @@ func runCheckHook(ctx context.Context, wd string, rest []string, hookHost string
 		return out.usageError(fmt.Sprintf("brief check: unknown host %q; expected one of: %s; run '%s'", hookHost, strings.Join(host.HookHosts(), ", "), checkHookInvocation))
 	}
 
+	if nearest, _, locateErr := config.LocateInRepo(wd); locateErr == nil && nearest == "" {
+		return nil
+	}
+
 	editedPath, err := h.HookPath(stdin)
 	if err != nil {
-		return out.usageError(fmt.Sprintf("brief check: malformed hook payload on stdin; run '%s'", checkHookInvocation))
+		fmt.Fprintf(out.stderr, "brief check: malformed hook payload on stdin; run '%s'\n", checkHookInvocation)
+
+		return errMalformedHookPayload
 	}
 
 	if !filepath.IsAbs(editedPath) {
 		editedPath = filepath.Join(wd, editedPath)
-	}
-
-	if nearest, _, locateErr := config.Locate(wd); locateErr == nil && nearest == "" {
-		return nil
 	}
 
 	cfg, root, err := resolveRoot(wd)
