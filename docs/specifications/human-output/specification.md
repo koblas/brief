@@ -120,6 +120,11 @@ rewritten per scenario as text changes (user decision).
   in-flight features — 'brief check <feature>' narrows to one`.
 - unknown feature: `brief <cmd>: no feature "<name>" in <feature dir>; known: <a>, <b>, …`
   (exit 1).
+- unknown step (MAJOR 3, `finish` only): `brief finish: no step "<id>" in <feature>; known: <a>,
+  <b>, … (no files changed)` — `<feature>` is the argument, never a path; empty: `known: none;
+  run 'brief new step <feature>' to create one`. Replaces the old "run 'brief new step
+  <feature>' to see the next step" fix, which named a command that writes files as the remedy
+  for a read-only refusal.
 - finish: `brief finish: <feature> <step> done; wrote <handoff rel>, replaced <state rel>;
   next: <id> — run 'brief start <feature>'` (or no next); re-finish:
   `brief finish: <feature> <step> already done with identical inputs; nothing written`.

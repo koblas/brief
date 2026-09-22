@@ -28,11 +28,13 @@ func flattenOneLine(s string) string {
 // bare not-found or a generic failure.
 const noFilesChangedTail = " (no files changed)"
 
-// refusalTextLayout selects which of refusalClassification.textLine's two
+// refusalTextLayout selects which of refusalClassification.textLine's three
 // shapes a classification renders through: layoutPathProblem (the default,
 // zero value) for every ordinary refusal, layoutProblemInPath for
 // *unknownFeatureError, whose ruled copy puts the problem before the path
-// it names rather than after it.
+// it names rather than after it, and layoutProblemOnly for scaffold's
+// unknown-step refusal, whose Problem already names the feature by its own
+// argument — never a path — so path renders in JSON only.
 type refusalTextLayout int
 
 const (
@@ -40,6 +42,9 @@ const (
 	layoutPathProblem refusalTextLayout = iota
 	// layoutProblemInPath renders "<problem> in <path>; <fix><tail>".
 	layoutProblemInPath
+	// layoutProblemOnly renders "<problem>; <fix><tail>", ignoring path
+	// entirely in text — path still flows to jsonPath for --json.
+	layoutProblemOnly
 )
 
 // refusalClassification is classifyRefusal's pure output: the R14a
@@ -111,6 +116,17 @@ func classifyRefusal(err error) refusalClassification {
 	}
 
 	if refusal, ok := errors.AsType[*scaffold.RefusalError](err); ok {
+		if errors.Is(refusal.Err, scaffold.ErrNoSuchStep) {
+			return refusalClassification{
+				kind:    errorKindRefusal,
+				layout:  layoutProblemOnly,
+				path:    refusal.Path,
+				problem: flattenOneLine(refusal.Problem),
+				fix:     flattenOneLine(refusal.Fix),
+				tail:    noFilesChangedTail,
+			}
+		}
+
 		return refusalClassification{
 			kind:    errorKindRefusal,
 			path:    refusal.Path,
@@ -227,12 +243,18 @@ func displayPath(wd, p string) string {
 
 // textLine renders c's R14a text-mode line, minus the "brief <command>: "
 // prefix: c.problem alone when c.path is "" — a generic failure names no
-// path in text and never appends c.fix there either — else one of two
-// shapes selected by c.layout, both with c.path rendered relative to wd
-// through displayPath: layoutPathProblem's default
-// "<path>[:<line>]: <problem>; <fix>[<tail>]", or layoutProblemInPath's
-// "<problem> in <path>; <fix>[<tail>]".
+// path in text and never appends c.fix there either —
+// "<problem>; <fix>[<tail>]" when c.layout is layoutProblemOnly, which
+// ignores c.path in text regardless of whether it is set (c.path still
+// flows to jsonPath for --json), else one of two shapes selected by
+// c.layout, both with c.path rendered relative to wd through displayPath:
+// layoutPathProblem's default "<path>[:<line>]: <problem>; <fix>[<tail>]",
+// or layoutProblemInPath's "<problem> in <path>; <fix>[<tail>]".
 func (c refusalClassification) textLine(wd string) string {
+	if c.layout == layoutProblemOnly {
+		return fmt.Sprintf("%s; %s%s", c.problem, c.fix, c.tail)
+	}
+
 	if c.path == "" {
 		return c.problem
 	}

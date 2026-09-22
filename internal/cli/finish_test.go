@@ -836,3 +836,45 @@ func Test_returns_an_error_for_an_unknown_feature_on_finish(t *testing.T) {
 	line := oneLine(t, &stderr)
 	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
 }
+
+// Test_finish_names_the_known_steps_for_an_unknown_step is MAJOR 3: an
+// unknown step id, on a feature that does exist, refuses with the same
+// "known:" convention cli's own unknown-feature refusal already carries —
+// never "run 'brief new step <feature>' to see the next step", which
+// writes files itself and so was misleading on a read-only refusal path.
+func Test_finish_names_the_known_steps_for_an_unknown_step(t *testing.T) {
+	wd := newFinishCLIFixture(t)
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md",
+		"## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-99", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, `brief finish: no step "SCENARIO-99" in demo; known: SCENARIO-01 (no files changed)`+"\n", stderr.String())
+}
+
+// Test_finish_on_an_unknown_step_with_no_step_files_suggests_creating_one is
+// MAJOR 3's empty-list companion: a feature with no step files at all
+// suggests scaffolding one rather than printing an empty "known:" list.
+func Test_finish_on_an_unknown_step_with_no_step_files_suggests_creating_one(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte("# demo\n\n## BDD Acceptance Progress\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(
+		"## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n"), 0o600))
+
+	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
+	statePath := writeInput(t, "state.md",
+		"## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, `brief finish: no step "SCENARIO-01" in demo; known: none; run 'brief new step demo' to create one (no files changed)`+"\n", stderr.String())
+}

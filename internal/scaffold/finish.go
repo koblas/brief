@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/conform"
@@ -190,8 +192,8 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	if err != nil {
 		return FinishResult{}, &RefusalError{
 			Path:    featurePath,
-			Problem: fmt.Sprintf("no step file found for %q", step),
-			Fix:     fmt.Sprintf("run 'brief new step %s' to see the next step, or check the id", feature),
+			Problem: fmt.Sprintf("no step %q in %s", step, feature),
+			Fix:     knownStepsFix(knownStepIDs(pattern, entries), feature),
 			Err:     ErrNoSuchStep,
 		}
 	}
@@ -570,6 +572,54 @@ func findStepFile(root *os.Root, pattern stepfile.Pattern, step string) (string,
 	}
 
 	return "", 0, entries, ErrNoSuchStep
+}
+
+// knownStepIDs returns pattern.ID(n) for every entry in entries that
+// pattern recognizes as a step file, in ascending step-number order — the
+// same order Status and nextOpenStep pick "next" from — for the unknown-step
+// refusal's own "known:" list (MAJOR 2: cli's unknown-feature refusal
+// already carries this convention; the unknown-step refusal now matches
+// it).
+func knownStepIDs(pattern stepfile.Pattern, entries []os.DirEntry) []string {
+	type numbered struct {
+		n  int
+		id string
+	}
+
+	var found []numbered
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+
+		n, ok := pattern.Number(e.Name())
+		if !ok {
+			continue
+		}
+
+		found = append(found, numbered{n: n, id: pattern.ID(n)})
+	}
+
+	sort.Slice(found, func(i, j int) bool { return found[i].n < found[j].n })
+
+	ids := make([]string, len(found))
+	for i, f := range found {
+		ids[i] = f.id
+	}
+
+	return ids
+}
+
+// knownStepsFix renders the unknown-step refusal's "known:" fix segment,
+// mirroring cli's own knownFeaturesFix for an unknown feature: the known
+// ids joined by ", " when non-empty, else the suggestion to scaffold one.
+func knownStepsFix(known []string, feature string) string {
+	if len(known) == 0 {
+		return fmt.Sprintf("known: none; run 'brief new step %s' to create one", feature)
+	}
+
+	return "known: " + strings.Join(known, ", ")
 }
 
 // nextOpenStep returns brief start's own next-open-step rule, rendered as a

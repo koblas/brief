@@ -282,7 +282,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					newStdin: noStdin,
 					wantKind: "refusal",
 					wantPath: &featureDir,
-					wantFix:  "run 'brief new step demo' to see the next step, or check the id",
+					wantFix:  "known: SCENARIO-01",
 				}
 			},
 			command:      "finish",

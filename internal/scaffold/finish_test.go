@@ -715,6 +715,11 @@ func Test_refuses_an_unknown_feature_on_finish(t *testing.T) {
 	assert.NoDirExists(t, filepath.Join(root, cfg.FeatureDirectory, "ghost"))
 }
 
+// Test_refuses_an_unknown_step is MAJOR 3: the refusal names the id and
+// feature, and its Fix lists every step id newFinishFixture wrote
+// (STEP-01..03, ascending by number) — the same "known:" convention cli's
+// own unknown-feature refusal carries, rather than a "run 'brief new step'"
+// suggestion that writes files on what is otherwise a read-only refusal.
 func Test_refuses_an_unknown_step(t *testing.T) {
 	fx := newFinishFixture(t)
 	srv := scaffold.NewServer(fx.cfg, fx.root)
@@ -724,6 +729,33 @@ func Test_refuses_an_unknown_step(t *testing.T) {
 
 	require.ErrorIs(t, err, scaffold.ErrNoSuchStep)
 	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, `no step "STEP-99" in widgets`, refusal.Problem)
+	assert.Equal(t, "known: STEP-01, STEP-02, STEP-03", refusal.Fix)
+}
+
+// Test_refuses_an_unknown_step_with_no_step_files_suggests_creating_one is
+// Test_refuses_an_unknown_step's empty-list companion: a feature directory
+// with no step files at all gets the "known: none; run '...' to create
+// one" suggestion instead of an empty list.
+func Test_refuses_an_unknown_step_with_no_step_files_suggests_creating_one(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "widgets")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-01", []byte("h"), []byte("s"))
+
+	require.ErrorIs(t, err, scaffold.ErrNoSuchStep)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, `no step "STEP-01" in widgets`, refusal.Problem)
+	assert.Equal(t, "known: none; run 'brief new step widgets' to create one", refusal.Fix)
 }
 
 func Test_refuses_a_specification_with_no_progress_heading_on_finish(t *testing.T) {
