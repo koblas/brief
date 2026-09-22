@@ -133,15 +133,26 @@ type InitRequest struct {
 	Print      bool
 }
 
-// Artifact is one thing Init installs or found already installed: Kind and
-// Path identify it, Action reports what happened, and Detail carries an
-// optional parenthetical ("edited locally", "rewritten from defaults"),
-// empty when there is nothing to add.
+// Artifact is one thing Init installs, or Init or Uninstall found already
+// installed: Kind and Path identify it, Action reports what happened, and
+// Detail carries an optional parenthetical ("edited locally", "rewritten
+// from defaults"), empty when there is nothing to add. ForceRemovable is
+// meaningful only for an Uninstall-side ActionKept artifact: true when
+// --force would remove it (an edited file — planPluginRemoval,
+// planConfigRemoval, planSnippetRemoval's own OriginEdited/OriginOlder
+// arm), false when nothing can (a non-regular file, never followed or
+// removed regardless of --force) — the typed distinction cli's own
+// uninstallNextAction counts on, rather than matching Detail's own free
+// text: install-side and removal-side kept detail wording are free to
+// differ (planSnippet's own longer "add the block by hand" versus
+// planSnippetRemoval's plain "not a regular file") without silently
+// breaking that count.
 type Artifact struct {
-	Kind   Kind
-	Path   string
-	Action Action
-	Detail string
+	Kind           Kind
+	Path           string
+	Action         Action
+	Detail         string
+	ForceRemovable bool
 }
 
 // Result is what Init and Uninstall both return: Host and DryRun echo the

@@ -65,7 +65,7 @@ func Test_uninstall_keeps_an_edited_config_and_reports_it(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, res.Artifacts, 1)
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "edited locally"}, res.Artifacts[0])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "edited locally", ForceRemovable: true}, res.Artifacts[0])
 	assert.Empty(t, res.Removed)
 
 	body, readErr := os.ReadFile(configPath)
@@ -87,7 +87,7 @@ func Test_uninstall_force_removes_an_edited_config(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, res.Artifacts, 1)
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally"}, res.Artifacts[0])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally", ForceRemovable: true}, res.Artifacts[0])
 	assert.Equal(t, []string{configPath}, res.Removed)
 
 	_, statErr := os.Stat(configPath)
@@ -118,7 +118,7 @@ func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing
 			kept, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
 			require.NoError(t, err)
 			require.Len(t, kept.Artifacts, 1)
-			assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "edited locally"}, kept.Artifacts[0])
+			assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "edited locally", ForceRemovable: true}, kept.Artifacts[0])
 			assert.Empty(t, kept.Removed)
 
 			body, readErr := os.ReadFile(configPath)
@@ -128,7 +128,7 @@ func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing
 			removed, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, Force: true})
 			require.NoError(t, err)
 			require.Len(t, removed.Artifacts, 1)
-			assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally"}, removed.Artifacts[0])
+			assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally", ForceRemovable: true}, removed.Artifacts[0])
 			assert.Equal(t, []string{configPath}, removed.Removed)
 
 			_, statErr := os.Stat(configPath)
@@ -422,7 +422,7 @@ func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_u
 					startArt = a
 				}
 			}
-			assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: start, Action: tt.wantAction, Detail: "edited locally"}, startArt)
+			assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: start, Action: tt.wantAction, Detail: "edited locally", ForceRemovable: true}, startArt)
 
 			_, statErr := os.Stat(start)
 			if tt.force {
@@ -599,7 +599,7 @@ func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
 					plannerArt = a
 				}
 			}
-			assert.Equal(t, setup.Artifact{Kind: setup.KindAgent, Path: planner, Action: tt.wantAction, Detail: "edited locally"}, plannerArt)
+			assert.Equal(t, setup.Artifact{Kind: setup.KindAgent, Path: planner, Action: tt.wantAction, Detail: "edited locally", ForceRemovable: true}, plannerArt)
 
 			_, statErr := os.Stat(planner)
 			if tt.force {

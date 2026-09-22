@@ -126,8 +126,11 @@ func Test_uninstall_host_none_with_nothing_installed_omits_the_host_suffix(t *te
 }
 
 // Test_uninstall_dry_run_prints_the_plan_and_removes_nothing pins R9's own
-// dry-run promise: the row says "removed", the dry-run stderr line, and
-// the file survives byte-identical.
+// dry-run promise: the row says "removed", the dry-run stderr line names
+// what the plan actually holds — here a lone config removal, never a host
+// install that was never there (C2's fix: the dry-run arm used to name
+// installLabel(host) unconditionally, regardless of what was planned) —
+// and the file survives byte-identical.
 func Test_uninstall_dry_run_prints_the_plan_and_removes_nothing(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -142,10 +145,47 @@ func Test_uninstall_dry_run_prints_the_plan_and_removes_nothing(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "removed .brief.yaml\n", stdout.String())
-	assert.Equal(t, "brief uninstall: dry run, nothing removed; rerun without --dry-run to remove brief's install\n", stderr.String())
+	assert.Equal(t, "brief uninstall: dry run, nothing removed; rerun without --dry-run to remove brief's config\n", stderr.String())
 
 	_, statErr := os.Stat(filepath.Join(wd, ".brief.yaml"))
 	assert.NoError(t, statErr)
+}
+
+// Test_uninstall_dry_run_for_claude_code_names_the_host_install is the
+// control arm for the test above: a plan holding a non-config removed
+// artifact (the CLAUDE.md block, here) names the host install under
+// --dry-run, exactly as a real run's own "removed" line would.
+func Test_uninstall_dry_run_for_claude_code_names_the_host_install(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code", "--dry-run"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, "brief uninstall: dry run, nothing removed; rerun without --dry-run to remove brief's claude-code install\n", stderr.String())
+
+	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
+	assert.NoError(t, statErr)
+}
+
+// Test_uninstall_dry_run_with_nothing_installed_reports_it is the third
+// arm: an empty plan under --dry-run names "nothing installed", never a
+// promise to remove something the plan never found.
+func Test_uninstall_dry_run_with_nothing_installed_reports_it(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--dry-run"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief uninstall: dry run, nothing installed for claude-code\n", stderr.String())
 }
 
 // Test_uninstall_for_claude_code_removes_the_plugin_then_the_config pins
@@ -292,8 +332,11 @@ func Test_uninstall_reaches_the_removed_line_from_the_snippet_alone(t *testing.T
 // regular file" — never "edited locally", since --force cannot remove it
 // either (planSnippetRemoval). That must not be counted toward the
 // force-removable tally, or the line would promise --force can remove a
-// file it never touches; it must fall to the plain "nothing removed"
-// line instead.
+// file it never touches; it must fall to the plain "nothing removed" line
+// instead. The stdout row is pinned exactly (C3's fix): planSnippetRemoval's
+// own kept detail is the plain "not a regular file", never planSnippet's
+// longer install-side "…; add the block by hand, see 'brief init --print'"
+// — there is nothing to add by hand on a removal.
 func Test_uninstall_nonregular_claude_md_alone_reports_plain_nothing_removed(t *testing.T) {
 	wd := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(wd, "CLAUDE.md"), 0o755))
@@ -302,7 +345,7 @@ func Test_uninstall_nonregular_claude_md_alone_reports_plain_nothing_removed(t *
 	err := cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
-	assert.NotContains(t, stdout.String(), "removed")
+	assert.Equal(t, "kept CLAUDE.md (not a regular file)\n", stdout.String())
 	assert.Equal(t, "brief uninstall: nothing removed for claude-code\n", stderr.String())
 }
 

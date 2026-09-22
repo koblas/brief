@@ -319,12 +319,15 @@ func planSnippet(root string, h host.Host, dir string) (snippetArtifact, error) 
 // there is nothing to report: no candidate exists, or the chosen one exists
 // but carries no recognized block. A chosen candidate carrying CRLF line
 // endings refuses, the same as planSnippet. A non-regular chosen candidate
-// is kept, "not a regular file". A regular candidate whose span is
+// is kept, plain "not a regular file" — unlike planSnippet's own longer
+// install-side detail, there is no block to add by hand on a removal:
+// Uninstall never suggests writing one. A regular candidate whose span is
 // artifact.RecognizeSnippet's OriginEdited is kept, "edited locally",
-// unless force, in which case — like an OriginCurrent span always — it is
-// removed: remains holds the bytes left after removeSnippet strips the
-// span, and Detail is "brief block" when remains is non-empty (apply
-// rewrites the file) or empty when remains is empty (apply deletes it).
+// ForceRemovable true, unless force, in which case — like an OriginCurrent
+// span always — it is removed: remains holds the bytes left after
+// removeSnippet strips the span, and Detail is "brief block" when remains
+// is non-empty (apply rewrites the file) or empty when remains is empty
+// (apply deletes it).
 func planSnippetRemoval(root string, h host.Host, force bool) (snippetArtifact, bool, error) {
 	candidates, err := scanSnippetCandidates(root, h)
 	if err != nil {
@@ -343,7 +346,7 @@ func planSnippetRemoval(root string, h host.Host, force bool) (snippetArtifact, 
 	if !chosen.regular {
 		return snippetArtifact{
 			Kind: KindSnippet, Path: chosen.path, Action: ActionKept,
-			Detail: "not a regular file; add the block by hand, see 'brief init --print'",
+			Detail: "not a regular file",
 		}, true, nil
 	}
 
@@ -356,6 +359,7 @@ func planSnippetRemoval(root string, h host.Host, force bool) (snippetArtifact, 
 	if match.Origin != artifact.OriginCurrent && !force {
 		return snippetArtifact{
 			Kind: KindSnippet, Path: chosen.path, Action: ActionKept, Detail: "edited locally",
+			ForceRemovable: true,
 		}, true, nil
 	}
 

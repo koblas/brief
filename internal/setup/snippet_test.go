@@ -462,7 +462,7 @@ func Test_uninstall_for_claude_code_keeps_an_edited_block_unless_forced(t *testi
 			snippetArt = a
 		}
 	}
-	assert.Equal(t, setup.Artifact{Kind: setup.KindSnippet, Path: claudeMD, Action: setup.ActionKept, Detail: "edited locally"}, snippetArt)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindSnippet, Path: claudeMD, Action: setup.ActionKept, Detail: "edited locally", ForceRemovable: true}, snippetArt)
 
 	body, readErr := os.ReadFile(claudeMD)
 	require.NoError(t, readErr)

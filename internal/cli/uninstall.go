@@ -33,6 +33,11 @@ const uninstallHostFlagUsage = "the agent host `name` to remove for: claude-code
 // uninstallForceFlagUsage is uninstall's own --force flag's usage string.
 const uninstallForceFlagUsage = "remove files edited locally instead of keeping them"
 
+// leftInPlaceTail is the closing clause every "removed" next-action line
+// (host artifact or config alone) shares, naming the one thing uninstall
+// never touches regardless of what it removed.
+const leftInPlaceTail = "; the feature root and its contents were left in place"
+
 // uninstallDocument is uninstall's --json success document: the common
 // header first, then the request's own host and dry_run, every path this
 // call removed (absolute, never nil, empty under --dry-run or when nothing
@@ -50,32 +55,29 @@ type uninstallDocument struct {
 }
 
 // uninstallNextAction renders uninstall's own stderr next-action line,
-// minus the "brief uninstall: " prefix: R11's stderr contract. Dry run
-// names installLabel unconditionally — planning already completed, but the
-// promise is about what a real run would remove, not what this one found.
-// Otherwise the discriminator is not which host was requested but what
-// Uninstall actually found to remove: any artifact outside KindConfig
-// reporting setup.ActionRemoved — a plugin, hook, snippet or agent file —
-// means a host integration really was removed, so the line names it
-// (installLabel, "removed brief's claude-code install; …", right after
-// "brief's" rather than trailing "for claude-code", which read awkwardly).
-// A lone KindConfig ActionRemoved — the shape a default-host uninstall
-// leaves after an earlier "init --host none" — never claims a host
-// install that was never there; it reports "removed brief's config"
-// instead. Failing both, any artifact ActionKept with detail "edited
-// locally" is counted and named, since --force can remove those; a "not a
-// regular file" kept artifact is excluded — --force never removes one
-// (planPluginRemoval, planConfigRemoval, planSnippetRemoval) — so counting
-// it would make a false promise. Zero artifacts falls back to "nothing
-// installed"; a non-empty plan with nothing removed and nothing
-// force-removable falls back to plain "nothing removed" — both still
-// carry host's own " for <host>" suffix (withHostSuffix), dropped only for
-// setup.HostNone.
+// minus the "brief uninstall: " prefix: R11's stderr contract. The
+// discriminator, dry run or not, is not which host was requested but what
+// the plan (already computed by the time this runs, dry run or real) holds:
+// any artifact outside KindConfig reporting setup.ActionRemoved — a
+// plugin, hook, snippet or agent file — means a host integration really
+// was, or under dry run would be, removed, so the line names it
+// (installLabel, right after "brief's" rather than trailing "for
+// claude-code", which read awkwardly). A lone KindConfig ActionRemoved —
+// the shape a default-host uninstall leaves after an earlier "init --host
+// none" — never claims a host install that was never there; it names
+// "brief's config" instead. Failing both, any artifact ActionKept with
+// ForceRemovable true is counted and named, since --force can remove
+// those (setup's own typed field, not Detail's free text: planPluginRemoval,
+// planConfigRemoval and planSnippetRemoval set it only on an edited file —
+// never on a non-regular one, which --force cannot remove either). Zero
+// artifacts falls back to
+// "nothing installed"; a non-empty plan with nothing removed and nothing
+// force-removable falls back to plain "nothing removed" — both still carry
+// host's own " for <host>" suffix (withHostSuffix), dropped only for
+// setup.HostNone. Dry run rephrases each branch as a promise about what
+// rerunning without --dry-run would do, rather than a report of what this
+// call did — this call, dry run or not, removed nothing itself.
 func uninstallNextAction(host string, dryRun bool, artifacts []setup.Artifact) string {
-	if dryRun {
-		return "dry run, nothing removed; rerun without --dry-run to remove " + installLabel(host)
-	}
-
 	var hostRemoved, configRemoved bool
 
 	var editedKept int
@@ -86,16 +88,31 @@ func uninstallNextAction(host string, dryRun bool, artifacts []setup.Artifact) s
 			configRemoved = true
 		case a.Action == setup.ActionRemoved:
 			hostRemoved = true
-		case a.Action == setup.ActionKept && a.Detail == "edited locally":
+		case a.Action == setup.ActionKept && a.ForceRemovable:
 			editedKept++
+		}
+	}
+
+	if dryRun {
+		switch {
+		case hostRemoved:
+			return "dry run, nothing removed; rerun without --dry-run to remove " + installLabel(host)
+		case configRemoved:
+			return "dry run, nothing removed; rerun without --dry-run to remove brief's config"
+		case editedKept > 0:
+			return fmt.Sprintf("dry run, nothing removed; %d file(s) edited locally would be kept; run 'brief uninstall --force' to remove them", editedKept)
+		case len(artifacts) == 0:
+			return withHostSuffix("dry run, nothing installed", host)
+		default:
+			return withHostSuffix("dry run, nothing removed", host)
 		}
 	}
 
 	switch {
 	case hostRemoved:
-		return fmt.Sprintf("removed %s; the feature root and its contents were left in place", installLabel(host))
+		return "removed " + installLabel(host) + leftInPlaceTail
 	case configRemoved:
-		return "removed brief's config; the feature root and its contents were left in place"
+		return "removed brief's config" + leftInPlaceTail
 	case editedKept > 0:
 		return fmt.Sprintf("nothing removed; %d file(s) edited locally were kept; run 'brief uninstall --force' to remove them", editedKept)
 	case len(artifacts) == 0:
