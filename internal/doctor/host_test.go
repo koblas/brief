@@ -406,6 +406,24 @@ func chmodUnreadable(t *testing.T, path string) {
 	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
 }
 
+// chmodUnreadableDir chmods dir to 0o000 and registers a t.Cleanup that
+// restores it to 0o755 before TempDir's own removal runs — an inaccessible
+// directory left at 0o000 (no execute/search bit) would otherwise make
+// RemoveAll unable to traverse into it at all, unlike chmodUnreadable's own
+// 0o600 restore, which is only safe for a plain file. Skips under euid 0,
+// the same as chmodUnreadable, where chmod's permission bits have no
+// effect and every Lstat underneath would silently succeed.
+func chmodUnreadableDir(t *testing.T, dir string) {
+	t.Helper()
+
+	if os.Geteuid() == 0 {
+		t.Skip("chmod has no effect as root")
+	}
+
+	require.NoError(t, os.Chmod(dir, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+}
+
 // Test_diagnose_classifies_host_snippet pins host-snippet's own rules: a
 // marker defect in either CLAUDE.md candidate is ERROR, naming its own
 // line; two candidates each holding a block is ERROR on ".claude/CLAUDE.md";
@@ -567,10 +585,11 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 				require.NoError(t, os.WriteFile(path, []byte("unrelated prose\n"), 0o600))
 				chmodUnreadable(t, path)
 			},
-			checkID:      "host-snippet",
-			wantSeverity: doctor.SeverityWarn,
-			wantDetail:   "not readable (permission denied); cannot check for brief block",
-			wantFix:      new("chmod +r CLAUDE.md, then " + runInitClaudeCode),
+			checkID:        "host-snippet",
+			wantSeverity:   doctor.SeverityWarn,
+			wantDetail:     "not readable (permission denied); cannot check for brief block",
+			wantFix:        new("chmod +r CLAUDE.md, then " + runInitClaudeCode),
+			wantPathSuffix: "CLAUDE.md",
 		},
 		{
 			// Pins the block-wins carve-out against an unreadable root
@@ -677,6 +696,56 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantFix:      new(runInitClaudeCode),
 		},
 	})
+}
+
+// Test_diagnose_host_snippet_unreadable_fix_is_relative_to_wd pins fix pass
+// 8's M1 fix: host-snippet's own "not readable" WARN must render its fix
+// command relative to the same working directory as the row's own Path
+// (cli.doctorRow's own displayPath(wd, ...)), never relative to the
+// install root. Diagnose run from a subdirectory below root must recommend
+// "chmod +r ../CLAUDE.md", not the bare root-relative "chmod +r CLAUDE.md"
+// the pre-fix code always rendered: run from that subdirectory, the bare
+// form either fails outright (no CLAUDE.md there) or — the second case
+// here — silently chmods an unrelated file the caller happens to have,
+// leaving the WARN in place. Mutation-verified: reverting
+// notReadableFix's own caller to firstPresent.relPath (the pre-fix
+// root-relative field) reddens both cases here — the fix text stops
+// changing between them — while leaving every case in
+// Test_diagnose_classifies_host_snippet (wd == root there, so the two
+// relativizations coincide) green.
+func Test_diagnose_host_snippet_unreadable_fix_is_relative_to_wd(t *testing.T) {
+	cases := []struct {
+		name       string
+		writeDecoy bool
+	}{
+		{name: "no CLAUDE.md in the subdirectory"},
+		{name: "the subdirectory holds its own unrelated CLAUDE.md", writeDecoy: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := newHostFixture(t)
+
+			claudeMD := filepath.Join(wd, "CLAUDE.md")
+			require.NoError(t, os.WriteFile(claudeMD, []byte("unrelated prose\n"), 0o600))
+			chmodUnreadable(t, claudeMD)
+
+			subdir := filepath.Join(wd, "docs")
+			if c.writeDecoy {
+				require.NoError(t, os.WriteFile(filepath.Join(subdir, "CLAUDE.md"), []byte("decoy\n"), 0o600))
+			}
+
+			srv := doctor.NewServer(emptyHomeDir(t))
+			report := srv.Diagnose(t.Context(), subdir)
+
+			check := findCheck(t, report, "host-snippet")
+			assert.Equal(t, doctor.SeverityWarn, check.Severity)
+			assert.Contains(t, check.Detail, "not readable (permission denied); cannot check for brief block")
+			assert.Equal(t, claudeMD, check.Path)
+			require.NotNil(t, check.Fix)
+			assert.Equal(t, "chmod +r ../CLAUDE.md, then "+runInitClaudeCode, *check.Fix)
+		})
+	}
 }
 
 // writeRolesConfig overwrites wd's own ".brief.yaml" with role bindings for

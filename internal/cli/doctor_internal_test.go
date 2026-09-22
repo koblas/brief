@@ -264,6 +264,67 @@ func Test_doctor_reports_env_path_error_when_not_on_path_and_the_plugin_is_insta
 	assert.Equal(t, "brief doctor: 1 ERROR, 0 WARN; this checks setup only, run 'brief check' for feature content\n", stderr.String())
 }
 
+// chmodUnreadableDir chmods dir to 0o000 and registers a t.Cleanup that
+// restores it to 0o755 before TempDir's own removal runs — an inaccessible
+// directory left at 0o000 (no execute/search bit) would otherwise make
+// RemoveAll unable to traverse into it. Skips under euid 0, where chmod's
+// permission bits have no effect and every Lstat underneath would silently
+// succeed.
+func chmodUnreadableDir(t *testing.T, dir string) {
+	t.Helper()
+
+	if os.Geteuid() == 0 {
+		t.Skip("chmod has no effect as root")
+	}
+
+	require.NoError(t, os.Chmod(dir, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+}
+
+// Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable
+// pins fix pass 8's M2 fix at the CLI boundary: a ".claude" directory
+// doctor cannot even Lstat into (mode 0o000) must not silently flip
+// doctor's own exit code from 1 to 0. Repro: ".claude/CLAUDE.md" holds the
+// current brief block and brief is missing from PATH — with ".claude"
+// readable that is ERROR env-path, exit 1 (doctorLong's own "exits 1 when
+// any check is ERROR"); the same tree with ".claude" at 0o000 must keep
+// exiting 1, host-snippet must keep discriminating "not readable" from
+// "not installed" (never SKIP), and the ERROR count must not read zero —
+// a stat failure other than "not found" must never read as "nothing
+// installed" one layer up from host-snippet's own row. host-plugin and
+// host-hook also turn ERROR here, a correct side effect of the same fix
+// (their own subject files under ".claude" are equally present-but-
+// unreadable, not absent), so this pins the count staying non-zero rather
+// than exactly one.
+func Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable(t *testing.T) {
+	wd, _ := newDoctorFixture(t)
+	claudeDir := filepath.Join(wd, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+	block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), block, 0o600))
+
+	lookPathNotFound := doctor.WithLookPath(func(string) (string, error) { return "", os.ErrNotExist })
+	homeDir := doctor.WithHomeDir(func() (string, error) { return t.TempDir(), nil })
+
+	var beforeOut, beforeErr bytes.Buffer
+	beforeRunErr := run(t.Context(), wd, []string{"doctor"}, nil, &beforeOut, &beforeErr, noBuildInfo, withDoctorOpts(lookPathNotFound, homeDir))
+	require.Error(t, beforeRunErr)
+	require.Equal(t, 1, ExitCode(beforeRunErr), "control arm: a readable .claude must report ERROR/exit 1")
+	require.Contains(t, beforeOut.String(), "OK  host-snippet")
+
+	chmodUnreadableDir(t, claudeDir)
+
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), wd, []string{"doctor"}, nil, &stdout, &stderr, noBuildInfo, withDoctorOpts(lookPathNotFound, homeDir))
+
+	require.Error(t, err)
+	assert.Equal(t, 1, ExitCode(err))
+	assert.Contains(t, stdout.String(), "ERROR  env-path")
+	assert.Contains(t, stdout.String(), "WARN  host-snippet")
+	assert.NotContains(t, stdout.String(), "SKIP  host-snippet")
+	assert.NotContains(t, stderr.String(), "0 ERROR", "an unreadable .claude must not report zero ERROR rows")
+}
+
 // Test_doctor_too_many_arguments_is_a_usage_error pins that "brief
 // doctor" takes no positional argument.
 func Test_doctor_too_many_arguments_is_a_usage_error(t *testing.T) {

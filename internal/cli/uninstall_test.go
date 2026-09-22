@@ -307,6 +307,36 @@ func Test_uninstall_counts_two_force_removable_kept_artifacts(t *testing.T) {
 	require.NoError(t, configErr)
 }
 
+// Test_uninstall_dry_run_counts_two_force_removable_kept_artifacts is the
+// dry-run twin of Test_uninstall_counts_two_force_removable_kept_artifacts:
+// the same two-artifact fixture, run with --dry-run, must promise "2
+// file(s) … would be kept" — not just "1", which a dry-run Sprintf whose
+// own count argument was hardcoded to 1 would also satisfy, since every
+// other dry-run case in this file edits exactly one artifact.
+// Mutation-verified: hardcoding the dry-run "N file(s) … would be kept"
+// Sprintf's own count argument to 1 reddens this test alone, restored
+// after.
+func Test_uninstall_dry_run_counts_two_force_removable_kept_artifacts(t *testing.T) {
+	wd := t.TempDir()
+	start := filepath.Join(wd, ".claude", "skills", "brief", "skills", "start", "SKILL.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(start), 0o755))
+	require.NoError(t, os.WriteFile(start, []byte("---\nedited: true\n---\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("feature-directory: specs\n"), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code", "--dry-run"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "kept .claude/skills/brief/skills/start/SKILL.md (edited locally)\n")
+	assert.Contains(t, stdout.String(), "kept .brief.yaml (edited locally)\n")
+	assert.Equal(t, "brief uninstall: dry run, nothing removed; 2 file(s) edited locally would be kept; run 'brief uninstall --force' to remove them\n", stderr.String())
+
+	_, startErr := os.Stat(start)
+	require.NoError(t, startErr)
+	_, configErr := os.Stat(filepath.Join(wd, ".brief.yaml"))
+	require.NoError(t, configErr)
+}
+
 // Test_uninstall_removes_the_block_leaving_unrelated_content pins the
 // "removed CLAUDE.md (brief block)" row at the CLI boundary: a CLAUDE.md
 // carrying unrelated prose alongside the block loses only the block, is

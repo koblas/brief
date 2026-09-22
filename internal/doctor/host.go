@@ -13,10 +13,13 @@ import (
 )
 
 // integrationFileState is one Claude Code integration file's own probe
-// result: present mirrors an Lstat success (any file type), regular is
-// true only for a present, regular file whose bytes were read and
-// classified into origin — never populated (OriginEdited's zero value)
-// otherwise.
+// result: present is false only when Lstat reports the path does not
+// exist. Any other Lstat outcome — success, of any file type, or a
+// failure such as an inaccessible parent directory — reports present
+// true, since a stat error other than "not found" proves nothing about
+// absence. regular is true only for a present, regular file whose bytes
+// were read and classified into origin — never populated (OriginEdited's
+// zero value) otherwise.
 type integrationFileState struct {
 	relPath string
 	path    string
@@ -26,15 +29,28 @@ type integrationFileState struct {
 }
 
 // probeIntegrationFile Lstats root/f.RelPath and, for a regular file, reads
-// and artifact.Recognizes its bytes against f.Kind. A read failure on a
-// present, regular file is reported the same as "not regular" — a subject
-// file this broken can never be classified as current, older or edited.
+// and artifact.Recognizes its bytes against f.Kind. An Lstat failure other
+// than os.IsNotExist — an inaccessible parent directory, say — reports
+// present true, regular false, the same shape a present-but-not-regular
+// file gets, rather than folding it into "absent": every check keyed off
+// this state (host-plugin/host-hook/host-agents' own "installed" gate,
+// env-path's own integration-installed gate) would otherwise silently
+// downgrade on a permission error it cannot actually attribute to absence.
+// A read failure on a present, regular file is reported the same as "not
+// regular" — a subject file this broken can never be classified as
+// current, older or edited.
 func probeIntegrationFile(root string, f host.File) integrationFileState {
 	path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 	state := integrationFileState{relPath: f.RelPath, path: path}
 
 	info, err := os.Lstat(path)
-	if err != nil {
+
+	switch {
+	case os.IsNotExist(err):
+		return state
+	case err != nil:
+		state.present = true
+
 		return state
 	}
 
@@ -246,26 +262,27 @@ func hostAgentsCheck(root string, h host.Host) Check {
 }
 
 // snippetCandidateState is one CLAUDE.md candidate's own scan result,
-// mirroring internal/setup's own candidateSnippetFile but read-only: present
-// mirrors an Lstat success (any file type) — a regular candidate whose
-// bytes could not be read is still present, distinguished by unreadable
-// rather than folded into "nothing here", since brief does know the file
-// exists and only cannot say whether it carries a block. body and span are
-// populated only for a regular file that was both readable and scanned
-// clean (no marker defect); prob carries the first marker defect
-// artifact.ScanSnippetMarkers found, nil otherwise. notRegular and kind are
-// populated only when the candidate exists but Lstat reports it is not a
-// regular file — kind is "symlink" or "directory" (nonRegularKind).
-// unreadable and readErr are populated only when the candidate is present,
-// regular, and os.ReadFile failed — readErr is the underlying reason (a
-// wrapped *fs.PathError's own inner error, e.g. "permission denied") rather
-// than the full "open <path>: …" text, since host-snippet's own WARN detail
-// already names the path via the row's Path field. notRegular and
-// unreadable are mutually exclusive: only a regular candidate is ever read
-// at all.
+// mirroring internal/setup's own candidateSnippetFile but read-only:
+// present is false only when Lstat reports the path does not exist — any
+// other Lstat outcome, or a regular candidate whose bytes could not be
+// read, is still present, distinguished by unreadable rather than folded
+// into "nothing here", since a stat or read failure other than "not found"
+// proves nothing about absence. body and span are populated only for a
+// regular file that was both readable and scanned clean (no marker
+// defect); prob carries the first marker defect artifact.ScanSnippetMarkers
+// found, nil otherwise. notRegular and kind are populated only when the
+// candidate exists but Lstat reports it is not a regular file — kind is
+// "symlink" or "directory" (nonRegularKind). unreadable and readErr are
+// populated when either Lstat itself failed for a reason other than "not
+// found" (an inaccessible parent directory, say) or the candidate is
+// present, regular, and os.ReadFile failed — readErr is the underlying
+// reason (a wrapped *fs.PathError's own inner error, e.g. "permission
+// denied") rather than the full "lstat <path>: …"/"open <path>: …" text,
+// since host-snippet's own WARN detail already names the path via the
+// row's Path field. notRegular and unreadable are mutually exclusive: only
+// a regular candidate that Lstat could itself resolve is ever read at all.
 type snippetCandidateState struct {
 	path       string
-	relPath    string
 	present    bool
 	body       []byte
 	span       *artifact.SnippetSpan
@@ -307,15 +324,17 @@ func notRegularDetail(kind string) string {
 }
 
 // readFailureReason extracts the underlying reason behind a failed
-// os.ReadFile call: a wrapped *fs.PathError's own inner error (e.g.
-// "permission denied" out of "open <path>: permission denied") when err
-// carries one, err's own message otherwise.
+// os.Lstat or os.ReadFile call: both fail only with a *fs.PathError, so
+// this unwraps that error's own inner cause (e.g. "permission denied" out
+// of "lstat <path>: permission denied" or "open <path>: permission
+// denied") rather than the full "<op> <path>: …" text, since host-snippet's
+// own WARN detail already names the path via the row's Path field. Every
+// caller passes a non-nil err it already knows came from one of those two
+// calls.
 func readFailureReason(err error) string {
-	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
-		return pathErr.Err.Error()
-	}
+	pathErr, _ := errors.AsType[*fs.PathError](err)
 
-	return err.Error()
+	return pathErr.Err.Error()
 }
 
 // notReadableDetail renders host-snippet's own WARN detail for a candidate
@@ -335,14 +354,23 @@ func notReadableFix(relPath string) string {
 }
 
 // scanSnippetCandidateStates Lstats and scans every h.InstructionFiles()
-// candidate under root, in that order. A missing candidate reports a zero
-// snippetCandidateState (no body, no span, no problem, present false) —
-// the "nothing here" shape host-snippet's own SKIP path expects. A
+// candidate under root, in that order. A missing candidate — Lstat
+// reporting os.IsNotExist — reports a zero snippetCandidateState (no
+// body, no span, no problem, present false), the "nothing here" shape
+// host-snippet's own SKIP path expects. Any other Lstat failure (an
+// inaccessible parent directory, say) reports present true, unreadable
+// true and readErr set (readFailureReason) — the same shape a present,
+// regular candidate whose own os.ReadFile failed gets below, since a stat
+// error other than "not found" proves nothing about absence either. A
 // candidate that exists but is not a regular file reports notRegular true
 // and kind set (nonRegularKind), never read. A candidate that exists, is
 // regular, but whose bytes os.ReadFile could not read reports present true,
-// unreadable true and readErr set (readFailureReason) — present, since
-// brief does know the file is there, just not what it contains.
+// unreadable true and readErr set — present, since brief does know the
+// file is there, just not what it contains; a read failure of
+// os.IsNotExist itself (the file was deleted between the Lstat and the
+// read) reports the plain missing shape instead, the same as an
+// os.IsNotExist Lstat, since it is no more readable-but-broken than a file
+// that was never there.
 func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateState {
 	rel := h.InstructionFiles()
 	out := make([]snippetCandidateState, 0, len(rel))
@@ -353,25 +381,35 @@ func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateStat
 		info, err := os.Lstat(path)
 
 		switch {
+		case os.IsNotExist(err):
+			out = append(out, snippetCandidateState{path: path})
+
+			continue
 		case err != nil:
-			out = append(out, snippetCandidateState{path: path, relPath: r})
+			out = append(out, snippetCandidateState{path: path, present: true, unreadable: true, readErr: readFailureReason(err)})
 
 			continue
 		case !info.Mode().IsRegular():
-			out = append(out, snippetCandidateState{path: path, relPath: r, present: true, notRegular: true, kind: nonRegularKind(info)})
+			out = append(out, snippetCandidateState{path: path, present: true, notRegular: true, kind: nonRegularKind(info)})
 
 			continue
 		}
 
 		body, err := os.ReadFile(path)
-		if err != nil {
-			out = append(out, snippetCandidateState{path: path, relPath: r, present: true, unreadable: true, readErr: readFailureReason(err)})
+
+		switch {
+		case os.IsNotExist(err):
+			out = append(out, snippetCandidateState{path: path})
+
+			continue
+		case err != nil:
+			out = append(out, snippetCandidateState{path: path, present: true, unreadable: true, readErr: readFailureReason(err)})
 
 			continue
 		}
 
 		span, prob := artifact.ScanSnippetMarkers(body)
-		out = append(out, snippetCandidateState{path: path, relPath: r, present: true, body: body, span: span, prob: prob})
+		out = append(out, snippetCandidateState{path: path, present: true, body: body, span: span, prob: prob})
 	}
 
 	return out
@@ -410,24 +448,30 @@ func snippetBlockFound(states []snippetCandidateState) bool {
 // consulted, so a regular-but-blockless first candidate reports the
 // ordinary SKIP below, naming that same candidate's own path, even when a
 // farther candidate happens to be a symlink or a directory. The one
-// divergence: a regular candidate whose bytes could not be read is
-// present here but never reaches chooseSnippetLocation at all, since
-// setup's own scan aborts with a hard error on the same failure — brief
-// has no way to write a snippet block through a file it cannot even read,
-// so there is nothing for setup's own selection rule to reach. When that
-// first present candidate is itself notRegular, the row is WARN, naming
-// which (nonRegularKind) — brief can neither write nor scan through it, so
-// the fix points at --print (runInitPrintSnippet) rather than a plain
-// re-run. When it is instead unreadable, the row is WARN "not readable
-// (<reason>); cannot check for brief block" (notReadableDetail) — brief
-// does not know whether a block is present, so it reports that rather than
-// the "not installed" a genuinely absent candidate gets, with a fix
-// (notReadableFix) that names making the file readable before the plain
-// re-run. No candidate present at all, or the first present one is a
-// regular, readable, blockless file, is SKIP "not installed", Path naming
-// that first-present candidate (falling back to the first candidate in
-// priority order only when none is present at all).
-func hostSnippetCheck(states []snippetCandidateState, dir string, dirKnown bool) Check {
+// divergence: a candidate that could not even be Lstat'd, or a regular
+// candidate whose bytes could not be read, is present here but never
+// reaches chooseSnippetLocation at all, since setup's own scan aborts with
+// a hard error on either failure — brief has no way to write a snippet
+// block through a candidate it cannot even stat or read, so there is
+// nothing for setup's own selection rule to reach. When that first present
+// candidate is itself notRegular, the row is WARN, naming which
+// (nonRegularKind) — brief can neither write nor scan through it, so the
+// fix points at --print (runInitPrintSnippet) rather than a plain re-run.
+// When it is instead unreadable, the row is WARN "not readable (<reason>);
+// cannot check for brief block" (notReadableDetail) — brief does not know
+// whether a block is present, so it reports that rather than the "not
+// installed" a genuinely absent candidate gets, with a fix (notReadableFix)
+// that names making the file readable before the plain re-run — the fix
+// text is rendered relative to wd, the same as every other Check.Fix in
+// this package (checkRootDir's own "mkdir -p"/"chmod u+rwx"), since a row's
+// own Path is rendered relative to wd too (cli.doctorRow's displayPath) and
+// a fix computed against root instead would name the wrong file, or fail
+// outright, whenever wd and root differ. No candidate present at all, or
+// the first present one is a regular, readable, blockless file, is SKIP
+// "not installed", Path naming that first-present candidate (falling back
+// to the first candidate in priority order only when none is present at
+// all).
+func hostSnippetCheck(wd string, states []snippetCandidateState, dir string, dirKnown bool) Check {
 	for _, s := range states {
 		if s.prob != nil {
 			return Check{ID: "host-snippet", Severity: SeverityError, Path: s.path, Detail: fmt.Sprintf("%s (line %d)", s.prob.Problem, s.prob.Line), Fix: &s.prob.Fix}
@@ -473,7 +517,7 @@ func hostSnippetCheck(states []snippetCandidateState, dir string, dirKnown bool)
 			return Check{
 				ID: "host-snippet", Severity: SeverityWarn, Path: firstPresent.path,
 				Detail: notReadableDetail(firstPresent.readErr),
-				Fix:    new(notReadableFix(firstPresent.relPath)),
+				Fix:    new(notReadableFix(relPath(wd, firstPresent.path))),
 			}
 		}
 

@@ -16,7 +16,13 @@ to stay unique; `ForceRemovable` is false on every force-removed artifact across
 producers, rule stated on `Artifact`'s own doc comment. Fix pass 7: an existing-but-unreadable
 CLAUDE.md candidate is its own host-snippet WARN, distinct from "not installed" (an
 unverifiable absence claim) and from the not-a-regular-file WARN; the reviewer gate's PASS
-WITH CHANGES closed on this alone, plus three cheap MINOR folds.
+WITH CHANGES closed on this alone, plus three cheap MINOR folds. Fix pass 8: host-snippet's
+own "not readable" WARN fix is rendered relative to `wd`, not the install root, matching the
+row's own Path (M1); a stat failure other than "not found" — an Lstat that cannot even reach
+the candidate, not just a `ReadFile` on one it already reached — is `unreadable`/`present`,
+never folded into absence, in both `scanSnippetCandidateStates` and `probeIntegrationFile`
+(M2), so an inaccessible `.claude/` can no longer downgrade `env-path` from ERROR to WARN or
+flip doctor's own exit code from 1 to 0.
 
 ## Binding decisions
 - `config.LocateWithin(dir, boundary)` bounds a walk at `boundary`, itself still checked, its
@@ -36,12 +42,19 @@ WITH CHANGES closed on this alone, plus three cheap MINOR folds.
   `chooseSnippetLocation` would itself pick — the first candidate present at all, regular or
   not, readable or not, in `host.InstructionFiles` priority order, never a farther
   candidate's own shape; SKIP's own Path names that same first-present candidate (falls back
-  to the first candidate in priority order only when none is present at all). A present,
-  regular candidate `os.ReadFile` cannot read (`snippetCandidateState.unreadable`, distinct
-  from `present=false`) is its own WARN — "not readable (`<reason>`); cannot check for brief
-  block", `<reason>` from `readFailureReason` (a wrapped `*fs.PathError`'s own inner error) —
-  never the "not installed" a genuinely missing candidate gets, since a failed read proves
-  nothing about absence; the block-wins carve-out still overrides it exactly like `notRegular`.
+  to the first candidate in priority order only when none is present at all). A candidate
+  `os.Lstat` cannot even reach, or a present, regular one `os.ReadFile` cannot read
+  (`snippetCandidateState.unreadable`, distinct from `present=false`; `os.IsNotExist` on
+  either call is still the plain absent shape) is its own WARN — "not readable (`<reason>`);
+  cannot check for brief block", `<reason>` from `readFailureReason` (a wrapped
+  `*fs.PathError`'s own inner error, always non-nil since `os.Lstat`/`os.ReadFile` only ever
+  fail with one) — never the "not installed" a genuinely missing candidate gets, since a stat
+  or read failure other than "not found" proves nothing about absence; the block-wins
+  carve-out still overrides it exactly like `notRegular`. Its Fix (`notReadableFix`) is
+  rendered `relPath(wd, ...)` — the same `wd` `Diagnose` was called with, never `root` — since
+  the row's own Path is later rendered relative to `wd` too (`cli.doctorRow`'s `displayPath`);
+  `probeIntegrationFile` (host-plugin/-hook/-agents, and `anyIntegrationFilePresent`'s own
+  "installed" gate) makes the identical absent-vs-unreadable call on the same `os.Lstat`.
 - `setup.Artifact.ForceRemovable` is true exactly on an Uninstall-side `ActionKept` artifact
   `--force` would turn into `ActionRemoved` (an edited file: `planPluginRemoval`,
   `planConfigRemoval`, `planSnippetRemoval`'s own non-`OriginCurrent` arm) — false on every
@@ -101,6 +114,11 @@ WITH CHANGES closed on this alone, plus three cheap MINOR folds.
 - A `hostCheckCase.wantPathSuffix` shorter than the full disambiguating suffix (e.g. bare
   "CLAUDE.md") can match either candidate's own path — use the full relative suffix, or the
   negative `wantPathNotSuffix` when a case must pin the root candidate specifically.
+- A `Check.Fix`'s own shell command must be rendered `relPath(wd, ...)`, the same `wd`
+  `Diagnose` was called with — `checkRootDir` already did; `hostSnippetCheck`'s own
+  `notReadableFix` did not until fix pass 8, and every fixture in `host_test.go` sets `wd ==
+  root`, so the bug was invisible to every existing case there; only a fixture calling
+  `Diagnose` from a subdirectory (`root-dir`'s own coverage never does either) catches it.
 
 ## Open debts
 - setup never rewrites/removes an `OriginOlder` file — harmless while every older digest list
@@ -111,7 +129,7 @@ WITH CHANGES closed on this alone, plus three cheap MINOR folds.
 - `hostPluginCheck`/`hostAgentsCheck` duplicate the same origin-check body — refactor-advisor
   MINORs, deferred rather than risk behavior change. **Unowned.**
 - `host_test.go`/`detect_test.go`'s classification tables mostly carry no mutation-verification
-  statement, unlike their siblings (fix passes 5, 6 and 7 each added a couple that do). **Unowned.**
+  statement, unlike their siblings (fix passes 5, 6, 7 and 8 each added a couple that do). **Unowned.**
 - `internal/doctor` (`scanSnippetCandidateStates`/`hostSnippetCheck`) and `internal/setup`
   (`scanSnippetCandidates`/`chooseSnippetLocation`) each hand-write the same snippet-candidate-
   selection rule and cannot import each other (dependency rule) — arch-reviewer suggests

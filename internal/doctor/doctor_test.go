@@ -565,3 +565,41 @@ func Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed(t
 		})
 	}
 }
+
+// Test_diagnose_treats_an_unreadable_host_snippet_directory_as_present_not_absent
+// pins fix pass 8's M2 fix: a stat failure other than "not found" — here,
+// ".claude" itself at 0o000, so Lstat on ".claude/CLAUDE.md" fails with
+// permission denied rather than IsNotExist — must never be folded into
+// "absent". Repro: the same fixture with ".claude" readable reports
+// host-snippet OK "installed" and env-path ERROR (brief missing from
+// PATH, integration installed); with ".claude" at 0o000 the row must keep
+// discriminating "not readable" from "not installed", and env-path must
+// stay ERROR — a false "nothing here" reading of the permission error
+// would silently downgrade it to WARN, and the CLI's own exit code from 1
+// to 0 (Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable
+// pins that consequence at the CLI boundary).
+func Test_diagnose_treats_an_unreadable_host_snippet_directory_as_present_not_absent(t *testing.T) {
+	wd := newHostFixture(t)
+	claudeDir := filepath.Join(wd, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+	block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), block, 0o600))
+
+	srv := doctor.NewServer(
+		doctor.WithLookPath(func(string) (string, error) { return "", os.ErrNotExist }),
+		emptyHomeDir(t),
+	)
+
+	before := srv.Diagnose(t.Context(), wd)
+	assert.Equal(t, doctor.SeverityOK, findCheck(t, before, "host-snippet").Severity, "control arm: the block must be found before the directory is made unreadable")
+	assert.Equal(t, doctor.SeverityError, findCheck(t, before, "env-path").Severity, "control arm: brief missing from PATH must be ERROR while the integration is installed")
+
+	chmodUnreadableDir(t, claudeDir)
+
+	after := srv.Diagnose(t.Context(), wd)
+	afterSnippet := findCheck(t, after, "host-snippet")
+	assert.Equal(t, doctor.SeverityWarn, afterSnippet.Severity)
+	assert.Contains(t, afterSnippet.Detail, "not readable")
+	assert.NotContains(t, afterSnippet.Detail, "not installed")
+	assert.Equal(t, doctor.SeverityError, findCheck(t, after, "env-path").Severity, "an unreadable directory must not downgrade env-path from ERROR to WARN")
+}
