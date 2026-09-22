@@ -79,6 +79,29 @@ func Test_uninstall_keeps_an_edited_config_and_reports_it(t *testing.T) {
 	assert.Equal(t, "feature-directory: specs\n", string(body))
 }
 
+// Test_uninstall_dry_run_reports_edited_files_would_be_kept is the dry-run
+// twin of Test_uninstall_keeps_an_edited_config_and_reports_it: the same
+// edited config, under --dry-run, promises what a real run would do
+// ("would be kept") rather than reporting what this call did, and the file
+// survives byte-identical.
+func Test_uninstall_dry_run_reports_edited_files_would_be_kept(t *testing.T) {
+	wd := t.TempDir()
+	configPath := filepath.Join(wd, ".brief.yaml")
+	original := []byte("feature-directory: specs\n")
+	require.NoError(t, os.WriteFile(configPath, original, 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--host", "none", "--dry-run"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, "kept .brief.yaml (edited locally)\n", stdout.String())
+	assert.Equal(t, "brief uninstall: dry run, nothing removed; 1 file(s) edited locally would be kept; run 'brief uninstall --force' to remove them\n", stderr.String())
+
+	body, readErr := os.ReadFile(configPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, original, body)
+}
+
 // Test_uninstall_force_removes_an_edited_config pins --force's own
 // override at the CLI boundary.
 func Test_uninstall_force_removes_an_edited_config(t *testing.T) {
@@ -347,6 +370,23 @@ func Test_uninstall_nonregular_claude_md_alone_reports_plain_nothing_removed(t *
 	require.NoError(t, err)
 	assert.Equal(t, "kept CLAUDE.md (not a regular file)\n", stdout.String())
 	assert.Equal(t, "brief uninstall: nothing removed for claude-code\n", stderr.String())
+}
+
+// Test_uninstall_dry_run_nonregular_claude_md_alone_reports_plain_nothing_removed
+// is the dry-run twin of the test above: the same non-regular CLAUDE.md,
+// under --dry-run, reaches uninstallNextAction's own plain "nothing
+// removed" default arm — a non-empty plan with nothing removed and nothing
+// force-removable — rather than a promise to remove or keep anything.
+func Test_uninstall_dry_run_nonregular_claude_md_alone_reports_plain_nothing_removed(t *testing.T) {
+	wd := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(wd, "CLAUDE.md"), 0o755))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code", "--dry-run"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, "kept CLAUDE.md (not a regular file)\n", stdout.String())
+	assert.Equal(t, "brief uninstall: dry run, nothing removed for claude-code\n", stderr.String())
 }
 
 // Test_uninstall_refuses_a_lone_marker_naming_the_file_and_line pins R5's
