@@ -1,3 +1,8 @@
+---
+id: SCENARIO-06
+status: done
+---
+
 # SCENARIO-06: status reads as a table for people
 
 ## Scenario

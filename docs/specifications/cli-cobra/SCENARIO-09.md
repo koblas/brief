@@ -1,3 +1,8 @@
+---
+id: SCENARIO-09
+status: done
+---
+
 # SCENARIO-09: "brief help" with an unknown topic
 
 ## Scenario

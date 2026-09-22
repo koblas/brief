@@ -1,3 +1,8 @@
+---
+id: SCENARIO-10
+status: done
+---
+
 # SCENARIO-10: new feature / new step say what happened and what's next
 
 ## Scenario

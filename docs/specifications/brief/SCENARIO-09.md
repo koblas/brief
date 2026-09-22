@@ -1,3 +1,8 @@
+---
+id: SCENARIO-09
+status: done
+---
+
 # SCENARIO-09: Status reports one four-field line per feature
 
 ## Scenario

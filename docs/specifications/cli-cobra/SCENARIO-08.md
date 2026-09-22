@@ -1,3 +1,8 @@
+---
+id: SCENARIO-08
+status: done
+---
+
 # SCENARIO-08: "brief help <command>" matches "<command> --help"
 
 ## Scenario

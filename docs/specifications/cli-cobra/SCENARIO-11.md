@@ -1,3 +1,8 @@
+---
+id: SCENARIO-11
+status: done
+---
+
 # SCENARIO-11: Unknown command stays one line, list built from the command tree
 
 ## Scenario

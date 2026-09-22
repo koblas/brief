@@ -1,3 +1,8 @@
+---
+id: SCENARIO-12
+status: done
+---
+
 # SCENARIO-12: A completed feature has no next step
 
 ## Scenario

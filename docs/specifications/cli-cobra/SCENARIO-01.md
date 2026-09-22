@@ -1,3 +1,8 @@
+---
+id: SCENARIO-01
+status: done
+---
+
 # SCENARIO-01: Existing command contract holds on cobra
 
 ## Scenario

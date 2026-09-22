@@ -1,3 +1,8 @@
+---
+id: SCENARIO-07
+status: done
+---
+
 # SCENARIO-07: A feature name that would break the status contract is refused
 
 ## Scenario

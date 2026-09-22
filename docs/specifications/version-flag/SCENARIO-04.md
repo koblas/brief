@@ -1,3 +1,8 @@
+---
+id: SCENARIO-04
+status: done
+---
+
 # SCENARIO-04: --version takes no value
 
 ## Scenario

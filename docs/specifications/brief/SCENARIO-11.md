@@ -1,3 +1,8 @@
+---
+id: SCENARIO-11
+status: done
+---
+
 # SCENARIO-11: One malformed feature does not blind status to the rest
 
 ## Scenario

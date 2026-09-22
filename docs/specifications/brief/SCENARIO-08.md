@@ -1,3 +1,8 @@
+---
+id: SCENARIO-08
+status: done
+---
+
 # SCENARIO-08: Creating a feature that already exists is refused
 
 ## Scenario

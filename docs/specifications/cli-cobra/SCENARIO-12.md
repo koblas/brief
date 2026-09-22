@@ -1,3 +1,8 @@
+---
+id: SCENARIO-12
+status: done
+---
+
 # SCENARIO-12: Shell completion script
 
 ## Scenario

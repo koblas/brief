@@ -1,3 +1,8 @@
+---
+id: SCENARIO-13
+status: done
+---
+
 # SCENARIO-13: Completion for an unsupported shell
 
 ## Scenario

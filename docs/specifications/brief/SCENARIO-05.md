@@ -1,3 +1,8 @@
+---
+id: SCENARIO-05
+status: done
+---
+
 # SCENARIO-05: Finishing writes the handoff and replaces the state, then marks done
 
 ## Scenario

@@ -1,3 +1,8 @@
+---
+id: SCENARIO-07
+status: done
+---
+
 # SCENARIO-07: Command help keeps its prose inside generated structure
 
 ## Scenario

@@ -1,3 +1,8 @@
+---
+id: SCENARIO-02
+status: done
+---
+
 # SCENARIO-02: --json turns refusals into the error document
 
 ## Scenario

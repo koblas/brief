@@ -1,3 +1,8 @@
+---
+id: SCENARIO-03
+status: done
+---
+
 # SCENARIO-03: New step scaffolds the next step file and its progress entry
 
 ## Scenario
@@ -349,7 +354,7 @@ strict and the lenient `Number` — proving nothing.
 - [x] Step 29: `internal/scaffold/doc.go` and `internal/cli/doc.go` — extend the package docs to
       cover `new step`; `go doc ./internal/scaffold` and `go doc ./internal/platform/stepfile`
       read as contracts (update)
-- [ ] Step 30: `go build ./...`, `go test ./...` unpiped with the exact test count and its delta,
+- [x] Step 30: `go build ./...`, `go test ./...` unpiped with the exact test count and its delta,
       `go test -race ./internal/scaffold/... ./internal/cli/... ./internal/platform/...`,
       `golangci-lint run ./...` all green → tick SCENARIO-03 in `specification.md`'s
       `## BDD Acceptance Progress`, and rewrite `STATE.md` from the Handoff below

@@ -1,3 +1,8 @@
+---
+id: SCENARIO-03
+status: done
+---
+
 # SCENARIO-03: Undefined short flag is a one-line usage error
 
 ## Scenario

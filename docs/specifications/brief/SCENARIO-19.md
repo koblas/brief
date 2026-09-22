@@ -1,3 +1,8 @@
+---
+id: SCENARIO-19
+status: done
+---
+
 # SCENARIO-19: A state body missing a required heading is refused
 
 ## Scenario

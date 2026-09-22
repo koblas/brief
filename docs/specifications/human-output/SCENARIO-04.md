@@ -1,3 +1,8 @@
+---
+id: SCENARIO-04
+status: done
+---
+
 # SCENARIO-04: A malformed feature names the step file at fault
 
 ## Scenario

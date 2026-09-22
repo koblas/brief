@@ -1,3 +1,8 @@
+---
+id: SCENARIO-06
+status: done
+---
+
 # SCENARIO-06: --help next to an undefined flag is a usage error in either order
 
 ## Scenario

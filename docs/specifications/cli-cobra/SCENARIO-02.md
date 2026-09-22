@@ -1,3 +1,8 @@
+---
+id: SCENARIO-02
+status: done
+---
+
 # SCENARIO-02: Undefined long flag is a one-line usage error
 
 ## Scenario

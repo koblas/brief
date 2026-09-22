@@ -1,3 +1,8 @@
+---
+id: SCENARIO-03
+status: done
+---
+
 # SCENARIO-03: --version takes no arguments
 
 ## Scenario

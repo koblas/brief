@@ -1,3 +1,8 @@
+---
+id: SCENARIO-14
+status: done
+---
+
 # SCENARIO-14: Every command's help advertises --json
 
 ## Scenario

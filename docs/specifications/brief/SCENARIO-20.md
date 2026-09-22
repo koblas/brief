@@ -1,3 +1,8 @@
+---
+id: SCENARIO-20
+status: done
+---
+
 # SCENARIO-20: A step with an open checklist item cannot be finished
 
 ## Scenario

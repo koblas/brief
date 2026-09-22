@@ -1,3 +1,8 @@
+---
+id: SCENARIO-14
+status: done
+---
+
 # SCENARIO-14: Start degrades on a missing optional convention and says so
 
 ## Scenario

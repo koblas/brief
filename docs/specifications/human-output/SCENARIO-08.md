@@ -1,3 +1,8 @@
+---
+id: SCENARIO-08
+status: done
+---
+
 # SCENARIO-08: check groups findings by feature and names each rule
 
 ## Scenario
@@ -69,7 +74,7 @@ Verification
 
 - [x] Step 17: mutation-verified individually (cp-to-$TMPDIR per `.claude/rules/agent-briefs.md`, each restored byte-identical after): (a) dropped `Rule: RuleHandoffCap` in `checkHandoffCapFinding` → reddened exactly `Test_check_assigns_each_producer_its_stable_rule_id/handoff_cap`; (b) dropped `Feature`/`FeaturePath`/`InFlight` in `symlinkFeatureFinding` → reddened exactly `Test_check_stamps_a_symlinked_feature_finding_with_its_own_name_path_and_in_flight_true`; (c) sorted the rule tally by id only → reddened `Test_check_groups_two_features_with_a_blank_line_and_counts_rules_by_count_then_id` (redesigned with a 2/1/1 count split so id-only sort actually diverges from count-desc-then-id — a pure 1/1 tie does not discriminate this mutation); (d) always emitted the ERRORs clause → reddened `Test_check_summary_drops_the_ERRORs_clause_when_every_finding_is_WARN` (plus the same WARN-only two-feature test as expected collateral); (e) always emitted `:%d` regardless of Line → reddened both `Test_RenderFindings_writes_a_group_header_and_its_indented_findings`/`_separates_groups_with_exactly_one_blank_line` and the cli `Test_check_omits_the_line_suffix_for_a_whole_file_finding`; (f) dropped the blank-line-between-groups branch → reddened `Test_RenderFindings_separates_groups_with_exactly_one_blank_line` and the cli two-feature test
 - [x] Step 18: `go build ./...` clean; `go test -count=1 ./...` all 8 packages ok, 0 fail, 0 skip; `go test -count=1 -v ./internal/assemble/... ./internal/cli/...` 649 PASS / 0 FAIL / 0 SKIP (+18 net top-level test funcs in this scenario's three touched test files — 18 table rows collapsed into named case functions plus new stamping/grouping/render/summary tests, minus 4 removed superseded tests, per `go test` output and `git diff --stat`); `go test -race ./internal/assemble/... ./internal/cli/...` both ok; `golangci-lint run ./...` 0 issues (fixed a `maintidx` hit and 3 `thelper` hits by hoisting the rule-id table's 18 closures into named top-level `ruleCase*` functions, each starting `t.Helper()`); `go run ./cmd/brief check` on this repo: 4 groups (brief, cli-cobra, human-output, version-flag), every path relative, zero `:0` occurrences (grepped), exit 1
-- [ ] Step 19: all tests green → mark SCENARIO-08 done in specification.md; rewrite STATE.md
+- [x] Step 19: all tests green → mark SCENARIO-08 done in specification.md; rewrite STATE.md
 
 ## Handoff
 

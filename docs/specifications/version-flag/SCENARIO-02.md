@@ -1,3 +1,8 @@
+---
+id: SCENARIO-02
+status: done
+---
+
 # SCENARIO-02: A build with no stored version reports (devel)
 
 ## Scenario

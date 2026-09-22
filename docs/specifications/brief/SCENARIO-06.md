@@ -1,3 +1,8 @@
+---
+id: SCENARIO-06
+status: done
+---
+
 # SCENARIO-06: Finishing a finished step with the same inputs changes nothing
 
 ## Scenario

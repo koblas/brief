@@ -1,3 +1,8 @@
+---
+id: SCENARIO-05
+status: done
+---
+
 # SCENARIO-05: Flag missing its value
 
 ## Scenario

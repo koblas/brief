@@ -1,3 +1,8 @@
+---
+id: SCENARIO-10
+status: done
+---
+
 # SCENARIO-10: "new" has its own help
 
 ## Scenario

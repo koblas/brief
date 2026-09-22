@@ -1,3 +1,8 @@
+---
+id: SCENARIO-09
+status: done
+---
+
 # SCENARIO-09: check --json
 
 ## Scenario

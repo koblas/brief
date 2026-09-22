@@ -1,3 +1,8 @@
+---
+id: SCENARIO-22
+status: done
+---
+
 # SCENARIO-22: Check reports what the write path would now refuse
 
 ## Scenario

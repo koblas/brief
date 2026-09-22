@@ -1,3 +1,8 @@
+---
+id: SCENARIO-21
+status: done
+---
+
 # SCENARIO-21: A step with an unfinished dependency cannot be finished
 
 ## Scenario

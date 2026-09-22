@@ -1,3 +1,8 @@
+---
+id: SCENARIO-18
+status: done
+---
+
 # SCENARIO-18: An over-cap state body is refused and nothing lands
 
 ## Scenario
