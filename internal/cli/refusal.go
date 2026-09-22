@@ -10,6 +10,7 @@ import (
 	"github.com/koblas/brief/internal/assemble"
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/scaffold"
+	"github.com/koblas/brief/internal/setup"
 )
 
 // flattenOneLine collapses s to a single line: embedded newlines and runs
@@ -20,12 +21,19 @@ func flattenOneLine(s string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " ")
 }
 
-// noFilesChangedTail is the "nothing changed on disk" promise appended to
-// a write command's refusal: a *config.InvalidConfigError or a
-// *scaffold.RefusalError, both of which concern a write that never
-// happened. A *assemble.RefusalError carries no such promise — assemble
-// never writes, so there is nothing for it to promise — and neither does a
-// bare not-found or a generic failure.
+// noFilesChangedTail is the "nothing changed on disk" promise a refusal's
+// text line appends. classifyRefusal decides it per error, never by type
+// alone: every typed refusal carries it except the named exceptions —
+// *setup.RefusalError drops it only when the specific error means a write
+// already partially landed (setup.ErrPartialWrite); *config.InvalidConfigError
+// always carries it, whether or not the command that hit it writes anything
+// itself, since config resolution runs before every command's own writes,
+// never after; a bare not-found or a generic failure carries none, having
+// nothing to promise about. A *unknownFeatureError inherits its own promise
+// from the sentinel it wraps rather than always carrying one:
+// scaffold.ErrNoSuchFeature's own callers ("new step", "finish") write and
+// refused before touching disk, so it carries the tail; assemble.ErrNoSuchFeature's
+// own callers ("start", "check") are read-only, so it never does.
 const noFilesChangedTail = " (no files changed)"
 
 // refusalTextLayout selects which of refusalClassification.textLine's three
@@ -70,7 +78,9 @@ type refusalClassification struct {
 	// errorKindFailure — whose fix depends on the failing command, filled
 	// in by (reporter).refusal.
 	fix string
-	// tail is noFilesChangedTail for a write refusal, "" otherwise.
+	// tail is noFilesChangedTail for a write refusal, "" otherwise — and
+	// "" even for a write refusal whose err wraps setup.ErrPartialWrite,
+	// since that promise is false once an earlier write already landed.
 	tail string
 	// layout selects textLine's rendering shape; layoutPathProblem (the
 	// zero value) unless set otherwise.
@@ -78,8 +88,15 @@ type refusalClassification struct {
 }
 
 // classifyRefusal renders err into the R14a text-mode line's ingredients
-// and R3's error.kind. *unknownFeatureError is checked first, ahead of the
-// three typed refusals: scaffold's own not-found (noSuchFeatureRefusal) is
+// and R3's error.kind. *setup.RefusalError is checked first, ahead of
+// *config.InvalidConfigError: init's own config refusal
+// (setup.configRefusal) wraps a *config.InvalidConfigError as its Err, and
+// errors.AsType would reach that inner error through *setup.RefusalError's
+// own Unwrap if the InvalidConfigError branch ran first — silently
+// replacing init's "run 'brief init --force'" fix with the generic
+// "remove it" copy every other command's own bare InvalidConfigError
+// carries. *unknownFeatureError is checked next, ahead of the two other
+// typed refusals: scaffold's own not-found (noSuchFeatureRefusal) is
 // itself a *scaffold.RefusalError wrapping scaffold.ErrNoSuchFeature, so a
 // *unknownFeatureError built around one — enrichUnknownFeature wraps the
 // original error unchanged — would be silently reclassified by the
@@ -89,12 +106,28 @@ type refusalClassification struct {
 // *scaffold.RefusalError) looked fixed. Anything else falls to the generic
 // errorKindFailure case.
 func classifyRefusal(err error) refusalClassification {
+	if refusal, ok := errors.AsType[*setup.RefusalError](err); ok {
+		tail := noFilesChangedTail
+		if errors.Is(err, setup.ErrPartialWrite) {
+			tail = ""
+		}
+
+		return refusalClassification{
+			kind:    errorKindRefusal,
+			path:    refusal.Path,
+			line:    refusal.Line,
+			problem: flattenOneLine(refusal.Problem),
+			fix:     flattenOneLine(refusal.Fix),
+			tail:    tail,
+		}
+	}
+
 	if invalidCfg, ok := errors.AsType[*config.InvalidConfigError](err); ok {
 		return refusalClassification{
 			kind:    errorKindRefusal,
 			path:    invalidCfg.Path,
 			problem: flattenOneLine(invalidCfg.Err.Error()),
-			fix:     "fix it or remove it to fall back to the shipped defaults",
+			fix:     "correct the value, or delete the key to use its default",
 			tail:    noFilesChangedTail,
 		}
 	}

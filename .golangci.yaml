@@ -60,10 +60,19 @@ linters:
       #                              or with "resolve config: " context;
       #                              re-wrapping at the call site would
       #                              double that prefix
+      #   - config.Locate           -> its own nonexistent-startDir refusal is
+      #                              already *InvalidConfigError, "resolve
+      #                              config: " prefixed, the same shape
+      #                              config.Resolve wraps
+      #   - config.LocateInRepo     -> LocateWithin(startDir, boundary), same
+      #                              nonexistent-startDir refusal as Locate,
+      #                              already wrapped the same way
       extra-ignore-sigs:
         - cobra.Command).ExecuteContext(
         - cobra.Command).Help(
         - config.Resolve(
+        - config.Locate(
+        - config.LocateInRepo(
   exclusions:
     generated: lax
     presets:

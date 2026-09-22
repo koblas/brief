@@ -9,7 +9,9 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/koblas/brief/internal/doctor"
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/setup"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -23,8 +25,8 @@ var ErrUsage = errors.New("usage error")
 func init() {
 	// Root help and every "expected one of:" list share one order:
 	// registration order, as newRootCommand's root.AddCommand calls lay it
-	// out — new, start, finish, status, check — rather than cobra's default
-	// alphabetical sort. EnableCommandSorting is a cobra package global:
+	// out — new, start, finish, status, check, init, doctor, uninstall —
+	// rather than cobra's default alphabetical sort. EnableCommandSorting is a cobra package global:
 	// set once here, never per Run or per call, since a per-call write
 	// would race parallel tests' reads.
 	cobra.EnableCommandSorting = false
@@ -171,10 +173,10 @@ const commandNounAnnotation = "commandNoun"
 
 // writesFilesAnnotation is the cobra.Command.Annotations key marking a
 // command whose successful run can modify the tree — "new", "new
-// feature", "new step" and "finish" — so filesChangedFor knows R3's
-// files_changed is false (not null) on a usage error or a refusal that
-// changed nothing for one of these, true when at least one write landed
-// before the failure, and null for every other command.
+// feature", "new step", "finish" and "init" — so filesChangedFor knows
+// R3's files_changed is false (not null) on a usage error or a refusal
+// that changed nothing for one of these, true when at least one write
+// landed before the failure, and null for every other command.
 const writesFilesAnnotation = "writesFiles"
 
 // jsonFlagUsage is every JSON-capable command's own --json flag's usage
@@ -279,12 +281,93 @@ file; it replaces the file, it is never appended to; it
 must carry the configured state headings, though a
 section may be empty`
 
+// hostFlagUsage is init's --host flag's usage string. The backquoted
+// "name" is pflag's own placeholder convention (see handoffFlagUsage) —
+// unlike an earlier draft that backquoted "none", one of the two accepted
+// values, which pflag then rendered as the flag's own table placeholder
+// ("--host none") instead of a generic one.
+const hostFlagUsage = "the agent host `name` to install for: claude-code or none\n(default: detected)"
+
+// printFlagUsage is init's --print flag's usage string.
+const printFlagUsage = "print each pending file to stdout instead of\nwriting it (cannot be combined with --dry-run)"
+
+// noHookFlagUsage is init's --no-hook flag's usage string. Unlike
+// --with-agents, --no-hook is never refused under --host none — with no
+// plugin to omit a hook from, it is a documented no-op there, since
+// InitRequest.Host == "" may still resolve to claude-code (R8's own
+// detection), and a fixed value the caller cannot predict in advance is a
+// poor thing to make a usage error turn on.
+const noHookFlagUsage = "install the plugin without its PostToolUse hook\n(no effect with --host none)"
+
+// withAgentsFlagUsage is init's --with-agents flag's usage string. Its
+// continuation line, like handoffFlagUsage's, wraps via an embedded
+// newline — but unlike handoffFlagUsage's, it never starts that line with
+// "--": a flag usage's own rendered continuation is otherwise
+// indistinguishable from a second flag definition row to a text-table
+// scraper.
+const withAgentsFlagUsage = "install the three role agents (the resolved\nhost must be claude-code)"
+
+// hookFlagUsage is check's --hook flag's usage string. Its embedded newline
+// is pflag's own wrapping cue — see handoffFlagUsage. The backquoted "host"
+// is the generic placeholder (see hostFlagUsage); host.HookHosts() names
+// only "claude-code" today, so that is what the parenthetical states.
+const hookFlagUsage = "read a `host` hook payload from stdin and check only the\nedited feature (claude-code only)"
+
+// dryRunFlagUsage is init's --dry-run flag's usage string.
+const dryRunFlagUsage = "print the plan without writing anything"
+
+// forceFlagUsage is init's --force flag's usage string.
+const forceFlagUsage = "rewrite an existing .brief.yaml from defaults"
+
+// uninstallDryRunFlagUsage is uninstall's --dry-run flag's usage string.
+const uninstallDryRunFlagUsage = "print the plan without removing anything"
+
+// runSeams collects every environment seam a test can override on a call to
+// run or newRootCommand, gathered from a trailing ...runSeam so neither
+// signature grows a dedicated parameter per package that needs one.
+type runSeams struct {
+	doctorOpts []doctor.Option
+	setupOpts  []setup.Option
+}
+
+// runSeam configures one field of a runSeams collector. withDoctorOpts and
+// withSetupOpts are the two constructors; resolveRunSeams folds a
+// ...runSeam argument list into one runSeams value.
+type runSeam func(*runSeams)
+
+// withDoctorOpts appends opts to a runSeams' own doctorOpts, passed to
+// runDoctor after its own doctor.WithVersion — a test overriding
+// WithVersion this way still wins.
+func withDoctorOpts(opts ...doctor.Option) runSeam {
+	return func(s *runSeams) { s.doctorOpts = append(s.doctorOpts, opts...) }
+}
+
+// withSetupOpts appends opts to a runSeams' own setupOpts, passed to
+// setup.NewServer inside runInit — a test injects setup.WithHomeDir this
+// way so host detection never depends on the developer's own
+// os.UserHomeDir.
+func withSetupOpts(opts ...setup.Option) runSeam {
+	return func(s *runSeams) { s.setupOpts = append(s.setupOpts, opts...) }
+}
+
+// resolveRunSeams folds seams into one runSeams value, applied in order.
+func resolveRunSeams(seams []runSeam) runSeams {
+	var rs runSeams
+
+	for _, s := range seams {
+		s(&rs)
+	}
+
+	return rs
+}
+
 // Run parses args, dispatches to the named command, and renders every
 // user-facing line to stdout or stderr itself. wd is the working directory
 // used to resolve configuration and to relativize any printed path — Run
 // never calls os.Getwd. stdin backs "-" arguments on commands that read one
-// (finish's --handoff/--state); commands that take no such argument never
-// read it. Run delegates to run, passing debug.ReadBuildInfo as the source
+// (finish's --handoff/--state) and check --hook's own payload read;
+// commands that read neither never read it. Run delegates to run, passing
+// debug.ReadBuildInfo as the source
 // "--version" reads.
 func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	return run(ctx, wd, args, stdin, stdout, stderr, debug.ReadBuildInfo)
@@ -294,7 +377,12 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // dependency so a test can pin "--version"'s output against a fake build
 // info without a real binary, including a build info reported with ok=false. It has
 // the same signature as debug.ReadBuildInfo: production passes that
-// function itself.
+// function itself. seams is a trailing seam letting a test override
+// doctor's own environment seams (WithLookPath, WithExecutable,
+// WithBinaryVersion, WithVersion, via withDoctorOpts) or setup's own
+// (WithHomeDir, via withSetupOpts) without a new run overload — every
+// existing call site compiles unchanged, since a trailing variadic is
+// optional.
 //
 // R5's --json detection runs here, ahead of cobra entirely: scanJSONFlag
 // scans args for an exact "--json" token before the first "--", strips
@@ -307,7 +395,7 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // on the line; root.InitDefaultHelpCmd registers the help stub as a real
 // child so root.Find can resolve "help" the same way ExecuteContext's own
 // dispatch would.
-func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) error {
+func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool), seams ...runSeam) error {
 	strippedArgs, jsonMode, hasJSONValue := scanJSONFlag(args)
 
 	out := reporter{stdout: stdout, stderr: stderr, json: jsonMode, wd: wd}
@@ -317,7 +405,7 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 	// resolved command before RunE runs. contextcheck cannot see that
 	// guarantee through cobra's own dispatch and instead flags the
 	// context.Background() fallback inside Command.Context()'s body.
-	root := newRootCommand(wd, stdin, out, readBuildInfo) //nolint:contextcheck
+	root := newRootCommand(wd, stdin, out, readBuildInfo, seams...) //nolint:contextcheck
 	root.SetIn(stdin)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
@@ -359,13 +447,20 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // its own counting and reports brief's own usage error.
 //
 // Commands are added in the order they should list in root help and in
-// every "expected one of:" message — new, start, finish, status, check —
-// not alphabetically: see this package's init, which turns cobra's default
-// sort off, and expectedCommandList, which reads root.Commands() in that
-// same order. "completion" registers last: it is Hidden (enabled and
-// dispatchable, but excluded from expectedCommandList, which filters on
-// IsAvailableCommand alone) and carries listedInHelpAnnotation instead, so
-// it still gets a root-help row and remains a valid "brief help" topic.
+// every "expected one of:" message — new, start, finish, status, check,
+// init, doctor, uninstall — not alphabetically: see this package's init,
+// which turns cobra's default sort off, and expectedCommandList, which
+// reads root.Commands() in that same order. "completion" registers last: it is
+// Hidden (enabled and dispatchable, but excluded from
+// expectedCommandList, which filters on IsAvailableCommand alone) and
+// carries listedInHelpAnnotation instead, so it still gets a root-help
+// row and remains a valid "brief help" topic.
+//
+// seams is resolved once (resolveRunSeams) into doctorOpts and setupOpts:
+// doctorOpts threads through unchanged to the "doctor" leaf's own RunE,
+// appended after runDoctor's own doctor.WithVersion; setupOpts threads
+// through to "init"'s own RunE, passed to runInit's own extraSetupOpts —
+// see run's own doc comment.
 //
 // One root.SetHelpFunc wrapper backs every help document: root --help, the
 // help stub, runNew's sole-help arm and every leaf's own --help all reach
@@ -381,7 +476,9 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // gets its own one-entry document. Every help document's own "command"
 // field is the literal "help", never the described command's path: see
 // newHelpDocument.
-func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func() (*debug.BuildInfo, bool)) *cobra.Command {
+func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func() (*debug.BuildInfo, bool), seams ...runSeam) *cobra.Command {
+	rs := resolveRunSeams(seams)
+
 	root := &cobra.Command{
 		Use:                "brief",
 		Long:               rootShort,
@@ -437,6 +534,44 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		})
 	finishCmd.Annotations[writesFilesAnnotation] = "true"
 
+	initCmd := leafCommand("init [--host <name>] [--no-hook] [--with-agents] [--dry-run | --print] [--force] [--json]", "install brief's config and agent-host integration", initInvocation, initLong,
+		func(fs *pflag.FlagSet) {
+			fs.String("host", "", hostFlagUsage)
+			fs.Bool("no-hook", false, noHookFlagUsage)
+			fs.Bool("with-agents", false, withAgentsFlagUsage)
+			fs.Bool("dry-run", false, dryRunFlagUsage)
+			fs.Bool("print", false, printFlagUsage)
+			fs.Bool("force", false, forceFlagUsage)
+			addJSONFlag(fs)
+		},
+		func(cmd *cobra.Command, args []string) error {
+			host, _ := cmd.Flags().GetString("host")
+			noHook, _ := cmd.Flags().GetBool("no-hook")
+			withAgents, _ := cmd.Flags().GetBool("with-agents")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			printFlag, _ := cmd.Flags().GetBool("print")
+			force, _ := cmd.Flags().GetBool("force")
+
+			return runInit(cmd.Context(), wd, args, host, noHook, withAgents, dryRun, printFlag, force, out.forCommand(cmd), rs.setupOpts...)
+		})
+	initCmd.Annotations[writesFilesAnnotation] = "true"
+
+	uninstallCmd := leafCommand("uninstall [--host <name>] [--dry-run] [--force] [--json]", "remove what init installed", uninstallInvocation, uninstallLong,
+		func(fs *pflag.FlagSet) {
+			fs.String("host", "", uninstallHostFlagUsage)
+			fs.Bool("dry-run", false, uninstallDryRunFlagUsage)
+			fs.Bool("force", false, uninstallForceFlagUsage)
+			addJSONFlag(fs)
+		},
+		func(cmd *cobra.Command, args []string) error {
+			host, _ := cmd.Flags().GetString("host")
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			force, _ := cmd.Flags().GetBool("force")
+
+			return runUninstall(cmd.Context(), wd, args, host, dryRun, force, out.forCommand(cmd))
+		})
+	uninstallCmd.Annotations[writesFilesAnnotation] = "true"
+
 	root.AddCommand(
 		newCmd,
 		leafCommand("start [--json] <feature>", "print the next open step's context", startInvocation, startLong,
@@ -449,10 +584,22 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			func(cmd *cobra.Command, args []string) error {
 				return runStatus(cmd.Context(), wd, args, out.forCommand(cmd))
 			}),
-		leafCommand("check [feature]", "report faults finish would now refuse to write over", checkInvocation, checkLong, addJSONFlag,
+		leafCommand("check [feature] [--hook <host>]", "report faults finish would now refuse to write over", checkInvocation, checkLong,
+			func(fs *pflag.FlagSet) {
+				fs.String("hook", "", hookFlagUsage)
+				addJSONFlag(fs)
+			},
 			func(cmd *cobra.Command, args []string) error {
-				return runCheck(cmd.Context(), wd, args, out.forCommand(cmd))
+				hook, _ := cmd.Flags().GetString("hook")
+
+				return runCheck(cmd.Context(), wd, args, hook, stdin, out.forCommand(cmd))
 			}),
+		initCmd,
+		leafCommand("doctor [--json]", "check brief's setup: config, feature root, host integration", doctorInvocation, doctorLong, addJSONFlag,
+			func(cmd *cobra.Command, args []string) error {
+				return runDoctor(cmd.Context(), wd, args, readBuildInfo, out.forCommand(cmd), rs.doctorOpts...)
+			}),
+		uninstallCmd,
 	)
 
 	completionCmd := leafCommand(

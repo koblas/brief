@@ -3,8 +3,9 @@ package config
 import "errors"
 
 // ErrInvalidConfig is returned when a ".brief.yaml" file cannot be used as
-// configuration: malformed YAML or an unknown key. Callers branch on it with
-// errors.Is.
+// configuration: malformed YAML, an unknown key, or a known key whose
+// decoded value fails its own rule (see ValueError). Callers branch on it
+// with errors.Is.
 var ErrInvalidConfig = errors.New("invalid brief config")
 
 // StateHeadings holds the heading text for each of the four sections a
@@ -25,13 +26,15 @@ func (h StateHeadings) Ordered() []string {
 	return []string{h.BindingDecisions, h.LeftUnbuilt, h.Traps, h.OpenDebts}
 }
 
-// RoleBindings names the agent bound to each of brief's two positions: the
-// planner, who turns a specification into conforming steps, and the
-// implementer, who calls start and closes with finish. An empty field means
-// that position is unbound.
+// RoleBindings names the agent bound to each of brief's three positions:
+// the planner, who turns a specification into conforming steps; the
+// implementer, who calls start and closes with finish; and the reviewer,
+// who calls start read-only and check to report on a step's own output. An
+// empty field means that position is unbound.
 type RoleBindings struct {
 	Planner     string `yaml:"planner"`
 	Implementer string `yaml:"implementer"`
+	Reviewer    string `yaml:"reviewer"`
 }
 
 // Config is brief's resolved configuration: where feature directories live,

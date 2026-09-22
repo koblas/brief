@@ -30,6 +30,25 @@ Rules:
 - Before declaring a scenario done, run `go test ./...` from the repo root once, unpiped.
   The exit code of an unpiped command is the evidence.
 
+## Scenario plan files are brief step files
+
+`docs/specifications/<feature>/SCENARIO-XX.md` is read by `brief` itself (`brief status`,
+`brief check`). The architect writes it starting with frontmatter, then the heading, with the
+checklist under `## Implementation Plan`:
+
+```markdown
+---
+id: SCENARIO-XX
+status: open
+---
+
+# SCENARIO-XX: <title>
+```
+
+The developer sets `status: done` when the scenario is complete, alongside ticking it in
+`specification.md`. Every `- [ ]` under `## Implementation Plan` must be ticked by then —
+`brief check` reports an unticked item on a done step.
+
 ## IDE diagnostics are advisory
 
 The IDE indexes mid-edit, and during mutation windows. It routinely reports compile errors
@@ -45,17 +64,22 @@ targeted check — that is how a live mutation left by a crashed run was caught.
 A guard, a test, or an "absence" claim is proven by breaking the thing and seeing the
 specific test go red — not by the suite being green.
 
-**Stash the mutation so a crash cannot leave it behind:**
+**Copy the file aside so a crash cannot leave the mutation behind:**
 
 ```bash
-git stash push -m "mutation: <what>" -- <file>   # or cp to $TMPDIR
-# run the targeted test, observe RED
-git stash pop                                     # or restore the copy
-diff <original> <file>                            # prove byte-identical
+cp <file> "$TMPDIR/<name>.orig"      # take a FRESH copy immediately before each mutation
+# apply the mutation, run the targeted test, observe RED
+cp "$TMPDIR/<name>.orig" <file>      # restore
+diff "$TMPDIR/<name>.orig" <file>    # prove byte-identical
 ```
 
 An interrupted run once died holding a gutted security guard, and the tree looked merely
-"failing" rather than "deliberately broken". Stashing makes that recoverable.
+"failing" rather than "deliberately broken". The copy makes that recoverable.
+
+**Never use `git stash` for this.** Pipeline work runs in git worktrees, and every worktree
+shares one stash stack with the main checkout and any other session: a bare `git stash pop`
+can apply someone else's entry. Never reuse an old `$TMPDIR` copy either — a stale copy once
+silently reverted a file to a previous commit's contents.
 
 Rules:
 
@@ -65,6 +89,28 @@ Rules:
   the file parses, nothing more. Make the mutation surgical and still-valid.
 - Say which mutation you ran and which test it reddened. "Mutation-verified" alone is not a
   claim anyone can check.
+
+## Reviewing: scope and completeness
+
+A review gate is not free. One 10-scenario feature spent roughly 550k tokens on reviewers and
+another 780k on the developer passes answering them, and the largest single cause was
+reviewers re-reading whole packages they had already read in an earlier round.
+
+**Read the delta, not the tree.** Your prompt names a commit range or a file list. Start from
+`git diff <range>` and read only what the diff touches. Every reviewer has `Bash` for exactly
+this; a reviewer that cannot run it says so rather than quietly reading whole packages. Widen to a whole file when the diff
+alone cannot settle a question — and say in the finding why you had to. A package you already
+reviewed in an earlier round, on a surface this fix did not touch, has nothing new in it.
+
+**Report every finding in the round you find it.** Do not hold a MINOR back "for the next
+pass", do not open with a finding you then withdraw, and do not re-raise a finding the
+previous round already recorded as deferred. A finding that arrives one round late costs a
+whole extra gate: the developer pass, the re-gate, and every reviewer that re-reads the
+result.
+
+**Say what you could not check.** A path you had no way to exercise — an environment you
+cannot change, a host you cannot detect — is reported as unchecked, not silently passed and
+not guessed at. Unchecked is a fact the caller can act on; a guess is one they cannot.
 
 ## Assertions that prove nothing
 

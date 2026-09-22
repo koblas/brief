@@ -800,9 +800,9 @@ func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_s
 		wantStderr string
 	}{
 		// "--"
-		{name: "root --", args: []string{"--"}, wantStderr: `brief: unknown command "--"; expected one of: new, start, finish, status, check`},
+		{name: "root --", args: []string{"--"}, wantStderr: `brief: unknown command "--"; expected one of: new, start, finish, status, check, init, doctor, uninstall`},
 		{name: "new --", args: []string{"new", "--"}, wantStderr: `brief new: unknown type "--"; expected one of: feature, step`},
-		{name: "help --", args: []string{"help", "--"}, wantStderr: `brief help: unknown command "--"; expected one of: new, start, finish, status, check`},
+		{name: "help --", args: []string{"help", "--"}, wantStderr: `brief help: unknown command "--"; expected one of: new, start, finish, status, check, init, doctor, uninstall`},
 
 		// "--help=true"
 		{name: "root --help=true", args: []string{"--help=true"}, wantStderr: "brief: '--help' takes no value; run 'brief --help'"},

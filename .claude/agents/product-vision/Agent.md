@@ -181,6 +181,31 @@ Answer briefly and concretely:
 - **Prior art?** What comparable tools got right, and wrong. Don't copy their mistakes;
   don't reinvent their solved problems.
 
+## The scoping pass owes the literal copy
+
+You are invoked twice, and the two passes are not the same job. The **final** pass judges a
+surface that already exists, so every change it asks for costs a failing test, a production
+edit, a re-gate and a reviewer round. The **scoping** pass costs one edit to a spec section
+nobody has implemented yet.
+
+So the scoping pass does not stop at "the shape is right". Write out, literally:
+
+- every command and flag name, and the **flag help string** as the user will see it rendered
+  (including the placeholder — a backticked word in a pflag usage string *becomes* the
+  placeholder, which has bitten this repo);
+- the success line, each refusal line, and each fix line;
+- the exit code for each outcome;
+- the `--json` field names, and where the document differs between modes of the same command.
+
+These land in the specification's `## Surface & Copy` section and the developer implements
+them verbatim. Anything you leave unwritten gets invented at the keyboard and comes back to
+you in the final pass, at roughly ten times the cost.
+
+At the final pass, copy you already ruled on is settled — re-open it only if implementation
+proved it wrong. Spend that pass on what only a built surface can show: a fix that cannot
+clear its own finding, a success line claiming more than happened, a help string that
+renders differently than it reads in source.
+
 ## Verdict format
 
 End every review with exactly one:

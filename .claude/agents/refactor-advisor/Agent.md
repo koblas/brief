@@ -3,7 +3,7 @@ name: refactor-advisor
 description: Chief Code Quality Officer for brief — naming, function length, behavior placement, invariant ownership, pass-through middlemen, policy configurability. Invoke AFTER tests are green, on a completed handler or feature. Every finding is MINOR or NIT by construction — it never blocks a merge. Returns ranked suggestions; it does not rewrite the code.
 type: reviewer
 triggers: ["cmd/**/*.go", "internal/**/*.go", "*.go"]
-tools: Read, Glob, Grep
+tools: Read, Glob, Grep, Bash
 model: sonnet
 effort: medium
 color: green

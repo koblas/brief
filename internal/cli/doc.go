@@ -34,6 +34,27 @@
 // "expected one of:" list while giving it a root-help row and a
 // "brief help completion" topic.
 //
+// "brief init [--host <name>] [--no-hook] [--with-agents] [--dry-run |
+// --print] [--force]" installs internal/setup's own config file and
+// feature root, converging on a second run; its refusal — a
+// *setup.RefusalError, checked ahead of a bare *config.InvalidConfigError
+// so its own "run 'brief init --force'" fix is never lost to the generic
+// one — carries writesFilesAnnotation the same way "new" and "finish" do.
+// --json and --force are both registered but left out of the Use line
+// itself (leaf help's own 80-column budget), the same as "check"'s and
+// "new"'s own Use lines. A bare --host resolves by detection
+// (setup.detectHost) rather than defaulting to "none": runInit passes ""
+// straight through to setup.InitRequest.Host, and renders
+// Result.NoHostDetected's own stderr line in place of the ordinary next
+// action when detection ran and found nothing. --print computes the same
+// plan as --dry-run and writes nothing either, but renders each pending
+// artifact's own path and bytes instead of the ordinary rows — the two
+// flags are mutually exclusive, checked in runInit before setup.Init ever
+// runs. setup.ErrUnwritable (R10) is the one Init error path that returns
+// a populated Result alongside the error, so runInit's own
+// renderUnwritable can still print the --print output after the refusal
+// line.
+//
 // "brief help [command] --json", "brief --help --json" and every leaf's
 // own "<command> --help --json" render a help document instead of text:
 // commands[] full index (root's own help) or filtered to the one command

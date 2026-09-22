@@ -78,7 +78,7 @@ func Test_help_json_lists_every_listed_command_and_new_itself(t *testing.T) {
 		names[i] = c.Name
 	}
 
-	assert.Equal(t, []string{"new", "new feature", "new step", "start", "finish", "status", "check", "completion"}, names)
+	assert.Equal(t, []string{"new", "new feature", "new step", "start", "finish", "status", "check", "init", "doctor", "uninstall", "completion"}, names)
 	assert.Contains(t, names, "completion")
 	assert.NotContains(t, names, "help")
 	assert.NotContains(t, names, "brief")
@@ -159,6 +159,9 @@ func Test_help_json_entries_agree_with_each_commands_text_help(t *testing.T) {
 		{name: "finish", path: []string{"finish"}},
 		{name: "status", path: []string{"status"}},
 		{name: "check", path: []string{"check"}},
+		{name: "init", path: []string{"init"}},
+		{name: "doctor", path: []string{"doctor"}},
+		{name: "uninstall", path: []string{"uninstall"}},
 		{name: "completion", path: []string{"completion"}},
 	}
 
@@ -237,7 +240,7 @@ func Test_help_json_spellings_produce_identical_documents(t *testing.T) {
 				for i, c := range doc.Commands {
 					names[i] = c.Name
 				}
-				assert.Equal(t, []string{"new", "new feature", "new step", "start", "finish", "status", "check", "completion"}, names)
+				assert.Equal(t, []string{"new", "new feature", "new step", "start", "finish", "status", "check", "init", "doctor", "uninstall", "completion"}, names)
 			},
 		},
 		{

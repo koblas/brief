@@ -60,7 +60,8 @@ func Test_prints_start_help_as_usage_line_prose_and_flag_table(t *testing.T) {
 // rootHelp is root's exact stdout for "brief --help", "brief -h" and
 // "brief help": the one-sentence description, one row per available
 // command (new's two children in new's place, in registration order),
-// finish's overlong row wrapped to its own line, and the two trailers —
+// finish's, check's, init's and uninstall's own overlong rows each wrapped
+// to their own line, and the two trailers —
 // "Run 'brief <command> --help' for details." then, as the render's last
 // line, "Run 'brief --version' to print the installed version." (R7).
 const rootHelp = `brief manages feature specifications as files in your repository.
@@ -72,7 +73,13 @@ Usage:
   brief finish <feature> <step> --handoff <path> --state <path>
                                    close a step: handoff, state, then done
   brief status                     print a FEATURE/DONE/BLOCKED/NEXT table of every feature
-  brief check [feature]            report faults finish would now refuse to write over
+  brief check [feature] [--hook <host>]
+                                   report faults finish would now refuse to write over
+  brief init [--host <name>] [--no-hook] [--with-agents] [--dry-run | --print] [--force] [--json]
+                                   install brief's config and agent-host integration
+  brief doctor [--json]            check brief's setup: config, feature root, host integration
+  brief uninstall [--host <name>] [--dry-run] [--force] [--json]
+                                   remove what init installed
   brief completion <bash|zsh|fish|powershell>
                                    print a shell completion script
 
@@ -227,6 +234,9 @@ func Test_every_command_help_has_a_usage_line_and_a_flag_table(t *testing.T) {
 		{name: "status", args: []string{"status", "--help"}, path: "brief status"},
 		{name: "check", args: []string{"check", "--help"}, path: "brief check"},
 		{name: "finish", args: []string{"finish", "--help"}, path: "brief finish"},
+		{name: "init", args: []string{"init", "--help"}, path: "brief init"},
+		{name: "doctor", args: []string{"doctor", "--help"}, path: "brief doctor"},
+		{name: "uninstall", args: []string{"uninstall", "--help"}, path: "brief uninstall"},
 		{name: "completion", args: []string{"completion", "--help"}, path: "brief completion"},
 	}
 
@@ -268,6 +278,9 @@ func Test_help_topic_prints_the_same_bytes_as_the_command_help_flag(t *testing.T
 		{name: "status", path: []string{"status"}},
 		{name: "check", path: []string{"check"}},
 		{name: "finish", path: []string{"finish"}},
+		{name: "init", path: []string{"init"}},
+		{name: "doctor", path: []string{"doctor"}},
+		{name: "uninstall", path: []string{"uninstall"}},
 		{name: "completion", path: []string{"completion"}},
 	}
 
@@ -326,27 +339,27 @@ func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) 
 		{
 			name:   "unknown top-level topic",
 			args:   []string{"help", "bogus"},
-			stderr: "brief help: unknown command \"bogus\"; expected one of: new, start, finish, status, check\n",
+			stderr: "brief help: unknown command \"bogus\"; expected one of: new, start, finish, status, check, init, doctor, uninstall\n",
 		},
 		{
 			name:   "resolved command with an unresolved trailing word",
 			args:   []string{"help", "new", "bogus"},
-			stderr: "brief help: unknown command \"new bogus\"; expected one of: new, start, finish, status, check\n",
+			stderr: "brief help: unknown command \"new bogus\"; expected one of: new, start, finish, status, check, init, doctor, uninstall\n",
 		},
 		{
 			name:   "resolved command with an extra positional",
 			args:   []string{"help", "start", "extra"},
-			stderr: "brief help: unknown command \"start extra\"; expected one of: new, start, finish, status, check\n",
+			stderr: "brief help: unknown command \"start extra\"; expected one of: new, start, finish, status, check, init, doctor, uninstall\n",
 		},
 		{
 			name:   "resolved command with a trailing flag",
 			args:   []string{"help", "start", "--bogus"},
-			stderr: "brief help: unknown command \"start --bogus\"; expected one of: new, start, finish, status, check\n",
+			stderr: "brief help: unknown command \"start --bogus\"; expected one of: new, start, finish, status, check, init, doctor, uninstall\n",
 		},
 		{
 			name:   "hidden command as topic",
 			args:   []string{"help", "help"},
-			stderr: "brief help: unknown command \"help\"; expected one of: new, start, finish, status, check\n",
+			stderr: "brief help: unknown command \"help\"; expected one of: new, start, finish, status, check, init, doctor, uninstall\n",
 		},
 	}
 
@@ -540,11 +553,19 @@ func Test_prints_finish_flag_prose_in_its_flag_table(t *testing.T) {
 
 // Test_every_leaf_help_line_fits_in_80_columns sweeps every leaf's "--help"
 // output — the commands that render a Flags table, the surface MAJOR 1
-// fixed — for a generated Usage line, wrapped prose, and a pflag flag
-// table long enough for one leaf's flags to overrun 80 columns unless its
-// usage string carries its own embedded wrap points, the way jsonFlagUsage
-// and handoffFlagUsage/stateFlagUsage do. Root and "new" are out of scope
-// here: their cmdList rows are fixed-column-padded, not wrapped to a
+// fixed — for wrapped prose and a pflag flag table long enough for one
+// leaf's flags to overrun 80 columns unless its usage string carries its
+// own embedded wrap points, the way jsonFlagUsage and
+// handoffFlagUsage/stateFlagUsage do. The generated Usage line itself is
+// exempt, keyed by position — the one content line immediately after the
+// literal "Usage:" line, never by a "  brief " prefix match, which would
+// also exempt any wrapped continuation line or table row that happens to
+// start the same way: it renders cmd.Use verbatim, cobra offers no wrap
+// point for it (Use must stay one line — Name() and argument parsing both
+// split on its first space), and R14 pins init's own Use to its full
+// accepted-flag syntax, which runs past 80 columns; root's own cmdRow
+// already tolerates that same string unwrapped. Root and "new" are out of
+// scope here: their cmdList rows are fixed-column-padded, not wrapped to a
 // terminal width, an existing and separately reviewed layout (rootHelp,
 // newHelp) this fix does not touch. The help stub's own sole-argument "-h"
 // render is a leaf shape too, covered here alongside the rest.
@@ -561,6 +582,9 @@ func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 		{name: "finish", args: []string{"finish", "--help"}},
 		{name: "status", args: []string{"status", "--help"}},
 		{name: "check", args: []string{"check", "--help"}},
+		{name: "init", args: []string{"init", "--help"}},
+		{name: "doctor", args: []string{"doctor", "--help"}},
+		{name: "uninstall", args: []string{"uninstall", "--help"}},
 		{name: "completion", args: []string{"completion", "--help"}},
 		{name: "help", args: []string{"help", "-h"}},
 	}
@@ -574,9 +598,85 @@ func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 
 			require.NoError(t, err)
 			require.NotEmpty(t, stdout.String())
-			for line := range strings.SplitSeq(stdout.String(), "\n") {
+			lines := strings.Split(stdout.String(), "\n")
+			for i, line := range lines {
+				if i > 0 && lines[i-1] == "Usage:" {
+					continue
+				}
+
 				assert.LessOrEqual(t, len(line), 80, "line %q of %q help must fit in 80 columns", line, tc.name)
 			}
+		})
+	}
+}
+
+// genericPlaceholderCase is one row of
+// Test_host_and_hook_flags_render_a_generic_table_placeholder: args is the
+// "--help" invocation, flagRow is the exact Flags table row (name, value
+// placeholder, and first line of usage) that row must render, and
+// concreteValue is the one accepted flag value pflag's own UnquoteUsage
+// bug (see hostFlagUsage's own doc comment) would substitute as the table
+// placeholder in its place, were the usage string's backquoted word that
+// value instead of a generic one.
+type genericPlaceholderCase struct {
+	name          string
+	args          []string
+	flagRow       string
+	concreteValue string
+}
+
+// Test_host_and_hook_flags_render_a_generic_table_placeholder pins the
+// rendered Flags table row for init's, uninstall's and check's own
+// `name`/`host`-placeholder flags: pflag's UnquoteUsage renders a usage
+// string's own backquoted word as that flag's table placeholder verbatim,
+// so backquoting one of the accepted values instead of a generic word
+// renders that value as the placeholder for every value, the trap
+// hostFlagUsage's own doc comment names. Each case asserts the ruled row
+// byte-exact and, as the control arm, that the concrete-value placeholder
+// a reverted usage string would render is absent — each concreteValue
+// carries enough of the row's own trailing usage text to stay unique to
+// that reverted rendering; a bare "--host none" alone also occurs,
+// unrelated to this bug, in --no-hook's own "(no effect with --host none)"
+// parenthetical, and would fail this assertion regardless of which usage
+// string init's --host flag carries. Mutation-verified per case:
+// backquoting the case's own concrete value instead of the generic word in
+// its flag's usage constant (hostFlagUsage, uninstallHostFlagUsage,
+// hookFlagUsage) reddens exactly that case, on both the byte-exact flagRow
+// assertion and the concreteValue control, restored after.
+func Test_host_and_hook_flags_render_a_generic_table_placeholder(t *testing.T) {
+	tests := []genericPlaceholderCase{
+		{
+			name:          "init --host",
+			args:          []string{"init", "--help"},
+			flagRow:       "      --host name     the agent host name to install for: claude-code or none\n                      (default: detected)\n",
+			concreteValue: "--host none     the agent host name",
+		},
+		{
+			name:          "uninstall --host",
+			args:          []string{"uninstall", "--help"},
+			flagRow:       "      --host name   the agent host name to remove for: claude-code or none\n                    (default: claude-code)\n",
+			concreteValue: "--host claude-code   the agent host",
+		},
+		{
+			name:          "check --hook",
+			args:          []string{"check", "--help"},
+			flagRow:       "      --hook host   read a host hook payload from stdin and check only the\n                    edited feature (claude-code only)\n",
+			concreteValue: "--hook claude-code   read a claude-code hook",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wd := t.TempDir()
+			var stdout, stderr bytes.Buffer
+
+			err := cli.Run(t.Context(), wd, tc.args, nil, &stdout, &stderr)
+
+			require.NoError(t, err)
+			assert.Empty(t, stderr.String())
+			out := stdout.String()
+			assert.Contains(t, out, tc.flagRow)
+			assert.NotContains(t, out, tc.concreteValue)
 		})
 	}
 }
@@ -602,6 +702,7 @@ func Test_every_command_help_lists_the_json_flag_row(t *testing.T) {
 		{name: "finish", args: []string{"finish", "--help"}},
 		{name: "status", args: []string{"status", "--help"}},
 		{name: "check", args: []string{"check", "--help"}},
+		{name: "init", args: []string{"init", "--help"}},
 		{name: "help", args: []string{"help", "-h"}},
 	}
 
@@ -763,6 +864,41 @@ func Test_every_command_help_names_its_json_documents_top_level_fields(t *testin
 			wantExit: 1,
 		},
 		{
+			name: "doctor",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := newDoctorJSONFixture(t)
+
+				return runJSONAndHelp(t, wd, []string{"doctor", "--json"}, []string{"doctor", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
+			name: "init",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := t.TempDir()
+
+				return runJSONAndHelp(t, wd, []string{"init", "--host", "none", "--json"}, []string{"init", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
+			name: "uninstall",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := t.TempDir()
+				var initStdout, initStderr bytes.Buffer
+				require.NoError(t, cli.Run(t.Context(), wd, []string{"init", "--host", "none"}, nil, &initStdout, &initStderr))
+
+				return runJSONAndHelp(t, wd, []string{"uninstall", "--host", "none", "--json"}, []string{"uninstall", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
 			name: "help",
 			run: func(t *testing.T) ([]byte, string, error) {
 				t.Helper()
@@ -800,9 +936,9 @@ func Test_every_command_help_names_its_json_documents_top_level_fields(t *testin
 }
 
 // Test_status_and_check_help_say_the_text_layout_may_change pins the
-// exact sentence status and check's own Long end with, after their JSON
-// paragraph; start and finish are the control arm, since no other command
-// carries it.
+// exact sentence status, check and doctor's own Long end with, after
+// their JSON paragraph; start and finish are the control arm, since no
+// other command carries it.
 func Test_status_and_check_help_say_the_text_layout_may_change(t *testing.T) {
 	const sentence = "For scripts, use --json; the text layout may change."
 
@@ -813,8 +949,10 @@ func Test_status_and_check_help_say_the_text_layout_may_change(t *testing.T) {
 	}{
 		{name: "status", args: []string{"status", "--help"}, carries: true},
 		{name: "check", args: []string{"check", "--help"}, carries: true},
+		{name: "doctor", args: []string{"doctor", "--help"}, carries: true},
 		{name: "start", args: []string{"start", "--help"}, carries: false},
 		{name: "finish", args: []string{"finish", "--help"}, carries: false},
+		{name: "init", args: []string{"init", "--help"}, carries: false},
 	}
 
 	for _, tc := range tests {

@@ -3,7 +3,7 @@ name: api-reviewer
 description: Chief API Conventions Officer. Checks an HTTP boundary for thin controllers, REST URL design, response and error modeling, status-code semantics, and idempotency. brief has no HTTP surface today, so this reviewer stays dormant — invoke it if and when an endpoint or a request/response shape is added, at design time on the proposed route and again on the finished handler. Returns ranked findings; it does not rewrite the code.
 type: reviewer
 triggers: ["internal/http/**/*.go", "internal/httpapi/**/*.go", "internal/server/**/*.go"]
-tools: Read, Glob, Grep
+tools: Read, Glob, Grep, Bash
 model: sonnet
 effort: medium
 color: yellow

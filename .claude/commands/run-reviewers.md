@@ -29,6 +29,11 @@ git diff --name-only HEAD~1 2>/dev/null
 
 Combine into deduplicated list. All commands empty → fall back to `git ls-files`.
 
+**Also capture the range**, and pass it on in Step 5. A reviewer given `HEAD~3..HEAD` reads a
+diff; one given nothing re-reads whole packages, which is where a re-gate's cost actually
+goes. Pipeline mode after a fix pass: the range is the fix commits, not the whole feature
+branch.
+
 ## Step 2: Discover reviewer agents
 
 Use `Grep` to find agents with `type: reviewer` in frontmatter. Both searches in parallel:
@@ -67,8 +72,16 @@ overrides). Skip reviewers with no matching files.
 Spawn all matching reviewers in a **single message** via `Agent`:
 
 ```
-Agent(subagent_type="<name>", prompt="Review the code in this project. Focus on files under <path>.")
+Agent(subagent_type="<name>", prompt="Review <commit range, or the listed paths>. Read
+.claude/rules/agent-briefs.md first. Scope: <the matched files, listed>. Start from the diff
+and read only what it touches; widen only when the diff cannot settle a question, and say
+which finding forced it. Report every finding you have in this round — a MINOR held back for
+a later pass costs a whole extra gate. <On a re-gate: your prior findings were X; confirm each
+is closed or still open. Findings STATE.md already records as deferred are out of scope.>")
 ```
+
+Name the files. A reviewer told only "focus on `internal/`" reads the package; one handed six
+paths reads six diffs.
 
 Do NOT review code yourself — only orchestrate.
 

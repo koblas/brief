@@ -90,6 +90,20 @@ bug — fix it rather than working around it.
     returned PASS on a surface the fix did not touch has nothing new to read.
   - **PASS WITH FOLLOW-UPS is done.** Only BLOCKER and MAJOR block. MINOR/NIT are
     fix-if-cheap — never force another round trip.
+  - **A gate round is the expensive unit.** Wait for every reviewer before dispatching the
+    fix pass, and hand the developer one consolidated list — blocking findings plus the
+    cheap MINOR/NIT folds. A fix pass sent the moment the first reviewer reports guarantees
+    a second round for findings that were already in flight. On one feature three rounds
+    cost ~1.3M tokens; one would have cost roughly a third of that.
+  - **Scope every reviewer prompt to the diff.** Pass the commit range and the matched file
+    list, and on a re-gate say which of that reviewer's own findings are being re-checked
+    and which STATE.md already records as deferred. `/run-reviewers` does this; a
+    hand-spawned reviewer must too.
+  - **Copy is ruled at scoping, not at the final gate.** Command and flag names, help
+    strings, success/refusal/fix lines, exit codes and `--json` field names come from
+    `product-vision`'s Phase 1 pass and live in the specification's `## Surface & Copy`.
+    The developer implements them verbatim. A string invented at the keyboard is a string
+    nobody ruled on, and the final pass sends it back at ten times the cost.
   - `/run-reviewers` reports `REVIEWER DISCOVERY FAILED` → gate did not run. Fix
     discovery; do not treat as PASS.
   - **Two gates, only two.** Pipeline pauses for user at scenario approval (before

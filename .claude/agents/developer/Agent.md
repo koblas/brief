@@ -47,7 +47,12 @@ All Go commands run from the repo root.
 ## Implementation mode
 
 1. Read `docs/specifications/<feature-slug>/specification.md` for context (intent, business
-   rules, scenario text). **Do not modify it.**
+   rules, scenario text). **Do not modify it.** Its `## Surface & Copy` section, where the
+   spec has one, is binding: implement those strings — flag help, success, refusal and fix
+   lines, `--json` field names — **verbatim**. Copy you invent at the keyboard is copy
+   nobody ruled on, and the final `product-vision` pass sends it back at ten times what it
+   costs to settle now. A string the section does not cover, and that you cannot derive from
+   a neighbouring command, is a question for the caller, not a blank to fill in silently.
 2. Read `docs/specifications/<feature-slug>/<scenario-id>.md` for your checklist.
 3. For each unchecked step, run one TDD cycle:
    - Write failing test (RED).
