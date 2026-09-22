@@ -25,11 +25,13 @@ The feature root and everything under it are never removed, nor is
 
 ` + jsonFieldsParagraph("host", "dry_run", "created", "modified", "removed", "artifacts")
 
-// uninstallHostFlagUsage is uninstall's own --host flag's usage string.
-const uninstallHostFlagUsage = "the agent host to remove for (claude-code or `none`)"
+// uninstallHostFlagUsage is uninstall's own --host flag's usage string —
+// see cli.go's hostFlagUsage for the backquoted "name" placeholder
+// convention.
+const uninstallHostFlagUsage = "the agent host `name` to remove for: claude-code or none\n(default: claude-code)"
 
 // uninstallForceFlagUsage is uninstall's own --force flag's usage string.
-const uninstallForceFlagUsage = "remove a config file edited locally instead of keeping it"
+const uninstallForceFlagUsage = "remove files edited locally instead of keeping them"
 
 // uninstallDocument is uninstall's --json success document: the common
 // header first, then the request's own host and dry_run, every path this
@@ -48,35 +50,71 @@ type uninstallDocument struct {
 }
 
 // uninstallNextAction renders uninstall's own stderr next-action line,
-// minus the "brief uninstall: " prefix: R11's stderr contract, first match
-// wins — dry run, then "nothing installed" for zero artifacts, then
-// "removed" when at least one artifact reports setup.ActionRemoved, else
-// "nothing removed" naming --force. host reads naturally in each case
-// unless it is setup.HostNone (uninstall's default host is
-// setup.HostClaudeCode, and a run scoped to "none" removes only the
-// config): every case but "removed" appends " for <host>"; "removed" names
-// it right after "brief's" instead ("removed brief's claude-code install;
-// …"), since a trailing "for claude-code" read awkwardly there.
+// minus the "brief uninstall: " prefix: R11's stderr contract. Dry run
+// names installLabel unconditionally — planning already completed, but the
+// promise is about what a real run would remove, not what this one found.
+// Otherwise the discriminator is not which host was requested but what
+// Uninstall actually found to remove: any artifact outside KindConfig
+// reporting setup.ActionRemoved — a plugin, hook, snippet or agent file —
+// means a host integration really was removed, so the line names it
+// (installLabel, "removed brief's claude-code install; …", right after
+// "brief's" rather than trailing "for claude-code", which read awkwardly).
+// A lone KindConfig ActionRemoved — the shape a default-host uninstall
+// leaves after an earlier "init --host none" — never claims a host
+// install that was never there; it reports "removed brief's config"
+// instead. Failing both, any artifact ActionKept with detail "edited
+// locally" is counted and named, since --force can remove those; a "not a
+// regular file" kept artifact is excluded — --force never removes one
+// (planPluginRemoval, planConfigRemoval, planSnippetRemoval) — so counting
+// it would make a false promise. Zero artifacts falls back to "nothing
+// installed"; a non-empty plan with nothing removed and nothing
+// force-removable falls back to plain "nothing removed" — both still
+// carry host's own " for <host>" suffix (withHostSuffix), dropped only for
+// setup.HostNone.
 func uninstallNextAction(host string, dryRun bool, artifacts []setup.Artifact) string {
 	if dryRun {
-		return withHostSuffix("dry run, no files changed; rerun without --dry-run to apply", host)
+		return "dry run, nothing removed; rerun without --dry-run to remove " + installLabel(host)
 	}
 
-	if len(artifacts) == 0 {
-		return withHostSuffix("nothing installed", host)
-	}
+	var hostRemoved, configRemoved bool
+
+	var editedKept int
 
 	for _, a := range artifacts {
-		if a.Action == setup.ActionRemoved {
-			if host == setup.HostNone {
-				return "removed brief's install; the feature root and its contents were left in place"
-			}
-
-			return fmt.Sprintf("removed brief's %s install; the feature root and its contents were left in place", host)
+		switch {
+		case a.Action == setup.ActionRemoved && a.Kind == setup.KindConfig:
+			configRemoved = true
+		case a.Action == setup.ActionRemoved:
+			hostRemoved = true
+		case a.Action == setup.ActionKept && a.Detail == "edited locally":
+			editedKept++
 		}
 	}
 
-	return withHostSuffix("nothing removed; run 'brief uninstall --force' to remove edited files", host)
+	switch {
+	case hostRemoved:
+		return fmt.Sprintf("removed %s; the feature root and its contents were left in place", installLabel(host))
+	case configRemoved:
+		return "removed brief's config; the feature root and its contents were left in place"
+	case editedKept > 0:
+		return fmt.Sprintf("nothing removed; %d file(s) edited locally were kept; run 'brief uninstall --force' to remove them", editedKept)
+	case len(artifacts) == 0:
+		return withHostSuffix("nothing installed", host)
+	default:
+		return withHostSuffix("nothing removed", host)
+	}
+}
+
+// installLabel names what a real uninstall run would remove for host, used
+// by uninstallNextAction's dry-run and host-artifact-removed lines: "brief's
+// <host> install" unless host is setup.HostNone, in which case the host
+// name is dropped — "brief's install" alone.
+func installLabel(host string) string {
+	if host == setup.HostNone {
+		return "brief's install"
+	}
+
+	return fmt.Sprintf("brief's %s install", host)
 }
 
 // withHostSuffix appends " for <host>" to base, unless host is

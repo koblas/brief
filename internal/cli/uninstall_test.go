@@ -31,10 +31,33 @@ func Test_uninstall_removes_the_config_init_wrote(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "removed .brief.yaml\n", stdout.String())
-	assert.Equal(t, "brief uninstall: removed brief's install; the feature root and its contents were left in place\n", stderr.String())
+	assert.Equal(t, "brief uninstall: removed brief's config; the feature root and its contents were left in place\n", stderr.String())
 
 	_, statErr := os.Stat(filepath.Join(wd, ".brief.yaml"))
 	assert.True(t, os.IsNotExist(statErr))
+}
+
+// Test_uninstall_default_host_after_init_host_none_names_the_config_not_a_host_install
+// pins the fix for a MAJOR finding: uninstall's own default host is
+// claude-code (a superset of none's own plan), but a repository set up
+// with "init --host none" never had a claude-code install to remove — only
+// the config file is present, so the "removed" line must name the config,
+// never claim a claude-code install that was never there.
+func Test_uninstall_default_host_after_init_host_none_names_the_config_not_a_host_install(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "none"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"uninstall"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, "removed .brief.yaml\n", stdout.String())
+	assert.Equal(t, "brief uninstall: removed brief's config; the feature root and its contents were left in place\n", stderr.String())
 }
 
 // Test_uninstall_keeps_an_edited_config_and_reports_it pins R11's stderr
@@ -49,7 +72,7 @@ func Test_uninstall_keeps_an_edited_config_and_reports_it(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "kept .brief.yaml (edited locally)\n", stdout.String())
-	assert.Equal(t, "brief uninstall: nothing removed; run 'brief uninstall --force' to remove edited files\n", stderr.String())
+	assert.Equal(t, "brief uninstall: nothing removed; 1 file(s) edited locally were kept; run 'brief uninstall --force' to remove them\n", stderr.String())
 
 	body, readErr := os.ReadFile(filepath.Join(wd, ".brief.yaml"))
 	require.NoError(t, readErr)
@@ -67,7 +90,7 @@ func Test_uninstall_force_removes_an_edited_config(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "removed .brief.yaml (edited locally)\n", stdout.String())
-	assert.Equal(t, "brief uninstall: removed brief's install; the feature root and its contents were left in place\n", stderr.String())
+	assert.Equal(t, "brief uninstall: removed brief's config; the feature root and its contents were left in place\n", stderr.String())
 
 	_, statErr := os.Stat(filepath.Join(wd, ".brief.yaml"))
 	assert.True(t, os.IsNotExist(statErr))
@@ -119,7 +142,7 @@ func Test_uninstall_dry_run_prints_the_plan_and_removes_nothing(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "removed .brief.yaml\n", stdout.String())
-	assert.Equal(t, "brief uninstall: dry run, no files changed; rerun without --dry-run to apply\n", stderr.String())
+	assert.Equal(t, "brief uninstall: dry run, nothing removed; rerun without --dry-run to remove brief's install\n", stderr.String())
 
 	_, statErr := os.Stat(filepath.Join(wd, ".brief.yaml"))
 	assert.NoError(t, statErr)
@@ -260,6 +283,27 @@ func Test_uninstall_reaches_the_removed_line_from_the_snippet_alone(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, "removed CLAUDE.md\n", stdout.String())
 	assert.Equal(t, "brief uninstall: removed brief's claude-code install; the feature root and its contents were left in place\n", stderr.String())
+}
+
+// Test_uninstall_nonregular_claude_md_alone_reports_plain_nothing_removed
+// pins the boundary of uninstallNextAction's own "N file(s) edited locally
+// were kept" count (MAJOR fix): a CLAUDE.md that is a directory, not a
+// regular file, is the sole artifact and reports ActionKept, detail "not a
+// regular file" — never "edited locally", since --force cannot remove it
+// either (planSnippetRemoval). That must not be counted toward the
+// force-removable tally, or the line would promise --force can remove a
+// file it never touches; it must fall to the plain "nothing removed"
+// line instead.
+func Test_uninstall_nonregular_claude_md_alone_reports_plain_nothing_removed(t *testing.T) {
+	wd := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(wd, "CLAUDE.md"), 0o755))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.NotContains(t, stdout.String(), "removed")
+	assert.Equal(t, "brief uninstall: nothing removed for claude-code\n", stderr.String())
 }
 
 // Test_uninstall_refuses_a_lone_marker_naming_the_file_and_line pins R5's
