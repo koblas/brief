@@ -254,7 +254,7 @@ func Test_status_names_the_reason_for_a_malformed_feature_on_stderr(t *testing.T
 	assert.Equal(t, 0, cli.ExitCode(err))
 	assert.Equal(t, ""+
 		"brief status: delta: "+filepath.Join("docs", "specifications", "delta", "SCENARIO-01.md")+
-		": no frontmatter found; run 'brief check delta' to list every fault\n"+
+		": frontmatter does not parse: no frontmatter found; run 'brief check delta' to list every fault\n"+
 		"brief status: 1 feature: 0 in progress, 0 complete, 1 malformed\n",
 		stderr.String())
 	assert.NotContains(t, stderr.String(), "(no files changed)")
@@ -373,7 +373,7 @@ func Test_status_writes_the_table_before_the_malformed_lines_and_the_summary(t *
 		"alpha    0/1   0        SCENARIO-01  "+stepTitle("SCENARIO-01")+"\n"+
 		"delta    -     -        (malformed, see below)\n"+
 		"brief status: delta: "+filepath.Join("docs", "specifications", "delta", "SCENARIO-01.md")+
-		": no frontmatter found; run 'brief check delta' to list every fault\n"+
+		": frontmatter does not parse: no frontmatter found; run 'brief check delta' to list every fault\n"+
 		"brief status: 2 features: 1 in progress, 0 complete, 1 malformed\n",
 		shared.String())
 }

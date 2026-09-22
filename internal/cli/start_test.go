@@ -572,7 +572,7 @@ func Test_start_names_the_malformed_step_file_relative_to_the_working_directory(
 		assert.Empty(t, stdout.String())
 		assert.Equal(t,
 			"brief start: "+filepath.Join("docs", "specifications", "demo", "SCENARIO-01.md")+
-				": no frontmatter found; run 'brief check demo' to list every fault\n",
+				": frontmatter does not parse: no frontmatter found; run 'brief check demo' to list every fault\n",
 			stderr.String())
 	})
 
@@ -592,7 +592,7 @@ func Test_start_names_the_malformed_step_file_relative_to_the_working_directory(
 		assert.Equal(t, filepath.Join(featureDir, "SCENARIO-01.md"), *got.Path)
 		assert.Equal(t,
 			"brief start: "+filepath.Join("docs", "specifications", "demo", "SCENARIO-01.md")+
-				": no frontmatter found; run 'brief check demo' to list every fault",
+				": frontmatter does not parse: no frontmatter found; run 'brief check demo' to list every fault",
 			got.Message)
 	})
 
@@ -610,7 +610,7 @@ func Test_start_names_the_malformed_step_file_relative_to_the_working_directory(
 		assert.Equal(t, 1, cli.ExitCode(err))
 		assert.Equal(t,
 			"brief start: "+filepath.Join("..", "docs", "specifications", "demo", "SCENARIO-01.md")+
-				": no frontmatter found; run 'brief check demo' to list every fault\n",
+				": frontmatter does not parse: no frontmatter found; run 'brief check demo' to list every fault\n",
 			stderr.String())
 	})
 }

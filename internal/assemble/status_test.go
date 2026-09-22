@@ -317,7 +317,7 @@ func Test_status_marks_a_feature_whose_step_frontmatter_does_not_parse(t *testin
 	assert.Equal(t, 0, delta.Blocked)
 	assert.Equal(t, deltaDir, delta.Path)
 	assert.Equal(t, filepath.Join(deltaDir, "STEP-01.md"), delta.Problem.Path)
-	assert.Equal(t, "no frontmatter found", delta.Problem.Detail)
+	assert.Equal(t, "frontmatter does not parse: no frontmatter found", delta.Problem.Detail)
 	assert.Equal(t, "run 'brief check delta' to list every fault", delta.Problem.Fix)
 }
 

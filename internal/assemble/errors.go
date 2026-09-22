@@ -104,9 +104,13 @@ func (e *stepFrontmatterError) Unwrap() error {
 //
 // A step-file frontmatter parse failure surfaces as a *stepFrontmatterError:
 // its own name is joined onto base to name the step file, its wrapped
-// error's own message becomes Detail, and Fix always names 'brief check
-// <feature>' — filepath.Base(base), the feature directory, never the step
-// file's own name — as the one place every fault in the feature is listed.
+// error's own message becomes Detail, prefixed "frontmatter does not
+// parse: " — the same prefix assemble.Check's own C6 finding and
+// scaffold.Finish's own frontmatter refusal both already carry, one wording
+// for the one fault regardless of which of the three read paths meets it —
+// and Fix always names 'brief check <feature>' — filepath.Base(base), the
+// feature directory, never the step file's own name — as the one place
+// every fault in the feature is listed.
 //
 // Every other error falls to the third, unreached branch: no current caller
 // passes newProblem anything but a *fs.PathError or a *stepFrontmatterError,
@@ -124,7 +128,7 @@ func newProblem(base string, err error, nameable bool) *Problem {
 	if fmErr, ok := errors.AsType[*stepFrontmatterError](err); ok {
 		return &Problem{
 			Path:   filepath.Join(base, fmErr.name),
-			Detail: fmErr.err.Error(),
+			Detail: "frontmatter does not parse: " + fmErr.err.Error(),
 			Fix:    fmt.Sprintf("run 'brief check %s' to list every fault", filepath.Base(base)),
 		}
 	}
