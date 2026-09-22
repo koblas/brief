@@ -13,7 +13,10 @@ empty-kind fold, `uninstall --dry-run`'s edited-kept and plain "nothing removed"
 host-snippet's SKIP row Path now names the real first-present candidate, not a hardcoded
 root path; the pflag-placeholder test's control values now carry enough trailing usage text
 to stay unique; `ForceRemovable` is false on every force-removed artifact across all three
-producers, rule stated on `Artifact`'s own doc comment.
+producers, rule stated on `Artifact`'s own doc comment. Fix pass 7: an existing-but-unreadable
+CLAUDE.md candidate is its own host-snippet WARN, distinct from "not installed" (an
+unverifiable absence claim) and from the not-a-regular-file WARN; the reviewer gate's PASS
+WITH CHANGES closed on this alone, plus three cheap MINOR folds.
 
 ## Binding decisions
 - `config.LocateWithin(dir, boundary)` bounds a walk at `boundary`, itself still checked, its
@@ -31,9 +34,14 @@ producers, rule stated on `Artifact`'s own doc comment.
   wordings differ freely since `ForceRemovable`, not Detail text, is what callers key on.
   Doctor's host-snippet WARN/SKIP fire only for the one candidate `planSnippet`/
   `chooseSnippetLocation` would itself pick — the first candidate present at all, regular or
-  not, in `host.InstructionFiles` priority order, never a farther candidate's own shape;
-  SKIP's own Path names that same first-present candidate (falls back to the first candidate
-  in priority order only when none is present at all).
+  not, readable or not, in `host.InstructionFiles` priority order, never a farther
+  candidate's own shape; SKIP's own Path names that same first-present candidate (falls back
+  to the first candidate in priority order only when none is present at all). A present,
+  regular candidate `os.ReadFile` cannot read (`snippetCandidateState.unreadable`, distinct
+  from `present=false`) is its own WARN — "not readable (`<reason>`); cannot check for brief
+  block", `<reason>` from `readFailureReason` (a wrapped `*fs.PathError`'s own inner error) —
+  never the "not installed" a genuinely missing candidate gets, since a failed read proves
+  nothing about absence; the block-wins carve-out still overrides it exactly like `notRegular`.
 - `setup.Artifact.ForceRemovable` is true exactly on an Uninstall-side `ActionKept` artifact
   `--force` would turn into `ActionRemoved` (an edited file: `planPluginRemoval`,
   `planConfigRemoval`, `planSnippetRemoval`'s own non-`OriginCurrent` arm) — false on every
@@ -103,9 +111,14 @@ producers, rule stated on `Artifact`'s own doc comment.
 - `hostPluginCheck`/`hostAgentsCheck` duplicate the same origin-check body — refactor-advisor
   MINORs, deferred rather than risk behavior change. **Unowned.**
 - `host_test.go`/`detect_test.go`'s classification tables mostly carry no mutation-verification
-  statement, unlike their siblings (fix passes 5 and 6 each added a couple that do). **Unowned.**
+  statement, unlike their siblings (fix passes 5, 6 and 7 each added a couple that do). **Unowned.**
 - `internal/doctor` (`scanSnippetCandidateStates`/`hostSnippetCheck`) and `internal/setup`
   (`scanSnippetCandidates`/`chooseSnippetLocation`) each hand-write the same snippet-candidate-
   selection rule and cannot import each other (dependency rule) — arch-reviewer suggests
   hoisting the shared predicate into `internal/platform/artifact`, which both already import.
   **Unowned.**
+- `init`'s own refusal on an unreadable CLAUDE.md leaks a Go wrap chain and names the path
+  twice — `brief init: setup: read /abs/CLAUDE.md: open /abs/CLAUDE.md: permission denied`;
+  contract-conformant (a refusal, correct exit code) so not blocking, but product-vision's
+  suggested copy if anyone touches it is `brief init: cannot read CLAUDE.md: permission
+  denied; make it readable, or run 'brief init --host none'`. **Unowned.**

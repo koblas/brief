@@ -253,6 +253,18 @@ feature root (accessible, not counted), environment, host integration — setup 
   at `.claude/CLAUDE.md` is the SKIP `not installed` row, naming root `CLAUDE.md`, exactly as
   `init --dry-run` would merge into that same file; the directory is never named, since brief
   would never write there either.
+
+  **Amended in fix pass 7**: the chosen candidate existing but unreadable (any `os.ReadFile`
+  failure on a present, regular file — permission denied is the practical case) is its own
+  host-snippet WARN, distinct from the not-a-regular-file WARN above: detail `not readable
+  (<reason>); cannot check for brief block`, `<reason>` the read error's own underlying cause
+  (e.g. `permission denied`) rather than a hardcoded word, fix `chmod +r <rel path>, then run
+  'brief init --host claude-code'`. Asserting `not installed` from a failed read is an
+  unverifiable claim — brief does not know whether a block is present, only that it could not
+  check — so this WARN replaces the SKIP a missing candidate reports, exactly as the
+  not-a-regular-file WARN already does. The same block-wins carve-out applies unchanged: an
+  unreadable candidate yields to the other candidate's own real block, reported exactly as it
+  would be were the unreadable candidate a regular, readable file.
 - R14: **Command surface & order.** Root help and every "expected one of:" list:
   `new, start, finish, status, check, init, doctor, uninstall`. Shorts: init `install brief's
   config and agent-host integration`; doctor `check brief's setup: config, feature root, host

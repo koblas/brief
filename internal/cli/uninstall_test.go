@@ -83,7 +83,9 @@ func Test_uninstall_keeps_an_edited_config_and_reports_it(t *testing.T) {
 // twin of Test_uninstall_keeps_an_edited_config_and_reports_it: the same
 // edited config, under --dry-run, promises what a real run would do
 // ("would be kept") rather than reporting what this call did, and the file
-// survives byte-identical.
+// survives byte-identical. Mutation-verified: deleting uninstallNextAction's
+// own dry-run "case editedKept > 0" arm reddens this test alone, restored
+// after.
 func Test_uninstall_dry_run_reports_edited_files_would_be_kept(t *testing.T) {
 	wd := t.TempDir()
 	configPath := filepath.Join(wd, ".brief.yaml")
@@ -273,6 +275,38 @@ func Test_uninstall_for_claude_code_keeps_an_edited_skill_and_removes_it_under_f
 	assert.True(t, os.IsNotExist(statErr))
 }
 
+// Test_uninstall_counts_two_force_removable_kept_artifacts pins
+// uninstallNextAction's own "N file(s) edited locally were kept" count at
+// N=2, not just N=1 (every other case in this file edits exactly one
+// artifact, which a hardcoded "1" in place of editedKept would also
+// satisfy): a hand-written plugin file and an edited config, both host
+// claude-code, present with nothing else installed — planPluginRemoval
+// plans no row at all for a missing path, so every other plugin/agent file
+// is simply absent from the plan — are both kept and both counted, with no
+// ActionRemoved artifact to take the "removed" branch ahead of editedKept.
+// Mutation-verified: hardcoding the real-run "N file(s) … kept" Sprintf's
+// own count argument to 1 reddens this test alone, restored after.
+func Test_uninstall_counts_two_force_removable_kept_artifacts(t *testing.T) {
+	wd := t.TempDir()
+	start := filepath.Join(wd, ".claude", "skills", "brief", "skills", "start", "SKILL.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(start), 0o755))
+	require.NoError(t, os.WriteFile(start, []byte("---\nedited: true\n---\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("feature-directory: specs\n"), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "kept .claude/skills/brief/skills/start/SKILL.md (edited locally)\n")
+	assert.Contains(t, stdout.String(), "kept .brief.yaml (edited locally)\n")
+	assert.Equal(t, "brief uninstall: nothing removed; 2 file(s) edited locally were kept; run 'brief uninstall --force' to remove them\n", stderr.String())
+
+	_, startErr := os.Stat(start)
+	require.NoError(t, startErr)
+	_, configErr := os.Stat(filepath.Join(wd, ".brief.yaml"))
+	require.NoError(t, configErr)
+}
+
 // Test_uninstall_removes_the_block_leaving_unrelated_content pins the
 // "removed CLAUDE.md (brief block)" row at the CLI boundary: a CLAUDE.md
 // carrying unrelated prose alongside the block loses only the block, is
@@ -377,6 +411,10 @@ func Test_uninstall_nonregular_claude_md_alone_reports_plain_nothing_removed(t *
 // under --dry-run, reaches uninstallNextAction's own plain "nothing
 // removed" default arm — a non-empty plan with nothing removed and nothing
 // force-removable — rather than a promise to remove or keep anything.
+// Mutation-verified: dropping the "&& a.ForceRemovable" guard from
+// uninstallNextAction's own tally loop (counting every ActionKept, not
+// only a force-removable one) reddens this test and its non-dry-run
+// sibling above, restored after.
 func Test_uninstall_dry_run_nonregular_claude_md_alone_reports_plain_nothing_removed(t *testing.T) {
 	wd := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(wd, "CLAUDE.md"), 0o755))

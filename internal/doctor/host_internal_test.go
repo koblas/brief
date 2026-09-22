@@ -1,14 +1,28 @@
 package doctor
 
-// White-box package: originRow is host.go's own unexported origin→row
-// mapping. Every compiled-in older digest list (internal/platform/artifact)
-// ships empty (STATE.md), so no real file's bytes ever classify as
-// artifact.OriginOlder through artifact.Recognize or artifact.RecognizeSnippet
-// today — the OriginOlder arm host-plugin, host-hook, host-snippet and
-// host-agents all share is reachable only by calling originRow directly
-// with a synthetic artifact.OriginOlder value, as this file does. Every
-// other arm (present/missing, edited, current) is covered black-box in
-// host_test.go through the real artifact.Recognize/RecognizeSnippet path.
+// White-box package. This file pins three unexported units host_test.go's
+// own black-box table cannot reach economically:
+//
+//   - originRow is host.go's own unexported origin→row mapping. Every
+//     compiled-in older digest list (internal/platform/artifact) ships empty
+//     (STATE.md), so no real file's bytes ever classify as
+//     artifact.OriginOlder through artifact.Recognize or
+//     artifact.RecognizeSnippet today — the OriginOlder arm host-plugin,
+//     host-hook, host-snippet and host-agents all share is reachable only by
+//     calling originRow directly with a synthetic artifact.OriginOlder
+//     value, as this file does. Every other arm (present/missing, edited,
+//     current) is covered black-box in host_test.go through the real
+//     artifact.Recognize/RecognizeSnippet path.
+//   - nonRegularKind's own default (neither-symlink-nor-directory) arm needs
+//     a mode a black-box fixture cannot portably construct: os.Symlink and
+//     os.Mkdir work on every platform this project targets, but a named
+//     pipe requires syscall.Mkfifo, which is POSIX-only and would make
+//     host_test.go itself platform-conditional. A fake os.FileInfo reaches
+//     the same branch without that dependency.
+//   - notRegularDetail's own empty-kind fold depends directly on
+//     nonRegularKind's default arm reporting "" — calling it with "" here
+//     pins the fold itself without needing the fifo fixture nonRegularKind's
+//     own test already stands in for.
 
 import (
 	"os"

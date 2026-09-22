@@ -388,6 +388,24 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 	})
 }
 
+// chmodUnreadable chmods path to 0o000 and registers a t.Cleanup that
+// restores it to 0o600 before TempDir's own removal runs — an unreadable
+// file left at 0o000 would otherwise make RemoveAll fail on some
+// platforms. Skips the test outright under euid 0, where chmod's
+// permission bits have no effect and the read would silently succeed,
+// which would make the case pass vacuously rather than exercise the WARN
+// this file pins.
+func chmodUnreadable(t *testing.T, path string) {
+	t.Helper()
+
+	if os.Geteuid() == 0 {
+		t.Skip("chmod has no effect as root")
+	}
+
+	require.NoError(t, os.Chmod(path, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+}
+
 // Test_diagnose_classifies_host_snippet pins host-snippet's own rules: a
 // marker defect in either CLAUDE.md candidate is ERROR, naming its own
 // line; two candidates each holding a block is ERROR on ".claude/CLAUDE.md";
@@ -397,9 +415,11 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 // block is OK "edited locally"; no CLAUDE.md at all, or a block whose line
 // endings are CRLF (which can never exactly match the LF marker), is SKIP
 // "not installed"; a candidate that exists but is not a regular file — a
-// directory or a symlink — is WARN, naming which, unless the other
-// candidate still holds a real block, in which case that block wins exactly
-// as it would if both candidates were regular files.
+// directory or a symlink — is WARN, naming which; a candidate that exists,
+// is regular, but could not be read is WARN naming the underlying reason,
+// never the "not installed" a genuinely absent candidate gets; either
+// unreadable arm yields to the other candidate's own real block, which
+// wins exactly as it would if both candidates were regular files.
 func Test_diagnose_classifies_host_snippet(t *testing.T) {
 	runHostCheckCases(t, []hostCheckCase{
 		{
@@ -527,6 +547,44 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 				elsewhere := filepath.Join(wd, "elsewhere.md")
 				require.NoError(t, os.WriteFile(elsewhere, []byte("elsewhere"), 0o600))
 				require.NoError(t, os.Symlink(elsewhere, filepath.Join(wd, "CLAUDE.md")))
+
+				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
+				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), block, 0o600))
+			},
+			checkID:        "host-snippet",
+			wantSeverity:   doctor.SeverityOK,
+			wantDetail:     "installed",
+			wantFix:        nil,
+			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+		},
+		{
+			name: "CLAUDE.md exists but is not readable",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				path := filepath.Join(wd, "CLAUDE.md")
+				require.NoError(t, os.WriteFile(path, []byte("unrelated prose\n"), 0o600))
+				chmodUnreadable(t, path)
+			},
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "not readable (permission denied); cannot check for brief block",
+			wantFix:      new("chmod +r CLAUDE.md, then " + runInitClaudeCode),
+		},
+		{
+			// Pins the block-wins carve-out against an unreadable root
+			// candidate specifically (P1): brief cannot tell whether root's
+			// own CLAUDE.md carries a block, but .claude/CLAUDE.md's own
+			// real block still wins, exactly as it does against a
+			// notRegular root candidate above.
+			name: "CLAUDE.md is not readable but .claude/CLAUDE.md holds a real block",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				path := filepath.Join(wd, "CLAUDE.md")
+				require.NoError(t, os.WriteFile(path, []byte("unrelated prose\n"), 0o600))
+				chmodUnreadable(t, path)
 
 				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
 				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
