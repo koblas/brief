@@ -246,7 +246,7 @@ Scenario: SCENARIO-10 doctor reports Claude Code integration health
 ## BDD Acceptance Progress
 
 - [x] SCENARIO-01: Invalid config values are refused by every command
-- [ ] SCENARIO-02: doctor reports config, feature-root and environment health
+- [x] SCENARIO-02: doctor reports config, feature-root and environment health
 - [ ] SCENARIO-03: init writes the config and feature root, and converges
 - [ ] SCENARIO-04: uninstall removes the config init wrote and nothing else
 - [ ] SCENARIO-05: check --hook scopes a Claude Code hook call to the edited feature

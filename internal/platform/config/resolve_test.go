@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/config"
@@ -434,4 +435,134 @@ func Test_Resolve_keeps_the_handoff_suffix_sentinel_reachable_for_a_bad_suffix(t
 	_, _, err := config.Resolve(root)
 
 	assert.ErrorIs(t, err, stepfile.ErrInvalidHandoffSuffix)
+}
+
+// Test_inspect_reports_every_invalid_value_in_field_declaration_order pins
+// Inspect's own contract, doctor's config-values row source: every bad
+// value in the file, not only the first, each reported in Config's own
+// field-declaration order, alongside the fully decoded Config; a clean
+// config and an empty file both decode with no violations; a file that
+// cannot be decoded at all refuses with the same *InvalidConfigError shape
+// Resolve's own decode failure carries, "resolve config:" prefixed exactly
+// once.
+func Test_inspect_reports_every_invalid_value_in_field_declaration_order(t *testing.T) {
+	t.Run("multiple bad values report in field-declaration order", func(t *testing.T) {
+		root := t.TempDir()
+		configPath := writeConfig(t, root, "step-file-pattern: \"SCENARIO-%s.md\"\nhandoff-cap-lines: 0\n")
+
+		cfg, violations, err := config.Inspect(configPath)
+
+		require.NoError(t, err)
+		require.Len(t, violations, 2)
+		assert.Equal(t, "step-file-pattern", violations[0].Key)
+		assert.Equal(t, "handoff-cap-lines", violations[1].Key)
+		assert.Equal(t, "SCENARIO-%s.md", cfg.StepFilePattern)
+	})
+
+	t.Run("a clean config reports no violations", func(t *testing.T) {
+		root := t.TempDir()
+		configPath := writeConfig(t, root, "progress-heading: \"## Custom Progress\"\n")
+
+		cfg, violations, err := config.Inspect(configPath)
+
+		require.NoError(t, err)
+		assert.Empty(t, violations)
+		assert.Equal(t, "## Custom Progress", cfg.ProgressHeading)
+	})
+
+	t.Run("an empty file is valid and decodes to the shipped defaults", func(t *testing.T) {
+		root := t.TempDir()
+		configPath := writeConfig(t, root, "")
+
+		cfg, violations, err := config.Inspect(configPath)
+
+		require.NoError(t, err)
+		assert.Empty(t, violations)
+		assert.Equal(t, config.Default(), cfg)
+	})
+
+	t.Run("a file that cannot be decoded refuses with one resolve config prefix", func(t *testing.T) {
+		root := t.TempDir()
+		configPath := writeConfig(t, root, "progress-heading: [this is not a scalar\n")
+
+		_, violations, err := config.Inspect(configPath)
+
+		require.ErrorIs(t, err, config.ErrInvalidConfig)
+		assert.Nil(t, violations)
+		assert.Equal(t, 1, strings.Count(err.Error(), "resolve config:"))
+
+		var invalidCfg *config.InvalidConfigError
+		require.ErrorAs(t, err, &invalidCfg)
+		assert.Equal(t, configPath, invalidCfg.Path)
+	})
+}
+
+// Test_locate_returns_the_nearest_config_and_the_ancestors_it_shadows pins
+// Locate's own contract, doctor's config-shadow row source: the nearest
+// ".brief.yaml" wins, every farther ancestor config is reported as
+// shadowed (nearest-first — Resolve/Inspect never see them), a repository
+// with none reports an empty nearest and no shadowed ancestors, and a
+// nonexistent startDir refuses as ErrInvalidConfig, the same guard Resolve
+// itself relies on.
+func Test_locate_returns_the_nearest_config_and_the_ancestors_it_shadows(t *testing.T) {
+	t.Run("the nearest of two configs wins, the farther one is shadowed", func(t *testing.T) {
+		root := t.TempDir()
+		rootConfig := writeConfig(t, root, "progress-heading: \"## Root Progress\"\n")
+		nearDir := filepath.Join(root, "near")
+		require.NoError(t, os.MkdirAll(nearDir, 0o755))
+		nearConfig := writeConfig(t, nearDir, "progress-heading: \"## Near Progress\"\n")
+
+		nearest, shadowed, err := config.Locate(nearDir)
+
+		require.NoError(t, err)
+		assert.Equal(t, nearConfig, nearest)
+		assert.Equal(t, []string{rootConfig}, shadowed)
+	})
+
+	t.Run("no config anywhere reports an empty nearest and no shadowed ancestors", func(t *testing.T) {
+		root := t.TempDir()
+		startDir := filepath.Join(root, "a", "b")
+		require.NoError(t, os.MkdirAll(startDir, 0o755))
+
+		nearest, shadowed, err := config.Locate(startDir)
+
+		require.NoError(t, err)
+		assert.Empty(t, nearest)
+		assert.Empty(t, shadowed)
+	})
+
+	t.Run("a nonexistent start directory refuses as ErrInvalidConfig", func(t *testing.T) {
+		root := t.TempDir()
+		missingDir := filepath.Join(root, "does-not-exist")
+
+		_, _, err := config.Locate(missingDir)
+
+		require.ErrorIs(t, err, config.ErrInvalidConfig)
+		assert.ErrorContains(t, err, missingDir)
+	})
+}
+
+// Test_resolve_refuses_with_the_first_violation_inspect_reports pins the
+// agreement between Resolve and Inspect: Resolve's own refusal names the
+// same key Inspect's own violations[0] would, for a config carrying two
+// bad values — proving Resolve is built on Inspect's first element rather
+// than a second, independent check. This agreement arm alone cannot catch
+// a doubled "resolve config:" prefix, since both sides move together; the
+// byte-level proof is internal/cli/invalid_config_test.go and every other
+// SCENARIO-01 test passing unmodified.
+func Test_resolve_refuses_with_the_first_violation_inspect_reports(t *testing.T) {
+	root := t.TempDir()
+	configPath := writeConfig(t, root, "step-file-pattern: \"SCENARIO-%s.md\"\nhandoff-cap-lines: 0\n")
+
+	_, inspectViolations, inspectErr := config.Inspect(configPath)
+	require.NoError(t, inspectErr)
+	require.NotEmpty(t, inspectViolations)
+
+	_, _, resolveErr := config.Resolve(root)
+
+	require.ErrorIs(t, resolveErr, config.ErrInvalidConfig)
+
+	var valueErr *config.ValueError
+	require.ErrorAs(t, resolveErr, &valueErr)
+	assert.Equal(t, inspectViolations[0].Key, valueErr.Key)
 }

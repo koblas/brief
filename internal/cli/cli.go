@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/koblas/brief/internal/doctor"
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -23,8 +24,8 @@ var ErrUsage = errors.New("usage error")
 func init() {
 	// Root help and every "expected one of:" list share one order:
 	// registration order, as newRootCommand's root.AddCommand calls lay it
-	// out — new, start, finish, status, check — rather than cobra's default
-	// alphabetical sort. EnableCommandSorting is a cobra package global:
+	// out — new, start, finish, status, check, doctor — rather than cobra's
+	// default alphabetical sort. EnableCommandSorting is a cobra package global:
 	// set once here, never per Run or per call, since a per-call write
 	// would race parallel tests' reads.
 	cobra.EnableCommandSorting = false
@@ -294,7 +295,12 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // dependency so a test can pin "--version"'s output against a fake build
 // info without a real binary, including a build info reported with ok=false. It has
 // the same signature as debug.ReadBuildInfo: production passes that
-// function itself.
+// function itself. extraDoctorOpts is a trailing seam letting a test
+// override doctor's own environment seams (WithLookPath, WithExecutable,
+// WithBinaryVersion, WithVersion) without a new run overload — every
+// existing call site compiles unchanged, since a trailing variadic is
+// optional; runDoctor appends extraDoctorOpts after its own
+// doctor.WithVersion, so a test overriding WithVersion still wins.
 //
 // R5's --json detection runs here, ahead of cobra entirely: scanJSONFlag
 // scans args for an exact "--json" token before the first "--", strips
@@ -307,7 +313,7 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // on the line; root.InitDefaultHelpCmd registers the help stub as a real
 // child so root.Find can resolve "help" the same way ExecuteContext's own
 // dispatch would.
-func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool)) error {
+func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool), extraDoctorOpts ...doctor.Option) error {
 	strippedArgs, jsonMode, hasJSONValue := scanJSONFlag(args)
 
 	out := reporter{stdout: stdout, stderr: stderr, json: jsonMode, wd: wd}
@@ -317,7 +323,7 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 	// resolved command before RunE runs. contextcheck cannot see that
 	// guarantee through cobra's own dispatch and instead flags the
 	// context.Background() fallback inside Command.Context()'s body.
-	root := newRootCommand(wd, stdin, out, readBuildInfo) //nolint:contextcheck
+	root := newRootCommand(wd, stdin, out, readBuildInfo, extraDoctorOpts...) //nolint:contextcheck
 	root.SetIn(stdin)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
@@ -359,13 +365,18 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // its own counting and reports brief's own usage error.
 //
 // Commands are added in the order they should list in root help and in
-// every "expected one of:" message — new, start, finish, status, check —
-// not alphabetically: see this package's init, which turns cobra's default
-// sort off, and expectedCommandList, which reads root.Commands() in that
-// same order. "completion" registers last: it is Hidden (enabled and
-// dispatchable, but excluded from expectedCommandList, which filters on
-// IsAvailableCommand alone) and carries listedInHelpAnnotation instead, so
-// it still gets a root-help row and remains a valid "brief help" topic.
+// every "expected one of:" message — new, start, finish, status, check,
+// doctor — not alphabetically: see this package's init, which turns
+// cobra's default sort off, and expectedCommandList, which reads
+// root.Commands() in that same order. "completion" registers last: it is
+// Hidden (enabled and dispatchable, but excluded from
+// expectedCommandList, which filters on IsAvailableCommand alone) and
+// carries listedInHelpAnnotation instead, so it still gets a root-help
+// row and remains a valid "brief help" topic.
+//
+// extraDoctorOpts threads through unchanged to the "doctor" leaf's own
+// RunE, appended after runDoctor's own doctor.WithVersion — see run's own
+// doc comment.
 //
 // One root.SetHelpFunc wrapper backs every help document: root --help, the
 // help stub, runNew's sole-help arm and every leaf's own --help all reach
@@ -381,7 +392,7 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // gets its own one-entry document. Every help document's own "command"
 // field is the literal "help", never the described command's path: see
 // newHelpDocument.
-func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func() (*debug.BuildInfo, bool)) *cobra.Command {
+func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func() (*debug.BuildInfo, bool), extraDoctorOpts ...doctor.Option) *cobra.Command {
 	root := &cobra.Command{
 		Use:                "brief",
 		Long:               rootShort,
@@ -452,6 +463,10 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		leafCommand("check [feature]", "report faults finish would now refuse to write over", checkInvocation, checkLong, addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
 				return runCheck(cmd.Context(), wd, args, out.forCommand(cmd))
+			}),
+		leafCommand("doctor [--json]", "check brief's setup: config, feature root, host integration", doctorInvocation, doctorLong, addJSONFlag,
+			func(cmd *cobra.Command, args []string) error {
+				return runDoctor(cmd.Context(), wd, args, readBuildInfo, out.forCommand(cmd), extraDoctorOpts...)
 			}),
 	)
 

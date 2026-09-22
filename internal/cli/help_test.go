@@ -73,6 +73,7 @@ Usage:
                                    close a step: handoff, state, then done
   brief status                     print a FEATURE/DONE/BLOCKED/NEXT table of every feature
   brief check [feature]            report faults finish would now refuse to write over
+  brief doctor [--json]            check brief's setup: config, feature root, host integration
   brief completion <bash|zsh|fish|powershell>
                                    print a shell completion script
 
@@ -227,6 +228,7 @@ func Test_every_command_help_has_a_usage_line_and_a_flag_table(t *testing.T) {
 		{name: "status", args: []string{"status", "--help"}, path: "brief status"},
 		{name: "check", args: []string{"check", "--help"}, path: "brief check"},
 		{name: "finish", args: []string{"finish", "--help"}, path: "brief finish"},
+		{name: "doctor", args: []string{"doctor", "--help"}, path: "brief doctor"},
 		{name: "completion", args: []string{"completion", "--help"}, path: "brief completion"},
 	}
 
@@ -268,6 +270,7 @@ func Test_help_topic_prints_the_same_bytes_as_the_command_help_flag(t *testing.T
 		{name: "status", path: []string{"status"}},
 		{name: "check", path: []string{"check"}},
 		{name: "finish", path: []string{"finish"}},
+		{name: "doctor", path: []string{"doctor"}},
 		{name: "completion", path: []string{"completion"}},
 	}
 
@@ -326,27 +329,27 @@ func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) 
 		{
 			name:   "unknown top-level topic",
 			args:   []string{"help", "bogus"},
-			stderr: "brief help: unknown command \"bogus\"; expected one of: new, start, finish, status, check\n",
+			stderr: "brief help: unknown command \"bogus\"; expected one of: new, start, finish, status, check, doctor\n",
 		},
 		{
 			name:   "resolved command with an unresolved trailing word",
 			args:   []string{"help", "new", "bogus"},
-			stderr: "brief help: unknown command \"new bogus\"; expected one of: new, start, finish, status, check\n",
+			stderr: "brief help: unknown command \"new bogus\"; expected one of: new, start, finish, status, check, doctor\n",
 		},
 		{
 			name:   "resolved command with an extra positional",
 			args:   []string{"help", "start", "extra"},
-			stderr: "brief help: unknown command \"start extra\"; expected one of: new, start, finish, status, check\n",
+			stderr: "brief help: unknown command \"start extra\"; expected one of: new, start, finish, status, check, doctor\n",
 		},
 		{
 			name:   "resolved command with a trailing flag",
 			args:   []string{"help", "start", "--bogus"},
-			stderr: "brief help: unknown command \"start --bogus\"; expected one of: new, start, finish, status, check\n",
+			stderr: "brief help: unknown command \"start --bogus\"; expected one of: new, start, finish, status, check, doctor\n",
 		},
 		{
 			name:   "hidden command as topic",
 			args:   []string{"help", "help"},
-			stderr: "brief help: unknown command \"help\"; expected one of: new, start, finish, status, check\n",
+			stderr: "brief help: unknown command \"help\"; expected one of: new, start, finish, status, check, doctor\n",
 		},
 	}
 
@@ -561,6 +564,7 @@ func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 		{name: "finish", args: []string{"finish", "--help"}},
 		{name: "status", args: []string{"status", "--help"}},
 		{name: "check", args: []string{"check", "--help"}},
+		{name: "doctor", args: []string{"doctor", "--help"}},
 		{name: "completion", args: []string{"completion", "--help"}},
 		{name: "help", args: []string{"help", "-h"}},
 	}
@@ -763,6 +767,17 @@ func Test_every_command_help_names_its_json_documents_top_level_fields(t *testin
 			wantExit: 1,
 		},
 		{
+			name: "doctor",
+			run: func(t *testing.T) ([]byte, string, error) {
+				t.Helper()
+
+				wd := newDoctorJSONFixture(t)
+
+				return runJSONAndHelp(t, wd, []string{"doctor", "--json"}, []string{"doctor", "--help"})
+			},
+			wantExit: 0,
+		},
+		{
 			name: "help",
 			run: func(t *testing.T) ([]byte, string, error) {
 				t.Helper()
@@ -800,9 +815,9 @@ func Test_every_command_help_names_its_json_documents_top_level_fields(t *testin
 }
 
 // Test_status_and_check_help_say_the_text_layout_may_change pins the
-// exact sentence status and check's own Long end with, after their JSON
-// paragraph; start and finish are the control arm, since no other command
-// carries it.
+// exact sentence status, check and doctor's own Long end with, after
+// their JSON paragraph; start and finish are the control arm, since no
+// other command carries it.
 func Test_status_and_check_help_say_the_text_layout_may_change(t *testing.T) {
 	const sentence = "For scripts, use --json; the text layout may change."
 
@@ -813,6 +828,7 @@ func Test_status_and_check_help_say_the_text_layout_may_change(t *testing.T) {
 	}{
 		{name: "status", args: []string{"status", "--help"}, carries: true},
 		{name: "check", args: []string{"check", "--help"}, carries: true},
+		{name: "doctor", args: []string{"doctor", "--help"}, carries: true},
 		{name: "start", args: []string{"start", "--help"}, carries: false},
 		{name: "finish", args: []string{"finish", "--help"}, carries: false},
 	}
