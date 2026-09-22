@@ -24,6 +24,20 @@
     ],
     "deny": ["Bash(rm -rf *)", "Bash(curl *)", "Read(./.env)", "Read(./.env.*)"]
   },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && command -v direnv >/dev/null && direnv export bash >> \"$CLAUDE_ENV_FILE\" 2>/dev/null || true",
+            "timeout": 120,
+            "statusMessage": "Loading devenv environment..."
+          }
+        ]
+      }
+    ]
+  },
   "enabledPlugins": {
     "gopls-lsp@claude-plugins-official": true
   },
