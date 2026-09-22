@@ -608,6 +608,36 @@ func Test_check_reports_a_missing_state_file(t *testing.T) {
 	assert.Contains(t, f.Detail, "no such file")
 }
 
+// Test_check_marks_a_zero_step_feature_in_flight_not_complete is the cheap
+// optional closing STATE.md's own trap: a feature with no step files at
+// all is vacuously "every step done" by a naive empty loop, but
+// assemble.Status's own Complete() requires Total > 0 and so calls the
+// same feature "in progress". A zero-step feature's own finding (here, a
+// missing state heading — C5, which fires regardless of step count) must
+// take SeverityError and InFlight true, agreeing with Status rather than
+// contradicting it with a WARN/"(complete)" reading.
+func Test_check_marks_a_zero_step_feature_in_flight_not_complete(t *testing.T) {
+	cfg := fixtureConfig()
+	cfg.StepFilePattern = "STEP-%02d.md"
+	root := t.TempDir()
+	featureDir := checkFeatureDir(cfg, root, "demo")
+
+	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkStateMissingHeading(cfg, cfg.StateHeadings.Traps))
+
+	srv := assemble.NewServer(cfg, root)
+
+	findings, err := srv.Check(t.Context(), "demo")
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, assemble.SeverityError, f.Severity)
+	assert.True(t, f.InFlight)
+
+	groups := assemble.GroupByFeature(findings)
+	require.Len(t, groups, 1)
+	assert.True(t, groups[0].InFlight)
+}
+
 func Test_check_reports_a_specification_with_no_progress_heading(t *testing.T) {
 	cfg := fixtureConfig()
 	cfg.StepFilePattern = "STEP-%02d.md"

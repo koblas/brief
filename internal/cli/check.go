@@ -193,7 +193,11 @@ func runCheck(ctx context.Context, wd string, rest []string, out reporter) error
 	}
 
 	if len(findings) == 0 {
-		fmt.Fprintln(out.stderr, "brief check: no findings")
+		if feature != "" {
+			fmt.Fprintf(out.stderr, "brief check: %s: no findings\n", feature)
+		} else {
+			fmt.Fprintln(out.stderr, "brief check: no findings")
+		}
 
 		return nil
 	}

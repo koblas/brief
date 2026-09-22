@@ -148,7 +148,11 @@ func Test_check_groups_two_features_with_a_blank_line_and_counts_rules_by_count_
 
 // Test_check_omits_the_line_suffix_for_a_whole_file_finding pins the
 // whole-file shape: a finding with Line 0 (here, a missing state file)
-// prints the bare path, never a trailing ":0".
+// prints the bare path, never a trailing ":0". The fixture has no step
+// files at all, so it is in flight (Total == 0, the same rule
+// assemble.Status's Complete() applies) and the finding is ERROR, exit 1
+// — not the WARN/exit-0 a naive "no step is un-done" reading would give a
+// zero-step feature.
 func Test_check_omits_the_line_suffix_for_a_whole_file_finding(t *testing.T) {
 	wd := t.TempDir()
 	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
@@ -159,9 +163,9 @@ func Test_check_omits_the_line_suffix_for_a_whole_file_finding(t *testing.T) {
 
 	err := cli.Run(t.Context(), wd, []string{"check"}, nil, &stdout, &stderr)
 
-	require.NoError(t, err)
-	assert.Equal(t, 0, cli.ExitCode(err))
-	assert.Contains(t, stdout.String(), "\n  WARN  "+filepath.Join("docs", "specifications", "demo", "STATE.md")+"  ")
+	require.Error(t, err)
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Contains(t, stdout.String(), "\n  ERROR  "+filepath.Join("docs", "specifications", "demo", "STATE.md")+"  ")
 	assert.NotContains(t, stdout.String(), "STATE.md:0")
 }
 
@@ -291,6 +295,29 @@ func Test_check_refuses_an_unknown_feature_with_no_files_changed_tail(t *testing
 	assert.Empty(t, stdout.String())
 	assert.Equal(t, 1, strings.Count(stderr.String(), "\n"))
 	assert.NotContains(t, stderr.String(), "(no files changed)")
+}
+
+// Test_check_names_the_feature_in_the_no_findings_notice pins the cheap
+// optional: a named, conforming feature's "no findings" notice names it
+// ("brief check: <feature>: no findings"), unlike the bare "brief check:
+// no findings" a run with no feature argument writes
+// (Test_check_json_document_golden's control arm, cli/check_json_test.go).
+func Test_check_names_the_feature_in_the_no_findings_notice(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "alpha")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(conformingSpec), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(conformingState), 0o600))
+	writeCheckStep(t, featureDir, "SCENARIO-01", "done", []string{"- [x] do the thing"})
+
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"check", "alpha"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "brief check: alpha: no findings\n", stderr.String())
 }
 
 // Test_check_scopes_to_the_named_feature_only asserts a malformed sibling

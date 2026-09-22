@@ -148,12 +148,16 @@ type Finding struct {
 // C10 for it, since the handoff cap does not depend on frontmatter.
 //
 // Severity is decided once per feature, after every step file is walked:
-// SeverityError when any step is not done or could not be read or parsed;
-// SeverityWarn when every step reads as done. A feature with no step files
-// is vacuously "every step done" and takes SeverityWarn. A feature-level
-// Finding — an unreadable or symlinked feature directory, or a feature
-// whose step files could not be listed at all — always takes
-// SeverityError: its doneness cannot be measured, and treating the
+// SeverityError when any step is not done or could not be read or parsed,
+// or the feature has no step files at all; SeverityWarn when every step
+// reads as done. A feature with no step files takes SeverityError rather
+// than the vacuous "every step done" WARN a naive empty-loop would read —
+// the same rule assemble.Status's own Complete() applies (Total > 0
+// required), so a zero-step feature's (in_flight) header agrees with
+// Status's own "in progress" (never "(complete)") classification of it. A
+// feature-level Finding — an unreadable or symlinked feature directory, or
+// a feature whose step files could not be listed at all — always takes
+// SeverityError too: its doneness cannot be measured, and treating the
 // unmeasurable case as anything less would understate it.
 func (s *Server) Check(_ context.Context, feature string) ([]Finding, error) {
 	pattern, err := stepfile.Compile(s.cfg.StepFilePattern)
@@ -417,8 +421,9 @@ type parsedStep struct {
 // pattern recognizes, in ascending step-number order. It returns the
 // findings and whether the feature reads as still in flight (the severity
 // rule Check's own doc comment states): true when any step is not done, or
-// could not be read or parsed, or the step files could not be listed at
-// all.
+// could not be read or parsed, the step files could not be listed at all,
+// or there are no step files at all — the same Total > 0 requirement
+// assemble.Status's Complete() applies.
 //
 // A listing failure — the directory opened but could not be read, most
 // often a permission failure on the directory itself rather than on
@@ -484,7 +489,10 @@ func (s *Server) checkStepFindings(root *os.Root, pattern stepfile.Pattern, hand
 
 	var findings []Finding
 
-	inFlight := false
+	// A feature with no step files at all is not vacuously "every step
+	// done": assemble.Status's own Complete() requires Total > 0, and Check
+	// now matches that rule rather than disagreeing with it.
+	inFlight := len(parsed) == 0
 
 	for _, ps := range parsed {
 		stepPath := filepath.Join(featurePath, ps.name)
