@@ -54,6 +54,32 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Contains(t, stdout.String(), "created .claude/skills/brief/.claude-plugin/plugin.json\n")
+		assert.Equal(t, "brief init: installed for claude-code (detected CLAUDE.md; use --host none to skip); "+
+			"start Claude Code in this directory (or run /reload-plugins in a session already here), "+
+			"then 'brief new feature <name>'\n", stderr.String())
+	})
+
+	t.Run("a root .claude directory detects claude-code and names it", func(t *testing.T) {
+		wd := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(wd, ".claude"), 0o755))
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+
+		require.NoError(t, err)
+		assert.Equal(t, "brief init: installed for claude-code (detected .claude; use --host none to skip); "+
+			"start Claude Code in this directory (or run /reload-plugins in a session already here), "+
+			"then 'brief new feature <name>'\n", stderr.String())
+	})
+
+	t.Run("an explicit --host claude-code names no detection signal", func(t *testing.T) {
+		wd := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(wd, ".claude"), 0o755))
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+
+		require.NoError(t, err)
 		assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
 	})
 
@@ -66,6 +92,19 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, stderr.String())
 		assert.Contains(t, stdout.String(), `"host":"none"`)
+		assert.Contains(t, stdout.String(), `"detected_by":null`)
+	})
+
+	t.Run("a detected host reports detected_by under --json", func(t *testing.T) {
+		wd := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(wd, ".claude"), 0o755))
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--json"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+
+		require.NoError(t, err)
+		assert.Empty(t, stderr.String())
+		assert.Contains(t, stdout.String(), `"detected_by":".claude"`)
 	})
 }
 

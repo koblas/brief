@@ -19,23 +19,27 @@ func WithHomeDir(fn func() (string, error)) Option {
 // or a "CLAUDE.md" entry of any type, or when home reports (without error)
 // a directory whose own ".claude" is a directory; HostNone with
 // detected=false otherwise. A home error, or home returning "", is treated
-// the same as no home directory at all — never a refusal.
-func detectHost(root string, home func() (string, error)) (string, bool) {
+// the same as no home directory at all — never a refusal. The third return
+// value names the signal detection found — ".claude", "CLAUDE.md", or
+// "~/.claude" — "" when detected is false; it backs Result.DetectedBy,
+// which cli's own next-action line names so a detected install is never
+// silently indistinguishable from an explicit --host claude-code.
+func detectHost(root string, home func() (string, error)) (string, bool, string) {
 	if info, err := os.Stat(filepath.Join(root, ".claude")); err == nil && info.IsDir() {
-		return HostClaudeCode, true
+		return HostClaudeCode, true, ".claude"
 	}
 
 	if _, err := os.Lstat(filepath.Join(root, "CLAUDE.md")); err == nil {
-		return HostClaudeCode, true
+		return HostClaudeCode, true, "CLAUDE.md"
 	}
 
 	if home != nil {
 		if h, err := home(); err == nil && h != "" {
 			if info, err := os.Stat(filepath.Join(h, ".claude")); err == nil && info.IsDir() {
-				return HostClaudeCode, true
+				return HostClaudeCode, true, "~/.claude"
 			}
 		}
 	}
 
-	return HostNone, false
+	return HostNone, false, ""
 }

@@ -30,7 +30,7 @@ func Test_init_json_is_one_exact_document(t *testing.T) {
 	configPath := filepath.Join(wd, ".brief.yaml")
 	featureRoot := filepath.Join(wd, "docs", "specifications")
 
-	want := `{"schema":1,"command":"init","ok":true,"exit_code":0,"host":"none","dry_run":false,"created":[` +
+	want := `{"schema":1,"command":"init","ok":true,"exit_code":0,"host":"none","detected_by":null,"dry_run":false,"created":[` +
 		jsonString(t, featureRoot) + `,` + jsonString(t, configPath) + `],"modified":[],"artifacts":[` +
 		`{"kind":"config","path":` + jsonString(t, configPath) + `,"action":"created","detail":null},` +
 		`{"kind":"feature-root","path":` + jsonString(t, featureRoot) + `,"action":"created","detail":null}],"roles_to_add":[]}` + "\n"

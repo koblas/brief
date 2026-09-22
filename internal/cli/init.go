@@ -44,19 +44,24 @@ be combined with --dry-run. Every target is checked for writability before
 anything is written: an unwritable target refuses, naming it, with the
 --print output on stdout so it can still be applied by hand.
 
-` + jsonFieldsParagraph("host", "dry_run", "created", "modified", "artifacts", "roles_to_add")
+` + jsonFieldsParagraph("host", "detected_by", "dry_run", "created", "modified", "artifacts", "roles_to_add") + "\n" +
+	wrapWords("With --print --json, the document carries only `artifacts`, each "+
+		"{`path`, `action` (create|merge), `body`}.", jsonParagraphWidth)
 
 // initDocument is init's --json success document: the common header first,
-// then the request's own host and dry_run, every path this call created or
-// modified (absolute, never nil, both empty under --dry-run), then one row
-// per artifact in setup.Result's own order — config, feature root — and
-// finally roles_to_add, always present, empty unless --with-agents left
-// roles unbound in a config this run did not write. Never written for
-// --print, which renders initPrintDocument instead.
+// then the request's own host, detected_by (null unless host was detected
+// rather than given — the same provenance initNextAction's own stderr line
+// names) and dry_run, every path this call created or modified (absolute,
+// never nil, both empty under --dry-run), then one row per artifact in
+// setup.Result's own order — config, feature root — and finally
+// roles_to_add, always present, empty unless --with-agents left roles
+// unbound in a config this run did not write. Never written for --print,
+// which renders initPrintDocument instead.
 type initDocument struct {
 	jsonHeader
 
 	Host       string         `json:"host"`
+	DetectedBy *string        `json:"detected_by"`
 	DryRun     bool           `json:"dry_run"`
 	Created    []string       `json:"created"`
 	Modified   []string       `json:"modified"`
@@ -119,14 +124,19 @@ func renderPrint(w io.Writer, wd string, artifacts []setup.PrintArtifact) {
 // "brief init: " prefix: dryRun's own line when set; else, with nothing
 // ActionCreated or ActionMerged, "already installed; nothing changed"; else, for
 // host != setup.HostClaudeCode, "installed config and feature root; run
-// 'brief new feature <name>'"; else "installed for claude-code[ in
-// <rel>]; start Claude Code in <dir> (or run /reload-plugins in a session
-// already <here/there>), then 'brief new feature <name>'" — Claude Code
-// loads a project skills-directory plugin only from the session's own
-// working directory, no walk-up, so the line names root whenever it
-// differs from wd (rel = displayPath(wd, root), "this directory"/"here"
-// when root == wd, else rel itself and "there").
-func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, root string) string {
+// 'brief new feature <name>'"; else "installed for claude-code[ (detected
+// <signal>; use --host none to skip)][ in <rel>]; start Claude Code in
+// <dir> (or run /reload-plugins in a session already <here/there>), then
+// 'brief new feature <name>'" — Claude Code loads a project
+// skills-directory plugin only from the session's own working directory,
+// no walk-up, so the line names root whenever it differs from wd (rel =
+// displayPath(wd, root), "this directory"/"here" when root == wd, else rel
+// itself and "there"). The detected clause appears only when detectedBy is
+// non-empty (setup.Result.DetectedBy) — an explicit --host claude-code
+// never carries one, so it never grows this clause; a detected install
+// otherwise looked identical to an explicit one, leaving --host none's own
+// escape hatch undiscoverable.
+func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, root, detectedBy string) string {
 	if dryRun {
 		return "dry run, no files changed; rerun without --dry-run to apply"
 	}
@@ -148,13 +158,18 @@ func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, ro
 		return "installed config and feature root; run 'brief new feature <name>'"
 	}
 
+	label := "installed for claude-code"
+	if detectedBy != "" {
+		label = fmt.Sprintf("installed for claude-code (detected %s; use --host none to skip)", detectedBy)
+	}
+
 	if root == wd {
-		return "installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'"
+		return label + "; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'"
 	}
 
 	rel := displayPath(wd, root)
 
-	return fmt.Sprintf("installed for claude-code in %s; start Claude Code in %s (or run /reload-plugins in a session already there), then 'brief new feature <name>'", rel, rel)
+	return fmt.Sprintf("%s in %s; start Claude Code in %s (or run /reload-plugins in a session already there), then 'brief new feature <name>'", label, rel, rel)
 }
 
 // unwrittenLine renders R9/R10's own "printed only" or "already installed"
@@ -218,6 +233,7 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 		doc := initDocument{
 			jsonHeader: out.successHeader(),
 			Host:       res.Host,
+			DetectedBy: nonEmptyString(res.DetectedBy),
 			DryRun:     res.DryRun,
 			Created:    res.Created,
 			Modified:   res.Modified,
@@ -253,7 +269,7 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 		return nil
 	}
 
-	fmt.Fprintf(out.stderr, "brief init: %s\n", initNextAction(res.Host, res.DryRun, res.Artifacts, wd, res.Root))
+	fmt.Fprintf(out.stderr, "brief init: %s\n", initNextAction(res.Host, res.DryRun, res.Artifacts, wd, res.Root, res.DetectedBy))
 
 	return nil
 }
@@ -293,6 +309,16 @@ func renderUnwritable(res setup.Result, err error, wd string, out reporter) erro
 	_ = writeJSONDocument(out.stdout, doc)
 
 	return err
+}
+
+// nonEmptyString returns nil for "", else a pointer to s — the same
+// null-unless-populated shape artifactJSON's own Detail field uses.
+func nonEmptyString(s string) *string {
+	if s == "" {
+		return nil
+	}
+
+	return &s
 }
 
 // configArtifactPath returns artifacts' own setup.KindConfig entry's Path

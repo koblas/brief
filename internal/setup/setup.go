@@ -173,9 +173,14 @@ type Artifact struct {
 // NoHostDetected is true only when InitRequest.Host was "" and detectHost
 // found nothing — the one signal a caller needs to render R8's
 // no-host-detected line instead of the ordinary next action; it is always
-// false when Host was given explicitly, HostNone included. Print is R9's
-// own pending-artifact set (printArtifacts), never nil, populated
-// regardless of DryRun or Print.
+// false when Host was given explicitly, HostNone included. DetectedBy names
+// the signal detectHost found — ".claude", "CLAUDE.md", or "~/.claude" —
+// only when Host was "" and detection succeeded; it is "" both when Host
+// was given explicitly and when NoHostDetected is true, so a caller can
+// tell "the caller chose claude-code" from "brief guessed it, and here is
+// why" without also checking NoHostDetected. Print is R9's own
+// pending-artifact set (printArtifacts), never nil, populated regardless of
+// DryRun or Print.
 type Result struct {
 	Host           string
 	DryRun         bool
@@ -186,6 +191,7 @@ type Result struct {
 	Removed        []string
 	RolesToAdd     []string
 	NoHostDetected bool
+	DetectedBy     string
 	Print          []PrintArtifact
 }
 
@@ -239,12 +245,15 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		root = filepath.Dir(nearest)
 	}
 
-	var noHostDetected bool
+	var (
+		noHostDetected bool
+		detectedBy     string
+	)
 
 	if req.Host == "" {
 		var detected bool
 
-		req.Host, detected = detectHost(root, s.homeDir)
+		req.Host, detected, detectedBy = detectHost(root, s.homeDir)
 		noHostDetected = !detected
 	}
 
@@ -328,6 +337,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		Removed:        []string{},
 		RolesToAdd:     rolesToAdd(req.WithAgents, configArt.Action, cfg.Roles),
 		NoHostDetected: noHostDetected,
+		DetectedBy:     detectedBy,
 		Print:          printArtifacts(artifacts, configBody, writeArts, snippetArt),
 	}
 

@@ -26,11 +26,13 @@ var errHomeLookup = errors.New("home lookup failed")
 // Test_init_detects_claude_code_from_the_install_root_or_home pins R8's
 // detection rule (InitRequest.Host == ""): a root ".claude" directory, a
 // root "CLAUDE.md" entry of any type, or an injected home's own ".claude"
-// directory all resolve to HostClaudeCode with Result.NoHostDetected
-// false; nothing anywhere resolves to HostNone with NoHostDetected true;
-// an explicit "none" is never overridden by detection, and a home()
-// failure is treated the same as no home directory at all, never a
-// refusal.
+// directory all resolve to HostClaudeCode with Result.NoHostDetected false
+// and Result.DetectedBy naming the signal (".claude", "CLAUDE.md", or
+// "~/.claude"); nothing anywhere resolves to HostNone with NoHostDetected
+// true and DetectedBy empty; an explicit "none" is never overridden by
+// detection, and reports DetectedBy empty too — it was given, not found;
+// a home() failure is treated the same as no home directory at all, never
+// a refusal.
 func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 	homeWithClaude := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(homeWithClaude, ".claude"), 0o755))
@@ -42,6 +44,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 		reqHost            string
 		wantHost           string
 		wantNoHostDetected bool
+		wantDetectedBy     string
 	}{
 		{
 			name: "root .claude directory",
@@ -52,6 +55,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 			home:               fixedHome(""),
 			wantHost:           setup.HostClaudeCode,
 			wantNoHostDetected: false,
+			wantDetectedBy:     ".claude",
 		},
 		{
 			name: "root CLAUDE.md file",
@@ -62,6 +66,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 			home:               fixedHome(""),
 			wantHost:           setup.HostClaudeCode,
 			wantNoHostDetected: false,
+			wantDetectedBy:     "CLAUDE.md",
 		},
 		{
 			name:               "home .claude directory, root has neither",
@@ -69,6 +74,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 			home:               fixedHome(homeWithClaude),
 			wantHost:           setup.HostClaudeCode,
 			wantNoHostDetected: false,
+			wantDetectedBy:     "~/.claude",
 		},
 		{
 			name:               "nothing present",
@@ -76,6 +82,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 			home:               fixedHome(""),
 			wantHost:           setup.HostNone,
 			wantNoHostDetected: true,
+			wantDetectedBy:     "",
 		},
 		{
 			name: "explicit host none with .claude present",
@@ -87,6 +94,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 			reqHost:            setup.HostNone,
 			wantHost:           setup.HostNone,
 			wantNoHostDetected: false,
+			wantDetectedBy:     "",
 		},
 		{
 			name:     "home func returns an error",
@@ -96,6 +104,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 			}),
 			wantHost:           setup.HostNone,
 			wantNoHostDetected: true,
+			wantDetectedBy:     "",
 		},
 	}
 
@@ -110,6 +119,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, c.wantHost, res.Host)
 			assert.Equal(t, c.wantNoHostDetected, res.NoHostDetected)
+			assert.Equal(t, c.wantDetectedBy, res.DetectedBy)
 		})
 	}
 }
@@ -133,4 +143,5 @@ func Test_init_detection_uses_the_locate_root_not_wd(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, setup.HostClaudeCode, res.Host)
 	assert.False(t, res.NoHostDetected)
+	assert.Equal(t, ".claude", res.DetectedBy)
 }
