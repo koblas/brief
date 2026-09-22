@@ -534,6 +534,45 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
 		},
 		{
+			// Mutation-verified: hardcoding states[0] instead of looping
+			// (`if states[0].notRegular` in place of the `for` loop) turns
+			// this WARN into the fallback SKIP "not installed" — reddened
+			// by this case alone, restored after.
+			name: "no root CLAUDE.md but .claude/CLAUDE.md is a directory",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				writeHostDir(t, wd, filepath.Join(".claude", "CLAUDE.md"))
+			},
+			checkID:        "host-snippet",
+			wantSeverity:   doctor.SeverityWarn,
+			wantDetail:     "not a regular file (directory); brief block not installed",
+			wantFix:        new("run 'brief init --print' and add the CLAUDE.md block by hand"),
+			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+		},
+		{
+			// Pins C1's fix: planSnippet would choose root CLAUDE.md here
+			// (chooseSnippetLocation's own "first candidate that exists at
+			// all" rule) and merge into it, never touching the directory at
+			// ".claude/CLAUDE.md" — doctor must agree, not WARN about a
+			// candidate init would never look at. Mutation-verified:
+			// reverting to scanning every state for notRegular (the pre-C1
+			// shape) turns this SKIP into the WARN case above's own detail,
+			// reddened by this case alone, restored after.
+			name: "root CLAUDE.md exists with no block, .claude/CLAUDE.md is a directory",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), []byte("unrelated prose\n"), 0o600))
+				writeHostDir(t, wd, filepath.Join(".claude", "CLAUDE.md"))
+			},
+			checkID:        "host-snippet",
+			wantSeverity:   doctor.SeveritySkip,
+			wantDetail:     "not installed",
+			wantFix:        new(runInitClaudeCode),
+			wantPathSuffix: "CLAUDE.md",
+		},
+		{
 			name: "a current block with CRLF line endings",
 			setup: func(t *testing.T, wd string, _ host.Host) {
 				t.Helper()

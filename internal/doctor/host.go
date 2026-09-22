@@ -244,15 +244,19 @@ func hostAgentsCheck(root string, h host.Host) Check {
 }
 
 // snippetCandidateState is one CLAUDE.md candidate's own scan result,
-// mirroring internal/setup's own candidateSnippetFile but read-only: body
-// and span are populated only for a regular file that scanned clean (no
-// marker defect); prob carries the first marker defect artifact.ScanSnippetMarkers
-// found, nil otherwise. notRegular and kind are populated only when the
-// candidate exists but Lstat reports it is not a regular file — kind is
-// "symlink" or "directory" (nonRegularKind), the two shapes host-snippet's
-// own WARN row names.
+// mirroring internal/setup's own candidateSnippetFile but read-only: present
+// mirrors an Lstat success (any file type, including one whose regular-file
+// bytes could not be read — treated as "nothing here", the same as a
+// missing candidate, since there is nothing further to report about it).
+// body and span are populated only for a regular file that scanned clean
+// (no marker defect); prob carries the first marker defect
+// artifact.ScanSnippetMarkers found, nil otherwise. notRegular and kind are
+// populated only when the candidate exists but Lstat reports it is not a
+// regular file — kind is "symlink" or "directory" (nonRegularKind), the two
+// shapes host-snippet's own WARN row names.
 type snippetCandidateState struct {
 	path       string
+	present    bool
 	body       []byte
 	span       *artifact.SnippetSpan
 	prob       *artifact.MarkerProblem
@@ -265,8 +269,9 @@ type snippetCandidateState struct {
 // symlink (checked first — a symlink to a directory reports both bits, and
 // "symlink" is the more useful of the two to a reader deciding what to do
 // about it) or a directory; any other mode (a fifo, a socket, a device —
-// never observed against a CLAUDE.md path in practice) falls back to the
-// plain "not a regular file".
+// never observed against a CLAUDE.md path in practice) falls back to "",
+// so the caller's parenthetical is dropped rather than rendering the
+// name twice ("not a regular file (not a regular file)").
 func nonRegularKind(info os.FileInfo) string {
 	switch {
 	case info.Mode()&os.ModeSymlink != 0:
@@ -274,8 +279,19 @@ func nonRegularKind(info os.FileInfo) string {
 	case info.IsDir():
 		return "directory"
 	default:
-		return "not a regular file"
+		return ""
 	}
+}
+
+// notRegularDetail renders host-snippet's own WARN detail for a candidate
+// Lstat reports as not a regular file: kind in parentheses when
+// nonRegularKind named one, the bare sentence otherwise.
+func notRegularDetail(kind string) string {
+	if kind == "" {
+		return "not a regular file; brief block not installed"
+	}
+
+	return fmt.Sprintf("not a regular file (%s); brief block not installed", kind)
 }
 
 // scanSnippetCandidateStates Lstats and scans every h.InstructionFiles()
@@ -300,7 +316,7 @@ func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateStat
 
 			continue
 		case !info.Mode().IsRegular():
-			out = append(out, snippetCandidateState{path: path, notRegular: true, kind: nonRegularKind(info)})
+			out = append(out, snippetCandidateState{path: path, present: true, notRegular: true, kind: nonRegularKind(info)})
 
 			continue
 		}
@@ -313,7 +329,7 @@ func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateStat
 		}
 
 		span, prob := artifact.ScanSnippetMarkers(body)
-		out = append(out, snippetCandidateState{path: path, body: body, span: span, prob: prob})
+		out = append(out, snippetCandidateState{path: path, present: true, body: body, span: span, prob: prob})
 	}
 
 	return out
@@ -344,11 +360,18 @@ func snippetBlockFound(states []snippetCandidateState) bool {
 // OriginEdited is OK "edited locally", OriginOlder is WARN, OriginCurrent
 // is OK "installed" when its own Dir matches dir (or dirKnown is false —
 // nothing to compare against) and WARN naming both directories otherwise.
-// Only once no candidate holds a span does existence matter: the first
-// candidate that exists but is not a regular file (notRegular) is WARN,
-// naming which (nonRegularKind) — brief can neither write nor scan through
-// it, so the fix points at --print (runInitPrintSnippet) rather than a
-// plain re-run; failing that too, SKIP "not installed".
+// Only once no candidate holds a span does existence matter, and only for
+// the one candidate planSnippet itself would then choose — the first
+// candidate that is present at all (states' own priority order), regular
+// or not, mirroring setup's own chooseSnippetLocation exactly: a later
+// candidate's own shape is never consulted, so a regular-but-blockless
+// first candidate reports the ordinary SKIP below even when a farther
+// candidate happens to be a symlink or a directory. Only when that first
+// present candidate is itself notRegular is the row WARN, naming which
+// (nonRegularKind) — brief can neither write nor scan through it, so the
+// fix points at --print (runInitPrintSnippet) rather than a plain re-run.
+// No candidate present at all, or the first present one is a regular
+// blockless file, is SKIP "not installed".
 func hostSnippetCheck(states []snippetCandidateState, dir string, dirKnown bool) Check {
 	for _, s := range states {
 		if s.prob != nil {
@@ -372,13 +395,19 @@ func hostSnippetCheck(states []snippetCandidateState, dir string, dirKnown bool)
 
 	if chosen == nil {
 		for i := range states {
+			if !states[i].present {
+				continue
+			}
+
 			if states[i].notRegular {
 				return Check{
 					ID: "host-snippet", Severity: SeverityWarn, Path: states[i].path,
-					Detail: fmt.Sprintf("not a regular file (%s); brief block not installed", states[i].kind),
+					Detail: notRegularDetail(states[i].kind),
 					Fix:    new(runInitPrintSnippet),
 				}
 			}
+
+			break
 		}
 
 		path := ""
