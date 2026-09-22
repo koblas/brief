@@ -30,7 +30,6 @@ func Test_uninstall_removes_the_config_init_wrote(t *testing.T) {
 	err = cli.Run(t.Context(), wd, []string{"uninstall", "--host", "none"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
-	assert.Equal(t, 0, cli.ExitCode(err))
 	assert.Equal(t, "removed .brief.yaml\n", stdout.String())
 	assert.Equal(t, "brief uninstall: removed brief's install; the feature root and its contents were left in place\n", stderr.String())
 
@@ -84,7 +83,6 @@ func Test_uninstall_with_nothing_installed_reports_it(t *testing.T) {
 	err := cli.Run(t.Context(), wd, []string{"uninstall"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
-	assert.Equal(t, 0, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 	assert.Equal(t, "brief uninstall: nothing installed for claude-code\n", stderr.String())
 }
@@ -100,7 +98,6 @@ func Test_uninstall_host_none_with_nothing_installed_omits_the_host_suffix(t *te
 	err := cli.Run(t.Context(), wd, []string{"uninstall", "--host", "none"}, nil, &stdout, &stderr)
 
 	require.NoError(t, err)
-	assert.Equal(t, 0, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 	assert.Equal(t, "brief uninstall: nothing installed\n", stderr.String())
 }

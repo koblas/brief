@@ -36,8 +36,8 @@ func Locate(startDir string) (string, []string, error) {
 // it that way (config.LocateInRepo's repo.Root) — since that is the only
 // shape where the walk ever reaches a directory equal to it; a boundary
 // that is not on startDir's own ancestor chain is silently inert rather
-// than an error, and resolveBoundary treats a boundary filepath.Abs cannot
-// resolve the same way: both fall back to unbounded, identical to Locate.
+// than an error, and a boundary filepath.Abs cannot resolve is treated the
+// same way: both fall back to unbounded, identical to Locate.
 func LocateWithin(startDir, boundary string) (string, []string, error) {
 	abs, err := filepath.Abs(startDir)
 	if err != nil {

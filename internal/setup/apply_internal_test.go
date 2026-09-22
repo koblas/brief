@@ -59,7 +59,12 @@ func Test_apply_refuses_when_CLAUDE_md_changed_since_planning(t *testing.T) {
 // ErrPartialWrite (that something already changed) — cli's own
 // files_changed and refusal-tail rendering both key off ErrPartialWrite
 // being reachable here, not merely off the sentinel this markPartial call
-// itself wraps.
+// itself wraps. It must also still carry a *RefusalError through
+// markPartial's wrapping: cli's classifyRefusal (internal/cli/refusal.go)
+// branches on errors.AsType[*RefusalError], not on the sentinels alone, so
+// a markPartial that erased the type would silently fall through to the
+// generic errorKindFailure case even though every errors.Is assertion here
+// still holds.
 func Test_apply_wraps_ErrPartialWrite_when_an_earlier_write_already_landed(t *testing.T) {
 	wd := t.TempDir()
 	claudePath := filepath.Join(wd, "CLAUDE.md")
@@ -80,6 +85,11 @@ func Test_apply_wraps_ErrPartialWrite_when_an_earlier_write_already_landed(t *te
 
 	require.ErrorIs(t, err, ErrConcurrentEdit)
 	require.ErrorIs(t, err, ErrPartialWrite)
+
+	var refusal *RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, claudePath, refusal.Path)
+	require.ErrorIs(t, refusal.Err, ErrConcurrentEdit)
 
 	info, statErr := os.Stat(featureRoot)
 	require.NoError(t, statErr)

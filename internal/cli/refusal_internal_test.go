@@ -29,7 +29,7 @@ func newConcurrentEditRefusal() *setup.RefusalError {
 	return &setup.RefusalError{
 		Path:    "/repo/CLAUDE.md",
 		Problem: "changed since it was planned",
-		Fix:     "re-run 'brief init'",
+		Fix:     "rerun 'brief init'",
 		Err:     setup.ErrConcurrentEdit,
 	}
 }
@@ -78,6 +78,9 @@ func Test_classifyRefusal_keeps_the_tail_for_an_ordinary_refusal(t *testing.T) {
 // with the same missing tail — the two independent code paths
 // (classifyRefusal's tail, filesChangedFor's errors.Is check) agreeing
 // rather than each telling a different story about the same run.
+// Test_classifyRefusal_keeps_the_tail_for_an_ordinary_refusal is this
+// claim's own control, proving the same *setup.RefusalError renders the
+// tail when ErrPartialWrite is absent.
 func Test_reporter_refusal_is_consistent_for_a_partial_write(t *testing.T) {
 	cmd := &cobra.Command{Use: "init"}
 	cmd.Annotations = map[string]string{writesFilesAnnotation: "true"}

@@ -188,17 +188,14 @@ func usageFix(msg string, cmd *cobra.Command) string {
 	return "run '" + usageHint(cmd) + "'"
 }
 
-// filesChangedFor reports R3's "files_changed" value for cmd, one of the
-// commands carrying writesFilesAnnotation ("new", "new feature", "new
-// step", "finish", "init", "uninstall"): nil (JSON null) for every other
-// command, since
-// a read command never changes anything to report on; for a write
-// command, what actually happened on disk — true when err wraps
-// scaffold.ErrPartialWrite or setup.ErrPartialWrite (at least one write
-// landed before the failure that reached cli), false otherwise (a usage
-// error, a refusal that changed nothing, or a failure before the first
-// write). err is nil for a usage error, which never reaches a write at
-// all.
+// filesChangedFor reports R3's "files_changed" value for cmd: nil (JSON
+// null) for any command not carrying writesFilesAnnotation, since a read
+// command never changes anything to report on; for a write command, what
+// actually happened on disk — true when err wraps scaffold.ErrPartialWrite
+// or setup.ErrPartialWrite (at least one write landed before the failure
+// that reached cli), false otherwise (a usage error, a refusal that
+// changed nothing, or a failure before the first write). err is nil for a
+// usage error, which never reaches a write at all.
 func filesChangedFor(cmd *cobra.Command, err error) *bool {
 	if cmd.Annotations[writesFilesAnnotation] == "" {
 		return nil

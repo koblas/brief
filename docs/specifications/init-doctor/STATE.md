@@ -4,7 +4,10 @@ Scenarios complete: SCENARIO-01..10 — every spec scenario shipped. Fix pass si
 install-root git-boundary MAJOR plus a set of MINOR/NIT folds (R3/R11/R12/R13 amended). Fix
 pass 2: closed a refusal-tail/files_changed inconsistency on a partial write, plus coverage
 gaps (check --hook's git boundary, --json partial-write render, Uninstall's git-boundary
-positive case) and doc/comment folds.
+positive case) and doc/comment folds. Fix pass 3: closed a MAJOR test gap —
+Test_apply_wraps_ErrPartialWrite_when_an_earlier_write_already_landed now asserts
+errors.As(*RefusalError), the predicate classifyRefusal actually branches on, not only
+errors.Is on the two sentinels — plus doc/comment/test-hygiene folds (no behavior change).
 
 ## Binding decisions
 - `config.LocateWithin(dir, boundary)` is the one bounded walk; `Locate` = `LocateWithin(dir, "")`;

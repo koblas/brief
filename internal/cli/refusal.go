@@ -22,11 +22,13 @@ func flattenOneLine(s string) string {
 }
 
 // noFilesChangedTail is the "nothing changed on disk" promise appended to
-// a write command's refusal: a *config.InvalidConfigError or a
-// *scaffold.RefusalError, both of which concern a write that never
-// happened. A *assemble.RefusalError carries no such promise — assemble
-// never writes, so there is nothing for it to promise — and neither does a
-// bare not-found or a generic failure.
+// a write command's refusal: a *config.InvalidConfigError, a
+// *scaffold.RefusalError, or a *setup.RefusalError, all of which concern a
+// write that never happened — except a *setup.RefusalError wrapping
+// setup.ErrPartialWrite, whose promise is false because an earlier write
+// already landed. A *assemble.RefusalError carries no such promise —
+// assemble never writes, so there is nothing for it to promise — and
+// neither does a bare not-found or a generic failure.
 const noFilesChangedTail = " (no files changed)"
 
 // refusalTextLayout selects which of refusalClassification.textLine's three

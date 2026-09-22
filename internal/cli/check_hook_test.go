@@ -56,8 +56,10 @@ func Test_check_hook_reports_only_the_feature_containing_the_edited_path_as_addi
 	err := cli.Run(t.Context(), wd, []string{"check", "--hook", "claude-code"}, strings.NewReader(hookPayload(editedPath)), &stdout, &stderr)
 
 	require.NoError(t, err)
-	assert.Equal(t, 0, cli.ExitCode(err))
 	assert.Empty(t, stderr.String())
+	// alpha carries no step files at all, so check counts it in flight
+	// (assemble.checkStepFindings) and its missing STATE.md fires
+	// RuleStateMissing (C2) as this single ERROR finding.
 	assert.Equal(t,
 		"brief check: "+filepath.Join("docs", "specifications", "alpha")+": 1 ERROR finding; run 'brief check alpha'",
 		hookAdditionalContext(t, stdout.Bytes()))
@@ -349,7 +351,6 @@ func Test_check_hook_is_silent_when_the_config_is_outside_the_enclosing_git_repo
 	err := cli.Run(t.Context(), proj, []string{"check", "--hook", "claude-code"}, strings.NewReader("not json"), &stdout, &stderr)
 
 	require.NoError(t, err)
-	assert.Equal(t, 0, cli.ExitCode(err))
 	assert.Empty(t, stdout.String())
 	assert.Empty(t, stderr.String())
 }
