@@ -45,7 +45,7 @@ type initDocument struct {
 
 // initNextAction renders init's own stderr next-action line, minus the
 // "brief init: " prefix: dryRun's own line when set; else, with nothing
-// ActionCreated, "already installed; nothing changed"; else, for
+// ActionCreated or ActionMerged, "already installed; nothing changed"; else, for
 // host != setup.HostClaudeCode, "installed config and feature root; run
 // 'brief new feature <name>'"; else "installed for claude-code[ in
 // <rel>]; start Claude Code in <dir> (or run /reload-plugins in a session
@@ -59,16 +59,16 @@ func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, ro
 		return "dry run, no files changed; rerun without --dry-run to apply"
 	}
 
-	var created bool
+	var changed bool
 	for _, a := range artifacts {
-		if a.Action == setup.ActionCreated {
-			created = true
+		if a.Action == setup.ActionCreated || a.Action == setup.ActionMerged {
+			changed = true
 
 			break
 		}
 	}
 
-	if !created {
+	if !changed {
 		return "already installed; nothing changed"
 	}
 

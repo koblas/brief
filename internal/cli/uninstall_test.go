@@ -2,11 +2,13 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/koblas/brief/internal/cli"
+	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -127,9 +129,10 @@ func Test_uninstall_dry_run_prints_the_plan_and_removes_nothing(t *testing.T) {
 }
 
 // Test_uninstall_for_claude_code_removes_the_plugin_then_the_config pins
-// the user-visible contract: rows in removal order — hooks.json, finish
-// skill, start skill, manifest, then ".brief.yaml" last — every one
-// "removed", and the claude-code next-action suffix.
+// the user-visible contract: rows in removal order — the CLAUDE.md block
+// first, then hooks.json, finish skill, start skill, manifest, then
+// ".brief.yaml" last — every one "removed", and the claude-code
+// next-action suffix.
 func Test_uninstall_for_claude_code_removes_the_plugin_then_the_config(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -143,6 +146,7 @@ func Test_uninstall_for_claude_code_removes_the_plugin_then_the_config(t *testin
 
 	require.NoError(t, err)
 	assert.Equal(t, ""+
+		"removed CLAUDE.md\n"+
 		"removed .claude/skills/brief/hooks/hooks.json\n"+
 		"removed .claude/skills/brief/skills/finish/SKILL.md\n"+
 		"removed .claude/skills/brief/skills/start/SKILL.md\n"+
@@ -184,6 +188,102 @@ func Test_uninstall_for_claude_code_keeps_an_edited_skill_and_removes_it_under_f
 
 	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
 	assert.True(t, os.IsNotExist(statErr))
+}
+
+// Test_uninstall_removes_the_block_leaving_unrelated_content pins the
+// "removed CLAUDE.md (brief block)" row at the CLI boundary: a CLAUDE.md
+// carrying unrelated prose alongside the block loses only the block, is
+// reported "removed" with that detail, stays on disk, and lands in
+// modified[] never removed[].
+func Test_uninstall_removes_the_block_leaving_unrelated_content(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	claudeMD := filepath.Join(wd, "CLAUDE.md")
+	before, readErr := os.ReadFile(claudeMD)
+	require.NoError(t, readErr)
+	require.NoError(t, os.WriteFile(claudeMD, append([]byte("# My project\n\n"), before...), 0o600)) //nolint:gosec // claudeMD is t.TempDir() joined with a fixed literal, not user input
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code", "--json"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+
+	var doc struct {
+		Modified []string `json:"modified"`
+		Removed  []string `json:"removed"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+	assert.Contains(t, doc.Modified, claudeMD)
+	assert.NotContains(t, doc.Removed, claudeMD)
+
+	body, readErr := os.ReadFile(claudeMD)
+	require.NoError(t, readErr)
+	assert.Equal(t, "# My project\n", string(body))
+}
+
+// Test_uninstall_text_row_for_a_kept_content_block pins the text-mode row
+// naming: "removed CLAUDE.md (brief block)" for the block-stripped case.
+func Test_uninstall_text_row_for_a_kept_content_block(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	claudeMD := filepath.Join(wd, "CLAUDE.md")
+	before, readErr := os.ReadFile(claudeMD)
+	require.NoError(t, readErr)
+	require.NoError(t, os.WriteFile(claudeMD, append([]byte("# My project\n\n"), before...), 0o600)) //nolint:gosec // claudeMD is t.TempDir() joined with a fixed literal, not user input
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "removed CLAUDE.md (brief block)\n")
+}
+
+// Test_uninstall_reaches_the_removed_line_from_the_snippet_alone pins the
+// snippet-only uninstall path: with no plugin files and no config
+// installed — only a brief-written CLAUDE.md block, --host none never
+// having touched it — uninstall still reaches R11's "removed brief's
+// install" stderr line off the snippet's own ActionRemoved alone.
+func Test_uninstall_reaches_the_removed_line_from_the_snippet_alone(t *testing.T) {
+	wd := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), artifact.SnippetBlock("docs/specifications"), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, "removed CLAUDE.md\n", stdout.String())
+	assert.Equal(t, "brief uninstall: removed brief's install; the feature root and its contents were left in place for claude-code\n", stderr.String())
+}
+
+// Test_uninstall_refuses_a_lone_marker_naming_the_file_and_line pins R5's
+// own refusal text at the CLI boundary: "<rel>:<line>: <problem>; <fix>",
+// exit 1, nothing removed.
+func Test_uninstall_refuses_a_lone_marker_naming_the_file_and_line(t *testing.T) {
+	wd := t.TempDir()
+	claudeMD := filepath.Join(wd, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(claudeMD, []byte("notes\n"+artifact.SnippetBegin+"\n"), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	assert.Equal(t, 1, cli.ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "CLAUDE.md:2:")
+	assert.Contains(t, stderr.String(), "(no files changed)")
+
+	body, readErr := os.ReadFile(claudeMD)
+	require.NoError(t, readErr)
+	assert.Equal(t, "notes\n"+artifact.SnippetBegin+"\n", string(body))
 }
 
 // Test_uninstall_refuses_an_unknown_host pins R8's usage-error branch,

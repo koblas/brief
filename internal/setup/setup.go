@@ -49,6 +49,8 @@ const (
 	KindPlugin Kind = "plugin"
 	// KindHook is a host's hook wiring file.
 	KindHook Kind = "hook"
+	// KindSnippet is the CLAUDE.md instruction block (R5).
+	KindSnippet Kind = "snippet"
 )
 
 // Action names what Init did, or would do, to one Artifact.
@@ -68,6 +70,12 @@ const (
 	ActionKept Action = "kept"
 	// ActionRemoved marks an artifact Uninstall deleted.
 	ActionRemoved Action = "removed"
+	// ActionMerged marks the CLAUDE.md instruction block appended to an
+	// existing file that carried none, or replaced in place because its
+	// bytes were a brief-written render other than today's own (an older
+	// release, or the same release rendered for a different feature
+	// directory).
+	ActionMerged Action = "merged"
 )
 
 // Server plans and applies brief's own install write path. It carries no
@@ -118,15 +126,18 @@ type Artifact struct {
 // config.Locate's directory, or wd when no config was found — Artifacts
 // lists what was found and what happened to it — for Init, the config
 // file, the feature root, then a claude-code host's own plugin manifest,
-// start skill, finish skill and hook wiring, the fixed order R11's stdout
-// rows render in; for Uninstall, a claude-code host's own files (hook,
-// finish skill, start skill, manifest) then the config file last, so a
-// partial uninstall never removes the repository's opt-in marker before
-// everything else. Created and Modified name every path Init actually
-// wrote, absolute, in the order it wrote them; Removed names every path
-// Uninstall actually deleted, in removal order — a pruned, now-empty
-// plugin directory is never one of them. No slice is ever nil; all three
-// are empty under DryRun.
+// start skill, finish skill, hook wiring and CLAUDE.md block, the fixed
+// order R11's stdout rows render in; for Uninstall, the CLAUDE.md block
+// first, then a claude-code host's own plugin files (hook, finish skill,
+// start skill, manifest), then the config file last, so a partial uninstall
+// never removes the repository's opt-in marker before everything else.
+// Created names every path Init wrote that did not exist before; Modified
+// names every path either command rewrote in place — Init's own CLAUDE.md
+// merge or replace, Uninstall's own CLAUDE.md block strip that leaves the
+// file non-empty; Removed names every path Uninstall actually deleted —
+// both absolute, in the order each command touched them. A pruned,
+// now-empty plugin directory is never in any of the three. No slice is
+// ever nil; all three are empty under DryRun.
 type Result struct {
 	Host      string
 	DryRun    bool
@@ -140,20 +151,23 @@ type Result struct {
 // Init plans then, unless req.DryRun, applies brief's own install: the
 // config file, the feature root the kept or freshly written config names,
 // and, for req.Host == HostClaudeCode, that host's own skills-directory
-// plugin files (host.Host.Plugin). Every refusal — an unknown host, an
-// invalid existing config, a feature root that exists as something other
-// than a directory — is decided during planning, before any artifact is
+// plugin files (host.Host.Plugin) and its CLAUDE.md instruction block (R5,
+// planSnippet) — independent of req.NoHook, which only ever omits the hook
+// file. Every refusal — an unknown host, an invalid existing config, a
+// feature root that exists as something other than a directory, a CLAUDE.md
+// marker defect — is decided during planning, before any artifact is
 // touched; DryRun therefore returns exactly the plan a real run would
 // apply, including any refusal, and writes nothing either way.
 //
 // Applying writes the feature root, then every plugin file reporting
-// ActionCreated, then the config file last, so the config file — the
-// repository's opt-in marker — never appears before everything else has
-// landed. A plugin file already present and unedited (ActionUnchanged) or
-// edited locally (ActionKept) is never rewritten, --force included: R3's
-// --force only ever rewrites the config from defaults. A failure after at
-// least one earlier write already landed is wrapped in ErrPartialWrite; a
-// failure before anything was written is returned as-is.
+// ActionCreated, then the CLAUDE.md block, then the config file last, so
+// the config file — the repository's opt-in marker — never appears before
+// everything else has landed. A plugin file already present and unedited
+// (ActionUnchanged) or edited locally (ActionKept) is never rewritten,
+// --force included: R3's --force only ever rewrites the config from
+// defaults; the same holds for a CLAUDE.md block reporting ActionKept. A
+// failure after at least one earlier write already landed is wrapped in
+// ErrPartialWrite; a failure before anything was written is returned as-is.
 func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, error) {
 	if !validHost(req.Host) {
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
@@ -181,7 +195,12 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return Result{}, err
 	}
 
-	var pluginArts []pluginArtifact
+	var (
+		pluginArts []pluginArtifact
+		snippetArt snippetArtifact
+		hasSnippet bool
+	)
+
 	if req.Host == HostClaudeCode {
 		h, _ := host.Lookup(host.ClaudeCode)
 
@@ -189,13 +208,24 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		if err != nil {
 			return Result{}, err
 		}
+
+		snippetArt, err = planSnippet(root, h, cfg.FeatureDirectory)
+		if err != nil {
+			return Result{}, err
+		}
+
+		hasSnippet = true
 	}
 
-	artifacts := make([]Artifact, 0, 2+len(pluginArts))
+	artifacts := make([]Artifact, 0, 3+len(pluginArts))
 	artifacts = append(artifacts, configArt, featureArt)
 
 	for _, p := range pluginArts {
 		artifacts = append(artifacts, p.Artifact)
+	}
+
+	if hasSnippet {
+		artifacts = append(artifacts, snippetArt.Artifact)
 	}
 
 	res := Result{
@@ -212,15 +242,17 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return res, nil
 	}
 
-	return apply(res, featureArt, pluginArts, configArt)
+	return apply(res, featureArt, pluginArts, snippetArt, hasSnippet, configArt)
 }
 
 // apply writes featureArt, then every pluginArts entry reporting
-// ActionCreated, then configArt last, into res's own Created list, when
-// each itself reports ActionCreated. A write failure is wrapped in
-// ErrPartialWrite iff at least one earlier write already landed in this
-// same call.
-func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, configArt Artifact) (Result, error) {
+// ActionCreated, then snippetArt (when hasSnippet, and it reports
+// ActionCreated or ActionMerged), then configArt last, into res's own
+// Created or Modified list — Created for ActionCreated, Modified for
+// ActionMerged, since a merge rewrites bytes an existing file already held.
+// A write failure is wrapped in ErrPartialWrite iff at least one earlier
+// write already landed in this same call.
+func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippetArt snippetArtifact, hasSnippet bool, configArt Artifact) (Result, error) {
 	var wroteSomething bool
 
 	if featureArt.Action == ActionCreated {
@@ -246,6 +278,26 @@ func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, configA
 		}
 
 		res.Created = append(res.Created, p.Path)
+		wroteSomething = true
+	}
+
+	if hasSnippet && (snippetArt.Action == ActionCreated || snippetArt.Action == ActionMerged) {
+		body := mergeSnippet(snippetArt.existing, snippetArt.span, artifact.SnippetBlock(snippetArt.dir))
+
+		if err := writeSnippetFile(snippetArt.Path, body); err != nil {
+			if wroteSomething {
+				return Result{}, markPartial(err)
+			}
+
+			return Result{}, err
+		}
+
+		if snippetArt.Action == ActionCreated {
+			res.Created = append(res.Created, snippetArt.Path)
+		} else {
+			res.Modified = append(res.Modified, snippetArt.Path)
+		}
+
 		wroteSomething = true
 	}
 

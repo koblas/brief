@@ -1,0 +1,467 @@
+package setup
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/koblas/brief/internal/platform/artifact"
+	"github.com/koblas/brief/internal/platform/atomicfile"
+	"github.com/koblas/brief/internal/platform/host"
+)
+
+// snippetSpan locates one recognized marker block inside a candidate
+// file's own bytes: [start:end) is the span itself — from the first byte of
+// the begin-marker line through the last byte of the end-marker text,
+// excluding its own line terminator — and beginLine is the begin marker's
+// 1-based line number, the position a refusal citing this span reports.
+type snippetSpan struct {
+	start, end int
+	beginLine  int
+}
+
+// markerProblem is scanSnippetMarkers's own refusal shape: line is the
+// 1-based line a caller-built *RefusalError should cite, 0 for a defect
+// (CRLF) that names no line. problem and fix are the *RefusalError's own
+// Problem and Fix text.
+type markerProblem struct {
+	line    int
+	problem string
+	fix     string
+}
+
+// scanSnippetMarkers walks body's own lines looking for SnippetBegin and
+// SnippetEnd marker lines — a whole line exactly equal to the marker — and
+// reports exactly one of: a nil span and nil problem when body carries no
+// marker at all; the one valid block's own snippetSpan; or a markerProblem
+// for the first marker defect it finds, in file order — a second begin
+// marker (whether or not the first block was ever closed), a lone begin (no
+// matching end before EOF), a lone end (no begin ever preceded it), or an
+// end before any begin.
+//
+// CRLF line endings are not checked here: a CRLF file's own lines carry a
+// trailing "\r" the LF-based marker constants can never exactly match, so
+// this function reports it the same as body carrying no marker at all — the
+// caller checks CRLF separately, scoped to the one candidate it is actually
+// about to read or write.
+func scanSnippetMarkers(body []byte) (*snippetSpan, *markerProblem) {
+	var (
+		beginLine, beginOffset int
+		pendingEndLine         int
+		open, done             bool
+		found                  *snippetSpan
+	)
+
+	offset := 0
+	lineNo := 0
+
+	for line := range strings.SplitSeq(string(body), "\n") {
+		lineNo++
+		lineStart := offset
+		offset += len(line) + 1 // account for the "\n" split consumed, harmless past EOF
+
+		switch line {
+		case artifact.SnippetBegin:
+			if open || done {
+				return nil, &markerProblem{line: lineNo, problem: "a second brief:begin marker; a file may hold only one brief block", fix: "delete the extra block"}
+			}
+
+			if pendingEndLine > 0 {
+				return nil, &markerProblem{line: pendingEndLine, problem: "brief:end marker appears before any brief:begin", fix: "reorder the markers, or remove them"}
+			}
+
+			beginLine = lineNo
+			beginOffset = lineStart
+			open = true
+		case artifact.SnippetEnd:
+			if !open {
+				if pendingEndLine == 0 && !done {
+					pendingEndLine = lineNo
+				}
+
+				continue
+			}
+
+			open = false
+			done = true
+			found = &snippetSpan{start: beginOffset, end: lineStart + len(line), beginLine: beginLine}
+		}
+	}
+
+	switch {
+	case open:
+		return nil, &markerProblem{line: beginLine, problem: "brief:begin marker with no matching brief:end", fix: "add " + artifact.SnippetEnd + " after it, or remove the lone marker"}
+	case done:
+		return found, nil
+	case pendingEndLine > 0:
+		return nil, &markerProblem{line: pendingEndLine, problem: "brief:end marker with no matching brief:begin", fix: "add " + artifact.SnippetBegin + " before it, or remove the lone marker"}
+	default:
+		return nil, nil
+	}
+}
+
+// mergeSnippet computes the bytes a CLAUDE.md candidate should hold after
+// installing block: existing nil or empty (the file did not exist, or
+// existed with zero bytes) produces block + "\n", the same as a fresh
+// create. A non-nil span replaces that span in place, surrounding bytes
+// untouched. Otherwise block is appended: existing ending in "\n" gets one
+// "\n" before block and one "\n" after; existing not ending in "\n" gets a
+// blank line ("\n\n") before block and nothing after — the asymmetry that
+// lets removeSnippet undo either shape byte-for-byte.
+func mergeSnippet(existing []byte, span *snippetSpan, block []byte) []byte {
+	if len(existing) == 0 {
+		return append(append([]byte{}, block...), '\n')
+	}
+
+	if span != nil {
+		out := make([]byte, 0, len(existing)-(span.end-span.start)+len(block))
+		out = append(out, existing[:span.start]...)
+		out = append(out, block...)
+		out = append(out, existing[span.end:]...)
+
+		return out
+	}
+
+	if bytes.HasSuffix(existing, []byte("\n")) {
+		out := make([]byte, 0, len(existing)+1+len(block)+1)
+		out = append(out, existing...)
+		out = append(out, '\n')
+		out = append(out, block...)
+		out = append(out, '\n')
+
+		return out
+	}
+
+	out := make([]byte, 0, len(existing)+2+len(block))
+	out = append(out, existing...)
+	out = append(out, '\n', '\n')
+	out = append(out, block...)
+
+	return out
+}
+
+// removeSnippet computes the bytes remaining after dropping span from
+// existing, undoing mergeSnippet's own separator encoding: a span
+// terminated by "\n" (not at EOF) and preceded by "\n\n" drops one of the
+// two preceding newlines, the span, and its own trailing newline; a span
+// unterminated (at EOF) and preceded by "\n\n" drops both preceding
+// newlines and the span; any other position — offset 0, or a block the
+// user relocated next to their own prose — drops only the span and its own
+// trailing newline, if present.
+func removeSnippet(existing []byte, span snippetSpan) []byte {
+	before := existing[:span.start]
+	after := existing[span.end:]
+
+	terminated := bytes.HasPrefix(after, []byte("\n"))
+	precededByBlank := bytes.HasSuffix(before, []byte("\n\n"))
+
+	switch {
+	case terminated && precededByBlank:
+		out := make([]byte, 0, len(before)-1+len(after)-1)
+		out = append(out, before[:len(before)-1]...)
+		out = append(out, after[1:]...)
+
+		return out
+	case !terminated && precededByBlank:
+		return append([]byte{}, before[:len(before)-2]...)
+	case terminated:
+		out := make([]byte, 0, len(before)+len(after)-1)
+		out = append(out, before...)
+		out = append(out, after[1:]...)
+
+		return out
+	default:
+		out := make([]byte, 0, len(before)+len(after))
+		out = append(out, before...)
+		out = append(out, after...)
+
+		return out
+	}
+}
+
+// candidateSnippetFile is one CLAUDE.md candidate's own scan result:
+// exists/regular mirror an Lstat, body and span are populated only for a
+// regular file (never for a missing or non-regular path, so a symlink is
+// never followed to read one).
+type candidateSnippetFile struct {
+	path    string
+	exists  bool
+	regular bool
+	body    []byte
+	span    *snippetSpan
+}
+
+// scanSnippetCandidates Lstats and scans every h.InstructionFiles()
+// candidate under root, in that order (root CLAUDE.md, then
+// ".claude/CLAUDE.md"): a missing path reports exists=false; a path that
+// exists but is not a regular file reports exists=true, regular=false,
+// never read; a regular file is read and scanned for a marker defect
+// (scanSnippetMarkers) — a defect anywhere in either candidate refuses
+// immediately, citing that candidate. Once both candidates are scanned
+// clean, two of them each holding a valid block is refused too, citing
+// ".claude/CLAUDE.md" (root is the preferred location) and its own begin
+// line.
+func scanSnippetCandidates(root string, h host.Host) ([]candidateSnippetFile, error) {
+	rel := h.InstructionFiles()
+	out := make([]candidateSnippetFile, 0, len(rel))
+
+	for _, r := range rel {
+		path := filepath.Join(root, filepath.FromSlash(r))
+
+		info, err := os.Lstat(path)
+
+		switch {
+		case os.IsNotExist(err):
+			out = append(out, candidateSnippetFile{path: path})
+
+			continue
+		case err != nil:
+			return nil, fmt.Errorf("setup: lstat %s: %w", path, err)
+		case !info.Mode().IsRegular():
+			out = append(out, candidateSnippetFile{path: path, exists: true})
+
+			continue
+		}
+
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("setup: read %s: %w", path, err)
+		}
+
+		span, prob := scanSnippetMarkers(body)
+		if prob != nil {
+			return nil, &RefusalError{Path: path, Line: prob.line, Problem: prob.problem, Fix: prob.fix}
+		}
+
+		out = append(out, candidateSnippetFile{path: path, exists: true, regular: true, body: body, span: span})
+	}
+
+	if len(out) == 2 && out[0].span != nil && out[1].span != nil {
+		return nil, &RefusalError{
+			Path:    out[1].path,
+			Line:    out[1].span.beginLine,
+			Problem: "a brief block already exists in CLAUDE.md",
+			Fix:     "delete that block",
+		}
+	}
+
+	return out, nil
+}
+
+// chooseSnippetLocation picks the one candidate Init writes to or Uninstall
+// examines for a block: a candidate already holding a valid span wins
+// first (scanSnippetCandidates already refused if both do); otherwise the
+// first candidate that exists at all, regular or not, in priority order.
+// ok is false when no candidate exists — Init falls back to creating the
+// first (root) candidate; Uninstall reports nothing installed.
+func chooseSnippetLocation(candidates []candidateSnippetFile) (candidateSnippetFile, bool) {
+	for _, c := range candidates {
+		if c.span != nil {
+			return c, true
+		}
+	}
+
+	for _, c := range candidates {
+		if c.exists {
+			return c, true
+		}
+	}
+
+	return candidateSnippetFile{}, false
+}
+
+// crlfRefusal reports c's own *RefusalError when its bytes contain a CRLF
+// line ending, nil otherwise. It is checked only against the one candidate
+// a caller has already resolved to act on — never blanket across both
+// candidates — so an unrelated, untouched CLAUDE.md authored on Windows
+// never blocks an install or removal aimed at the other one.
+func crlfRefusal(c candidateSnippetFile) error {
+	if !c.regular || !bytes.Contains(c.body, []byte("\r\n")) {
+		return nil
+	}
+
+	return &RefusalError{Path: c.path, Problem: "has CRLF line endings", Fix: "convert it to LF line endings"}
+}
+
+// snippetArtifact pairs one CLAUDE.md candidate's own Artifact with the
+// bytes apply needs to actually write or remove: existing and span are the
+// candidate's own pre-write state (nil/nil for a fresh create), dir is the
+// configured feature directory Init renders into a create or merge, and
+// remains is the bytes Uninstall would leave behind after stripping the
+// span — populated only when Action is ActionRemoved, so apply can tell a
+// rewrite (remains non-empty) from a delete (remains empty) without
+// recomputing it.
+type snippetArtifact struct {
+	Artifact
+
+	existing []byte
+	span     *snippetSpan
+	dir      string
+	remains  []byte
+}
+
+// planSnippet decides the CLAUDE.md instruction block's own Artifact for
+// Init (R5): scanSnippetCandidates locates and scans both
+// host.InstructionFiles() candidates, refusing on any marker defect or a
+// block in both before this function decides anything. The location is the
+// candidate already holding a recognized block; otherwise the first
+// existing candidate, regular or not; otherwise root CLAUDE.md is created.
+// A chosen candidate carrying CRLF line endings refuses. A non-regular
+// chosen candidate is kept, never followed. A regular candidate with no
+// span merges by appending. A regular candidate whose span is
+// artifact.RecognizeSnippet's OriginEdited is kept, "edited locally";
+// OriginCurrent for dir (its own trailing "/" trimmed, matching
+// SnippetBlock's own rule) is unchanged; OriginCurrent for any other
+// directory is merged, "block updated".
+func planSnippet(root string, h host.Host, dir string) (snippetArtifact, error) {
+	candidates, err := scanSnippetCandidates(root, h)
+	if err != nil {
+		return snippetArtifact{}, err
+	}
+
+	chosen, ok := chooseSnippetLocation(candidates)
+	if !ok {
+		chosen = candidates[0]
+	}
+
+	if err := crlfRefusal(chosen); err != nil {
+		return snippetArtifact{}, err
+	}
+
+	if !chosen.exists {
+		return snippetArtifact{
+			Kind: KindSnippet, Path: chosen.path, Action: ActionCreated,
+			dir: dir,
+		}, nil
+	}
+
+	if !chosen.regular {
+		return snippetArtifact{
+			Kind: KindSnippet, Path: chosen.path, Action: ActionKept, Detail: "not a regular file",
+		}, nil
+	}
+
+	if chosen.span == nil {
+		return snippetArtifact{
+			Kind: KindSnippet, Path: chosen.path, Action: ActionMerged,
+			existing: chosen.body,
+			dir:      dir,
+		}, nil
+	}
+
+	match := artifact.RecognizeSnippet(chosen.body[chosen.span.start:chosen.span.end])
+
+	if match.Origin != artifact.OriginCurrent {
+		return snippetArtifact{
+			Kind: KindSnippet, Path: chosen.path, Action: ActionKept, Detail: "edited locally",
+		}, nil
+	}
+
+	if match.Dir == strings.TrimRight(dir, "/") {
+		return snippetArtifact{
+			Kind: KindSnippet, Path: chosen.path, Action: ActionUnchanged,
+		}, nil
+	}
+
+	return snippetArtifact{
+		Kind: KindSnippet, Path: chosen.path, Action: ActionMerged, Detail: "block updated",
+		existing: chosen.body,
+		span:     chosen.span,
+		dir:      dir,
+	}, nil
+}
+
+// planSnippetRemoval decides the CLAUDE.md instruction block's own removal
+// Artifact for Uninstall, present=false with a zero snippetArtifact when
+// there is nothing to report: no candidate exists, or the chosen one exists
+// but carries no recognized block. A chosen candidate carrying CRLF line
+// endings refuses, the same as planSnippet. A non-regular chosen candidate
+// is kept, "not a regular file". A regular candidate whose span is
+// artifact.RecognizeSnippet's OriginEdited is kept, "edited locally",
+// unless force, in which case — like an OriginCurrent span always — it is
+// removed: remains holds the bytes left after removeSnippet strips the
+// span, and Detail is "brief block" when remains is non-empty (apply
+// rewrites the file) or empty when remains is empty (apply deletes it).
+func planSnippetRemoval(root string, h host.Host, force bool) (snippetArtifact, bool, error) {
+	candidates, err := scanSnippetCandidates(root, h)
+	if err != nil {
+		return snippetArtifact{}, false, err
+	}
+
+	chosen, ok := chooseSnippetLocation(candidates)
+	if !ok {
+		return snippetArtifact{}, false, nil
+	}
+
+	if err := crlfRefusal(chosen); err != nil {
+		return snippetArtifact{}, false, err
+	}
+
+	if !chosen.regular {
+		return snippetArtifact{
+			Kind: KindSnippet, Path: chosen.path, Action: ActionKept, Detail: "not a regular file",
+		}, true, nil
+	}
+
+	if chosen.span == nil {
+		return snippetArtifact{}, false, nil
+	}
+
+	match := artifact.RecognizeSnippet(chosen.body[chosen.span.start:chosen.span.end])
+
+	if match.Origin != artifact.OriginCurrent && !force {
+		return snippetArtifact{
+			Kind: KindSnippet, Path: chosen.path, Action: ActionKept, Detail: "edited locally",
+		}, true, nil
+	}
+
+	remains := removeSnippet(chosen.body, *chosen.span)
+	detail := "brief block"
+	if len(remains) == 0 {
+		detail = ""
+	}
+
+	return snippetArtifact{
+		Kind: KindSnippet, Path: chosen.path, Action: ActionRemoved, Detail: detail,
+		existing: chosen.body,
+		span:     chosen.span,
+		remains:  remains,
+	}, true, nil
+}
+
+// writeSnippetFile atomically replaces path's bytes with body, through
+// internal/platform/atomicfile so a reader never observes a truncated or
+// half-written CLAUDE.md, preserving the file's own mode across a replace.
+// Unlike writePluginFile it never creates path's parent directory: a
+// chosen CLAUDE.md candidate's own directory already exists by
+// construction — root always does, and ".claude/CLAUDE.md" is only ever
+// chosen when it already exists — so brief never creates ".claude/" itself
+// just to hold this file.
+func writeSnippetFile(path string, body []byte) error {
+	dir := filepath.Dir(path)
+
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("setup: open %s: %w", dir, err)
+	}
+	defer func() { _ = root.Close() }()
+
+	w, err := atomicfile.Create(root, filepath.Base(path), 0o644)
+	if err != nil {
+		return fmt.Errorf("setup: write %s: %w", path, err)
+	}
+
+	if _, err := w.Write(body); err != nil {
+		_ = w.Close()
+
+		return fmt.Errorf("setup: write %s: %w", path, err)
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("setup: write %s: %w", path, err)
+	}
+
+	return nil
+}

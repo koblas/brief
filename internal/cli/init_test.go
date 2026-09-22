@@ -191,7 +191,8 @@ func Test_init_for_claude_code_installs_the_plugin_and_says_where_to_start_claud
 		"created .claude/skills/brief/.claude-plugin/plugin.json\n"+
 		"created .claude/skills/brief/skills/start/SKILL.md\n"+
 		"created .claude/skills/brief/skills/finish/SKILL.md\n"+
-		"created .claude/skills/brief/hooks/hooks.json\n", stdout.String())
+		"created .claude/skills/brief/hooks/hooks.json\n"+
+		"created CLAUDE.md\n", stdout.String())
 	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
 
 	manifest, err2 := os.ReadFile(filepath.Join(wd, ".claude", "skills", "brief", ".claude-plugin", "plugin.json"))
@@ -231,7 +232,8 @@ func Test_init_no_hook_omits_the_hook_row(t *testing.T) {
 		"created docs/specifications/\n"+
 		"created .claude/skills/brief/.claude-plugin/plugin.json\n"+
 		"created .claude/skills/brief/skills/start/SKILL.md\n"+
-		"created .claude/skills/brief/skills/finish/SKILL.md\n", stdout.String())
+		"created .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"created CLAUDE.md\n", stdout.String())
 
 	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief", "hooks", "hooks.json"))
 	assert.True(t, os.IsNotExist(statErr))
@@ -277,8 +279,45 @@ func Test_init_rerunning_for_claude_code_reports_unchanged_and_edited_files_kept
 		"unchanged .claude/skills/brief/.claude-plugin/plugin.json\n"+
 		"unchanged .claude/skills/brief/skills/start/SKILL.md\n"+
 		"kept .claude/skills/brief/skills/finish/SKILL.md (edited locally)\n"+
-		"unchanged .claude/skills/brief/hooks/hooks.json\n", stdout.String())
+		"unchanged .claude/skills/brief/hooks/hooks.json\n"+
+		"unchanged CLAUDE.md\n", stdout.String())
 	assert.Equal(t, "brief init: already installed; nothing changed\n", stderr.String())
+}
+
+// Test_init_merging_only_the_snippet_reports_installed_not_nothing_changed
+// pins the trap a merge-only run is exposed to: every other artifact
+// already converged (unchanged), only the CLAUDE.md block needs replacing
+// (it was brief-written for a different feature directory) — the
+// next-action line must still say "installed", not "already installed;
+// nothing changed", so initNextAction has to treat ActionMerged as a
+// change alongside ActionCreated.
+func Test_init_merging_only_the_snippet_reports_installed_not_nothing_changed(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), artifact.SnippetBlock("elsewhere"), 0o600))
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"unchanged .brief.yaml\n"+
+		"unchanged docs/specifications/\n"+
+		"unchanged .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"unchanged .claude/skills/brief/skills/start/SKILL.md\n"+
+		"unchanged .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"unchanged .claude/skills/brief/hooks/hooks.json\n"+
+		"merged CLAUDE.md (block updated)\n", stdout.String())
+	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
+
+	body, readErr := os.ReadFile(filepath.Join(wd, "CLAUDE.md"))
+	require.NoError(t, readErr)
+	assert.Equal(t, artifact.SnippetBlock("docs/specifications"), body)
 }
 
 // Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file pins

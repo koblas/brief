@@ -47,6 +47,12 @@ type Host interface {
 	// it did not exist — no row, nothing written. Uninstall removes the
 	// same files in the reverse of this order.
 	Plugin(withHook bool) []File
+	// InstructionFiles returns the repository-root-relative paths (forward
+	// slash separated) of every file this host reads project instructions
+	// from, in the priority order setup's own CLAUDE.md-block location rule
+	// (R5) tries them in. It performs no filesystem access of its own — a
+	// caller Lstats each in turn.
+	InstructionFiles() []string
 }
 
 // hookHosts lists every Host HookHosts and Lookup search, constructed once

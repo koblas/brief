@@ -23,6 +23,14 @@ const (
 	KindSkillFinish Kind = "skill-finish"
 	// KindClaudeHooks is ClaudeHooks's own Kind.
 	KindClaudeHooks Kind = "claude-hooks"
+	// KindSnippet is SnippetBlock's own Kind. Unlike every other Kind, it is
+	// never passed to Render or Recognize: SnippetBlock takes a feature
+	// directory Render's own signature carries no room for, and Recognize's
+	// single compiled-in digest list has no way to check "current for which
+	// directory". SnippetBlock and RecognizeSnippet are the snippet's own
+	// render and recognize functions instead — internal/setup calls them
+	// directly, never Render(KindSnippet) or Recognize(KindSnippet, ...).
+	KindSnippet Kind = "snippet"
 )
 
 // Origin classifies an existing file's bytes against a Kind's compiled-in
@@ -105,6 +113,10 @@ func digestsFor(kind Kind) [][32]byte {
 		return skillFinishDigests
 	case KindClaudeHooks:
 		return claudeHooksDigests
+	case KindSnippet:
+		// Deliberately excluded: SnippetBlock/RecognizeSnippet are the
+		// snippet's own render and recognize functions (see doc.go).
+		return nil
 	default:
 		return nil
 	}

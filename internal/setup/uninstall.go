@@ -33,15 +33,18 @@ type UninstallRequest struct {
 // file found either means zero artifacts, reported by cli as "nothing
 // installed".
 //
-// Artifacts lists a claude-code host's own files — hook wiring, finish
-// skill, start skill, manifest, the reverse of the order Init installs
-// them in — ahead of the config file, always last: the config, this
-// repository's opt-in marker, is always removed last, so a failure
+// Artifacts lists, for HostClaudeCode, the CLAUDE.md block first
+// (planSnippetRemoval), then a claude-code host's own files — hook wiring,
+// finish skill, start skill, manifest, the reverse of the order Init
+// installs them in — ahead of the config file, always last: the config,
+// this repository's opt-in marker, is always removed last, so a failure
 // partway through never removes it while something else still is. A
 // plugin file Lstat finds missing (never installed, or a --no-hook init's
-// own hook file) plans no row and no error. Apply removes every
-// ActionRemoved artifact in that same order, then, for HostClaudeCode,
-// prunes the plugin's own now-empty directories deepest-first, stopping at
+// own hook file) plans no row and no error; a CLAUDE.md candidate found
+// but carrying no recognized block plans no row either. Apply strips or
+// deletes the CLAUDE.md block first, then removes every ActionRemoved
+// plugin artifact in that same order, then, for HostClaudeCode, prunes the
+// plugin's own now-empty directories deepest-first, stopping at
 // host.PluginDir — never above it, and never touching a directory still
 // holding a file brief did not write. A failure after at least one
 // artifact was already removed is wrapped in ErrPartialWrite,
@@ -71,8 +74,26 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 		Removed:   []string{},
 	}
 
+	var (
+		snippetArt snippetArtifact
+		hasSnippet bool
+	)
+
 	if req.Host == HostClaudeCode {
 		h, _ := host.Lookup(host.ClaudeCode)
+
+		var present bool
+
+		snippetArt, present, err = planSnippetRemoval(root, h, req.Force)
+		if err != nil {
+			return Result{}, err
+		}
+
+		if present {
+			res.Artifacts = append(res.Artifacts, snippetArt.Artifact)
+			hasSnippet = true
+		}
+
 		files := h.Plugin(true)
 
 		for _, f := range slices.Backward(files) {
@@ -107,7 +128,7 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 		return res, nil
 	}
 
-	return applyUninstall(res, root, req.Host)
+	return applyUninstall(res, root, req.Host, snippetArt, hasSnippet)
 }
 
 // planPluginRemoval decides one plugin file's own removal Artifact,
@@ -234,18 +255,49 @@ func planConfigRemoval(path string, force bool) (Artifact, bool, error) {
 	return Artifact{Kind: KindConfig, Path: path, Action: action, Detail: "edited locally"}, true, nil
 }
 
-// applyUninstall removes every res.Artifacts entry reporting ActionRemoved,
-// in list order, appending each removed path to res.Removed as it lands,
-// then, for hostName == HostClaudeCode, prunes the plugin's own now-empty
-// directories (pruneEmptyPluginDirs) — never added to res.Removed, which
-// names files only, symmetric with Result.Created. A failure after at
-// least one earlier removal already landed is wrapped in ErrPartialWrite;
-// a failure before any removal landed is returned as-is.
-func applyUninstall(res Result, root, hostName string) (Result, error) {
+// applyUninstall strips or deletes the CLAUDE.md block first (when
+// hasSnippet and snippetArt reports ActionRemoved: a rewrite with its
+// remaining bytes goes to res.Modified, an emptied file is deleted and
+// goes to res.Removed), then removes every other res.Artifacts entry
+// reporting ActionRemoved, in list order, appending each removed path to
+// res.Removed as it lands, then, for hostName == HostClaudeCode, prunes the
+// plugin's own now-empty directories (pruneEmptyPluginDirs) — never added
+// to res.Removed, which names files only, symmetric with Result.Created. A
+// failure after at least one earlier removal already landed is wrapped in
+// ErrPartialWrite; a failure before any removal landed is returned as-is.
+func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifact, hasSnippet bool) (Result, error) {
 	var removedAny bool
 
+	if hasSnippet && snippetArt.Action == ActionRemoved {
+		if len(snippetArt.remains) == 0 {
+			if err := os.Remove(snippetArt.Path); err != nil {
+				wrapped := fmt.Errorf("setup: remove %s: %w", snippetArt.Path, err)
+
+				if removedAny {
+					return Result{}, markPartial(wrapped)
+				}
+
+				return Result{}, wrapped
+			}
+
+			res.Removed = append(res.Removed, snippetArt.Path)
+		} else {
+			if err := writeSnippetFile(snippetArt.Path, snippetArt.remains); err != nil {
+				if removedAny {
+					return Result{}, markPartial(err)
+				}
+
+				return Result{}, err
+			}
+
+			res.Modified = append(res.Modified, snippetArt.Path)
+		}
+
+		removedAny = true
+	}
+
 	for _, a := range res.Artifacts {
-		if a.Action != ActionRemoved {
+		if a.Kind == KindSnippet || a.Action != ActionRemoved {
 			continue
 		}
 

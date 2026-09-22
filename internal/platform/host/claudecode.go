@@ -114,3 +114,13 @@ func (claudeCode) Plugin(withHook bool) []File {
 
 	return append([]File(nil), files...)
 }
+
+// claudeCodeInstructionFiles lists claudeCode's own InstructionFiles, in
+// priority order: the repository-root CLAUDE.md, then ".claude/CLAUDE.md".
+var claudeCodeInstructionFiles = []string{"CLAUDE.md", ".claude/CLAUDE.md"}
+
+// InstructionFiles returns claudeCodeInstructionFiles, a fresh copy per
+// call.
+func (claudeCode) InstructionFiles() []string {
+	return append([]string(nil), claudeCodeInstructionFiles...)
+}

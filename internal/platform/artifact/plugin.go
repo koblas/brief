@@ -138,6 +138,11 @@ func Render(kind Kind) []byte {
 		return SkillFinish()
 	case KindClaudeHooks:
 		return ClaudeHooks()
+	case KindSnippet:
+		// Deliberately excluded: SnippetBlock is the snippet's own render
+		// function, taking the feature directory Render's signature has no
+		// room for (see doc.go).
+		return nil
 	default:
 		return nil
 	}

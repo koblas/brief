@@ -105,3 +105,14 @@ func Test_claude_code_plugin_layout_lists_every_file_and_drops_only_the_hook_wit
 	assert.Equal(t, artifact.KindSkillFinish, withHook[2].Kind)
 	assert.Equal(t, artifact.KindClaudeHooks, withHook[3].Kind)
 }
+
+// Test_claude_code_lists_its_instruction_files_in_priority_order pins
+// InstructionFiles's own contract (R5): the repository-root CLAUDE.md
+// first, ".claude/CLAUDE.md" second — the order setup's own location rule
+// tries them in — and no filesystem access: the same two relative paths
+// come back regardless of what does or does not exist on disk.
+func Test_claude_code_lists_its_instruction_files_in_priority_order(t *testing.T) {
+	h := newClaudeCode(t)
+
+	assert.Equal(t, []string{"CLAUDE.md", ".claude/CLAUDE.md"}, h.InstructionFiles())
+}

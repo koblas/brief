@@ -39,9 +39,10 @@ func Test_init_json_is_one_exact_document(t *testing.T) {
 
 // Test_init_json_for_claude_code_carries_plugin_and_hook_kinds pins the
 // JSON "kind" vocabulary (R11): "plugin" for the manifest and both skills,
-// "hook" for hooks.json, "host" echoing "claude-code", and every created
-// path listed in write order (feature root, then the four plugin files,
-// config last) — files only, never a directory.
+// "hook" for hooks.json, "snippet" for CLAUDE.md, "host" echoing
+// "claude-code", and every created path listed in write order (feature
+// root, then the four plugin files, then CLAUDE.md, config last) — files
+// only, never a directory.
 func Test_init_json_for_claude_code_carries_plugin_and_hook_kinds(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -71,8 +72,9 @@ func Test_init_json_for_claude_code_carries_plugin_and_hook_kinds(t *testing.T) 
 	hooks := filepath.Join(base, "hooks", "hooks.json")
 	featureRoot := filepath.Join(wd, "docs", "specifications")
 	configPath := filepath.Join(wd, ".brief.yaml")
+	claudeMD := filepath.Join(wd, "CLAUDE.md")
 
-	assert.Equal(t, []string{featureRoot, manifest, start, finish, hooks, configPath}, doc.Created)
+	assert.Equal(t, []string{featureRoot, manifest, start, finish, hooks, claudeMD, configPath}, doc.Created)
 
 	kindByPath := map[string]string{}
 	for _, a := range doc.Artifacts {
@@ -82,6 +84,7 @@ func Test_init_json_for_claude_code_carries_plugin_and_hook_kinds(t *testing.T) 
 	assert.Equal(t, "plugin", kindByPath[start])
 	assert.Equal(t, "plugin", kindByPath[finish])
 	assert.Equal(t, "hook", kindByPath[hooks])
+	assert.Equal(t, "snippet", kindByPath[claudeMD])
 }
 
 // Test_init_dry_run_json_reports_empty_created_and_modified pins R9's JSON

@@ -48,6 +48,16 @@ feature root (accessible, not counted), environment, host integration — setup 
   Re-running replaces the marked span; uninstall removes it and leaves the rest byte-identical.
   A lone marker refuses, naming file and line (no files changed). Snippet content (R17 thin):
 
+  **Amended during SCENARIO-07 planning**: a candidate already holding the block wins over the
+  root-first rule — Claude Code's own `/init` can create a root `CLAUDE.md` after the block
+  landed in `.claude/CLAUDE.md`, and the plain root-first rule would then install a second block
+  there. Two candidates each holding a block refuses, naming `.claude/CLAUDE.md` (root is the
+  preferred location) and its own begin line, fix "delete that block". A chosen candidate with
+  CRLF line endings refuses too, scoped to that one candidate — an untouched CLAUDE.md elsewhere
+  with CRLF endings never blocks an install or removal aimed at the other one. An emptied
+  CLAUDE.md is deleted on uninstall, the only "brief created it" signal this scenario keeps, so a
+  pre-existing, already-empty CLAUDE.md is deleted too, not restored.
+
   ```
   <!-- brief:begin -->
   ## brief
@@ -263,7 +273,7 @@ Scenario: SCENARIO-10 doctor reports Claude Code integration health
 - [x] SCENARIO-04: uninstall removes the config init wrote and nothing else
 - [x] SCENARIO-05: check --hook scopes a Claude Code hook call to the edited feature
 - [x] SCENARIO-06: init installs the Claude Code plugin
-- [ ] SCENARIO-07: init adds the CLAUDE.md instruction block
+- [x] SCENARIO-07: init adds the CLAUDE.md instruction block
 - [ ] SCENARIO-08: --with-agents scaffolds three role agents and binds them
 - [ ] SCENARIO-09: --print, host detection, and unwritable targets
 - [ ] SCENARIO-10: doctor reports Claude Code integration health

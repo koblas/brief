@@ -314,12 +314,12 @@ func Test_uninstall_rejects_an_unknown_host(t *testing.T) {
 }
 
 // Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_directories
-// pins R6's own removal order and directory pruning: the plugin's four
-// rows report hooks.json, finish skill, start skill, manifest — the
-// reverse of Init's own write order — then the config last, every row
-// ActionRemoved, and afterward ".claude/skills/brief/" is gone while
-// ".claude/skills/" and ".claude/" (the host's own directories, never
-// brief's to remove) still stand.
+// pins R6's own removal order and directory pruning: the CLAUDE.md block
+// first, then the plugin's four rows report hooks.json, finish skill,
+// start skill, manifest — the reverse of Init's own write order — then the
+// config last, every row ActionRemoved, and afterward ".claude/skills/brief/"
+// is gone while ".claude/skills/" and ".claude/" (the host's own
+// directories, never brief's to remove) still stand.
 func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_directories(t *testing.T) {
 	wd := t.TempDir()
 	srv := setup.NewServer()
@@ -332,13 +332,14 @@ func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_di
 	paths := pluginFilePaths(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
 
-	require.Len(t, res.Artifacts, 5)
-	assert.Equal(t, setup.Artifact{Kind: setup.KindHook, Path: paths.Hooks, Action: setup.ActionRemoved}, res.Artifacts[0])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionRemoved}, res.Artifacts[1])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionRemoved}, res.Artifacts[2])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionRemoved}, res.Artifacts[3])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, res.Artifacts[4])
-	assert.Equal(t, []string{paths.Hooks, paths.Finish, paths.Start, paths.Manifest, configPath}, res.Removed)
+	require.Len(t, res.Artifacts, 6)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindSnippet, Path: paths.ClaudeMD, Action: setup.ActionRemoved}, res.Artifacts[0])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindHook, Path: paths.Hooks, Action: setup.ActionRemoved}, res.Artifacts[1])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionRemoved}, res.Artifacts[2])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionRemoved}, res.Artifacts[3])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionRemoved}, res.Artifacts[4])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, res.Artifacts[5])
+	assert.Equal(t, []string{paths.ClaudeMD, paths.Hooks, paths.Finish, paths.Start, paths.Manifest, configPath}, res.Removed)
 
 	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
 	assert.True(t, os.IsNotExist(statErr))
@@ -414,8 +415,9 @@ func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_u
 
 // Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directory
 // pins the missing-file branch: hooks.json never existed (a --no-hook
-// init), so it plans no row and no error, and the remaining three files
-// still remove cleanly with the plugin directory pruned.
+// init), so it plans no row and no error, and the remaining three plugin
+// files plus the CLAUDE.md block still remove cleanly with the plugin
+// directory pruned.
 func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directory(t *testing.T) {
 	wd := t.TempDir()
 	srv := setup.NewServer()
@@ -425,7 +427,7 @@ func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directo
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 4)
+	require.Len(t, res.Artifacts, 5)
 	for _, a := range res.Artifacts {
 		assert.NotEqual(t, setup.KindHook, a.Kind)
 		assert.Equal(t, setup.ActionRemoved, a.Action)

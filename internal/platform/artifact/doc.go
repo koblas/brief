@@ -13,4 +13,13 @@
 // Neither consumer's logic — what to do with an origin — belongs here:
 // this package only renders bytes and classifies bytes, never a
 // filesystem path or a command's own decision.
+//
+// The CLAUDE.md instruction block (R5) is the one parameterized artifact:
+// SnippetBlock(dir) and RecognizeSnippet are its own render and recognize
+// functions, never Render(KindSnippet) or Recognize(KindSnippet, ...) —
+// Render's signature carries no room for the feature directory a snippet
+// needs, and a single compiled-in digest list has no way to check "current
+// for which directory". RecognizeSnippet is config-independent: it matches
+// a block brief-written for any feature directory, not only the caller's
+// currently configured one, and reports which directory that was.
 package artifact

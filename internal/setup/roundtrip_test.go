@@ -137,3 +137,85 @@ func Test_init_then_uninstall_for_claude_code_leaves_pre_existing_claude_files_b
 
 	assert.Equal(t, expected, after)
 }
+
+// Test_init_then_uninstall_leaves_claude_md_byte_identical pins R5's own
+// round trip across every append shape the byte rules distinguish, plus
+// the ".claude/CLAUDE.md" fallback and the "nothing there at all" case:
+// each asserts the tree actually changed after Init (so "restored after
+// round trip" is never vacuously true of a run that wrote nothing) before
+// asserting Uninstall restores it byte-identical — or, when nothing
+// preceded Init, absent again afterward.
+func Test_init_then_uninstall_leaves_claude_md_byte_identical(t *testing.T) {
+	cases := []struct {
+		name    string
+		relPath string // "" means no pre-existing CLAUDE.md at all
+		body    string
+	}{
+		{name: "no trailing newline", relPath: "CLAUDE.md", body: "# notes"},
+		{name: "one trailing newline", relPath: "CLAUDE.md", body: "# notes\n"},
+		{name: "trailing blank line", relPath: "CLAUDE.md", body: "# notes\n\n"},
+		{name: ".claude/CLAUDE.md fallback", relPath: filepath.Join(".claude", "CLAUDE.md"), body: "host notes\n"},
+		{name: "no CLAUDE.md at all", relPath: "", body: ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := t.TempDir()
+
+			if c.relPath != "" {
+				require.NoError(t, os.MkdirAll(filepath.Join(wd, filepath.Dir(c.relPath)), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(wd, c.relPath), []byte(c.body), 0o600))
+			}
+
+			before := snapshotTree(t, wd)
+
+			srv := setup.NewServer()
+			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
+			require.NoError(t, err)
+
+			afterInit := snapshotTree(t, wd)
+			assert.NotEqual(t, before, afterInit, "init must actually have written the CLAUDE.md block")
+
+			_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+			require.NoError(t, err)
+
+			after := snapshotTree(t, wd)
+
+			featureRootRel := filepath.Join("docs", "specifications")
+
+			expected := map[string]treeEntry{}
+			maps.Copy(expected, before)
+			expected["docs"] = treeEntry{isDir: true}
+			expected[featureRootRel] = treeEntry{isDir: true}
+			// A claude-code Init always creates ".claude/skills/brief/..."; Uninstall
+			// prunes empty directories only down to and including host.PluginDir
+			// (R6 never removes ".claude/skills/" or ".claude/" themselves), so both
+			// survive, empty, regardless of what the CLAUDE.md fixture pre-created.
+			expected[".claude"] = treeEntry{isDir: true}
+			expected[filepath.Join(".claude", "skills")] = treeEntry{isDir: true}
+
+			assert.Equal(t, expected, after)
+		})
+	}
+}
+
+// Test_init_then_uninstall_deletes_a_pre_existing_empty_CLAUDE_md pins the
+// accepted exception R6's own "brief created it" signal is exposed to: an
+// emptied CLAUDE.md is deleted on uninstall, and that rule cannot tell a
+// file brief emptied apart from one that started empty — so a pre-existing,
+// already-empty CLAUDE.md is deleted too, not restored as an empty file.
+func Test_init_then_uninstall_deletes_a_pre_existing_empty_CLAUDE_md(t *testing.T) {
+	wd := t.TempDir()
+	claudeMD := filepath.Join(wd, "CLAUDE.md")
+	require.NoError(t, os.WriteFile(claudeMD, []byte{}, 0o600))
+
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
+	require.NoError(t, err)
+
+	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+	require.NoError(t, err)
+
+	_, statErr := os.Stat(claudeMD)
+	assert.True(t, os.IsNotExist(statErr), "a pre-existing empty CLAUDE.md is deleted, not restored")
+}
