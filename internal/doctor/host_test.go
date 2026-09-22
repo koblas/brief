@@ -273,7 +273,43 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 				host.PluginDir + "/skills/start/SKILL.md",
 				host.PluginDir + "/skills/finish/SKILL.md",
 			}, ", "),
-			wantFix: new("chmod u+rx " + host.PluginDir + "/.claude-plugin, then " + runInitClaudeCode),
+			wantFix: new("chmod u+rwx .claude, then " + runInitClaudeCode),
+		},
+		{
+			// The blocking directory is two levels below root
+			// (".claude/skills"), not root's own immediate child
+			// (".claude", left at 0o755): notReadableFix's own ancestor
+			// walk must climb past every unresolvable descendant and stop
+			// at the first ancestor whose own Lstat succeeds, not at the
+			// subject file's immediate parent and not at root. Control:
+			// "a subject file is unreadable, not missing" above chmods
+			// ".claude" itself and expects the walk to stop one level
+			// higher still. Mutation-verified: stopping blockingDir's walk
+			// one level early (returning filepath.Dir(dir) instead of dir
+			// on Lstat failure, i.e. testing .claude/skills/brief's own
+			// parent instead of .claude/skills) reddens this case alone
+			// (the fix becomes "chmod u+rwx .claude/skills/brief, then
+			// …"), restored after; stopping one level late (never
+			// returning until root) reddens it into "chmod u+rwx .claude,
+			// then …" instead, restored after.
+			name: "the blocking dir is .claude/skills, .claude itself stays 0755",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				for _, f := range h.Plugin(true) {
+					writeHostArtifact(t, wd, f)
+				}
+
+				chmodUnreadableDir(t, filepath.Join(wd, ".claude", "skills"))
+			},
+			checkID:      "host-plugin",
+			wantSeverity: doctor.SeverityError,
+			wantDetail: "not readable (permission denied): " + strings.Join([]string{
+				host.PluginDir + "/.claude-plugin/plugin.json",
+				host.PluginDir + "/skills/start/SKILL.md",
+				host.PluginDir + "/skills/finish/SKILL.md",
+			}, ", "),
+			wantFix: new("chmod u+rwx .claude/skills, then " + runInitClaudeCode),
 		},
 		{
 			// Every directory stays searchable; only the manifest file
@@ -284,7 +320,7 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 			// file is current" above is the identical install, readable,
 			// OK. Mutation-verified: hardcoding first.statFailed to true
 			// in integrationFileRowDetail's own notReadableFix call
-			// reddens this case alone (the fix reverts to "chmod u+rx
+			// reddens this case alone (the fix reverts to "chmod u+rwx
 			// .claude/skills/brief/.claude-plugin, then …"), restored
 			// after.
 			name: "a subject file itself is unreadable, its directory is searchable",
@@ -432,7 +468,7 @@ func Test_diagnose_classifies_host_hook(t *testing.T) {
 			checkID:      "host-hook",
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "not readable (permission denied)",
-			wantFix:      new("chmod u+rx " + host.PluginDir + "/hooks, then " + runInitClaudeCode),
+			wantFix:      new("chmod u+rwx .claude, then " + runInitClaudeCode),
 		},
 		{
 			// The unreadable-directory case above fails at the Lstat call
@@ -573,7 +609,7 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 				host.PluginDir + "/agents/implementer.md",
 				host.PluginDir + "/agents/reviewer.md",
 			}, ", "),
-			wantFix: new("chmod u+rx " + host.PluginDir + "/agents, then " + runInitClaudeCode),
+			wantFix: new("chmod u+rwx .claude, then " + runInitClaudeCode),
 		},
 		{
 			// Every directory stays searchable; only the planner agent
@@ -584,7 +620,7 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 			// install, readable, OK. Mutation-verified: hardcoding
 			// first.statFailed to true in integrationFileRowDetail's own
 			// notReadableFix call reddens this case alone (the fix
-			// reverts to "chmod u+rx .claude/skills/brief/agents,
+			// reverts to "chmod u+rwx .claude/skills/brief/agents,
 			// then …"), restored after.
 			name: "an agent file itself is unreadable, its directory is searchable",
 			setup: func(t *testing.T, wd string, h host.Host) {
@@ -614,7 +650,7 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 // pins the same wd-vs-root split fix pass 8 gave host-snippet's own "not
 // readable" fix (Test_diagnose_host_snippet_unreadable_fix_is_relative_to_wd)
 // for host-plugin, host-hook and host-agents: Diagnose run from a
-// subdirectory below root must recommend "chmod u+rx ../<dir>", not the
+// subdirectory below root must recommend "chmod u+rwx ../<dir>", not the
 // bare root-relative form every hostCheckCase table in this file pins
 // (wd == root there). Mutation-verified: passing root instead of absWd as
 // wd into hostPluginCheck/hostHookCheck/hostAgentsCheck in doctor.go's own
@@ -643,17 +679,17 @@ func Test_diagnose_host_plugin_hook_agents_unreadable_fix_is_relative_to_wd(t *t
 	pluginCheck := findCheck(t, report, "host-plugin")
 	assert.Equal(t, doctor.SeverityError, pluginCheck.Severity)
 	require.NotNil(t, pluginCheck.Fix)
-	assert.Equal(t, "chmod u+rx ../"+host.PluginDir+"/.claude-plugin, then "+runInitClaudeCode, *pluginCheck.Fix)
+	assert.Equal(t, "chmod u+rwx ../.claude, then "+runInitClaudeCode, *pluginCheck.Fix)
 
 	hookCheck := findCheck(t, report, "host-hook")
 	assert.Equal(t, doctor.SeverityWarn, hookCheck.Severity)
 	require.NotNil(t, hookCheck.Fix)
-	assert.Equal(t, "chmod u+rx ../"+host.PluginDir+"/hooks, then "+runInitClaudeCode, *hookCheck.Fix)
+	assert.Equal(t, "chmod u+rwx ../.claude, then "+runInitClaudeCode, *hookCheck.Fix)
 
 	agentsCheck := findCheck(t, report, "host-agents")
 	assert.Equal(t, doctor.SeverityWarn, agentsCheck.Severity)
 	require.NotNil(t, agentsCheck.Fix)
-	assert.Equal(t, "chmod u+rx ../"+host.PluginDir+"/agents, then "+runInitClaudeCode, *agentsCheck.Fix)
+	assert.Equal(t, "chmod u+rwx ../.claude, then "+runInitClaudeCode, *agentsCheck.Fix)
 }
 
 // Test_diagnose_host_plugin_detail_names_unreadable_and_missing_together
@@ -989,11 +1025,12 @@ func Test_diagnose_classifies_host_snippet_unreadable(t *testing.T) {
 			// P1: an ancestor directory doctor cannot even Lstat into (mode
 			// 0o000) is unreadable at the Lstat call itself, not the
 			// ReadFile call — the fix must target the broken directory
-			// (chmod u+rx), not a "chmod +r" on a file it never reached.
-			// Mutation-verified: hardcoding statFailed to false in
-			// notReadableFix's own caller reddens this case alone (the fix
-			// text reverts to "chmod +r .claude/CLAUDE.md, then …"), restored
-			// after.
+			// (chmod u+rwx, the search bit to read through it again and
+			// the write bit init needs to create entries under it), not a
+			// "chmod +r" on a file it never reached. Mutation-verified:
+			// hardcoding statFailed to false in notReadableFix's own caller
+			// reddens this case alone (the fix text reverts to "chmod +r
+			// .claude/CLAUDE.md, then …"), restored after.
 			name: "no root CLAUDE.md, .claude itself cannot be Lstat'd",
 			setup: func(t *testing.T, wd string, _ host.Host) {
 				t.Helper()
@@ -1005,7 +1042,7 @@ func Test_diagnose_classifies_host_snippet_unreadable(t *testing.T) {
 			checkID:        "host-snippet",
 			wantSeverity:   doctor.SeverityWarn,
 			wantDetail:     "not readable (permission denied); cannot check for brief block",
-			wantFix:        new("chmod u+rx .claude, then " + runInitClaudeCode),
+			wantFix:        new("chmod u+rwx .claude, then " + runInitClaudeCode),
 			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
 		},
 		{

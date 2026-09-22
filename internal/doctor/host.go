@@ -159,9 +159,10 @@ func unreadableRelPaths(states []integrationFileState) []string {
 // shares the same cause in practice; any file still genuinely missing is
 // named too, in its own fragment, since classifyProbeError only
 // reclassifies the files it actually failed against. Fix is
-// notReadableFix against that same first unreadable state. ok is false
-// when states holds no unreadable file at all.
-func integrationFileRowDetail(wd string, states []integrationFileState) (string, string, bool) {
+// notReadableFix against that same first unreadable state, root bounding
+// its own ancestor walk. ok is false when states holds no unreadable file
+// at all.
+func integrationFileRowDetail(wd, root string, states []integrationFileState) (string, string, bool) {
 	unreadable := unreadableRelPaths(states)
 	if len(unreadable) == 0 {
 		return "", "", false
@@ -183,7 +184,7 @@ func integrationFileRowDetail(wd string, states []integrationFileState) (string,
 		fragments = append(fragments, "missing "+strings.Join(missing, ", "))
 	}
 
-	return strings.Join(fragments, "; "), notReadableFix(wd, first.path, first.statFailed), true
+	return strings.Join(fragments, "; "), notReadableFix(wd, root, first.path, first.statFailed), true
 }
 
 // relPathsWithOrigin returns the relPath of every present, regular state
@@ -251,7 +252,7 @@ func hostPluginCheck(wd, root string, h host.Host, installed bool) Check {
 
 	states := probeIntegrationFiles(root, h.Plugin(false))
 
-	if detail, fix, ok := integrationFileRowDetail(wd, states); ok {
+	if detail, fix, ok := integrationFileRowDetail(wd, root, states); ok {
 		return Check{ID: "host-plugin", Severity: SeverityError, Path: path, Detail: detail, Fix: new(fix)}
 	}
 
@@ -305,7 +306,7 @@ func hostHookCheck(wd, root string, h host.Host, installed bool) Check {
 	}
 
 	if state.unreadable {
-		return Check{ID: "host-hook", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(wd, state.path, state.statFailed))}
+		return Check{ID: "host-hook", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(wd, root, state.path, state.statFailed))}
 	}
 
 	if !state.regular {
@@ -337,7 +338,7 @@ func hostAgentsCheck(wd, root string, h host.Host) Check {
 		return Check{ID: "host-agents", Severity: SeveritySkip, Path: path, Detail: "not installed", Fix: new(runInitWithAgents)}
 	}
 
-	if detail, fix, ok := integrationFileRowDetail(wd, states); ok {
+	if detail, fix, ok := integrationFileRowDetail(wd, root, states); ok {
 		return Check{ID: "host-agents", Severity: SeverityWarn, Path: path, Detail: detail, Fix: new(fix)}
 	}
 
@@ -446,19 +447,47 @@ func notReadableDetail(reason string) string {
 	return notReadableReason(reason) + "; cannot check for brief block"
 }
 
+// blockingDir walks from filepath.Dir(path) upward, Lstat'ing each
+// ancestor, until one resolves: that ancestor is the directory actually
+// missing its own search (+x) bit, since every descendant beneath it
+// failed to Lstat while it itself did not — Lstat needs +x on a path's
+// parent to find its directory entry, never on the path itself, so an
+// unsearchable directory still resolves its own Lstat but blocks every
+// Lstat of anything nested inside it. The walk never rises above root —
+// the one directory every host check already treats as its own install
+// boundary — returning root itself if even it fails to resolve, which
+// should not happen in practice since only root's own descendants are
+// ever the broken directory.
+func blockingDir(root, path string) string {
+	dir := filepath.Dir(path)
+
+	for dir != root {
+		if _, err := os.Lstat(dir); err == nil {
+			return dir
+		}
+
+		dir = filepath.Dir(dir)
+	}
+
+	return root
+}
+
 // notReadableFix renders the shared WARN fix for a subject
 // classifyProbeError read as unreadable: when the failure was in the
 // Lstat call itself (statFailed — an ancestor directory not searchable),
-// the fix targets that immediate parent directory (chmod u+rx); when it
-// was the ReadFile call instead (the file itself, present and regular,
-// not readable), the fix targets the file (chmod +r). Both then re-run
+// the fix targets blockingDir's own result — the actual directory missing
+// its search bit, not necessarily the subject's immediate parent — with
+// both the search and write bits restored (chmod u+rwx), since init must
+// still be able to create entries under it; when it was the ReadFile call
+// instead (the file itself, present and regular, not readable), the fix
+// targets the file (chmod +r). Both then re-run
 // 'brief init --host claude-code', the same repair every "not installed"
 // row already points at. path and its fix target are rendered relative to
 // wd, the same wd Diagnose was called with, since every row's own Path is
-// rendered relative to wd too.
-func notReadableFix(wd, path string, statFailed bool) string {
+// rendered relative to wd too; root bounds blockingDir's own walk.
+func notReadableFix(wd, root, path string, statFailed bool) string {
 	if statFailed {
-		return fmt.Sprintf("chmod u+rx %s, then %s", relPath(wd, filepath.Dir(path)), runInitClaudeCode)
+		return fmt.Sprintf("chmod u+rwx %s, then %s", relPath(wd, blockingDir(root, path)), runInitClaudeCode)
 	}
 
 	return fmt.Sprintf("chmod +r %s, then %s", relPath(wd, path), runInitClaudeCode)
@@ -550,7 +579,7 @@ func snippetBlockFound(states []snippetCandidateState) bool {
 // or the first present one is a regular, readable, blockless file, is
 // SKIP "not installed", Path naming that first-present candidate (or the
 // first candidate in priority order when none is present at all).
-func hostSnippetCheck(wd string, states []snippetCandidateState, dir string, dirKnown bool) Check {
+func hostSnippetCheck(wd, root string, states []snippetCandidateState, dir string, dirKnown bool) Check {
 	for _, s := range states {
 		if s.prob != nil {
 			return Check{ID: "host-snippet", Severity: SeverityError, Path: s.path, Detail: fmt.Sprintf("%s (line %d)", s.prob.Problem, s.prob.Line), Fix: &s.prob.Fix}
@@ -596,7 +625,7 @@ func hostSnippetCheck(wd string, states []snippetCandidateState, dir string, dir
 			return Check{
 				ID: "host-snippet", Severity: SeverityWarn, Path: firstPresent.path,
 				Detail: notReadableDetail(firstPresent.readErr),
-				Fix:    new(notReadableFix(wd, firstPresent.path, firstPresent.statFailed)),
+				Fix:    new(notReadableFix(wd, root, firstPresent.path, firstPresent.statFailed)),
 			}
 		}
 

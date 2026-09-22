@@ -265,7 +265,7 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 		s.checkEnvPath(integrationInstalled),
 		hostPluginCheck(absWd, root, h, filesInstalled),
 		hostHookCheck(absWd, root, h, filesInstalled),
-		hostSnippetCheck(absWd, snippetStates, dir, dirKnown),
+		hostSnippetCheck(absWd, root, snippetStates, dir, dirKnown),
 		hostAgentsCheck(absWd, root, h),
 		rolesCheck,
 	)
