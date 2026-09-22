@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-03
 status: done
-depends-on: []
 ---
 
 # SCENARIO-03: New step scaffolds the next step file and its progress entry

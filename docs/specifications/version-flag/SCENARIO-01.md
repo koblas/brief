@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-01
 status: done
-depends-on: []
 ---
 
 # SCENARIO-01: --version prints the build's stored version

@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-08
 status: done
-depends-on: []
 ---
 
 # SCENARIO-08: check groups findings by feature and names each rule

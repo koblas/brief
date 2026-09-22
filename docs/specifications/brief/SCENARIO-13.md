@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-13
 status: done
-depends-on: []
 ---
 
 # SCENARIO-13: Start refuses a malformed feature rather than assembling half a brief

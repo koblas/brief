@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-20
 status: done
-depends-on: []
 ---
 
 # SCENARIO-20: A step with an open checklist item cannot be finished

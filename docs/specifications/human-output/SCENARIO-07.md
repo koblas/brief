@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-07
 status: done
-depends-on: []
 ---
 
 # SCENARIO-07: status --json

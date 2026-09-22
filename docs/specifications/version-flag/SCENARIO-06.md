@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-06
 status: done
-depends-on: []
 ---
 
 # SCENARIO-06: --version outside the root is unchanged

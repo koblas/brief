@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-08
 status: done
-depends-on: []
 ---
 
 # SCENARIO-08: "brief help <command>" matches "<command> --help"

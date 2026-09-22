@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-10
 status: done
-depends-on: []
 ---
 
 # SCENARIO-10: "new" has its own help

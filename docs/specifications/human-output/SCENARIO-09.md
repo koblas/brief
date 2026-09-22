@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-09
 status: done
-depends-on: []
 ---
 
 # SCENARIO-09: check --json

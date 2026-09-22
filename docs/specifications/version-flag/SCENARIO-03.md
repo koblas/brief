@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-03
 status: done
-depends-on: []
 ---
 
 # SCENARIO-03: --version takes no arguments

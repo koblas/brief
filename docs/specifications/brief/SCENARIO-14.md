@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-14
 status: done
-depends-on: []
 ---
 
 # SCENARIO-14: Start degrades on a missing optional convention and says so

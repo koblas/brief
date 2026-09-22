@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-11
 status: done
-depends-on: []
 ---
 
 # SCENARIO-11: One malformed feature does not blind status to the rest

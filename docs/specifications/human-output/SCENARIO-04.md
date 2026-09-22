@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-04
 status: done
-depends-on: []
 ---
 
 # SCENARIO-04: A malformed feature names the step file at fault

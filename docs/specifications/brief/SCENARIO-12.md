@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-12
 status: done
-depends-on: []
 ---
 
 # SCENARIO-12: A completed feature has no next step

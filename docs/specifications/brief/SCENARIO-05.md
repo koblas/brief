@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-05
 status: done
-depends-on: []
 ---
 
 # SCENARIO-05: Finishing writes the handoff and replaces the state, then marks done

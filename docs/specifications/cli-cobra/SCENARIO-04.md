@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-04
 status: done
-depends-on: []
 ---
 
 # SCENARIO-04: Single-dash long flag is rejected

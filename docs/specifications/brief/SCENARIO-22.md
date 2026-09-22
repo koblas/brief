@@ -1,7 +1,6 @@
 ---
 id: SCENARIO-22
 status: done
-depends-on: []
 ---
 
 # SCENARIO-22: Check reports what the write path would now refuse
