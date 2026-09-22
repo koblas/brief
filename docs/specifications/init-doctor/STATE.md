@@ -89,7 +89,8 @@ wd≠root, mixed-row and ReadFile-arm coverage for host-plugin/-hook/-agents.
 - pflag's `UnquoteUsage` keeps the backticked word in the rendered text too — backtick a real
   value and it becomes the table placeholder; backtick a generic word instead. Pinned by
   `Test_host_and_hook_flags_render_a_generic_table_placeholder` (help_test.go), mutation-
-  verified per flag.
+  verified per flag; a control asserting the reverted placeholder is absent needs enough
+  trailing usage text to stay unique.
 - `os.Lstat` on a file-as-directory returns `syscall.ENOTDIR`, never matched by
   `os.IsNotExist`/`fs.ErrNotExist` directly — `doctor.classifyProbeError` and
   `internal/setup`'s own `planPluginFile`/`checkWritable` check it explicitly; other
@@ -113,6 +114,11 @@ wd≠root, mixed-row and ReadFile-arm coverage for host-plugin/-hook/-agents.
   severity change: env-path's own ERROR already forces exit 1 on its own. A test asserting a
   host row's severity at the CLI boundary needs brief FOUND on PATH instead
   (`Test_doctor_reports_host_plugin_error_when_the_plugin_directory_is_unreadable`).
+- Under an unsearchable `.claude`, host-plugin reads ERROR and names three plugin files even
+  when none was ever installed — "unreadable counts as present" has no floor. Pinned by
+  `Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable`, whose own
+  fixture only ever wrote a CLAUDE.md snippet. Flagged for product-vision's final pass, not
+  fixed here.
 
 ## Open debts
 - setup never rewrites/removes an `OriginOlder` file — harmless while every older digest list
@@ -122,8 +128,10 @@ wd≠root, mixed-row and ReadFile-arm coverage for host-plugin/-hook/-agents.
   tests pin stdout byte-exact. **Unowned.**
 - `hostPluginCheck`/`hostAgentsCheck` duplicate the same origin-check body — refactor-advisor
   MINORs, deferred rather than risk behavior change. **Unowned.**
-- `detect_test.go`'s classification table carries no mutation-verification statement, unlike
-  most of `host_test.go`'s own tables (fix passes 5-10 each added some, not all). **Unowned.**
+- `internal/setup`'s `detect_test.go` classification table carries no mutation-verification
+  statement at all, and in `host_test.go`, `Test_diagnose_classifies_host_hook` has only one
+  (fix pass 10's own addition) and `Test_diagnose_classifies_roles` has none — every other
+  table in `host_test.go` has at least one (fix passes 5-10 each added some). **Unowned.**
 - `internal/doctor` (`scanSnippetCandidateStates`/`hostSnippetCheck`) and `internal/setup`
   (`scanSnippetCandidates`/`chooseSnippetLocation`) each hand-write the same snippet-candidate-
   selection rule and cannot import each other (dependency rule) — arch-reviewer suggests

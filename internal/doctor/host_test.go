@@ -251,9 +251,11 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 			// there. Control: "every subject file is current" above is
 			// the identical install, readable, OK. Mutation-verified:
 			// dropping integrationFileRowDetail's own call ahead of
-			// missingRelPaths (falling through to the "incomplete:
-			// missing" branch) reddens this case alone via its Detail
-			// text, restored after.
+			// missingRelPaths turns this case OK "installed" — every file
+			// is unreadable, so missingRelPaths itself finds nothing left
+			// to call missing — reddening this case and every other case
+			// or test that depends on host-plugin's own unreadable arm,
+			// restored after.
 			name: "a subject file is unreadable, not missing",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
