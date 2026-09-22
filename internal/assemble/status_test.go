@@ -725,6 +725,114 @@ func Test_status_leaves_a_feature_with_a_conforming_specification_and_state_unma
 	assert.Equal(t, 1, rows[0].Total)
 }
 
+// Test_status_prefers_the_specification_fault_over_a_step_file_fault pins
+// featureStatus's first-fault-wins check order at the point where two
+// faults compete: a feature with no specification and a step file whose
+// frontmatter does not parse must report the specification's own Problem,
+// not the step's — the tests above only prove a spec fault alone produces a
+// row, never that it is checked ahead of a step fault that would otherwise
+// win.
+func Test_status_prefers_the_specification_fault_over_a_step_file_fault(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(checkConformingState(cfg)), 0o600))
+	writeStepFile(t, featureDir, "STEP-01.md", "no frontmatter here\n")
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), rows[0].Problem.Path)
+	assert.Equal(t, cfg.SpecificationFile+" not found", rows[0].Problem.Detail)
+}
+
+// Test_status_prefers_the_state_fault_over_a_step_file_fault pins
+// featureStatus's check order one step further: a conforming specification
+// beside a missing state file and a step file whose frontmatter does not
+// parse must report the state file's own Problem, not the step's.
+// wantDetail comes from a real os.Open on the removed state path, the same
+// technique Test_status_marks_a_feature_whose_state_file_is_missing uses,
+// since the OS-native error text is not this test's own contract.
+func Test_status_prefers_the_state_fault_over_a_step_file_fault(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(checkConformingSpec(cfg)), 0o600))
+	writeStepFile(t, featureDir, "STEP-01.md", "no frontmatter here\n")
+
+	statePath := filepath.Join(featureDir, cfg.StateFile)
+	_, openErr := os.Open(statePath)
+	var pathErr *fs.PathError
+	require.ErrorAs(t, openErr, &pathErr)
+	wantDetail := pathErr.Err.Error()
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, statePath, rows[0].Problem.Path)
+	assert.Equal(t, wantDetail, rows[0].Problem.Detail)
+}
+
+// Test_status_reports_the_line_of_a_state_file_s_unclosed_fence pins
+// Problem.Line: a state file whose fenced code block never closes reports
+// the fence's own opening line, the same line Check's own RuleFence finding
+// reports for the byte-identical fixture (17, checkStateUnterminatedFence's
+// four headings each contributing four lines before the fence opens) — the
+// two readers of the same fault must never disagree about where it is.
+func Test_status_reports_the_line_of_a_state_file_s_unclosed_fence(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkStateUnterminatedFence(cfg))
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, 17, rows[0].Problem.Line)
+
+	findings, err := srv.Check(t.Context(), "demo")
+	require.NoError(t, err)
+	require.Len(t, findings, 1)
+	assert.Equal(t, 17, findings[0].Line, "Status and Check must report the same line for the same fence")
+}
+
+// Test_status_leaves_line_at_zero_for_a_whole_file_fault pins the other
+// half of Problem.Line's contract: a fault with no particular line — here,
+// a missing specification — reports Line 0, the "whole file" sentinel
+// statusProblemJSON renders as a null "line" rather than a fabricated 0.
+func Test_status_leaves_line_at_zero_for_a_whole_file_fault(t *testing.T) {
+	cfg := fixtureConfig()
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(checkConformingState(cfg)), 0o600))
+	writeStepFile(t, featureDir, "STEP-01.md", fixtureStepWithDeps(cfg, "STEP-01", "open", "STEP-01", nil))
+
+	srv := assemble.NewServer(cfg, root)
+
+	rows, err := srv.Status(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Problem)
+	assert.Equal(t, 0, rows[0].Problem.Line)
+}
+
 // Test_complete reports (FeatureStatus).Complete's one rule — Problem ==
 // nil && Total > 0 && Done == Total — over its four discriminating shapes.
 // The malformed case sets Done == Total == 3 specifically so a mutant that

@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -563,6 +564,11 @@ func Test_status_text_marks_a_feature_missing_its_state_file(t *testing.T) {
 // every malformed row, matching the well-formed control's non-null counts
 // and null "problem".
 func Test_status_json_marks_a_feature_for_each_of_major_1s_three_conditions(t *testing.T) {
+	_, openErr := os.Open(filepath.Join(t.TempDir(), "missing.md"))
+	var pathErr *fs.PathError
+	require.ErrorAs(t, openErr, &pathErr)
+	missingFileDetail := pathErr.Err.Error()
+
 	cases := []struct {
 		name         string
 		setup        func(t *testing.T, featureDir string)
@@ -600,7 +606,7 @@ func Test_status_json_marks_a_feature_for_each_of_major_1s_three_conditions(t *t
 				require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(conformingSpec), 0o600))
 				require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(statusFixtureStepBody("SCENARIO-01")), 0o600))
 			},
-			wantDetailIn: "",
+			wantDetailIn: missingFileDetail,
 		},
 	}
 
@@ -635,12 +641,7 @@ func Test_status_json_marks_a_feature_for_each_of_major_1s_three_conditions(t *t
 				Detail string `json:"detail"`
 			}
 			require.NoError(t, json.Unmarshal(row["problem"], &problem))
-
-			if c.wantDetailIn != "" {
-				assert.Equal(t, c.wantDetailIn, problem.Detail)
-			} else {
-				assert.NotEmpty(t, problem.Detail)
-			}
+			assert.Equal(t, c.wantDetailIn, problem.Detail)
 		})
 	}
 }
@@ -670,4 +671,37 @@ func Test_status_json_leaves_a_conforming_feature_s_counts_non_null(t *testing.T
 	assert.Equal(t, "1", string(row["total"]))
 	assert.Equal(t, "0", string(row["blocked"]))
 	assert.Equal(t, "null", string(row["problem"]))
+}
+
+// Test_status_json_reports_the_line_of_a_state_file_s_unclosed_fence pins
+// statusProblemJSON's "line" member: a state file whose fenced code block
+// never closes renders a non-null "line" holding the fence's own opening
+// line — 17, stateWithUnterminatedFence's four headings each contributing
+// four lines before the fence opens — never a null the way a whole-file
+// fault's line does.
+func Test_status_json_reports_the_line_of_a_state_file_s_unclosed_fence(t *testing.T) {
+	wd := t.TempDir()
+	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(conformingSpec), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(stateWithUnterminatedFence), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte(statusFixtureStepBody("SCENARIO-01")), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"status", "--json"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+
+	var doc struct {
+		Features []map[string]json.RawMessage `json:"features"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+	require.Len(t, doc.Features, 1)
+
+	var problem struct {
+		Line *int `json:"line"`
+	}
+	require.NoError(t, json.Unmarshal(doc.Features[0]["problem"], &problem))
+	require.NotNil(t, problem.Line)
+	assert.Equal(t, 17, *problem.Line)
 }

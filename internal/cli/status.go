@@ -64,9 +64,8 @@ type statusNextJSON struct {
 
 // statusProblemJSON is a statusFeatureJSON row's "problem" member: path and
 // detail/fix exactly as assemble.Problem carries them, raw and never
-// flattened. Line is always nil: assemble.Problem carries no line number
-// today, and the key stays present so a future assemble.Problem.Line is
-// additive rather than a schema bump.
+// flattened. Line is assemble.Problem.Line, non-nil only when it is greater
+// than 0 — a whole-file fault carries no line number.
 type statusProblemJSON struct {
 	Path   string `json:"path"`
 	Line   *int   `json:"line"`
@@ -88,6 +87,10 @@ func statusFeatures(rows []assemble.FeatureStatus) []statusFeatureJSON {
 			f.Done, f.Total, f.Blocked = &done, &total, &blocked
 		} else {
 			f.Problem = &statusProblemJSON{Path: row.Problem.Path, Detail: row.Problem.Detail, Fix: row.Problem.Fix}
+			if row.Problem.Line > 0 {
+				line := row.Problem.Line
+				f.Problem.Line = &line
+			}
 		}
 
 		if row.Next != nil {

@@ -131,8 +131,8 @@ type Finding struct {
 //
 // Check narrows the population Finish's band applies to, never the
 // predicate: an open step's unticked checklist item, and an open step's
-// known-but-unmet dependency — already counted by Status's Blocked — are
-// ordinary in-progress work, not findings. C8 and C9 carry no such
+// known-but-unmet dependency, are ordinary in-progress work, not findings.
+// C8 and C9 carry no such
 // narrowing: a self-dependency or a dangling depends-on id is a fault on a
 // done step exactly as much as an open one. Every other rule applies
 // without narrowing too, including C10: a done or open step's over-cap
@@ -151,10 +151,9 @@ type Finding struct {
 // SeverityError when any step is not done or could not be read or parsed,
 // or the feature has no step files at all; SeverityWarn when every step
 // reads as done. A feature with no step files takes SeverityError rather
-// than the vacuous "every step done" WARN a naive empty-loop would read —
-// the same rule assemble.Status's own Complete() applies (Total > 0
-// required), so a zero-step feature's (in_flight) header agrees with
-// Status's own "in progress" (never "(complete)") classification of it. A
+// than the vacuous "every step done" WARN a naive empty-loop would read,
+// matching (FeatureStatus).Complete's own Total > 0 requirement
+// (Test_check_marks_a_zero_step_feature_in_flight_not_complete). A
 // feature-level Finding — an unreadable or symlinked feature directory, or
 // a feature whose step files could not be listed at all — always takes
 // SeverityError too: its doneness cannot be measured, and treating the
@@ -490,8 +489,8 @@ func (s *Server) checkStepFindings(root *os.Root, pattern stepfile.Pattern, hand
 	var findings []Finding
 
 	// A feature with no step files at all is not vacuously "every step
-	// done": assemble.Status's own Complete() requires Total > 0, and Check
-	// now matches that rule rather than disagreeing with it.
+	// done": it is in flight, matching (FeatureStatus).Complete's own
+	// Total > 0 requirement (Test_check_marks_a_zero_step_feature_in_flight_not_complete).
 	inFlight := len(parsed) == 0
 
 	for _, ps := range parsed {
@@ -546,10 +545,8 @@ func checkStepChecklistFinding(heading string, ps parsedStep, stepPath string) [
 // (C8) fault. It walks every id in fm.DependsOn directly, in declaration
 // order, and emits one Finding per id that is stepID itself (C9) or that
 // idx.Known reports nothing recorded under (C8). An id that is Known and
-// not stepID is an ordinary known-but-unmet dependency — already counted
-// by Status's Blocked for an open step, and never a fault for a done one —
-// and is never a finding. Copy matches
-// scaffold.checkStepDependencies's own two refusal branches verbatim.
+// not stepID is an ordinary known-but-unmet dependency, never a fault
+// whether the step is open or done, and is never a finding.
 func checkStepDependencyFindings(idx *stepfile.DependencyIndex, fm stepfile.Frontmatter, stepID, stepPath string) []Finding {
 	var findings []Finding
 

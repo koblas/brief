@@ -758,6 +758,31 @@ func Test_refuses_an_unknown_step_with_no_step_files_suggests_creating_one(t *te
 	assert.Equal(t, "known: none; run 'brief new step widgets' to create one", refusal.Fix)
 }
 
+// Test_refuses_an_unknown_step_lists_known_ids_in_numeric_not_filename_order
+// pins knownStepIDs' sort by stepfile.Pattern.Number rather than os.ReadDir's
+// byte order: an unpadded "STEP-%d.md" pattern puts "STEP-10.md" before
+// "STEP-2.md" in filename order, while the Fix's "known:" list must still
+// name STEP-2 first.
+func Test_refuses_an_unknown_step_lists_known_ids_in_numeric_not_filename_order(t *testing.T) {
+	cfg := fixtureConfig()
+	cfg.StepFilePattern = "STEP-%d.md"
+	root := t.TempDir()
+	featureDir := filepath.Join(root, cfg.FeatureDirectory, "widgets")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-10.md"), []byte("x"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STEP-2.md"), []byte("x"), 0o600))
+
+	srv := scaffold.NewServer(cfg, root)
+
+	_, err := srv.Finish(context.Background(), "widgets", "STEP-99", []byte("h"), []byte("s"))
+
+	require.ErrorIs(t, err, scaffold.ErrNoSuchStep)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, "known: STEP-2, STEP-10", refusal.Fix)
+}
+
 func Test_refuses_a_specification_with_no_progress_heading_on_finish(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()

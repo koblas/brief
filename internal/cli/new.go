@@ -165,9 +165,14 @@ func runNewStep(ctx context.Context, wd string, rest []string, out reporter) err
 		return out.document(doc)
 	}
 
+	specDisplay := ""
+	if len(res.Modified) > 0 {
+		specDisplay = displayPath(wd, res.Modified[0])
+	}
+
 	fmt.Fprintln(out.stdout, displayPath(wd, res.Path))
 	fmt.Fprintf(out.stderr, "brief new step: created %s in %s and added it to %s; fill in its acceptance criteria and checklist, then 'brief start %s'\n",
-		res.Step, res.Feature, displayPath(wd, res.Modified[0]), res.Feature)
+		res.Step, res.Feature, specDisplay, res.Feature)
 
 	return nil
 }

@@ -24,11 +24,14 @@ var ErrMalformedFeature = errors.New("malformed feature")
 // absolute path of the offending directory or file — the step file itself
 // when the fault is that file's own frontmatter, never the feature
 // directory it lives in — Detail is the underlying failure's own message,
-// and Fix is the one-line remedy printed beside it.
+// Fix is the one-line remedy printed beside it, and Line is the 1-based
+// line number within Path the fault points at (0 when it names the whole
+// file), copied from the *RefusalError that produced it.
 type Problem struct {
 	Path   string
 	Detail string
 	Fix    string
+	Line   int
 }
 
 // RefusalError is the read-side refusal Start returns when it declines to

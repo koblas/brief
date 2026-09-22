@@ -1,8 +1,9 @@
 # human-output — current state
 
-Scenarios complete: SCENARIO-01..14 (all). Last updated by a fix-mode pass: 3 MAJOR findings
-(status/check parity with start's own refusals, finish `next` shape parity with status,
-unknown-step refusal copy) plus 6 cheap-optional fixes.
+Scenarios complete: SCENARIO-01..14 (all). Last updated by a fix-mode pass: 2 MAJOR findings
+(status's directory→spec→state→step precedence, `knownStepIDs`'s numeric sort — both were
+unpinned: true only because no fixture combined two competing faults) plus cheap
+correctness/test/doc fixes.
 
 ## Binding decisions
 
@@ -28,11 +29,16 @@ unknown-step refusal copy) plus 6 cheap-optional fixes.
   (`knownStepIDs`/`knownStepsFix`), not duplicated in cli. Empty: `known: none; run 'brief new
   step <feature>' to create one`.
 - **Paths: absolute in `assemble`/`scaffold`/JSON, relative in text (R6)** via `displayPath`.
-- `status.featureStatus` (now a `*Server` method) checks, per feature: open/list the directory,
-  `s.specFault`, `s.readStateFile` (both reused from `Start`), then step files — the same faults
-  `brief start` refuses over now degrade a status row into `Problem`. `check` agrees on
-  zero-step severity too: `checkStepFindings`'s `inFlight` starts `true` when a feature has no
-  step files (`Total > 0`, matching `Status.Complete()`), not vacuous WARN.
+- `status.featureStatus` (a `*Server` method) checks, per feature, in fixed order: open/list the
+  directory, `s.specFault`, `s.readStateFile` (reused from `Start`), then step files — first
+  fault wins, mutation-verified by reordering. `assemble.Problem` carries `Line` (copied from the
+  producing `*RefusalError`), rendered in `status --json`'s `problem.line` only when > 0. `check`
+  agrees on zero-step severity: `checkStepFindings`'s `inFlight` starts `true` on no step files
+  (`Total > 0`, matching `Status.Complete()`), not vacuous WARN.
+- `scaffold.knownStepIDs` sorts by `pattern.Number`, not `os.ReadDir`'s filename order
+  (mutation-verified). `findStepFile` returns `ErrNoSuchStep` unwrapped on no match, any other
+  error (e.g. `ReadDir` failure) wrapped and un-refused; `Finish` builds the unknown-step refusal
+  only on `errors.Is(err, ErrNoSuchStep)`.
 - `finish --json`'s `"next"` is `status`'s own `{"id","title","path"}|null` object
   (`scaffold.FinishNext`, via `nextOpenStep` + `stepTitleFromFile`); text still names only the
   id. `finish`/`new step` also carry additive `"modified"` (never nil): `finish` =
@@ -54,7 +60,7 @@ unknown-step refusal copy) plus 6 cheap-optional fixes.
 ## Left unbuilt
 
 - `brief new --json` (bare `new`, no type) success document — it only ever errors.
-- `assemble.Problem.Line` and `assemble.RenderJSON` — both unowned.
+- `assemble.RenderJSON` — unowned.
 - A shared platform helper for "next open step" — lives once in `assemble`, once in `scaffold`,
   tied only by an agreement test (now also checks `next.path` against `status`'s own).
 - A `blocked` flag in `finish`'s output, and a flag `shorthand` field in help entries.
@@ -72,13 +78,14 @@ unknown-step refusal copy) plus 6 cheap-optional fixes.
   user's own relative `--state`/`--handoff` argument.
 - A reserved-name collision (`schema`, `command`, `ok`, `exit_code`, `error`) in a future payload
   struct is silently resolved by encoding/json's equal-depth rule.
-- `known:` (unknown-feature/unknown-step) lists only openable dirs / real step files.
+- `known:` (unknown-feature/unknown-step) lists only openable dirs / real step files, sorted by
+  `pattern.Number` for steps — never `os.ReadDir`'s filename order.
 - `os.ReadDir` order is filename order — `nextOpenStep` picks the minimum by `pattern.Number`.
 - pflag sorts a leaf's Flags rows by name: `--json` lands between `--help` and `--state` in
   finish's table.
-- Every status fixture built from step files alone now needs a conforming spec + state file
-  too, or `featureStatus`'s spec/state check wins the row's `Problem` for the wrong reason —
-  `writeConformingFeature`/`writeConformingFeatureFiles` exist in both test packages for this.
+- A status fixture built from step files alone needs a conforming spec + state file too
+  (`writeConformingFeature`/`writeConformingFeatureFiles`, both test packages), else
+  `featureStatus`'s spec/state check wins the row's `Problem` before steps are ever read.
 
 ## Open debts
 
@@ -91,3 +98,6 @@ unknown-step refusal copy) plus 6 cheap-optional fixes.
 - `writeExclusive` orphaning a file when `WriteString`/`Close` fails after `OpenFile` succeeds —
   correctness MINOR, not constructible via a returned error — unowned.
 - `reporter.refusal`'s compose-method extraction — refactor MINOR — unowned.
+- `scaffold.findStepFile`'s `ReadDir`-failure branch (wrapped error, not the unknown-step
+  refusal) has no deterministic test seam in `scaffold` (unlike `assemble`'s
+  `SetReadDirForTest`) — fixed but unverified by mutation — unowned.

@@ -21,7 +21,7 @@ from stdin; it may be given for at most one of --handoff and --state.
 // finishDocument is finish's --json success document: the common header
 // first, then scaffold.FinishResult's own fields, every path absolute and
 // passed through verbatim. Next is statusNextJSON, the identical
-// id/title/path object status's own "next" renders (MAJOR 2) — nil (JSON
+// id/title/path object status's own "next" renders — nil (JSON
 // null) when nothing is open. Modified is res.Modified verbatim — the
 // state file, the step file and the specification, in that order, when
 // Changed; empty on the no-op — and never includes handoff_path, this

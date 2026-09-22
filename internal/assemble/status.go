@@ -152,6 +152,7 @@ func (s *Server) featureStatus(topRoot *os.Root, pattern stepfile.Pattern, name,
 
 	if _, refusal := s.specFault(root, displayPath); refusal != nil {
 		problem := refusal.Problem
+		problem.Line = refusal.Line
 
 		return FeatureStatus{Name: name, Path: displayPath, Problem: &problem}
 	}
@@ -209,7 +210,10 @@ func (s *Server) featureStatus(topRoot *os.Root, pattern stepfile.Pattern, name,
 // contract degrades into an ordinary Problem instead of crashing Status.
 func stateFaultProblem(displayPath string, err error) Problem {
 	if refusal, ok := errors.AsType[*RefusalError](err); ok {
-		return refusal.Problem
+		problem := refusal.Problem
+		problem.Line = refusal.Line
+
+		return problem
 	}
 
 	return *newProblem(displayPath, err, false)
