@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"syscall"
 
@@ -679,94 +678,19 @@ func hostSnippetCheck(wd, root string, states []snippetCandidateState, dir strin
 	}
 }
 
-// roleBindingResult classifies one role's own binding value against the
-// filesystem.
-type roleBindingResult int
-
-const (
-	// roleUnbound marks an empty binding.
-	roleUnbound roleBindingResult = iota
-	// roleResolved marks a binding whose own agent file was found.
-	roleResolved
-	// roleUnresolved marks a non-empty binding whose own agent file was
-	// not found.
-	roleUnresolved
-	// roleUnverified marks a "<plugin>:<name>" binding for a plugin other
-	// than "brief" — doctor has no file layout to check it against, so it
-	// counts as bound without being verified.
-	roleUnverified
-)
-
-// roleResolution is resolveRoleBinding's own result: state classifies the
-// binding, path is the resolved file's own absolute path when state is
-// roleResolved (nil-string otherwise), and defs carries every
-// agentfile.Definition a bare-name binding's own agentfile.Find returned
-// — nil for a "brief:<name>", any other "<plugin>:<name>", or an unbound
-// or unresolved binding. rolesCheck derives the duplicate-definition WARN
-// and the "user-level:" OK suffix from defs; roles-skill reads defs (a
-// bare name) or agentfile.Load(path) (a "brief:*" binding) to tell
-// whether the resolved agent preloads the brief-workflow skill, without
-// re-deriving the "brief:*" filename rule.
-type roleResolution struct {
-	state roleBindingResult
-	path  string
-	defs  []agentfile.Definition
-}
-
-// resolveRoleBinding classifies value (a config.RoleBindings field)
-// against root and, for a bare name, an injected home (R7, Rule 5): "" is
-// roleUnbound; a "brief:<name>" binding is roleResolved via
-// "<root>/.claude/agents/<name>.md", overriding
-// "<root>/.claude/skills/brief/agents/<name>.md" when both are regular
-// files, roleUnresolved when neither is; any other "<plugin>:<name>" is
-// roleUnverified; a bare "<name>" is roleResolved when
-// agentfile.Find(root, home, name) returns at least one Definition (home
-// errors, or an empty home, are treated as no home directory at all),
-// roleUnresolved otherwise — path and defs then carry its first and every
-// result respectively, in the scope agentfile.Find chose (project agents
-// shadow a same-named user one entirely, never mixed).
-func (s *Server) resolveRoleBinding(root, value string) roleResolution {
-	if value == "" {
-		return roleResolution{state: roleUnbound}
-	}
-
-	if plugin, agent, ok := strings.Cut(value, ":"); ok {
-		if plugin != "brief" {
-			return roleResolution{state: roleUnverified}
-		}
-
-		overridePath := filepath.Join(root, ".claude", "agents", agent+".md")
-		pluginPath := filepath.Join(root, host.PluginDir, "agents", agent+".md")
-
-		switch {
-		case fileIsRegular(overridePath):
-			return roleResolution{state: roleResolved, path: overridePath}
-		case fileIsRegular(pluginPath):
-			return roleResolution{state: roleResolved, path: pluginPath}
-		default:
-			return roleResolution{state: roleUnresolved}
-		}
-	}
-
+// resolveRoleBinding resolves home (R7) and classifies value (a
+// config.RoleBindings field) against root via agentfile.ResolveBinding —
+// the binding-classification logic setup's own missing-skill report reuses
+// (agentfile.Binding, Rule 5). doctor stays the caller here rather than
+// agentfile itself resolving home, since only doctor carries s.homeDir's
+// own injectable seam (setup.WithHomeDir mirrors it independently).
+func (s *Server) resolveRoleBinding(root, value string) agentfile.Binding {
 	home, err := s.homeDir()
 	if err != nil {
 		home = ""
 	}
 
-	defs := agentfile.Find(root, home, value)
-	if len(defs) == 0 {
-		return roleResolution{state: roleUnresolved}
-	}
-
-	return roleResolution{state: roleResolved, path: defs[0].Path, defs: defs}
-}
-
-// fileIsRegular reports whether path exists and is a regular file,
-// following symlinks.
-func fileIsRegular(path string) bool {
-	info, err := os.Stat(path)
-
-	return err == nil && info.Mode().IsRegular()
+	return agentfile.ResolveBinding(root, home, value)
 }
 
 // roleBinding names one role position alongside its own configured value,
@@ -835,17 +759,17 @@ func (s *Server) rolesCheck(root, nearest string, bindings [3]roleBinding) Check
 	for _, b := range bindings {
 		res := s.resolveRoleBinding(root, b.value)
 
-		switch res.state {
-		case roleUnbound:
+		switch res.State {
+		case agentfile.BindingUnbound:
 			problems = append(problems, b.name+" unbound")
-		case roleUnresolved:
+		case agentfile.BindingUnresolved:
 			problems = append(problems, fmt.Sprintf("%s: %s not found", b.name, b.value))
-		case roleUnverified:
+		case agentfile.BindingUnverified:
 			suffixes = append(suffixes, "not verified: "+b.name)
-		case roleResolved:
-			if dup := duplicateDefinitionProblem(root, b.name, b.value, res.defs); dup != "" {
+		case agentfile.BindingResolved:
+			if dup := duplicateDefinitionProblem(root, b.name, b.value, res.Defs); dup != "" {
 				problems = append(problems, dup)
-			} else if len(res.defs) > 0 && res.defs[0].Scope == agentfile.ScopeUser {
+			} else if len(res.Defs) > 0 && res.Defs[0].Scope == agentfile.ScopeUser {
 				suffixes = append(suffixes, "user-level: "+b.name)
 			}
 		}
@@ -967,51 +891,35 @@ func rolesSkillMissingEntry(role, value string, omitClaudeMd bool) string {
 	return entry
 }
 
-// hasWorkflowSkill reports whether skills names artifact.WorkflowSkillName.
-func hasWorkflowSkill(skills []string) bool {
-	return slices.Contains(skills, artifact.WorkflowSkillName)
-}
-
 // roleLacksSkill reports whether res's own resolved agent(s) do not
-// preload artifact.WorkflowSkillName: for a bare-name binding (res.defs
-// non-empty), any resolved agentfile.Definition lacking it is enough —
-// Claude Code loads duplicate definitions in unspecified order, so any one
-// lacking it makes the binding unreliable — and the omitClaudeMd suffix
-// follows the same "any" rule, from any lacking definition that sets it;
-// for a "brief:*" binding (res.defs nil), agentfile.Load(res.path)'s own
-// Frontmatter decides it, a load error counting as lacking, without a
-// suffix, since that file's own omitClaudeMd is then unknown.
-func roleLacksSkill(res roleResolution) (bool, bool) {
-	if len(res.defs) > 0 {
-		var lacking, omitClaudeMd bool
+// preload artifact.WorkflowSkillName, via agentfile.Binding's own
+// LackingSkill — the single decision point every "lacks the skill"
+// question (this row and setup's own missing-skill report) shares: a
+// non-empty result means lacking, and the omitClaudeMd suffix follows
+// LackingSkill's own "any" rule, true when any returned Definition sets
+// it — a "brief:*" binding's own Load failure returns a zero Frontmatter,
+// so it never sets the suffix.
+func roleLacksSkill(res agentfile.Binding) (bool, bool) {
+	defs := res.LackingSkill(artifact.WorkflowSkillName)
+	if len(defs) == 0 {
+		return false, false
+	}
 
-		for _, d := range res.defs {
-			if !hasWorkflowSkill(d.Frontmatter.Skills) {
-				lacking = true
-
-				if d.Frontmatter.OmitClaudeMd {
-					omitClaudeMd = true
-				}
-			}
+	for _, d := range defs {
+		if d.Frontmatter.OmitClaudeMd {
+			return true, true
 		}
-
-		return lacking, omitClaudeMd
 	}
 
-	fm, err := agentfile.Load(res.path)
-	if err != nil {
-		return true, false
-	}
-
-	return !hasWorkflowSkill(fm.Skills), fm.OmitClaudeMd
+	return true, false
 }
 
 // rolesSkillCheck builds roles-skill's own row for a parsed config,
 // considering only planner and implementer (product verdict item 1 — the
 // reviewer role is deliberately excluded, R15): SKIP
 // (rolesSkillNoConfigDetail) when neither is bound and resolved
-// (roleResolved — a roleUnverified binding does not itself count, so two
-// other-plugin bindings SKIP); any resolved role whose agent does not
+// (agentfile.BindingResolved — a BindingUnverified binding does not itself
+// count, so two other-plugin bindings SKIP); any resolved role whose agent does not
 // preload the skill (roleLacksSkill) is WARN, one entry per lacking role
 // (rolesSkillMissingEntry), joined "; ", in planner-then-implementer
 // order; otherwise OK (rolesSkillOKDetail), plus "; not verified: <role>"
@@ -1030,16 +938,16 @@ func (s *Server) rolesSkillCheck(root, nearest string, planner, implementer role
 	for _, b := range bindings {
 		res := s.resolveRoleBinding(root, b.value)
 
-		switch res.state {
-		case roleUnverified:
+		switch res.State {
+		case agentfile.BindingUnverified:
 			suffixes = append(suffixes, "not verified: "+b.name)
-		case roleResolved:
+		case agentfile.BindingResolved:
 			anyResolved = true
 
 			if lacking, omitClaudeMd := roleLacksSkill(res); lacking {
 				problems = append(problems, rolesSkillMissingEntry(b.name, b.value, omitClaudeMd))
 			}
-		case roleUnbound, roleUnresolved:
+		case agentfile.BindingUnbound, agentfile.BindingUnresolved:
 			// The roles row already reports this position; roles-skill
 			// has nothing of its own to add.
 		}

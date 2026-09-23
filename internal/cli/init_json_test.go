@@ -33,7 +33,7 @@ func Test_init_json_is_one_exact_document(t *testing.T) {
 	want := `{"schema":1,"command":"init","ok":true,"exit_code":0,"host":"none","detected_by":null,"dry_run":false,"created":[` +
 		jsonString(t, featureRoot) + `,` + jsonString(t, configPath) + `],"modified":[],"artifacts":[` +
 		`{"kind":"config","path":` + jsonString(t, configPath) + `,"action":"created","detail":null},` +
-		`{"kind":"feature-root","path":` + jsonString(t, featureRoot) + `,"action":"created","detail":null}],"roles_to_add":[]}` + "\n"
+		`{"kind":"feature-root","path":` + jsonString(t, featureRoot) + `,"action":"created","detail":null}],"roles_to_add":[],"agents_missing_skill":[]}` + "\n"
 
 	assert.Equal(t, want, stdout.String())
 }
@@ -181,6 +181,10 @@ func Test_init_print_json_is_one_exact_document(t *testing.T) {
 	assert.NotContains(t, doc, "created")
 	assert.NotContains(t, doc, "modified")
 	assert.NotContains(t, doc, "roles_to_add")
+	// Green on arrival: --print --json never computed agents_missing_skill
+	// before this field existed either. Kept as a regression pin, matching
+	// the roles_to_add precedent right above.
+	assert.NotContains(t, doc, "agents_missing_skill")
 
 	var artifacts []struct {
 		Path   string `json:"path"`

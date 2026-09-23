@@ -8,6 +8,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -138,4 +139,227 @@ func Test_init_with_agents_follows_the_detected_host(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, stdout.String(), "created .claude/skills/brief/agents/planner.md\n")
 	})
+}
+
+// missingSkillHeaderLine is the exact stderr header init's own missing-skill
+// block renders (Surface & Copy), including the "brief init: " prefix.
+const missingSkillHeaderLine = `brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each, or rerun with --edit-agents:`
+
+// installedNextActionLine is the exact stderr next-action line an explicit
+// "--host claude-code" run reports once at least one artifact changed and
+// root == wd — no detection clause, since the host was given explicitly.
+const installedNextActionLine = "brief init: installed for claude-code; start Claude Code in this directory " +
+	"(or run /reload-plugins in a session already here), then 'brief new feature <name>'"
+
+// Test_init_lists_bound_agents_missing_the_workflow_skill pins S06's own
+// stderr block: a home-level "planner" agent and a project, nested
+// ".claude/agents/developer/Agent.md" bound as implementer, neither
+// carrying the skill. The project row renders first, then the user row —
+// display groups project-scope rows ahead of user-scope ones, distinct
+// from Result.AgentsMissingSkill's own role-major order (setup's own
+// missing_skill_test.go pins that order directly). Neither agent file is
+// touched, and a --dry-run sub-case reports the identical block.
+func Test_init_lists_bound_agents_missing_the_workflow_skill(t *testing.T) {
+	wd := t.TempDir()
+	home := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+		"feature-directory: docs/specifications\nroles:\n  planner: planner\n  implementer: developer\n",
+	), 0o600))
+
+	homePlanner := filepath.Join(home, ".claude", "agents", "planner.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(homePlanner), 0o755))
+	plannerBody := []byte("---\nname: planner\n---\n\nbody\n")
+	require.NoError(t, os.WriteFile(homePlanner, plannerBody, 0o600))
+
+	projectDeveloper := filepath.Join(wd, ".claude", "agents", "developer", "Agent.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(projectDeveloper), 0o755))
+	developerBody := []byte("---\nname: developer\n---\n\nbody\n")
+	require.NoError(t, os.WriteFile(projectDeveloper, developerBody, 0o600))
+
+	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+
+	wantBlock := missingSkillHeaderLine + "\n" +
+		"  .claude/agents/developer/Agent.md (implementer)\n" +
+		"  ~/.claude/agents/planner.md (planner; user-level, edit by hand)\n"
+
+	t.Run("without --dry-run", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+		require.NoError(t, err)
+		assert.Equal(t, wantBlock+installedNextActionLine+"\n", stderr.String())
+
+		after, readErr := os.ReadFile(projectDeveloper)
+		require.NoError(t, readErr)
+		assert.Equal(t, developerBody, after)
+
+		homeAfter, readErr := os.ReadFile(homePlanner)
+		require.NoError(t, readErr)
+		assert.Equal(t, plannerBody, homeAfter)
+	})
+
+	t.Run("--dry-run reports the same block", func(t *testing.T) {
+		wd := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+			"feature-directory: docs/specifications\nroles:\n  planner: planner\n  implementer: developer\n",
+		), 0o600))
+
+		projectDeveloper := filepath.Join(wd, ".claude", "agents", "developer", "Agent.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(projectDeveloper), 0o755))
+		require.NoError(t, os.WriteFile(projectDeveloper, developerBody, 0o600))
+
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--dry-run"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+		require.NoError(t, err)
+		assert.Equal(t, wantBlock+"brief init: dry run, no files changed; rerun without --dry-run to apply\n", stderr.String())
+
+		entries, readErr := os.ReadDir(filepath.Join(wd, ".claude"))
+		require.NoError(t, readErr)
+		assert.Len(t, entries, 1, "--dry-run must write nothing beyond the fixture's own agents directory")
+	})
+}
+
+// Test_init_prints_roles_to_add_before_the_missing_skill_block pins R7's
+// stderr order (Surface & Copy): the "roles_to_add" block, then the
+// missing-skill block, then the next-action line — never the reverse.
+func Test_init_prints_roles_to_add_before_the_missing_skill_block(t *testing.T) {
+	wd := t.TempDir()
+	home := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+		"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
+	), 0o600))
+
+	developer := filepath.Join(wd, ".claude", "agents", "developer.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(developer), 0o755))
+	require.NoError(t, os.WriteFile(developer, []byte("---\nname: developer\n---\n\nbody\n"), 0o600))
+
+	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"brief init: .brief.yaml was not edited; to bind brief's agents, add these lines to it:\n"+
+		"roles:\n"+
+		"  planner: brief:planner\n"+
+		"  reviewer: brief:reviewer\n"+
+		missingSkillHeaderLine+"\n"+
+		"  .claude/agents/developer.md (implementer)\n"+
+		installedNextActionLine+"\n", stderr.String())
+}
+
+// Test_init_json_lists_agents_missing_the_skill pins "agents_missing_skill"
+// --json's own item shape (S06): exactly the keys role, agent, path
+// (absolute) and scope, in that order, values "project"/"user", stderr
+// empty — the same fixture Test_init_lists_bound_agents_missing_the_workflow_skill
+// uses.
+func Test_init_json_lists_agents_missing_the_skill(t *testing.T) {
+	wd := t.TempDir()
+	home := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+		"feature-directory: docs/specifications\nroles:\n  planner: planner\n  implementer: developer\n",
+	), 0o600))
+
+	homePlanner := filepath.Join(home, ".claude", "agents", "planner.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(homePlanner), 0o755))
+	require.NoError(t, os.WriteFile(homePlanner, []byte("---\nname: planner\n---\n\nbody\n"), 0o600))
+
+	projectDeveloper := filepath.Join(wd, ".claude", "agents", "developer", "Agent.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(projectDeveloper), 0o755))
+	require.NoError(t, os.WriteFile(projectDeveloper, []byte("---\nname: developer\n---\n\nbody\n"), 0o600))
+
+	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--json"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	var doc struct {
+		AgentsMissingSkill []struct {
+			Role  string `json:"role"`
+			Agent string `json:"agent"`
+			Path  string `json:"path"`
+			Scope string `json:"scope"`
+		} `json:"agents_missing_skill"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+
+	require.Len(t, doc.AgentsMissingSkill, 2)
+
+	byRole := map[string]struct {
+		Role  string
+		Agent string
+		Path  string
+		Scope string
+	}{}
+	for _, a := range doc.AgentsMissingSkill {
+		byRole[a.Role] = struct {
+			Role  string
+			Agent string
+			Path  string
+			Scope string
+		}{a.Role, a.Agent, a.Path, a.Scope}
+	}
+
+	require.Contains(t, byRole, "planner")
+	require.Contains(t, byRole, "implementer")
+
+	assert.Equal(t, "planner", byRole["planner"].Agent)
+	assert.Equal(t, homePlanner, byRole["planner"].Path)
+	assert.True(t, filepath.IsAbs(byRole["planner"].Path))
+	assert.Equal(t, "user", byRole["planner"].Scope)
+
+	assert.Equal(t, "developer", byRole["implementer"].Agent)
+	assert.Equal(t, projectDeveloper, byRole["implementer"].Path)
+	assert.True(t, filepath.IsAbs(byRole["implementer"].Path))
+	assert.Equal(t, "project", byRole["implementer"].Scope)
+
+	rawKeys := extractFirstObjectKeys(t, stdout.Bytes(), "agents_missing_skill")
+	assert.Equal(t, []string{"role", "agent", "path", "scope"}, rawKeys)
+}
+
+// extractFirstObjectKeys decodes doc[field]'s own first array element as an
+// ordered list of its own JSON object keys, via json.Decoder's own token
+// stream — the one way to observe encoding/json's own field order without
+// relying on a Go struct's field order to prove it.
+func extractFirstObjectKeys(t *testing.T, doc []byte, field string) []string {
+	t.Helper()
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(doc, &raw))
+
+	var items []json.RawMessage
+	require.NoError(t, json.Unmarshal(raw[field], &items))
+	require.NotEmpty(t, items)
+
+	dec := json.NewDecoder(bytes.NewReader(items[0]))
+
+	tok, err := dec.Token()
+	require.NoError(t, err)
+	require.Equal(t, json.Delim('{'), tok)
+
+	var keys []string
+
+	for dec.More() {
+		keyTok, err := dec.Token()
+		require.NoError(t, err)
+
+		key, ok := keyTok.(string)
+		require.True(t, ok, "an object key token must decode as a string")
+		keys = append(keys, key)
+
+		var discard json.RawMessage
+		require.NoError(t, dec.Decode(&discard))
+	}
+
+	return keys
 }

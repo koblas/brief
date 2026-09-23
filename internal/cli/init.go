@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/setup"
 )
 
@@ -30,7 +31,9 @@ that file — an existing config is never edited, and stderr instead lists
 the "roles:" lines to add by hand for any role still unbound. Every
 claude-code install also writes a "brief-workflow" skill under
 ".claude/skills/brief-workflow/", which agents preload by listing it in
-their frontmatter "skills:". Writes
+their frontmatter "skills:". init never edits an agent file of yours by
+default; stderr instead lists each planner or implementer bound in
+".brief.yaml" whose agent lacks it. Writes
 ".brief.yaml" with every key present but commented out, documenting each
 setting in place (live under --with-agents only for "roles:" and its
 three children, when this run creates the file), and creates the
@@ -47,7 +50,7 @@ be combined with --dry-run. Every target is checked for writability before
 anything is written: an unwritable target refuses, naming it, with the
 --print output on stdout so it can still be applied by hand.
 
-` + jsonFieldsParagraph("host", "detected_by", "dry_run", "created", "modified", "artifacts", "roles_to_add") + "\n" +
+` + jsonFieldsParagraph("host", "detected_by", "dry_run", "created", "modified", "artifacts", "roles_to_add", "agents_missing_skill") + "\n" +
 	wrapWords("With --print --json, the document carries only `artifacts`, each "+
 		"{`path`, `action` (create|merge), `body`}.", jsonParagraphWidth)
 
@@ -56,20 +59,49 @@ anything is written: an unwritable target refuses, naming it, with the
 // rather than given — the same provenance initNextAction's own stderr line
 // names) and dry_run, every path this call created or modified (absolute,
 // never nil, both empty under --dry-run), then one row per artifact in
-// setup.Result's own order — config, feature root — and finally
-// roles_to_add, always present, empty unless --with-agents left roles
-// unbound in a config this run did not write. Never written for --print,
-// which renders initPrintDocument instead.
+// setup.Result's own order — config, feature root — then roles_to_add,
+// always present, empty unless --with-agents left roles unbound in a
+// config this run did not write, and finally agents_missing_skill, always
+// present (Surface & Copy), empty unless the resolved host is claude-code
+// and at least one bare-name planner or implementer binding lacks the
+// skill. Never written for --print, which renders initPrintDocument
+// instead.
 type initDocument struct {
 	jsonHeader
 
-	Host       string         `json:"host"`
-	DetectedBy *string        `json:"detected_by"`
-	DryRun     bool           `json:"dry_run"`
-	Created    []string       `json:"created"`
-	Modified   []string       `json:"modified"`
-	Artifacts  []artifactJSON `json:"artifacts"`
-	RolesToAdd []string       `json:"roles_to_add"`
+	Host               string             `json:"host"`
+	DetectedBy         *string            `json:"detected_by"`
+	DryRun             bool               `json:"dry_run"`
+	Created            []string           `json:"created"`
+	Modified           []string           `json:"modified"`
+	Artifacts          []artifactJSON     `json:"artifacts"`
+	RolesToAdd         []string           `json:"roles_to_add"`
+	AgentsMissingSkill []missingSkillJSON `json:"agents_missing_skill"`
+}
+
+// missingSkillJSON is one initDocument "agents_missing_skill" row: role,
+// agent (the binding's own configured value), path (absolute) and scope
+// ("project"|"user"), in that key order, exactly as setup.MissingSkillAgent
+// carries them — agentfile.Scope's own string values are already "project"
+// and "user" (agentfile's own doc.go), so Scope is cast, never re-derived.
+type missingSkillJSON struct {
+	Role  string `json:"role"`
+	Agent string `json:"agent"`
+	Path  string `json:"path"`
+	Scope string `json:"scope"`
+}
+
+// missingSkillJSONRows maps agents to initDocument's own
+// "agents_missing_skill" rows, in setup.Result.AgentsMissingSkill's own
+// order, never nil.
+func missingSkillJSONRows(agents []setup.MissingSkillAgent) []missingSkillJSON {
+	out := make([]missingSkillJSON, 0, len(agents))
+
+	for _, a := range agents {
+		out = append(out, missingSkillJSON{Role: a.Role, Agent: a.Agent, Path: a.Path, Scope: string(a.Scope)})
+	}
+
+	return out
 }
 
 // printArtifactJSON is one initPrintDocument "artifacts" row: path
@@ -175,6 +207,38 @@ func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, ro
 	return fmt.Sprintf("%s in %s; start Claude Code in %s (or run /reload-plugins in a session already there), then 'brief new feature <name>'", label, rel, rel)
 }
 
+// missingSkillHeader is init's own missing-skill stderr block header
+// (Surface & Copy), minus the "brief init: " prefix every stderr line in
+// this file shares.
+const missingSkillHeader = `bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each, or rerun with --edit-agents:`
+
+// missingSkillLines renders one line per agents entry (Surface & Copy),
+// grouped by scope — every ScopeProject entry first, then every
+// ScopeUser one, each group in agents' own relative order — so the rows an
+// adopter can fix by rerunning init (--edit-agents, S07) come before the
+// one under "~/.claude" that is always left for them to edit by hand: a
+// project row is "  <displayPath(wd, path)> (<role>)", a user row is
+// "  ~/<home-relative slash path> (<role>; user-level, edit by hand)".
+// This grouping is a display concern only — setup.Result.AgentsMissingSkill
+// itself stays in role-major order (setup's own missing_skill.go).
+func missingSkillLines(wd string, agents []setup.MissingSkillAgent) []string {
+	lines := make([]string, 0, len(agents))
+
+	for _, a := range agents {
+		if a.Scope != agentfile.ScopeUser {
+			lines = append(lines, fmt.Sprintf("  %s (%s)", displayPath(wd, a.Path), a.Role))
+		}
+	}
+
+	for _, a := range agents {
+		if a.Scope == agentfile.ScopeUser {
+			lines = append(lines, fmt.Sprintf("  ~/%s (%s; user-level, edit by hand)", a.ScopeRelPath, a.Role))
+		}
+	}
+
+	return lines
+}
+
 // unwrittenLine renders R9/R10's own "printed only" or "already installed"
 // stderr line for --print, minus the "brief init: " prefix: the
 // nothing-pending line when artifacts is empty, else the "printed only"
@@ -234,14 +298,15 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 		}
 
 		doc := initDocument{
-			jsonHeader: out.successHeader(),
-			Host:       res.Host,
-			DetectedBy: nonEmptyString(res.DetectedBy),
-			DryRun:     res.DryRun,
-			Created:    res.Created,
-			Modified:   res.Modified,
-			Artifacts:  artifactsJSON(res.Artifacts),
-			RolesToAdd: res.RolesToAdd,
+			jsonHeader:         out.successHeader(),
+			Host:               res.Host,
+			DetectedBy:         nonEmptyString(res.DetectedBy),
+			DryRun:             res.DryRun,
+			Created:            res.Created,
+			Modified:           res.Modified,
+			Artifacts:          artifactsJSON(res.Artifacts),
+			RolesToAdd:         res.RolesToAdd,
+			AgentsMissingSkill: missingSkillJSONRows(res.AgentsMissingSkill),
 		}
 
 		return out.document(doc)
@@ -262,6 +327,14 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 		fmt.Fprintf(out.stderr, "brief init: %s was not edited; to bind brief's agents, add these lines to it:\n", displayPath(wd, configArtifactPath(res.Artifacts)))
 
 		for _, line := range res.RolesToAdd {
+			fmt.Fprintln(out.stderr, line)
+		}
+	}
+
+	if len(res.AgentsMissingSkill) > 0 {
+		fmt.Fprintf(out.stderr, "brief init: %s\n", missingSkillHeader)
+
+		for _, line := range missingSkillLines(wd, res.AgentsMissingSkill) {
 			fmt.Fprintln(out.stderr, line)
 		}
 	}

@@ -202,19 +202,25 @@ type Artifact struct {
 // tell "the caller chose claude-code" from "brief guessed it, and here is
 // why" without also checking NoHostDetected. Print is R9's own
 // pending-artifact set (printArtifacts), never nil, populated regardless of
-// DryRun or Print.
+// DryRun or Print. AgentsMissingSkill is Init's own report (agentsMissingSkill):
+// every bare-name planner or implementer binding, from this run's own
+// post-plan config.Roles, whose resolved agent does not preload the
+// brief-workflow skill — populated only when the resolved Host is
+// HostClaudeCode, regardless of DryRun or Print, empty and non-nil
+// otherwise, including on every Uninstall Result.
 type Result struct {
-	Host           string
-	DryRun         bool
-	Root           string
-	Artifacts      []Artifact
-	Created        []string
-	Modified       []string
-	Removed        []string
-	RolesToAdd     []string
-	NoHostDetected bool
-	DetectedBy     string
-	Print          []PrintArtifact
+	Host               string
+	DryRun             bool
+	Root               string
+	Artifacts          []Artifact
+	Created            []string
+	Modified           []string
+	Removed            []string
+	RolesToAdd         []string
+	NoHostDetected     bool
+	DetectedBy         string
+	Print              []PrintArtifact
+	AgentsMissingSkill []MissingSkillAgent
 }
 
 // Init plans then, unless req.DryRun, applies brief's own install: the
@@ -299,11 +305,12 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 	}
 
 	var (
-		pluginArts []pluginArtifact
-		skillArts  []pluginArtifact
-		agentArts  []pluginArtifact
-		snippetArt snippetArtifact
-		hasSnippet bool
+		pluginArts             []pluginArtifact
+		skillArts              []pluginArtifact
+		agentArts              []pluginArtifact
+		snippetArt             snippetArtifact
+		hasSnippet             bool
+		agentsMissingSkillList = []MissingSkillAgent{}
 	)
 
 	if req.Host == HostClaudeCode {
@@ -332,6 +339,13 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		}
 
 		hasSnippet = true
+
+		home, homeErr := s.homeDir()
+		if homeErr != nil {
+			home = ""
+		}
+
+		agentsMissingSkillList = agentsMissingSkill(root, home, cfg.Roles)
 	}
 
 	artifacts := make([]Artifact, 0, 3+len(pluginArts)+len(skillArts)+len(agentArts))
@@ -364,17 +378,18 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 	writeArts = append(writeArts, agentArts...)
 
 	res := Result{
-		Host:           req.Host,
-		DryRun:         req.DryRun,
-		Root:           root,
-		Artifacts:      artifacts,
-		Created:        []string{},
-		Modified:       []string{},
-		Removed:        []string{},
-		RolesToAdd:     rolesToAdd(req.WithAgents, configArt.Action, cfg.Roles),
-		NoHostDetected: noHostDetected,
-		DetectedBy:     detectedBy,
-		Print:          printArtifacts(artifacts, configBody, writeArts, snippetArt),
+		Host:               req.Host,
+		DryRun:             req.DryRun,
+		Root:               root,
+		Artifacts:          artifacts,
+		Created:            []string{},
+		Modified:           []string{},
+		Removed:            []string{},
+		RolesToAdd:         rolesToAdd(req.WithAgents, configArt.Action, cfg.Roles),
+		NoHostDetected:     noHostDetected,
+		DetectedBy:         detectedBy,
+		Print:              printArtifacts(artifacts, configBody, writeArts, snippetArt),
+		AgentsMissingSkill: agentsMissingSkillList,
 	}
 
 	if req.DryRun || req.Print {

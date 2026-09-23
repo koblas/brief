@@ -112,9 +112,19 @@
 // byte-identical replace, os.MkdirAll for the feature root and a plugin or
 // skill file's parent directories, os.Remove for Uninstall's own file and
 // now-empty-directory removals (never RemoveAll) — imports only
-// internal/platform/config, internal/platform/artifact,
-// internal/platform/atomicfile and internal/platform/host alongside the
-// standard library, and never internal/scaffold or internal/doctor: those
-// own the write and read paths over a feature's own content, a question
-// setup never asks.
+// internal/platform/agentfile, internal/platform/config,
+// internal/platform/artifact, internal/platform/atomicfile and
+// internal/platform/host alongside the standard library, and never
+// internal/scaffold or internal/doctor: those own the write and read paths
+// over a feature's own content, a question setup never asks.
+//
+// Result.AgentsMissingSkill (agentsMissingSkill) is Init's own report of
+// every bare-name planner or implementer binding — never a "brief:*" or
+// other-plugin one — whose resolved agent does not preload the
+// brief-workflow skill, via internal/platform/agentfile's own
+// ResolveBinding and (Binding).LackingSkill, the same decision doctor's
+// roles-skill row makes. It reads from planConfig's own post-run
+// config.Roles, computed only for HostClaudeCode, before the DryRun/Print
+// return so both carry it, and is empty — never nil — otherwise, including
+// on every Uninstall Result.
 package setup

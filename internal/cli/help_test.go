@@ -958,6 +958,11 @@ func Test_init_help_names_the_brief_workflow_skill(t *testing.T) {
 
 	const sentence = `Every claude-code install also writes a "brief-workflow" skill under ".claude/skills/brief-workflow/", which agents preload by listing it in their frontmatter "skills:".`
 	assert.Contains(t, normalizeWhitespace(stdout.String()), sentence)
+
+	const missingSkillSentence = `init never edits an agent file of yours by default; stderr instead lists each planner or implementer bound in ".brief.yaml" whose agent lacks it.`
+	assert.Contains(t, normalizeWhitespace(stdout.String()), missingSkillSentence)
+
+	assert.True(t, wholeWordPresent(t, stdout.String(), "agents_missing_skill"))
 }
 
 // Test_doctor_help_names_role_resolution_and_the_brief_workflow_skill pins

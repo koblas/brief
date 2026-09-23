@@ -77,13 +77,14 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 	}
 
 	res := Result{
-		Host:      req.Host,
-		DryRun:    req.DryRun,
-		Root:      root,
-		Artifacts: []Artifact{},
-		Created:   []string{},
-		Modified:  []string{},
-		Removed:   []string{},
+		Host:               req.Host,
+		DryRun:             req.DryRun,
+		Root:               root,
+		Artifacts:          []Artifact{},
+		Created:            []string{},
+		Modified:           []string{},
+		Removed:            []string{},
+		AgentsMissingSkill: []MissingSkillAgent{},
 	}
 
 	var (
