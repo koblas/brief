@@ -4,5 +4,13 @@
 // shares: doctor's own env-git check, and config.LocateInRepo, which bounds
 // init/uninstall/doctor's own install-root discovery to it so an ancestor
 // ".brief.yaml" outside the repository the working directory is inside is
-// never adopted.
+// never adopted. RootFS is Root's own core: a root FS (production:
+// os.DirFS("/"), a test: a fstest.MapFS holding just the ancestors in
+// play) rather than os.Stat per directory, with Root as the thin OS
+// adapter that owns filepath.Abs's own cwd-dependent resolution — the core
+// never sees a relative path. The fs-name mapping (fsName) is duplicated
+// from an identical helper in internal/platform/config rather than
+// shared: config already imports repo for LocateInRepo's own boundary, and
+// a shared package for an eight-line path mapping would invert that
+// dependency.
 package repo
