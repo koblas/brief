@@ -88,9 +88,9 @@ func Test_new_feature_reports_the_directory_and_the_files_it_created(t *testing.
 		filepath.Join(featureDir, cfg.StateFile),
 	}, res.Created)
 	_, specErr := top.Stat("widgets/" + cfg.SpecificationFile)
-	assert.NoError(t, specErr)
+	require.NoError(t, specErr)
 	_, stateErr := top.Stat("widgets/" + cfg.StateFile)
-	assert.NoError(t, stateErr)
+	require.NoError(t, stateErr)
 }
 
 func Test_writes_the_specification_skeleton_with_the_configured_progress_heading_and_nothing_under_it(t *testing.T) {

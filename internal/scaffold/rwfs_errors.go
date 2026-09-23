@@ -22,8 +22,7 @@ import (
 // no name in it at all, which is worse than the *fs.PathError's own
 // Op/Path framing. Those two call sites keep rwfs's wrapping instead.
 func peelWriteErr(err error) error {
-	var pe *fs.PathError
-	if errors.As(err, &pe) {
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
 		return pe.Err
 	}
 

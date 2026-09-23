@@ -20,7 +20,7 @@ import (
 // surfaced, on both adapters.
 func replaceBytes(fsys rwfs.FS, name string, data []byte) error {
 	if err := fsys.WriteFile(name, data, 0o600); err != nil {
-		return peelWriteErr(err) //nolint:wrapcheck // the caller owns this boundary
+		return peelWriteErr(err)
 	}
 
 	return nil
@@ -34,7 +34,7 @@ func replaceBytes(fsys rwfs.FS, name string, data []byte) error {
 // wrapped.
 func replaceString(fsys rwfs.FS, name, data string) error {
 	if err := fsys.WriteFile(name, []byte(data), 0o600); err != nil {
-		return peelWriteErr(err) //nolint:wrapcheck // the caller owns this boundary
+		return peelWriteErr(err)
 	}
 
 	return nil

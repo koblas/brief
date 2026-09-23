@@ -56,12 +56,20 @@
 // ErrInvalidFeatureName and cli classifies it as a usage error rather than
 // rendering it with the "(no files changed)" write-refusal template.
 //
-// scaffold writes through the real filesystem; there is no Store port. The
-// contracts this package ships — no temp file left behind, byte-identity
-// after a refusal — are filesystem properties that an in-memory adapter
-// cannot model, so every test that matters runs against a real directory
-// tree regardless. The seam kept instead is a pure renderer, exercised
-// only through Server. Every write that replaces an existing file's full
-// contents goes through internal/platform/atomicfile, so a reader never
-// observes a truncated specification.
+// scaffold writes through internal/platform/rwfs.FS rather than the OS
+// package directly; there is no Store port. NewFeature, NewStep and Finish
+// each build one rwfs.FS — an OS adapter, via rwfs.OpenOS, confined to the
+// configured feature directory or, for NewStep and Finish, nested one
+// level deeper at the feature's own subdirectory — and delegate to an
+// exported FS-taking core (NewFeatureFS, NewStepFS, FinishFS) that carries
+// every check and write. That core is what most of this package's tests
+// exercise, against rwfs.Mem instead of a real directory tree. A handful
+// of contracts remain properties of a real filesystem that rwfs.Mem does
+// not reproduce — a symlinked feature entry refused rather than followed,
+// a write blocked by a directory at atomicfile's own temp-sibling name, a
+// file's permission bits under a pinned umask — and those tests run
+// against the OS adapter instead; see rwfs/doc.go for the full list of
+// what Mem does not model. Every write that replaces an existing file's
+// full contents goes through rwfs.FS.WriteFile — atomicfile on the OS
+// adapter — so a reader never observes a truncated specification.
 package scaffold
