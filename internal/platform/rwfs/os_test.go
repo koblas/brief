@@ -4,13 +4,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/rwfs"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// The two tests in this file pin OS-only guarantees rwfs.Mem does not, and
+// The tests in this file pin OS-only guarantees rwfs.Mem does not, and
 // cannot economically, reproduce — see the divergences listed in doc.go.
 // They have no Mem counterpart.
 
@@ -33,6 +35,34 @@ func Test_OS_refuses_a_symlink_that_escapes_the_root(t *testing.T) {
 	_, err = fsys.ReadFile("escape")
 
 	require.Error(t, err)
+}
+
+// Test_OS_OpenRoot_refuses_a_symlink_that_escapes_the_root pins
+// os.Root.OpenRoot's confinement for the nested-root case, alongside
+// Test_OS_refuses_a_symlink_that_escapes_the_root pinning it for a plain
+// read. The symlink target is relative — the same shape
+// "follows a symlink to a directory" in the shared contract resolves
+// successfully — so escaping the root is the one variable this test
+// isolates. The failure is left unclassified (see classifyOpenRootErr in
+// os.go): it must not be mistaken for the file-in-place case, which reports
+// syscall.ENOTDIR.
+func Test_OS_OpenRoot_refuses_a_symlink_that_escapes_the_root(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(outside, "secret"), 0o755))
+
+	relTarget, err := filepath.Rel(dir, filepath.Join(outside, "secret"))
+	require.NoError(t, err)
+	require.NoError(t, os.Symlink(relTarget, filepath.Join(dir, "escape")))
+
+	fsys, err := rwfs.OpenOS(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = fsys.Close() })
+
+	_, err = fsys.OpenRoot("escape")
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, syscall.ENOTDIR)
 }
 
 // skipIfRoot skips t when running as the root user, for a test whose

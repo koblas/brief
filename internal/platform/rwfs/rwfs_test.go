@@ -57,6 +57,7 @@ func testContract(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 	testContractRead(t, mk)
 	testContractReadThroughFileAncestor(t, mk)
 	testContractCreateExclusive(t, mk)
+	testContractOpenRoot(t, mk)
 	testContractInvalidNames(t, mk)
 
 	t.Run("fs.TestFS validates a seeded tree", func(t *testing.T) {
@@ -518,8 +519,173 @@ func testContractInvalidNames(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 			require.ErrorIs(t, fsys.MkdirAll(c.name, 0o755), fs.ErrInvalid)
 			require.ErrorIs(t, fsys.Remove(c.name), fs.ErrInvalid)
 			require.ErrorIs(t, fsys.CreateExclusive(c.name, []byte("x"), 0o600), fs.ErrInvalid)
+
+			_, err := fsys.OpenRoot(c.name)
+			require.ErrorIs(t, err, fs.ErrInvalid)
 		})
 	}
+}
+
+// testContractOpenRoot covers OpenRoot: the missing, file-in-place and
+// symlink-to-non-directory error cases; a write through a view landing in
+// the parent's own tree and vice versa; nesting a view inside a view;
+// OpenRoot("."); following a symlink to a directory; and that a view's read
+// methods use names relative to the view rather than the parent.
+func testContractOpenRoot(t *testing.T, mk func(t *testing.T) rwfs.FS) {
+	t.Helper()
+
+	t.Run("fails with fs.ErrNotExist when name does not exist", func(t *testing.T) {
+		fsys := mk(t)
+
+		_, err := fsys.OpenRoot("missing")
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		assertPathError(t, err, "missing")
+	})
+
+	t.Run("fails when name exists as a file", func(t *testing.T) {
+		fsys := mk(t)
+		require.NoError(t, fsys.WriteFile("f.txt", []byte("x"), 0o600))
+
+		_, err := fsys.OpenRoot("f.txt")
+
+		requireENOTDIR(t, err, "f.txt")
+	})
+
+	t.Run("fails when name is a symlink to a non-directory", func(t *testing.T) {
+		fsys := mk(t) // pre-seeded with a-symlink -> symlink-target.txt, a regular file
+
+		_, err := fsys.OpenRoot("a-symlink")
+
+		requireENOTDIR(t, err, "a-symlink")
+	})
+
+	t.Run("follows a symlink to a directory", func(t *testing.T) {
+		fsys := mk(t) // pre-seeded with dir-symlink -> dir-target, a directory
+
+		view, err := fsys.OpenRoot("dir-symlink")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = view.Close() })
+
+		require.NoError(t, view.WriteFile("a.txt", []byte("via symlink"), 0o600))
+
+		got, err := fsys.ReadFile("dir-target/a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "via symlink", string(got))
+	})
+
+	t.Run("a write through the view is visible from the parent and reads back through the view", func(t *testing.T) {
+		fsys := mk(t)
+		require.NoError(t, fsys.MkdirAll("sub", 0o755))
+
+		view, err := fsys.OpenRoot("sub")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = view.Close() })
+
+		require.NoError(t, view.WriteFile("a.txt", []byte("from view"), 0o600))
+
+		fromParent, err := fsys.ReadFile("sub/a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "from view", string(fromParent))
+
+		fromView, err := view.ReadFile("a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "from view", string(fromView))
+	})
+
+	t.Run("a write through the parent is visible through an existing view", func(t *testing.T) {
+		fsys := mk(t)
+		require.NoError(t, fsys.MkdirAll("sub", 0o755))
+		view, err := fsys.OpenRoot("sub")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = view.Close() })
+
+		require.NoError(t, fsys.WriteFile("sub/a.txt", []byte("from parent"), 0o600))
+
+		got, err := view.ReadFile("a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "from parent", string(got))
+	})
+
+	t.Run("OpenRoot of a view opens relative to the view, not the parent", func(t *testing.T) {
+		fsys := mk(t)
+		require.NoError(t, fsys.MkdirAll("a/b", 0o755))
+		viewA, err := fsys.OpenRoot("a")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = viewA.Close() })
+
+		viewB, err := viewA.OpenRoot("b")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = viewB.Close() })
+		require.NoError(t, viewB.WriteFile("c.txt", []byte("nested"), 0o600))
+
+		got, err := fsys.ReadFile("a/b/c.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "nested", string(got))
+	})
+
+	t.Run(`OpenRoot(".") returns a view equivalent to the parent's own root`, func(t *testing.T) {
+		fsys := mk(t)
+
+		view, err := fsys.OpenRoot(".")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = view.Close() })
+
+		require.NoError(t, view.WriteFile("a.txt", []byte("via dot"), 0o600))
+
+		got, err := fsys.ReadFile("a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "via dot", string(got))
+	})
+
+	t.Run("a view's ReadDir, Stat and Lstat report names relative to the view", func(t *testing.T) {
+		fsys := mk(t)
+		require.NoError(t, fsys.MkdirAll("sub/child", 0o755))
+		require.NoError(t, fsys.WriteFile("sub/a.txt", []byte("x"), 0o600))
+
+		view, err := fsys.OpenRoot("sub")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = view.Close() })
+
+		entries, err := view.ReadDir(".")
+		require.NoError(t, err)
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		assert.Equal(t, []string{"a.txt", "child"}, names)
+
+		statInfo, err := view.Stat("a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "a.txt", statInfo.Name())
+
+		lstatInfo, err := view.Lstat("a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "a.txt", lstatInfo.Name())
+	})
+
+	t.Run("fs.TestFS validates a seeded view", func(t *testing.T) {
+		fsys := mk(t)
+		require.NoError(t, fsys.MkdirAll("sub/child", 0o755))
+		view, err := fsys.OpenRoot("sub")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = view.Close() })
+		require.NoError(t, view.WriteFile("root.txt", []byte("x"), 0o600))
+		require.NoError(t, view.WriteFile("child/file.txt", []byte("x"), 0o600))
+
+		assert.NoError(t, fstest.TestFS(view, "root.txt", "child/file.txt"))
+	})
+
+	t.Run("a view rejects an invalid name the same way the root does", func(t *testing.T) {
+		fsys := mk(t)
+		require.NoError(t, fsys.MkdirAll("sub", 0o755))
+		view, err := fsys.OpenRoot("sub")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = view.Close() })
+
+		require.ErrorIs(t, view.WriteFile("..", []byte("x"), 0o600), fs.ErrInvalid)
+	})
 }
 
 // Test_os_adapter_contract runs the shared contract against rwfs.OS, backed
@@ -539,7 +705,8 @@ func Test_mem_adapter_contract(t *testing.T) {
 }
 
 // newOSContractFS returns an *rwfs.OS rooted at a fresh t.TempDir(),
-// pre-seeded with the symlink fixture the contract's symlink case expects.
+// pre-seeded with the symlink-to-file fixture the contract's symlink case
+// expects and a symlink-to-directory fixture OpenRoot's follow case expects.
 func newOSContractFS(t *testing.T) rwfs.FS {
 	t.Helper()
 
@@ -551,17 +718,22 @@ func newOSContractFS(t *testing.T) rwfs.FS {
 	require.NoError(t, fsys.WriteFile("symlink-target.txt", []byte("target contents"), 0o600))
 	require.NoError(t, os.Symlink("symlink-target.txt", filepath.Join(dir, "a-symlink")))
 
+	require.NoError(t, fsys.MkdirAll("dir-target", 0o755))
+	require.NoError(t, os.Symlink("dir-target", filepath.Join(dir, "dir-symlink")))
+
 	return fsys
 }
 
 // newMemContractFS returns an *rwfs.Mem pre-seeded with the same symlink
-// fixture as newOSContractFS, via a literal fstest.MapFS entry instead of a
-// filesystem call.
+// fixtures as newOSContractFS, via literal fstest.MapFS entries instead of
+// filesystem calls.
 func newMemContractFS(t *testing.T) rwfs.FS {
 	t.Helper()
 
 	return rwfs.NewMem(fstest.MapFS{
 		"symlink-target.txt": {Data: []byte("target contents"), Mode: 0o600},
 		"a-symlink":          {Data: []byte("symlink-target.txt"), Mode: fs.ModeSymlink | 0o777},
+		"dir-target":         {Mode: fs.ModeDir | 0o755},
+		"dir-symlink":        {Data: []byte("dir-target"), Mode: fs.ModeSymlink | 0o777},
 	})
 }

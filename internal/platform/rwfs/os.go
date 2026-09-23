@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"syscall"
 
 	"github.com/koblas/brief/internal/platform/atomicfile"
 )
@@ -176,6 +177,47 @@ func (o *OS) CreateExclusive(name string, data []byte, perm fs.FileMode) error {
 	}
 
 	return nil
+}
+
+// OpenRoot returns name as a fresh *OS confined to that subtree. See
+// rwfs.FS for the contract.
+func (o *OS) OpenRoot(name string) (FS, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "openroot", Path: name, Err: fs.ErrInvalid}
+	}
+
+	r, err := o.root.OpenRoot(name)
+	if err != nil {
+		return nil, &fs.PathError{Op: "openroot", Path: name, Err: classifyOpenRootErr(o.root, name, err)}
+	}
+
+	return &OS{root: r, fsys: r.FS()}, nil
+}
+
+// classifyOpenRootErr normalizes os.Root.OpenRoot's raw failure for name
+// into the sentinel rwfs.FS promises. os.Root itself reports a missing name
+// with an error already wrapping fs.ErrNotExist; the case this exists for is
+// "name, once any symlink in it is followed, is not a directory", which
+// os.Root reports as a bare, unwrapped error string rather than
+// syscall.ENOTDIR — confirmed against go1.27.1's os/root_unix.go newRoot.
+// root.Stat follows a symlink the same way OpenRoot itself does, and fails
+// the same way OpenRoot does when a symlink resolves outside the root, so a
+// failed Stat here leaves err unclassified rather than misreporting an
+// escape as ENOTDIR.
+func classifyOpenRootErr(root *os.Root, name string, err error) error {
+	if errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+
+	info, statErr := root.Stat(name)
+	if statErr != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return syscall.ENOTDIR
+	}
+
+	return err
 }
 
 // Remove deletes name. See rwfs.FS for the contract.
