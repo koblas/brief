@@ -1,6 +1,10 @@
 // Package agentfile resolves an agent by name the same way Claude Code
-// identifies one: Find walks a ".claude/agents/" tree recursively and
-// matches on frontmatter "name:", never on filename or directory layout;
+// identifies one: FindIn walks a ".claude/agents/" tree recursively and
+// matches on frontmatter "name:", never on filename or directory layout.
+// The filesystem is a port: a Tree pairs an fs.FS with the absolute OS
+// directory it is rooted at, so every Definition.Path is a real path a
+// caller can Lstat or rewrite; DirTree builds one over os.DirFS, and Find
+// is FindIn over the project and home DirTrees;
 // Load decodes one already-resolved file's own frontmatter directly, and
 // Parse decodes it from bytes already held in memory. ResolveBinding
 // classifies a role binding's own configured value — "brief:<name>",
