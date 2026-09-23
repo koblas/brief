@@ -13,11 +13,3 @@ import "os"
 func SetOpenRootForTest(s *Server, fn func(parent *os.Root, name string) (*os.Root, error)) {
 	s.openRoot = fn
 }
-
-// SetReadDirForTest overrides s's directory-listing function, for the same
-// reason as SetOpenRootForTest: it lets a test inject a listing failure on
-// a directory that opened successfully, independent of OS permission bits
-// or effective uid.
-func SetReadDirForTest(s *Server, fn func(root *os.Root) ([]os.DirEntry, error)) {
-	s.readDir = fn
-}

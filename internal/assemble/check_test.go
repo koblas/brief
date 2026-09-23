@@ -11,6 +11,7 @@ import (
 
 	"github.com/koblas/brief/internal/assemble"
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/stepfile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -164,32 +165,65 @@ func onlyFinding(t *testing.T, findings []assemble.Finding) assemble.Finding {
 }
 
 // ruleCase is one row of Test_check_assigns_each_producer_its_stable_rule_id's
-// table: setup builds the smallest fixture (or Server override) that trips
-// exactly one of Check's producers and returns the Server plus the feature
-// argument to check; wantRule is that producer's own stable Rule.
+// table: setup builds the smallest fixture that trips exactly one of
+// Check's producers and returns a thunk that runs the check — CheckFS
+// against an in-memory fixture for a case whose subject is content, or
+// (*assemble.Server).Check against a real disk fixture for a case whose
+// subject is the OS (a directory standing in for a file, a symlink escaping
+// the feature root, or a Server test-injection seam); wantRule is that
+// producer's own stable Rule.
 type ruleCase struct {
 	name     string
-	setup    func(t *testing.T) (*assemble.Server, string)
+	setup    func(t *testing.T) func() ([]assemble.Finding, error)
 	wantRule assemble.Rule
 }
 
+// checkFSRunner returns a thunk that runs CheckFS against fsys, compiling
+// cfg's own step-file and handoff-file patterns the same way
+// (*assemble.Server).Check does once per call — the MapFS-backed
+// counterpart to checkDiskRunner below.
+func checkFSRunner(t *testing.T, cfg config.Config, fsys assemble.FeatureFS) func() ([]assemble.Finding, error) {
+	t.Helper()
+
+	pattern, err := stepfile.Compile(cfg.StepFilePattern)
+	require.NoError(t, err)
+	handoffPattern, err := stepfile.CompileHandoff(pattern, cfg.HandoffFileSuffix, cfg.StateFile, cfg.SpecificationFile)
+	require.NoError(t, err)
+
+	srv := assemble.NewServer(cfg, "")
+
+	return func() ([]assemble.Finding, error) {
+		return srv.CheckFS(fsys, pattern, handoffPattern), nil
+	}
+}
+
+// checkDiskRunner returns a thunk that calls srv.Check for feature using
+// t's own context, so the table runner does not care whether a case is
+// disk- or MapFS-backed.
+func checkDiskRunner(t *testing.T, srv *assemble.Server, feature string) func() ([]assemble.Finding, error) {
+	t.Helper()
+
+	return func() ([]assemble.Finding, error) {
+		return srv.Check(t.Context(), feature)
+	}
+}
+
 // ruleCaseSpecMissing builds a feature with no specification file.
-func ruleCaseSpecMissing(t *testing.T) (*assemble.Server, string) {
+func ruleCaseSpecMissing(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(checkConformingState(cfg)), 0o600))
+	fsys := featureFS(map[string]string{cfg.StateFile: checkConformingState(cfg)})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseSpecUnreadable builds a feature whose specification path is a
-// directory, so reading it as a file fails without depending on OS
-// permission bits.
-func ruleCaseSpecUnreadable(t *testing.T) (*assemble.Server, string) {
+// directory, so reading it as a file fails: real disk, since MapFS files
+// have no "is a directory" read failure to reproduce — a MapFS key that is
+// itself a prefix of another entry is a synthetic directory only for
+// listing purposes, not for ReadFile.
+func ruleCaseSpecUnreadable(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
@@ -199,51 +233,50 @@ func ruleCaseSpecUnreadable(t *testing.T) (*assemble.Server, string) {
 	require.NoError(t, os.MkdirAll(filepath.Join(featureDir, cfg.SpecificationFile), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.StateFile), []byte(checkConformingState(cfg)), 0o600))
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkDiskRunner(t, assemble.NewServer(cfg, root), "demo")
 }
 
 // ruleCaseSpecFence builds a feature whose specification opens a fence it
 // never closes.
-func ruleCaseSpecFence(t *testing.T) (*assemble.Server, string) {
+func ruleCaseSpecFence(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, "# demo\n\n```\nunterminated\n", checkConformingState(cfg))
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile: "# demo\n\n```\nunterminated\n",
+		cfg.StateFile:         checkConformingState(cfg),
+	})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseSpecHeading builds a feature whose specification carries no
 // progress heading.
-func ruleCaseSpecHeading(t *testing.T) (*assemble.Server, string) {
+func ruleCaseSpecHeading(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, "# demo\n\nno progress list here\n", checkConformingState(cfg))
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile: "# demo\n\nno progress list here\n",
+		cfg.StateFile:         checkConformingState(cfg),
+	})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseStateMissing builds a feature with no state file.
-func ruleCaseStateMissing(t *testing.T) (*assemble.Server, string) {
+func ruleCaseStateMissing(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(checkConformingSpec(cfg)), 0o600))
+	fsys := featureFS(map[string]string{cfg.SpecificationFile: checkConformingSpec(cfg)})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseStateUnreadable builds a feature whose state path is a
-// directory.
-func ruleCaseStateUnreadable(t *testing.T) (*assemble.Server, string) {
+// directory: real disk, for the same reason ruleCaseSpecUnreadable is.
+func ruleCaseStateUnreadable(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
@@ -253,70 +286,57 @@ func ruleCaseStateUnreadable(t *testing.T) (*assemble.Server, string) {
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(checkConformingSpec(cfg)), 0o600))
 	require.NoError(t, os.MkdirAll(filepath.Join(featureDir, cfg.StateFile), 0o755))
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkDiskRunner(t, assemble.NewServer(cfg, root), "demo")
 }
 
 // ruleCaseStateCap builds a feature whose state body is over the
 // configured cap.
-func ruleCaseStateCap(t *testing.T) (*assemble.Server, string) {
+func ruleCaseStateCap(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
 	cfg.StateCapLines = 20
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkStateOfLines(cfg, 21))
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkStateOfLines(cfg, 21),
+	})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseStateFence builds a feature whose state body opens a fence it
 // never closes.
-func ruleCaseStateFence(t *testing.T) (*assemble.Server, string) {
+func ruleCaseStateFence(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkStateUnterminatedFence(cfg))
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkStateUnterminatedFence(cfg),
+	})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseStateHeading builds a feature whose state body is missing one of
 // its configured headings.
-func ruleCaseStateHeading(t *testing.T) (*assemble.Server, string) {
+func ruleCaseStateHeading(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkStateMissingHeading(cfg, cfg.StateHeadings.Traps))
-
-	return assemble.NewServer(cfg, root), "demo"
-}
-
-// ruleCaseStepsUnlistable builds a Server whose readDir seam is overridden
-// to fail listing a feature's step files.
-func ruleCaseStepsUnlistable(t *testing.T) (*assemble.Server, string) {
-	t.Helper()
-
-	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-
-	srv := assemble.NewServer(cfg, root)
-	assemble.SetReadDirForTest(srv, func(*os.Root) ([]os.DirEntry, error) {
-		return nil, &fs.PathError{Op: "readdirent", Path: ".", Err: syscall.EACCES}
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkStateMissingHeading(cfg, cfg.StateHeadings.Traps),
 	})
 
-	return srv, "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseStepUnreadable builds a feature whose step file is a symlink
-// escaping the feature root, so reading it fails.
-func ruleCaseStepUnreadable(t *testing.T) (*assemble.Server, string) {
+// escaping the feature root, so reading it fails: real disk, since a
+// symlink-escape refusal is os.Root's own containment behavior, not
+// something an in-memory fs.FS reproduces.
+func ruleCaseStepUnreadable(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
@@ -325,84 +345,90 @@ func ruleCaseStepUnreadable(t *testing.T) (*assemble.Server, string) {
 	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
 	require.NoError(t, os.Symlink(filepath.Join(featureDir, "nonexistent-target.md"), filepath.Join(featureDir, "STEP-01.md")))
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkDiskRunner(t, assemble.NewServer(cfg, root), "demo")
 }
 
 // ruleCaseFrontmatter builds a feature whose step file carries no
 // frontmatter at all.
-func ruleCaseFrontmatter(t *testing.T) (*assemble.Server, string) {
+func ruleCaseFrontmatter(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", "not frontmatter at all\n")
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkConformingState(cfg),
+		"STEP-01.md":          "not frontmatter at all\n",
+	})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseChecklist builds a feature whose done step carries an unticked
 // checklist item.
-func ruleCaseChecklist(t *testing.T) (*assemble.Server, string) {
+func ruleCaseChecklist(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil,
-		[]string{"- [x] first thing", "- [ ] second thing"}))
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkConformingState(cfg),
+		"STEP-01.md": checkStepBody(cfg, "STEP-01", "done", nil,
+			[]string{"- [x] first thing", "- [ ] second thing"}),
+	})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseDependsOnSelf builds a feature whose step depends on itself.
-func ruleCaseDependsOnSelf(t *testing.T) (*assemble.Server, string) {
+func ruleCaseDependsOnSelf(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "open", []string{"STEP-01"}, []string{"- [ ] a task"}))
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkConformingState(cfg),
+		"STEP-01.md":          checkStepBody(cfg, "STEP-01", "open", []string{"STEP-01"}, []string{"- [ ] a task"}),
+	})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseDependsOnDangling builds a feature whose step depends on an id
 // naming no step file.
-func ruleCaseDependsOnDangling(t *testing.T) (*assemble.Server, string) {
+func ruleCaseDependsOnDangling(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "open", []string{"STEP-99"}, []string{"- [ ] a task"}))
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkConformingState(cfg),
+		"STEP-01.md":          checkStepBody(cfg, "STEP-01", "open", []string{"STEP-99"}, []string{"- [ ] a task"}),
+	})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseHandoffCap builds a feature whose done step's handoff file is
 // over the configured cap.
-func ruleCaseHandoffCap(t *testing.T) (*assemble.Server, string) {
+func ruleCaseHandoffCap(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
 	cfg.HandoffCapLines = 10
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}))
-	checkWriteHandoff(t, cfg, featureDir, "STEP-01", string(checkBodyOfLines(11)))
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile:             checkConformingSpec(cfg),
+		cfg.StateFile:                     checkConformingState(cfg),
+		"STEP-01.md":                      checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}),
+		"STEP-01" + cfg.HandoffFileSuffix: string(checkBodyOfLines(11)),
+	})
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkFSRunner(t, cfg, fsys)
 }
 
 // ruleCaseFeatureSymlink builds a symlink where a feature directory is
-// expected.
-func ruleCaseFeatureSymlink(t *testing.T) (*assemble.Server, string) {
+// expected: real disk, an OS symlink at the top-level adapter's own
+// entry-point, one layer above anything CheckFS reads.
+func ruleCaseFeatureSymlink(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
@@ -412,12 +438,13 @@ func ruleCaseFeatureSymlink(t *testing.T) (*assemble.Server, string) {
 	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
 	require.NoError(t, os.Symlink(realDir, filepath.Join(root, cfg.FeatureDirectory, "demo")))
 
-	return assemble.NewServer(cfg, root), "demo"
+	return checkDiskRunner(t, assemble.NewServer(cfg, root), "demo")
 }
 
 // ruleCaseFeatureUnreadable builds a Server whose openRoot seam is
-// overridden to fail opening a feature directory.
-func ruleCaseFeatureUnreadable(t *testing.T) (*assemble.Server, string) {
+// overridden to fail opening a feature directory: real disk, since openRoot
+// is the adapter-level containment hook CheckFS never touches.
+func ruleCaseFeatureUnreadable(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
 	cfg := fixtureConfig()
@@ -434,7 +461,7 @@ func ruleCaseFeatureUnreadable(t *testing.T) (*assemble.Server, string) {
 		return parent.OpenRoot(name)
 	})
 
-	return srv, "demo"
+	return checkDiskRunner(t, srv, "demo")
 }
 
 // Test_check_assigns_each_producer_its_stable_rule_id pins R8: every one of
@@ -451,7 +478,10 @@ func Test_check_assigns_each_producer_its_stable_rule_id(t *testing.T) {
 		{name: "state cap", setup: ruleCaseStateCap, wantRule: assemble.RuleStateCap},
 		{name: "state fence", setup: ruleCaseStateFence, wantRule: assemble.RuleFence},
 		{name: "state heading", setup: ruleCaseStateHeading, wantRule: assemble.RuleHeading},
-		{name: "steps unlistable", setup: ruleCaseStepsUnlistable, wantRule: assemble.RuleStepsUnlistable},
+		// "steps unlistable" is not a row here: RuleStepsUnlistable is pinned
+		// by Test_check_reports_a_feature_whose_step_files_cannot_be_listed
+		// instead, which needs a fake fs.FS (failFS) rather than this table's
+		// uniform featureFS/checkDiskRunner shape to inject the failure.
 		{name: "step unreadable", setup: ruleCaseStepUnreadable, wantRule: assemble.RuleStepUnreadable},
 		{name: "frontmatter", setup: ruleCaseFrontmatter, wantRule: assemble.RuleFrontmatter},
 		{name: "checklist", setup: ruleCaseChecklist, wantRule: assemble.RuleChecklist},
@@ -464,9 +494,9 @@ func Test_check_assigns_each_producer_its_stable_rule_id(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			srv, feature := c.setup(t)
+			check := c.setup(t)
 
-			findings, err := srv.Check(t.Context(), feature)
+			findings, err := check()
 			require.NoError(t, err)
 
 			f := onlyFinding(t, findings)
@@ -485,22 +515,16 @@ func Test_check_assigns_each_producer_its_stable_rule_id(t *testing.T) {
 // two claims actually broke.
 func Test_check_reports_an_over_cap_handoff_file(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
 	cfg.HandoffCapLines = 10
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"})
+	files["STEP-01"+cfg.HandoffFileSuffix] = string(checkBodyOfLines(11))
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}))
-	checkWriteHandoff(t, cfg, featureDir, "STEP-01", string(checkBodyOfLines(11)))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-01"+cfg.HandoffFileSuffix), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-01"+cfg.HandoffFileSuffix), f.Path)
 	assert.Equal(t, 11, f.Line, "a cap finding's line is cap+1, the first line over it")
 	assert.Contains(t, f.Detail, "11")
 	assert.Contains(t, f.Detail, "10")
@@ -515,97 +539,77 @@ func Test_check_reports_an_over_cap_handoff_file(t *testing.T) {
 // (R16) already treats as nothing to diverge from.
 func Test_check_reports_nothing_for_a_missing_handoff_file(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"})
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 	assert.Empty(t, findings)
 }
 
 func Test_check_reports_a_state_body_over_the_configured_cap(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
 	cfg.StateCapLines = 20
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkStateOfLines(cfg, 21),
+		"STEP-01.md":          checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}),
+	}
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkStateOfLines(cfg, 21))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, cfg.StateFile), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, cfg.StateFile), f.Path)
 	assert.Equal(t, 21, f.Line, "a cap finding's line is cap+1, the first line over it")
 	assert.Equal(t, "state is 21 lines, over the cap of 20", f.Detail)
 }
 
 func Test_check_reports_a_state_body_with_an_unterminated_fence(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkStateUnterminatedFence(cfg),
+		"STEP-01.md":          checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}),
+	}
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkStateUnterminatedFence(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, cfg.StateFile), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, cfg.StateFile), f.Path)
 	assert.Equal(t, "state has an unclosed ``` fence", f.Detail)
 }
 
 func Test_check_reports_a_state_body_missing_a_required_heading(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkStateMissingHeading(cfg, cfg.StateHeadings.Traps),
+		"STEP-01.md":          checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}),
+	}
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkStateMissingHeading(cfg, cfg.StateHeadings.Traps))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, cfg.StateFile), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, cfg.StateFile), f.Path)
 	assert.Equal(t, `state is missing the "## Gotchas" section`, f.Detail)
 }
 
 func Test_check_reports_a_missing_state_file(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		"STEP-01.md":          checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}),
+	}
 
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(checkConformingSpec(cfg)), 0o600))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, cfg.StateFile), f.Path)
-	assert.Contains(t, f.Detail, "no such file")
+	assert.Equal(t, filepath.Join(testFeaturePath, cfg.StateFile), f.Path)
+	assert.Contains(t, f.Detail, "file does not exist")
 }
 
 // Test_check_marks_a_zero_step_feature_in_flight_not_complete is the cheap
@@ -618,15 +622,12 @@ func Test_check_reports_a_missing_state_file(t *testing.T) {
 // contradicting it with a WARN/"(complete)" reading.
 func Test_check_marks_a_zero_step_feature_in_flight_not_complete(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkStateMissingHeading(cfg, cfg.StateHeadings.Traps),
+	}
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkStateMissingHeading(cfg, cfg.StateHeadings.Traps))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
@@ -640,20 +641,17 @@ func Test_check_marks_a_zero_step_feature_in_flight_not_complete(t *testing.T) {
 
 func Test_check_reports_a_specification_with_no_progress_heading(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := map[string]string{
+		cfg.SpecificationFile: "# demo\n\nno progress list here\n",
+		cfg.StateFile:         checkConformingState(cfg),
+		"STEP-01.md":          checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}),
+	}
 
-	checkWriteFeature(t, cfg, featureDir, "# demo\n\nno progress list here\n", checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil, []string{"- [x] first thing"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, cfg.SpecificationFile), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, cfg.SpecificationFile), f.Path)
 	assert.Contains(t, f.Detail, cfg.ProgressHeading)
 }
 
@@ -663,24 +661,18 @@ func Test_check_reports_a_specification_with_no_progress_heading(t *testing.T) {
 // that Check never reuses readSteps's all-or-nothing stance.
 func Test_check_reports_a_step_whose_frontmatter_does_not_parse_and_still_reports_its_handoff_cap(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
 	cfg.HandoffCapLines = 10
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = "not frontmatter at all\n"
+	files["STEP-01"+cfg.HandoffFileSuffix] = string(checkBodyOfLines(11))
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", "not frontmatter at all\n")
-	checkWriteHandoff(t, cfg, featureDir, "STEP-01", string(checkBodyOfLines(11)))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 	require.Len(t, findings, 2)
 
-	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), findings[0].Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-01.md"), findings[0].Path)
 	assert.Contains(t, findings[0].Detail, "frontmatter does not parse")
-	assert.Equal(t, filepath.Join(featureDir, "STEP-01"+cfg.HandoffFileSuffix), findings[1].Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-01"+cfg.HandoffFileSuffix), findings[1].Path)
 	assert.Contains(t, findings[1].Detail, "over the cap")
 
 	for _, f := range findings {
@@ -690,21 +682,15 @@ func Test_check_reports_a_step_whose_frontmatter_does_not_parse_and_still_report
 
 func Test_check_reports_an_unticked_checklist_item_on_a_done_step(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "done", nil,
+		[]string{"- [x] first thing", "- [ ] second thing"})
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", nil,
-		[]string{"- [x] first thing", "- [ ] second thing"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-01.md"), f.Path)
 	assert.Equal(t, 12, f.Line)
 	assert.Equal(t, `checklist item "second thing" is not ticked`, f.Detail)
 }
@@ -714,38 +700,25 @@ func Test_check_reports_an_unticked_checklist_item_on_a_done_step(t *testing.T) 
 // in-progress work, not a finding.
 func Test_check_reports_nothing_for_an_unticked_checklist_item_on_an_open_step(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "open", nil,
+		[]string{"- [x] first thing", "- [ ] second thing"})
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "open", nil,
-		[]string{"- [x] first thing", "- [ ] second thing"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 	assert.Empty(t, findings)
 }
 
 func Test_check_reports_a_dependency_id_that_names_no_step_file(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "open", []string{"STEP-99"}, []string{"- [ ] a task"})
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "open", []string{"STEP-99"},
-		[]string{"- [ ] a task"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-01.md"), f.Path)
 	assert.Equal(t, `step "STEP-01" depends on "STEP-99", which names no step file`, f.Detail)
 }
 
@@ -754,37 +727,25 @@ func Test_check_reports_a_dependency_id_that_names_no_step_file(t *testing.T) {
 // is ordinary in-progress work, already counted by Status's Blocked.
 func Test_check_reports_nothing_for_an_ordinary_unmet_dependency(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "open", nil, []string{"- [ ] a task"})
+	files["STEP-02.md"] = checkStepBody(cfg, "STEP-02", "open", []string{"STEP-01"}, []string{"- [ ] a task"})
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "open", nil, []string{"- [ ] a task"}))
-	checkWriteStep(t, featureDir, "STEP-02", checkStepBody(cfg, "STEP-02", "open", []string{"STEP-01"}, []string{"- [ ] a task"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 	assert.Empty(t, findings)
 }
 
 func Test_check_reports_a_step_that_depends_on_itself(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "open", []string{"STEP-01"}, []string{"- [ ] a task"})
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "open", []string{"STEP-01"}, []string{"- [ ] a task"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-01.md"), f.Path)
 	assert.Equal(t, `step "STEP-01" depends on "STEP-01", which is not finished`, f.Detail)
 }
 
@@ -795,21 +756,15 @@ func Test_check_reports_a_step_that_depends_on_itself(t *testing.T) {
 // declared id rather than reuse that refusal predicate.
 func Test_check_reports_a_dangling_dependency_that_is_not_first_in_the_list(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "open", nil, []string{"- [ ] a task"})
+	files["STEP-02.md"] = checkStepBody(cfg, "STEP-02", "open", []string{"STEP-01", "STEP-99"}, []string{"- [ ] a task"})
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "open", nil, []string{"- [ ] a task"}))
-	checkWriteStep(t, featureDir, "STEP-02", checkStepBody(cfg, "STEP-02", "open", []string{"STEP-01", "STEP-99"}, []string{"- [ ] a task"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-02.md"), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-02.md"), f.Path)
 	assert.Equal(t, `step "STEP-02" depends on "STEP-99", which names no step file`, f.Detail)
 }
 
@@ -820,21 +775,15 @@ func Test_check_reports_a_dangling_dependency_that_is_not_first_in_the_list(t *t
 // all.
 func Test_check_reports_a_self_dependency_masked_behind_an_earlier_unmet_dependency(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "open", nil, []string{"- [ ] a task"})
+	files["STEP-02.md"] = checkStepBody(cfg, "STEP-02", "open", []string{"STEP-01", "STEP-02"}, []string{"- [ ] a task"})
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "open", nil, []string{"- [ ] a task"}))
-	checkWriteStep(t, featureDir, "STEP-02", checkStepBody(cfg, "STEP-02", "open", []string{"STEP-01", "STEP-02"}, []string{"- [ ] a task"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-02.md"), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-02.md"), f.Path)
 	assert.Equal(t, `step "STEP-02" depends on "STEP-02", which is not finished`, f.Detail)
 }
 
@@ -846,20 +795,14 @@ func Test_check_reports_a_self_dependency_masked_behind_an_earlier_unmet_depende
 // C7 (the checklist rule) to done steps; C8 and C9 carry no such narrowing.
 func Test_check_reports_a_self_dependency_on_a_done_step(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "done", []string{"STEP-01"}, []string{"- [x] a task"})
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", []string{"STEP-01"}, []string{"- [x] a task"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-01.md"), f.Path)
 	assert.Equal(t, `step "STEP-01" depends on "STEP-01", which is not finished`, f.Detail)
 	assert.Equal(t, assemble.SeverityWarn, f.Severity)
 }
@@ -869,20 +812,14 @@ func Test_check_reports_a_self_dependency_on_a_done_step(t *testing.T) {
 // above but for an id that names no step file at all.
 func Test_check_reports_a_dangling_dependency_on_a_done_step(t *testing.T) {
 	cfg := fixtureConfig()
-	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = checkStepBody(cfg, "STEP-01", "done", []string{"STEP-99"}, []string{"- [x] a task"})
 
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-	checkWriteStep(t, featureDir, "STEP-01", checkStepBody(cfg, "STEP-01", "done", []string{"STEP-99"}, []string{"- [x] a task"}))
-
-	srv := assemble.NewServer(cfg, root)
-
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, filepath.Join(featureDir, "STEP-01.md"), f.Path)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-01.md"), f.Path)
 	assert.Equal(t, `step "STEP-01" depends on "STEP-99", which names no step file`, f.Detail)
 	assert.Equal(t, assemble.SeverityWarn, f.Severity)
 }
@@ -1288,24 +1225,24 @@ func Test_check_reports_an_unreadable_named_feature_directory(t *testing.T) {
 // its step files cannot be listed (the branch a stricter-than-darwin
 // permission model, such as Linux's, takes at a directory readable to
 // enter but not to list). checkStepFindings used to swallow this failure
-// silently (return nil, true) rather than report it.
+// silently (return nil, true) rather than report it. The listing failure is
+// injected through failFS rather than a Server test seam, now that CheckFS
+// lists fsys.FS directly: fixture and failure share the exact same fs.FS.
 func Test_check_reports_a_feature_whose_step_files_cannot_be_listed(t *testing.T) {
 	cfg := fixtureConfig()
 	cfg.StepFilePattern = "STEP-%02d.md"
-	root := t.TempDir()
-	featureDir := checkFeatureDir(cfg, root, "demo")
-	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
-
-	srv := assemble.NewServer(cfg, root)
-	assemble.SetReadDirForTest(srv, func(*os.Root) ([]os.DirEntry, error) {
-		return nil, &fs.PathError{Op: "readdirent", Path: ".", Err: syscall.EACCES}
+	fsys := featureFS(map[string]string{
+		cfg.SpecificationFile: checkConformingSpec(cfg),
+		cfg.StateFile:         checkConformingState(cfg),
 	})
+	fsys.FS = failFS{FS: fsys.FS, failReadDir: ".", err: syscall.EACCES}
 
-	findings, err := srv.Check(t.Context(), "demo")
+	findings, err := checkFSRunner(t, cfg, fsys)()
 	require.NoError(t, err)
 
 	f := onlyFinding(t, findings)
-	assert.Equal(t, featureDir, f.Path)
+	assert.Equal(t, assemble.RuleStepsUnlistable, f.Rule)
+	assert.Equal(t, testFeaturePath, f.Path)
 	assert.Contains(t, f.Detail, "permission denied")
 	assert.Equal(t, assemble.SeverityError, f.Severity)
 }

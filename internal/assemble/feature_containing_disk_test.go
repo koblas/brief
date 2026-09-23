@@ -1,3 +1,10 @@
+// FeatureContaining's every test here runs against real directories: its
+// whole contract is os.Lstat and filepath.EvalSymlinks behavior — a
+// symlinked ancestor of the project root, a "." or ".." escape, a regular
+// file standing where a feature directory belongs — which an in-memory
+// fs.FS cannot reproduce, since FeatureContaining never takes an fs.FS in
+// the first place (it reads the OS path space directly, not through
+// Server's FeatureFS seam).
 package assemble_test
 
 import (

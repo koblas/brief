@@ -1,34 +1,32 @@
 package assemble_test
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	"github.com/koblas/brief/internal/assemble"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// Test_features_lists_directory_entries_only pins Features' population: a
+// Test_features_lists_directory_entries_only pins FeaturesFS's population: a
 // regular file and a symlink beside two real feature directories must not
 // appear in the result, and the result carries fs.ReadDir's own order.
+// fstest.MapFS represents a symlink entry the same way os.DirFS does — a
+// Mode carrying fs.ModeSymlink — so this reaches the same branch Features'
+// own os.Root-backed FS would.
 func Test_features_lists_directory_entries_only(t *testing.T) {
-	cfg := fixtureConfig()
-	root := t.TempDir()
-	featureRoot := filepath.Join(root, cfg.FeatureDirectory)
+	fsys := fstest.MapFS{
+		"alpha/STEP-01.md": &fstest.MapFile{Data: []byte("x")},
+		"beta/STEP-01.md":  &fstest.MapFile{Data: []byte("x")},
+		"README.md":        &fstest.MapFile{Data: []byte("not a feature\n")},
+		"linked":           &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte("outside")},
+	}
 
-	require.NoError(t, os.MkdirAll(filepath.Join(featureRoot, "alpha"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(featureRoot, "beta"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(featureRoot, "README.md"), []byte("not a feature\n"), 0o600))
-
-	outside := filepath.Join(root, "outside")
-	require.NoError(t, os.MkdirAll(outside, 0o755))
-	require.NoError(t, os.Symlink(outside, filepath.Join(featureRoot, "linked")))
-
-	srv := assemble.NewServer(cfg, root)
-
-	names, err := srv.Features(t.Context())
+	names, err := assemble.FeaturesFS(fsys)
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"alpha", "beta"}, names)
@@ -36,7 +34,8 @@ func Test_features_lists_directory_entries_only(t *testing.T) {
 
 // Test_features_returns_nil_when_the_feature_directory_is_missing pins the
 // same "nothing to return is not an error" contract Status already keeps
-// for a repository that has never run brief.
+// for a repository that has never run brief: real disk, since the subject
+// is Features' own os.Root.OpenRoot adapter, not FeaturesFS.
 func Test_features_returns_nil_when_the_feature_directory_is_missing(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -52,7 +51,8 @@ func Test_features_returns_nil_when_the_feature_directory_is_missing(t *testing.
 // Test_features_returns_an_error_when_the_feature_directory_is_a_regular_file
 // is the control for the test above: a configured feature-directory path
 // that exists but is not a directory is a misconfiguration, not an empty
-// repository, and must not be swallowed by the same ErrNotExist guard.
+// repository, and must not be swallowed by the same ErrNotExist guard —
+// real disk, the same adapter-level reason as the test above.
 func Test_features_returns_an_error_when_the_feature_directory_is_a_regular_file(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
