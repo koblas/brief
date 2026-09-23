@@ -142,7 +142,7 @@ func Test_removeSnippet_on_a_block_the_user_moved_drops_only_the_span(t *testing
 	assert.Equal(t, "before\nafter", string(restored))
 }
 
-// Test_verifySnippetUnchanged pins the read-modify-write guard apply and
+// Test_verifyFileUnchanged pins the read-modify-write guard apply and
 // applyUninstall both run immediately before touching CLAUDE.md: nil, the
 // happy path, when the file's current bytes still match what planning
 // read (or, for a fresh create, the file is still absent); a
@@ -150,13 +150,13 @@ func Test_removeSnippet_on_a_block_the_user_moved_drops_only_the_span(t *testing
 // Fix, for every other combination planning could not have foreseen — the
 // file's bytes changed, it now exists when planning found nothing, or it
 // no longer exists at all.
-func Test_verifySnippetUnchanged(t *testing.T) {
+func Test_verifyFileUnchanged(t *testing.T) {
 	t.Run("unchanged existing bytes is nil", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "CLAUDE.md")
 		require.NoError(t, os.WriteFile(path, []byte("stable"), 0o600))
 
-		err := verifySnippetUnchanged(path, true, []byte("stable"), "brief init")
+		err := verifyFileUnchanged(path, true, []byte("stable"), "brief init")
 
 		assert.NoError(t, err)
 	})
@@ -165,7 +165,7 @@ func Test_verifySnippetUnchanged(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "CLAUDE.md")
 
-		err := verifySnippetUnchanged(path, false, nil, "brief init")
+		err := verifyFileUnchanged(path, false, nil, "brief init")
 
 		assert.NoError(t, err)
 	})
@@ -175,7 +175,7 @@ func Test_verifySnippetUnchanged(t *testing.T) {
 		path := filepath.Join(dir, "CLAUDE.md")
 		require.NoError(t, os.WriteFile(path, []byte("edited by someone else"), 0o600))
 
-		err := verifySnippetUnchanged(path, true, []byte("stable"), "brief init")
+		err := verifyFileUnchanged(path, true, []byte("stable"), "brief init")
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 
@@ -190,7 +190,7 @@ func Test_verifySnippetUnchanged(t *testing.T) {
 		path := filepath.Join(dir, "CLAUDE.md")
 		require.NoError(t, os.WriteFile(path, []byte("raced into existence"), 0o600))
 
-		err := verifySnippetUnchanged(path, false, nil, "brief uninstall")
+		err := verifyFileUnchanged(path, false, nil, "brief uninstall")
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 	})
@@ -199,7 +199,7 @@ func Test_verifySnippetUnchanged(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "CLAUDE.md")
 
-		err := verifySnippetUnchanged(path, true, []byte("stable"), "brief uninstall")
+		err := verifyFileUnchanged(path, true, []byte("stable"), "brief uninstall")
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 	})
@@ -209,7 +209,7 @@ func Test_verifySnippetUnchanged(t *testing.T) {
 		path := filepath.Join(dir, "sub", "CLAUDE.md")
 		require.NoError(t, os.MkdirAll(path, 0o755))
 
-		err := verifySnippetUnchanged(path, true, []byte("stable"), "brief init")
+		err := verifyFileUnchanged(path, true, []byte("stable"), "brief init")
 
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, ErrConcurrentEdit)

@@ -210,9 +210,12 @@ func relPathsWithOrigin(states []integrationFileState, origin artifact.Origin) [
 // appended verbatim — a multi-file row (host-plugin, host-agents) passes
 // ": <rel, ...>", a single-subject row (host-hook, host-snippet) passes "".
 // This is the one place every host row's own origin precedence lives, so
-// the four can never drift from each other; it is also the only way to
-// reach the OriginOlder arm at all today, since every compiled-in older
-// digest list ships empty.
+// the four can never drift from each other. The planner and implementer
+// agent renders are the one pair whose own older-digest list is non-empty
+// (Rule 6), so host-agents' own OriginOlder arm is reachable through a real
+// fixture today; host-plugin's, host-hook's and host-snippet's own
+// OriginOlder arms still need host_internal_test.go's direct, synthetic
+// call, since every other Kind's older-digest list still ships empty.
 func originRow(origin artifact.Origin, olderFix, suffix string) (Severity, string, *string) {
 	switch origin {
 	case artifact.OriginOlder:

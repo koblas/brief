@@ -391,6 +391,38 @@ func Test_init_with_agents_installs_three_agents_and_binds_roles(t *testing.T) {
 	assert.Equal(t, artifact.ConfigFileWithRoles(), body)
 }
 
+// Test_init_with_agents_reports_an_older_agent_as_merged_updated pins R11's
+// stdout row for Rule 6's upgrade path: a planner file holding the
+// pre-SCENARIO-02 bytes is reported "merged … (updated)", exit 0, and its
+// bytes on disk are rewritten to today's own render.
+func Test_init_with_agents_reports_an_older_agent_as_merged_updated(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+
+	plannerPath := filepath.Join(wd, ".claude", "skills", "brief", "agents", "planner.md")
+	older := []byte("---\nname: planner\ndescription: Turn a feature's specification into ordered scenario " +
+		"plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's " +
+		"specification into ordered scenario plans: run `brief new step <feature>` for the next " +
+		"scenario, then fill its plan file. Never write production or test code.\n")
+	require.NoError(t, os.WriteFile(plannerPath, older, 0o600))
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, cli.ExitCode(err))
+	assert.Contains(t, stdout.String(), "merged .claude/skills/brief/agents/planner.md (updated)\n")
+
+	body, readErr := os.ReadFile(plannerPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, artifact.AgentPlanner(), body)
+}
+
 // Test_init_with_agents_over_an_existing_config_prints_the_roles_lines_to_add
 // pins R7's stderr hint, exact copy: the config is never edited, and the
 // hint block — "was not edited" line, then "roles:" and the three bare

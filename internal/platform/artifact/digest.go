@@ -123,9 +123,19 @@ var agentPlannerDigests = [][32]byte{
 	sha256.Sum256(AgentPlanner()),
 }
 
+// olderAgentPlannerBytes is an earlier release's own AgentPlanner render, a
+// fixed byte literal — never a live render call, which would make this list
+// duplicate agentPlannerDigests and the OriginOlder arm unreachable.
+const olderAgentPlannerBytes = "---\nname: planner\ndescription: Turn a feature's specification into ordered scenario " +
+	"plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's " +
+	"specification into ordered scenario plans: run `brief new step <feature>` for the next " +
+	"scenario, then fill its plan file. Never write production or test code.\n"
+
 // olderAgentPlannerDigests holds the sha256 digest of every earlier
-// release's own AgentPlanner render, empty until a release changes it.
-var olderAgentPlannerDigests = [][32]byte{}
+// release's own AgentPlanner render, one fixed literal per release.
+var olderAgentPlannerDigests = [][32]byte{
+	sha256.Sum256([]byte(olderAgentPlannerBytes)),
+}
 
 // agentImplementerDigests holds the sha256 digest of this release's own
 // AgentImplementer render.
@@ -133,9 +143,21 @@ var agentImplementerDigests = [][32]byte{
 	sha256.Sum256(AgentImplementer()),
 }
 
+// olderAgentImplementerBytes is an earlier release's own AgentImplementer
+// render, a fixed byte literal — never a live render call, which would make
+// this list duplicate agentImplementerDigests and the OriginOlder arm
+// unreachable.
+const olderAgentImplementerBytes = "---\nname: implementer\ndescription: Implement a feature's next open step, from brief " +
+	"start through brief finish.\n---\n\nRun `brief start <feature>` and implement its next " +
+	"open step, working from its output rather than reading the specification or earlier steps " +
+	"whole. Close the step with `brief finish <feature> <step> --handoff <path> --state " +
+	"<path>`.\n"
+
 // olderAgentImplementerDigests holds the sha256 digest of every earlier
-// release's own AgentImplementer render, empty until a release changes it.
-var olderAgentImplementerDigests = [][32]byte{}
+// release's own AgentImplementer render, one fixed literal per release.
+var olderAgentImplementerDigests = [][32]byte{
+	sha256.Sum256([]byte(olderAgentImplementerBytes)),
+}
 
 // agentReviewerDigests holds the sha256 digest of this release's own
 // AgentReviewer render.

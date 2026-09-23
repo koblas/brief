@@ -105,6 +105,86 @@ func Test_implementer_agent_carries_no_tools_key(t *testing.T) {
 	assert.NotContains(t, keys, "tools")
 }
 
+// rulledPlannerBody, rulledImplementerBody are the ruled one-line bodies
+// specification.md's "Rewritten plugin agents" block names verbatim for the
+// planner and implementer, copied byte-for-byte.
+const (
+	rulledPlannerBody     = "Plan the feature's next scenario: run `brief new step <feature>`, then fill its plan file. Never write production or test code."
+	rulledImplementerBody = "Implement the next open step: `brief start <feature>`, work it, then `brief finish <feature> <step> --handoff <path> --state <path>`."
+)
+
+// wantPlannerBytes, wantImplementerBytes are specification.md's "Rewritten
+// plugin agents" block, copied byte-for-byte (fenced code block content,
+// trailing newline).
+var (
+	wantPlannerBytes = []byte("---\n" +
+		"name: planner\n" +
+		"description: Turn a feature's specification into ordered scenario plans.\n" +
+		"tools: Read, Grep, Glob, Bash, Edit, Write\n" +
+		"skills:\n" +
+		"  - brief-workflow\n" +
+		"---\n\n" +
+		rulledPlannerBody + "\n")
+
+	wantImplementerBytes = []byte("---\n" +
+		"name: implementer\n" +
+		"description: Implement a feature's next open step, from brief start through brief finish.\n" +
+		"skills:\n" +
+		"  - brief-workflow\n" +
+		"---\n\n" +
+		rulledImplementerBody + "\n")
+)
+
+// olderPlannerBytes, olderImplementerBytes, currentReviewerBytes are the
+// pre-SCENARIO-02 renders, captured mechanically (%q dump of
+// artifact.AgentPlanner/AgentImplementer/AgentReviewer) before agents.go was
+// touched, and never derived from a live render call — the fixture Recognize
+// itself must classify as OriginOlder (planner/implementer) or
+// OriginCurrent (reviewer, unchanged).
+const (
+	olderPlannerBytes = "---\nname: planner\ndescription: Turn a feature's specification into ordered scenario plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's specification into ordered scenario plans: run `brief new step <feature>` for the next scenario, then fill its plan file. Never write production or test code.\n"
+
+	olderImplementerBytes = "---\nname: implementer\ndescription: Implement a feature's next open step, from brief start through brief finish.\n---\n\nRun `brief start <feature>` and implement its next open step, working from its output rather than reading the specification or earlier steps whole. Close the step with `brief finish <feature> <step> --handoff <path> --state <path>`.\n"
+
+	currentReviewerBytes = "---\nname: reviewer\ndescription: Report brief check's findings on a feature's open step, read-only.\ntools: Read, Grep, Glob, Bash\n---\n\nRun `brief start <feature>` to read the open step's acceptance criteria and inherited constraints (it writes nothing), then `brief check <feature>` and report what it finds. Never edit or write a file.\n"
+)
+
+// Test_planner_and_implementer_agents_render_the_ruled_bytes pins
+// SCENARIO-02's Surface & Copy block byte-for-byte: AgentPlanner and
+// AgentImplementer now carry a "skills:" block list naming brief-workflow
+// and the ruled one-line body, in the frontmatter order name, description,
+// tools (planner only), skills.
+func Test_planner_and_implementer_agents_render_the_ruled_bytes(t *testing.T) {
+	assert.Equal(t, wantPlannerBytes, artifact.AgentPlanner())
+	assert.Equal(t, wantImplementerBytes, artifact.AgentImplementer())
+}
+
+// Test_reviewer_agent_bytes_are_unchanged pins R7's exclusion: the reviewer
+// never preloads brief-workflow (R15 limits it to read-only brief start and
+// brief check), so its render must stay byte-identical to the literal
+// captured before agents.go changed.
+func Test_reviewer_agent_bytes_are_unchanged(t *testing.T) {
+	assert.Equal(t, []byte(currentReviewerBytes), artifact.AgentReviewer())
+}
+
+// Test_previous_release_agent_renders_classify_as_older pins Rule 6: the
+// pre-SCENARIO-02 planner and implementer bytes move to their own
+// older-digest list and Recognize reports OriginOlder for them, never
+// OriginEdited; today's own render is still OriginCurrent; the reviewer
+// literal — unchanged by this scenario — is still OriginCurrent, never
+// OriginOlder, proving the older list holds only the two agents that
+// actually changed.
+func Test_previous_release_agent_renders_classify_as_older(t *testing.T) {
+	assert.Equal(t, artifact.OriginOlder, artifact.Recognize(artifact.KindAgentPlanner, []byte(olderPlannerBytes)))
+	assert.Equal(t, artifact.OriginOlder, artifact.Recognize(artifact.KindAgentImplementer, []byte(olderImplementerBytes)))
+
+	assert.Equal(t, artifact.OriginCurrent, artifact.Recognize(artifact.KindAgentPlanner, artifact.AgentPlanner()))
+	assert.Equal(t, artifact.OriginCurrent, artifact.Recognize(artifact.KindAgentImplementer, artifact.AgentImplementer()))
+
+	assert.Equal(t, artifact.OriginCurrent, artifact.Recognize(artifact.KindAgentReviewer, []byte(currentReviewerBytes)))
+	assert.Equal(t, artifact.OriginEdited, artifact.Recognize(artifact.KindAgentReviewer, []byte(olderPlannerBytes)))
+}
+
 // Test_agent_bodies_name_only_their_own_brief_invocations pins R7's "thin,
 // limited to calls into the tool": each body names the brief command(s)
 // its own role runs — the planner "brief new step", the implementer

@@ -34,7 +34,10 @@ type UninstallRequest struct {
 // decodes the config, or a plugin or agent file, the way Init does, so it
 // has no refusal class of its own; an invalid, unparseable, or locally
 // edited file is simply "edited locally", the same as any other byte
-// mismatch. No config found anywhere (config.LocateInRepo's own bounded
+// mismatch, kept unless --force. An OriginOlder file (Rule 6) is not an
+// edit: it is removed the same as a current one, without --force, since
+// its bytes are still brief's own, just an earlier release's. No config
+// found anywhere (config.LocateInRepo's own bounded
 // walk-up, R3 — an ancestor config above the nearest enclosing git
 // repository is treated as though it did not exist, the same rule Init
 // applies to its own install root) and no plugin or agent file found either
@@ -171,11 +174,13 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 // row at all. A path that exists but is not a regular file (os.Lstat — a
 // directory, a symlink) reports ActionKept, detail "not a regular file",
 // regardless of force — never followed. A regular file whose bytes are
-// artifact.Recognize's OriginCurrent for renderKind is always
-// ActionRemoved, no detail. Any other bytes report detail "edited
-// locally": unless force is set, ActionKept with ForceRemovable true;
-// with force, ActionRemoved with ForceRemovable false — the field is true
-// only while --force could still act on the artifact, never once it
+// artifact.Recognize's OriginCurrent or OriginOlder for renderKind is
+// always ActionRemoved, no detail — Rule 6: an earlier release's own render
+// is not a local edit, so uninstall removes it the same as today's own,
+// without needing --force. Any other bytes (OriginEdited) report detail
+// "edited locally": unless force is set, ActionKept with ForceRemovable
+// true; with force, ActionRemoved with ForceRemovable false — the field is
+// true only while --force could still act on the artifact, never once it
 // already has.
 func planPluginRemoval(path string, kind Kind, renderKind artifact.Kind, force bool) (Artifact, bool, error) {
 	info, err := os.Lstat(path)
@@ -194,7 +199,7 @@ func planPluginRemoval(path string, kind Kind, renderKind artifact.Kind, force b
 		return Artifact{}, false, fmt.Errorf("setup: read %s: %w", path, err)
 	}
 
-	if artifact.Recognize(renderKind, body) == artifact.OriginCurrent {
+	if origin := artifact.Recognize(renderKind, body); origin == artifact.OriginCurrent || origin == artifact.OriginOlder {
 		return Artifact{Kind: kind, Path: path, Action: ActionRemoved}, true, nil
 	}
 
@@ -309,7 +314,7 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 	var removedAny bool
 
 	if hasSnippet && snippetArt.Action == ActionRemoved {
-		if err := verifySnippetUnchanged(snippetArt.Path, true, snippetArt.existing, "brief uninstall"); err != nil {
+		if err := verifyFileUnchanged(snippetArt.Path, true, snippetArt.existing, "brief uninstall"); err != nil {
 			return Result{}, err
 		}
 

@@ -615,6 +615,38 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 			wantFix:      new(runInitWithAgents),
 		},
 		{
+			// SCENARIO-02: the pre-scenario planner render, captured
+			// mechanically (%q dump) before agents.go changed and now moved
+			// to olderAgentPlannerDigests — the one fixture that actually
+			// reaches host-agents' own OriginOlder arm today (every other
+			// Kind's older…Digests list still ships empty). Mutation-verify
+			// by emptying olderAgentPlannerDigests: this case alone reddens
+			// (falls through to "edited locally"), the others above and
+			// below stay green.
+			name: "an older planner render",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				for _, f := range h.Agents() {
+					if f.Kind == artifact.KindAgentPlanner {
+						continue
+					}
+
+					writeHostArtifact(t, wd, f)
+				}
+
+				older := []byte("---\nname: planner\ndescription: Turn a feature's specification into ordered scenario " +
+					"plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's " +
+					"specification into ordered scenario plans: run `brief new step <feature>` for the next " +
+					"scenario, then fill its plan file. Never write production or test code.\n")
+				writeHostFile(t, wd, host.PluginDir+"/agents/planner.md", older)
+			},
+			checkID:      "host-agents",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "installed by an older brief release: .claude/skills/brief/agents/planner.md",
+			wantFix:      new(runInitWithAgents),
+		},
+		{
 			name: "an agent file was edited locally",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()

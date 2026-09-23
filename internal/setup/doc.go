@@ -54,9 +54,15 @@
 // (internal/platform/artifact.Recognize) and never decoded, so none of
 // them has a refusal class of its own — an unparseable, R1-invalid, or
 // locally edited file is simply "edited locally", the same as any other
-// byte mismatch, kept unless --force. --force rewrites only the config
-// from defaults; it never rewrites an edited plugin file, only removes one
-// under Uninstall.
+// byte mismatch, kept unless --force. An OriginOlder file (Rule 6: bytes
+// equal to an earlier release's own render, never today's) is not treated
+// as an edit at all: planPluginFile plans it ActionMerged, detail
+// "updated", and apply rewrites it unconditionally, guarded only by
+// verifyFileUnchanged's own concurrent-edit check — no --force needed,
+// since nothing about it is the adopter's own content. --force otherwise
+// rewrites only the config from defaults; it never rewrites an edited
+// plugin file, only removes one under Uninstall, and Uninstall removes an
+// OriginOlder file the same as a current one, without --force.
 //
 // InitRequest.Host == "" means detect rather than refuse: detectHost
 // resolves HostClaudeCode when the install root (the same root every

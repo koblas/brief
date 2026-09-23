@@ -12,10 +12,11 @@ import (
 
 // writableTargets lists every path a real (non-DryRun, non-Print) Init
 // would write to, in apply's own write order: the feature root when
-// ActionCreated, then every writeArts entry reporting ActionCreated, then
-// the snippet's own path when hasSnippet and its Action is ActionCreated or
-// ActionMerged, then the config file's own path when ActionCreated —
-// checkWritable's own input.
+// ActionCreated, then every writeArts entry reporting ActionCreated or
+// ActionMerged (an OriginOlder file apply is about to rewrite in place),
+// then the snippet's own path when hasSnippet and its Action is
+// ActionCreated or ActionMerged, then the config file's own path when
+// ActionCreated — checkWritable's own input.
 func writableTargets(featureArt Artifact, writeArts []pluginArtifact, snippetArt snippetArtifact, hasSnippet bool, configArt Artifact) []string {
 	targets := make([]string, 0, 2+len(writeArts))
 
@@ -24,7 +25,7 @@ func writableTargets(featureArt Artifact, writeArts []pluginArtifact, snippetArt
 	}
 
 	for _, w := range writeArts {
-		if w.Action == ActionCreated {
+		if w.Action == ActionCreated || w.Action == ActionMerged {
 			targets = append(targets, w.Path)
 		}
 	}

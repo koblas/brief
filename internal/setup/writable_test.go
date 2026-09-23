@@ -67,6 +67,47 @@ func Test_init_refuses_an_unwritable_target_before_writing_anything(t *testing.T
 	})
 }
 
+// Test_init_refuses_when_an_older_agent_file_is_unwritable pins R10 for an
+// ActionMerged target, not only ActionCreated: a planner file holding the
+// pre-SCENARIO-02 bytes, in an agents directory made unwritable after it
+// was installed, refuses under the same ErrUnwritable contract, naming the
+// agents directory, and nothing is written — the file on disk stays exactly
+// the older bytes it held before this run, proving Init never reached
+// writePluginFile. Skipped under root, which ignores directory write
+// permission.
+func Test_init_refuses_when_an_older_agent_file_is_unwritable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory write permission")
+	}
+
+	wd := t.TempDir()
+	srv := setup.NewServer()
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+	require.NoError(t, err)
+
+	agentsDir := filepath.Join(wd, ".claude", "skills", "brief", "agents")
+	plannerPath := filepath.Join(agentsDir, "planner.md")
+	older := []byte("---\nname: planner\ndescription: Turn a feature's specification into ordered scenario " +
+		"plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's " +
+		"specification into ordered scenario plans: run `brief new step <feature>` for the next " +
+		"scenario, then fill its plan file. Never write production or test code.\n")
+	require.NoError(t, os.WriteFile(plannerPath, older, 0o600))
+
+	require.NoError(t, os.Chmod(agentsDir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(agentsDir, 0o755) })
+
+	_, err = srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+
+	require.ErrorIs(t, err, setup.ErrUnwritable)
+	refusal, ok := errors.AsType[*setup.RefusalError](err)
+	require.True(t, ok)
+	assert.Equal(t, agentsDir, refusal.Path)
+
+	body, readErr := os.ReadFile(plannerPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, older, body)
+}
+
 // Test_the_writability_probe_never_runs_under_dry_run_or_print is the
 // control arm for the two refusal cases above: the identical portable
 // fixture (a regular file blocking ".claude/skills") never refuses under

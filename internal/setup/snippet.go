@@ -412,17 +412,19 @@ func writeSnippetFile(path string, body []byte) error {
 	return nil
 }
 
-// verifySnippetUnchanged re-reads path immediately before Init or Uninstall
+// verifyFileUnchanged re-reads path immediately before Init or Uninstall
 // writes to it and reports ErrConcurrentEdit (wrapped in a *RefusalError,
 // fix naming rerunCommand) unless its bytes still match exactly what
 // planning read: existedBefore true and existing byte-identical to the
 // current bytes, or existedBefore false and path still absent. A read
 // failure other than "does not exist" is returned unwrapped — the same
-// shape planSnippet's own reads use. This is apply's/applyUninstall's own
-// read-modify-write guard: planning and applying are not atomic with
-// respect to a concurrent brief invocation, or a person editing CLAUDE.md
-// by hand, in between.
-func verifySnippetUnchanged(path string, existedBefore bool, existing []byte, rerunCommand string) error {
+// shape planSnippet's own reads use. This is apply's own read-modify-write
+// guard, shared by every file apply rewrites in place rather than merely
+// creating — the CLAUDE.md block and an ActionMerged plugin, skill or agent
+// file (an OriginOlder render Rule 6 upgrades) alike: planning and applying
+// are not atomic with respect to a concurrent brief invocation, or a person
+// editing the file by hand, in between.
+func verifyFileUnchanged(path string, existedBefore bool, existing []byte, rerunCommand string) error {
 	current, err := os.ReadFile(path)
 
 	switch {
