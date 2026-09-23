@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
+	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/setup"
 )
 
@@ -16,35 +18,41 @@ const initInvocation = "brief init --host claude-code"
 
 // initLong is "brief init"'s help prose.
 var initLong = `Installs brief's own config, feature root and, for --host claude-code, a
-Claude Code skills-directory plugin under ".claude/skills/brief/": a
-plugin manifest, "/brief:start" and "/brief:finish" skills, and a
-PostToolUse hook running "brief check --hook claude-code" — omit it with
---no-hook. With no --host, the host is detected: claude-code when the
-repository already has ".claude/" or "CLAUDE.md", or the user's own
-"~/.claude" exists; otherwise only the config and feature root install,
-and stderr says no host was detected. --with-agents additionally installs
-three role agents (planner, implementer, reviewer) under the plugin's own
-"agents/" directory; it requires the resolved host to be claude-code, and
-binds every role to them in ".brief.yaml" only when this same run creates
-that file — an existing config is never edited, and stderr instead lists
-the "roles:" lines to add by hand for any role still unbound. Writes
+Claude Code skills-directory plugin under ".claude/skills/brief/": a plugin
+manifest, "/brief:start" and "/brief:finish" skills, and a PostToolUse hook
+running "brief check --hook claude-code" — omit it with --no-hook. With no
+--host, the host is detected: claude-code when the repository already has
+".claude/" or "CLAUDE.md", or the user's own "~/.claude" exists; otherwise
+only the config and feature root install, and stderr says no host was
+detected. --with-agents additionally installs three role agents (planner,
+implementer, reviewer) under the plugin's own "agents/" directory; it
+requires the resolved host to be claude-code, and binds every role to them
+in ".brief.yaml" only when this same run creates that file — an existing
+config is never edited, and stderr instead lists the "roles:" lines to add
+by hand for any role still unbound. Every claude-code install also writes a
+"brief-workflow" skill under ".claude/skills/brief-workflow/", which agents
+preload by listing it in their frontmatter "skills:". init never edits an
+agent file of yours by default; stderr instead lists each planner or
+implementer bound in ".brief.yaml" whose agent lacks it. --edit-agents adds
+it to those agents' "skills:" lists, for agent files under ".claude/agents/"
+only; one under "~/.claude" is always left for you to edit. Writes
 ".brief.yaml" with every key present but commented out, documenting each
-setting in place (live under --with-agents only for "roles:" and its
-three children, when this run creates the file), and creates the
-configured feature directory. Re-running converges: a valid existing
-config, and any plugin or agent file whose bytes are unedited, is kept
-as-is, and every artifact already installed reports "unchanged". An
-unparseable or invalid existing config refuses, naming the fix; --force
-rewrites it from defaults — the bound variant under --with-agents — and
-never rewrites an edited plugin or agent file. --dry-run prints the same
-report and writes nothing. --print writes nothing either and instead
-prints each pending artifact's own path and bytes to stdout, prefixed
-"# <path> (create|merge)", for wiring the integration by hand; it cannot
-be combined with --dry-run. Every target is checked for writability before
-anything is written: an unwritable target refuses, naming it, with the
---print output on stdout so it can still be applied by hand.
+setting in place (live under --with-agents only for "roles:" and its three
+children, when this run creates the file), and creates the configured
+feature directory. Re-running converges: a valid existing config, and any
+plugin or agent file whose bytes are unedited, is kept as-is, and every
+artifact already installed reports "unchanged". An unparseable or invalid
+existing config refuses, naming the fix; --force rewrites it from defaults —
+the bound variant under --with-agents — and never rewrites an edited plugin
+or agent file. --dry-run prints the same report and writes nothing. --print
+writes nothing either and instead prints each pending artifact's own path
+and bytes to stdout, prefixed "# <path> (create|merge)", for wiring the
+integration by hand; it cannot be combined with --dry-run. Every target is
+checked for writability before anything is written: an unwritable target
+refuses, naming it, with the --print output on stdout so it can still be
+applied by hand.
 
-` + jsonFieldsParagraph("host", "detected_by", "dry_run", "created", "modified", "artifacts", "roles_to_add") + "\n" +
+` + jsonFieldsParagraph("host", "detected_by", "dry_run", "created", "modified", "artifacts", "roles_to_add", "agents_missing_skill") + "\n" +
 	wrapWords("With --print --json, the document carries only `artifacts`, each "+
 		"{`path`, `action` (create|merge), `body`}.", jsonParagraphWidth)
 
@@ -53,20 +61,49 @@ anything is written: an unwritable target refuses, naming it, with the
 // rather than given — the same provenance initNextAction's own stderr line
 // names) and dry_run, every path this call created or modified (absolute,
 // never nil, both empty under --dry-run), then one row per artifact in
-// setup.Result's own order — config, feature root — and finally
-// roles_to_add, always present, empty unless --with-agents left roles
-// unbound in a config this run did not write. Never written for --print,
-// which renders initPrintDocument instead.
+// setup.Result's own order — config, feature root — then roles_to_add,
+// always present, empty unless --with-agents left roles unbound in a
+// config this run did not write, and finally agents_missing_skill, always
+// present (Surface & Copy), empty unless the resolved host is claude-code
+// and at least one bare-name planner or implementer binding lacks the
+// skill. Never written for --print, which renders initPrintDocument
+// instead.
 type initDocument struct {
 	jsonHeader
 
-	Host       string         `json:"host"`
-	DetectedBy *string        `json:"detected_by"`
-	DryRun     bool           `json:"dry_run"`
-	Created    []string       `json:"created"`
-	Modified   []string       `json:"modified"`
-	Artifacts  []artifactJSON `json:"artifacts"`
-	RolesToAdd []string       `json:"roles_to_add"`
+	Host               string             `json:"host"`
+	DetectedBy         *string            `json:"detected_by"`
+	DryRun             bool               `json:"dry_run"`
+	Created            []string           `json:"created"`
+	Modified           []string           `json:"modified"`
+	Artifacts          []artifactJSON     `json:"artifacts"`
+	RolesToAdd         []string           `json:"roles_to_add"`
+	AgentsMissingSkill []missingSkillJSON `json:"agents_missing_skill"`
+}
+
+// missingSkillJSON is one initDocument "agents_missing_skill" row: role,
+// agent (the binding's own configured value), path (absolute) and scope
+// ("project"|"user"), in that key order, exactly as setup.MissingSkillAgent
+// carries them — agentfile.Scope's own string values are already "project"
+// and "user" (agentfile's own doc.go), so Scope is cast, never re-derived.
+type missingSkillJSON struct {
+	Role  string `json:"role"`
+	Agent string `json:"agent"`
+	Path  string `json:"path"`
+	Scope string `json:"scope"`
+}
+
+// missingSkillJSONRows maps agents to initDocument's own
+// "agents_missing_skill" rows, in setup.Result.AgentsMissingSkill's own
+// order, never nil.
+func missingSkillJSONRows(agents []setup.MissingSkillAgent) []missingSkillJSON {
+	out := make([]missingSkillJSON, 0, len(agents))
+
+	for _, a := range agents {
+		out = append(out, missingSkillJSON{Role: a.Role, Agent: a.Agent, Path: a.Path, Scope: string(a.Scope)})
+	}
+
+	return out
 }
 
 // printArtifactJSON is one initPrintDocument "artifacts" row: path
@@ -172,6 +209,104 @@ func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, ro
 	return fmt.Sprintf("%s in %s; start Claude Code in %s (or run /reload-plugins in a session already there), then 'brief new feature <name>'", label, rel, rel)
 }
 
+// missingSkillHeaderBase is init's own missing-skill stderr block header's
+// invariant prefix (Surface & Copy), minus the "brief init: " prefix every
+// stderr line in this file shares.
+const missingSkillHeaderBase = `bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each`
+
+// missingSkillFixable reports whether a is a row "--edit-agents" could
+// still reach — setup's own planBoundAgent verdict (setup.ReachFixable),
+// never re-derived here: cli only maps setup.MissingSkillAgent.Reach to
+// display text and grouping. A ScopeProject row whose Reach is anything
+// other than the three setup ever assigns a row planBoundAgent itself
+// cannot merge (setup.ReachNotRegular, setup.ReachUneditable,
+// setup.ReachEscaped) is treated as fixable too — the fallback every other
+// group's own filter needs so a row can never silently vanish from the
+// report if that invariant is ever broken elsewhere. A ScopeUser row is
+// never fixable regardless of Reach — "--edit-agents" never targets one
+// (Rule 3) — which is what keeps setup.ReachNone, the legitimate value
+// every ScopeUser row carries, out of this fallback.
+func missingSkillFixable(a setup.MissingSkillAgent) bool {
+	if a.Scope != agentfile.ScopeProject {
+		return false
+	}
+
+	switch a.Reach {
+	case setup.ReachNotRegular, setup.ReachUneditable, setup.ReachEscaped:
+		return false
+	case setup.ReachFixable, setup.ReachNone:
+		return true
+	default:
+		return true
+	}
+}
+
+// missingSkillHeader renders init's own missing-skill stderr block header
+// (Surface & Copy): the suffix ", or rerun with --edit-agents:" is
+// appended only when editAgents was not given on this run and at least one
+// listed agent is one it could still reach (missingSkillFixable) —
+// otherwise the header ends plain ":", since suggesting a flag that either
+// already ran, or cannot help any row left, would be a dead end.
+func missingSkillHeader(editAgents bool, agents []setup.MissingSkillAgent) string {
+	if !editAgents && slices.ContainsFunc(agents, missingSkillFixable) {
+		return missingSkillHeaderBase + `, or rerun with --edit-agents:`
+	}
+
+	return missingSkillHeaderBase + `:`
+}
+
+// missingSkillLines renders one line per agents entry (Surface & Copy), in
+// four groups, each in agents' own relative order, so the rows an adopter
+// can fix by rerunning init with --edit-agents come before the ones always
+// left for them to edit by hand: (1) every row "--edit-agents" could still
+// reach (setup.ReachFixable), "  <displayPath(wd, path)> (<role>)"; (2) a
+// ScopeProject row setup.planBoundAgent itself cannot reach — not a
+// regular file (setup.ReachNotRegular), "  <displayPath(wd, path)>
+// (<role>; not a regular file, edit by hand)", and an unrecognized
+// "skills:" shape (setup.ReachUneditable), "  <displayPath(wd, path)>
+// (<role>; skills: is not a list brief can edit, edit by hand)" — rendered
+// together, in that combined relative order; (3) a ScopeProject row whose
+// own resolved path escapes the repository (setup.ReachEscaped), "
+// <displayPath(wd, path)> (<role>; outside the repository, edit by
+// hand)"; (4) every ScopeUser row, "  ~/<home-relative slash path>
+// (<role>; user-level, edit by hand)". This grouping is a display concern
+// only — setup.Result.AgentsMissingSkill itself stays in role-major order
+// (setup's own missing_skill.go).
+func missingSkillLines(wd string, agents []setup.MissingSkillAgent) []string {
+	lines := make([]string, 0, len(agents))
+
+	for _, a := range agents {
+		if missingSkillFixable(a) {
+			lines = append(lines, fmt.Sprintf("  %s (%s)", displayPath(wd, a.Path), a.Role))
+		}
+	}
+
+	for _, a := range agents {
+		switch a.Reach {
+		case setup.ReachNotRegular:
+			lines = append(lines, fmt.Sprintf("  %s (%s; not a regular file, edit by hand)", displayPath(wd, a.Path), a.Role))
+		case setup.ReachUneditable:
+			lines = append(lines, fmt.Sprintf("  %s (%s; skills: is not a list brief can edit, edit by hand)", displayPath(wd, a.Path), a.Role))
+		case setup.ReachFixable, setup.ReachEscaped, setup.ReachNone:
+			// Rendered in a different group; nothing to do here.
+		}
+	}
+
+	for _, a := range agents {
+		if a.Reach == setup.ReachEscaped {
+			lines = append(lines, fmt.Sprintf("  %s (%s; outside the repository, edit by hand)", displayPath(wd, a.Path), a.Role))
+		}
+	}
+
+	for _, a := range agents {
+		if a.Scope == agentfile.ScopeUser {
+			lines = append(lines, fmt.Sprintf("  ~/%s (%s; user-level, edit by hand)", a.ScopeRelPath, a.Role))
+		}
+	}
+
+	return lines
+}
+
 // unwrittenLine renders R9/R10's own "printed only" or "already installed"
 // stderr line for --print, minus the "brief init: " prefix: the
 // nothing-pending line when artifacts is empty, else the "printed only"
@@ -184,14 +319,42 @@ func unwrittenLine(artifacts []setup.PrintArtifact) string {
 	return "printed only, no files changed; apply the output above by hand, or rerun without --print"
 }
 
+// editAgentsNothingToEditLine is --edit-agents' own exit-0 stderr line
+// (Surface & Copy), minus the "brief init: " prefix, rendered when editAgents
+// is set and res.Artifacts carries no KindBoundAgent row — text mode only,
+// including --dry-run and --print, never --json.
+const editAgentsNothingToEditLine = `--edit-agents: no planner or implementer bound to an agent under .claude/agents; nothing to edit`
+
+// hasBoundAgentArtifact reports whether artifacts carries a
+// setup.KindBoundAgent row.
+func hasBoundAgentArtifact(artifacts []setup.Artifact) bool {
+	for _, a := range artifacts {
+		if a.Kind == setup.KindBoundAgent {
+			return true
+		}
+	}
+
+	return false
+}
+
+// printEditAgentsNothingToEdit writes editAgentsNothingToEditLine to
+// out.stderr when editAgents is set and artifacts carries no
+// setup.KindBoundAgent row — the print-mode and write-mode render paths'
+// own shared guard.
+func printEditAgentsNothingToEdit(out reporter, editAgents bool, artifacts []setup.Artifact) {
+	if editAgents && !hasBoundAgentArtifact(artifacts) {
+		fmt.Fprintf(out.stderr, "brief init: %s\n", editAgentsNothingToEditLine)
+	}
+}
+
 // runInit implements "brief init [--host <name>] [--no-hook]
-// [--with-agents] [--dry-run | --print] [--force] [--json]"; rest is its
-// positional arguments, flags already parsed away and must be empty. host
-// is "" when --host was not given, passed through unchanged to
+// [--with-agents] [--edit-agents] [--dry-run | --print] [--force] [--json]";
+// rest is its positional arguments, flags already parsed away and must be
+// empty. host is "" when --host was not given, passed through unchanged to
 // setup.InitRequest.Host — setup.Init treats "" as "detect" (R8) rather
 // than defaulting it here. extraSetupOpts threads a test's own
 // setup.WithHomeDir override (withSetupOpts) to setup.NewServer.
-func runInit(ctx context.Context, wd string, rest []string, host string, noHook, withAgents, dryRun, printOnly, force bool, out reporter, extraSetupOpts ...setup.Option) error {
+func runInit(ctx context.Context, wd string, rest []string, host string, noHook, withAgents, editAgents, dryRun, printOnly, force bool, out reporter, extraSetupOpts ...setup.Option) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief init: too many arguments; run '%s'", initInvocation))
 	}
@@ -202,10 +365,14 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 
 	srv := setup.NewServer(extraSetupOpts...)
 
-	res, err := srv.Init(ctx, wd, setup.InitRequest{Host: host, NoHook: noHook, WithAgents: withAgents, DryRun: dryRun, Force: force, Print: printOnly})
+	res, err := srv.Init(ctx, wd, setup.InitRequest{Host: host, NoHook: noHook, WithAgents: withAgents, EditAgents: editAgents, DryRun: dryRun, Force: force, Print: printOnly})
 	if err != nil {
 		if errors.Is(err, setup.ErrAgentsNeedHost) {
 			return out.usageError(fmt.Sprintf("brief init: --with-agents requires --host claude-code; run '%s --with-agents'", initInvocation))
+		}
+
+		if errors.Is(err, setup.ErrEditAgentsNeedHost) {
+			return out.usageError(fmt.Sprintf("brief init: --edit-agents requires --host claude-code; run '%s --edit-agents'", initInvocation))
 		}
 
 		if errors.Is(err, setup.ErrUnknownHost) {
@@ -231,14 +398,15 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 		}
 
 		doc := initDocument{
-			jsonHeader: out.successHeader(),
-			Host:       res.Host,
-			DetectedBy: nonEmptyString(res.DetectedBy),
-			DryRun:     res.DryRun,
-			Created:    res.Created,
-			Modified:   res.Modified,
-			Artifacts:  artifactsJSON(res.Artifacts),
-			RolesToAdd: res.RolesToAdd,
+			jsonHeader:         out.successHeader(),
+			Host:               res.Host,
+			DetectedBy:         nonEmptyString(res.DetectedBy),
+			DryRun:             res.DryRun,
+			Created:            res.Created,
+			Modified:           res.Modified,
+			Artifacts:          artifactsJSON(res.Artifacts),
+			RolesToAdd:         res.RolesToAdd,
+			AgentsMissingSkill: missingSkillJSONRows(res.AgentsMissingSkill),
 		}
 
 		return out.document(doc)
@@ -246,6 +414,9 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 
 	if printOnly {
 		renderPrint(out.stdout, wd, res.Print)
+
+		printEditAgentsNothingToEdit(out, editAgents, res.Artifacts)
+
 		fmt.Fprintf(out.stderr, "brief init: %s\n", unwrittenLine(res.Print))
 
 		return nil
@@ -259,6 +430,16 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 		fmt.Fprintf(out.stderr, "brief init: %s was not edited; to bind brief's agents, add these lines to it:\n", displayPath(wd, configArtifactPath(res.Artifacts)))
 
 		for _, line := range res.RolesToAdd {
+			fmt.Fprintln(out.stderr, line)
+		}
+	}
+
+	printEditAgentsNothingToEdit(out, editAgents, res.Artifacts)
+
+	if len(res.AgentsMissingSkill) > 0 {
+		fmt.Fprintf(out.stderr, "brief init: %s\n", missingSkillHeader(editAgents, res.AgentsMissingSkill))
+
+		for _, line := range missingSkillLines(wd, res.AgentsMissingSkill) {
 			fmt.Fprintln(out.stderr, line)
 		}
 	}

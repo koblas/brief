@@ -55,8 +55,18 @@ const (
 	// under InitRequest.WithAgents; Uninstall always plans their removal
 	// regardless of any flag Init was run with.
 	KindAgent Kind = "agent"
+	// KindSkill is the brief-workflow skill file (host.Host.Skills),
+	// installed on every claude-code install, with or without WithAgents —
+	// unlike KindAgent, it lives outside host.PluginDir.
+	KindSkill Kind = "skill"
 	// KindSnippet is the CLAUDE.md instruction block (R5).
 	KindSnippet Kind = "snippet"
+	// KindBoundAgent is a repository agent file InitRequest.EditAgents
+	// edited, or found already satisfying or unable to satisfy, Rule 4's
+	// own "skills:" edit — a bare-name planner or implementer binding's own
+	// ScopeProject agentfile.Definition, never a "brief:*" binding, another
+	// plugin's, or one under "~/.claude".
+	KindBoundAgent Kind = "bound-agent"
 )
 
 // Action names what Init did, or would do, to one Artifact.
@@ -76,11 +86,13 @@ const (
 	ActionKept Action = "kept"
 	// ActionRemoved marks an artifact Uninstall deleted.
 	ActionRemoved Action = "removed"
-	// ActionMerged marks the CLAUDE.md instruction block appended to an
-	// existing file that carried none, or replaced in place because its
-	// bytes were a brief-written render other than today's own (an older
-	// release, or the same release rendered for a different feature
-	// directory).
+	// ActionMerged marks either of two rewrites in place: the CLAUDE.md
+	// instruction block appended to an existing file that carried none, or
+	// replaced because its bytes were a brief-written render other than
+	// today's own (an older release, or the same release rendered for a
+	// different feature directory); or a whole plugin, skill or agent file
+	// whose bytes are artifact.OriginOlder — Rule 6 — replaced wholesale
+	// with today's own render, detail "updated".
 	ActionMerged Action = "merged"
 )
 
@@ -116,6 +128,12 @@ func NewServer(opts ...Option) *Server {
 // this run also creates the config file, binds every role to them (R7) —
 // like NoHook, false plans no agent row at all, never reading or writing
 // them; it is refused as ErrAgentsNeedHost unless Host is
+// HostClaudeCode. EditAgents plans and, for a real run, applies
+// planBoundAgents (Rule 3, Rule 4): every bare-name planner or implementer
+// binding's own ScopeProject agentfile.Definition gets a KindBoundAgent
+// row and, when its own "skills:" shape allows it, its frontmatter edited
+// to add artifact.WorkflowSkillName — it is refused as
+// ErrEditAgentsNeedHost, checked after ErrAgentsNeedHost, unless Host is
 // HostClaudeCode. DryRun computes the same plan without writing anything,
 // and Force rewrites an existing config from defaults — the bound variant
 // under WithAgents — rather than keeping or refusing it; it never rewrites
@@ -128,6 +146,7 @@ type InitRequest struct {
 	Host       string
 	NoHook     bool
 	WithAgents bool
+	EditAgents bool
 	DryRun     bool
 	Force      bool
 	Print      bool
@@ -161,19 +180,27 @@ type Artifact struct {
 // request, Root is the absolute install root both operated against —
 // config.LocateInRepo's directory, or wd when no config was found, or when
 // the config found lies above the nearest enclosing git repository (R3) —
-// Artifacts lists what was found and what happened to it — for Init, the config
-// file, the feature root, then a claude-code host's own plugin manifest,
-// start skill, finish skill, hook wiring, and, under WithAgents, the three
-// role-agent files, then the CLAUDE.md block last, the fixed order R11's
-// stdout rows render in; for Uninstall, the CLAUDE.md block first, then a
+// Artifacts lists what was found and what happened to it — for Init, the
+// config file, the feature root, then a claude-code host's own plugin
+// manifest, start skill, finish skill, hook wiring, the brief-workflow
+// skill, and, under WithAgents, the three role-agent files, then the
+// CLAUDE.md block last, the fixed order R11's stdout rows render in; for
+// Uninstall, the CLAUDE.md block first, then one KindBoundAgent row per
+// planBoundAgentRemovals target (Rule 8, planned only when the
+// brief-workflow skill's own row is not itself ActionKept), then a
 // claude-code host's own agent files (reviewer, implementer, planner —
-// always planned, independent of any flag Init was run with) and plugin
-// files (hook, finish skill, start skill, manifest), then the config file
-// last, so a partial uninstall never removes the repository's opt-in
-// marker before everything else. Created names every path Init wrote that
-// did not exist before; Modified names every path either command rewrote
-// in place — Init's own CLAUDE.md merge or replace, Uninstall's own
-// CLAUDE.md block strip that leaves the file non-empty; Removed names
+// always planned, independent of any flag Init was run with), the
+// brief-workflow skill, and plugin files (hook, finish skill, start skill,
+// manifest), then the config file last, so a partial uninstall never
+// removes the repository's opt-in marker before everything else. Created
+// names every path Init wrote that did not exist before; Modified names
+// every path either command rewrote in place — Init's own CLAUDE.md merge
+// or replace, an ActionMerged plugin, skill or agent file Init upgrades
+// from an OriginOlder render (Rule 6), Uninstall's own CLAUDE.md block
+// strip that leaves the file non-empty, and Uninstall's own bound-agent
+// "skills:" edit (Rule 8) — a bound-agent row is ActionRemoved but never
+// appears in Removed, since the file itself is rewritten, not deleted;
+// Removed names
 // every path Uninstall actually deleted — both absolute, in the order each
 // command touched them. A pruned, now-empty plugin directory is never in
 // any of the three. RolesToAdd is Init's own hint (R7): empty unless
@@ -193,28 +220,36 @@ type Artifact struct {
 // tell "the caller chose claude-code" from "brief guessed it, and here is
 // why" without also checking NoHostDetected. Print is R9's own
 // pending-artifact set (printArtifacts), never nil, populated regardless of
-// DryRun or Print.
+// DryRun or Print. AgentsMissingSkill is Init's own report (agentsMissingSkill):
+// every bare-name planner or implementer binding, from this run's own
+// post-plan config.Roles, whose resolved agent does not preload the
+// brief-workflow skill — populated only when the resolved Host is
+// HostClaudeCode, regardless of DryRun or Print, empty and non-nil
+// otherwise, including on every Uninstall Result.
 type Result struct {
-	Host           string
-	DryRun         bool
-	Root           string
-	Artifacts      []Artifact
-	Created        []string
-	Modified       []string
-	Removed        []string
-	RolesToAdd     []string
-	NoHostDetected bool
-	DetectedBy     string
-	Print          []PrintArtifact
+	Host               string
+	DryRun             bool
+	Root               string
+	Artifacts          []Artifact
+	Created            []string
+	Modified           []string
+	Removed            []string
+	RolesToAdd         []string
+	NoHostDetected     bool
+	DetectedBy         string
+	Print              []PrintArtifact
+	AgentsMissingSkill []MissingSkillAgent
 }
 
 // Init plans then, unless req.DryRun, applies brief's own install: the
 // config file, the feature root the kept or freshly written config names,
 // and, for req.Host == HostClaudeCode, that host's own skills-directory
-// plugin files (host.Host.Plugin), under req.WithAgents its three
-// role-agent files (host.Host.Agents, R7) — with a config this same call
-// creates or --force-rewrites bound to them (artifact.AgentBindings) — and
-// its CLAUDE.md instruction block (R5, planSnippet) — independent of
+// plugin files (host.Host.Plugin), the brief-workflow skill
+// (host.Host.Skills) — written on every claude-code install, with or
+// without req.WithAgents — under req.WithAgents its three role-agent files
+// (host.Host.Agents, R7) — with a config this same call creates or
+// --force-rewrites bound to them (artifact.AgentBindings) — and its
+// CLAUDE.md instruction block (R5, planSnippet) — independent of
 // req.NoHook, which only ever omits the hook file. Every refusal — an
 // unknown host, req.WithAgents without a resolved HostClaudeCode
 // (ErrAgentsNeedHost), an invalid existing config, a feature root that
@@ -232,17 +267,18 @@ type Result struct {
 // disk. With no enclosing git repository anywhere above wd, Init keeps its
 // own plain ancestor walk, unbounded, exactly as before this rule existed.
 //
-// Applying writes the feature root, then every plugin and agent file
-// reporting ActionCreated, then the CLAUDE.md block, then the config file
-// last, so the config file — the repository's opt-in marker — never
-// appears before everything else has landed. A plugin or agent file
-// already present and unedited (ActionUnchanged) or edited locally
-// (ActionKept) is never rewritten, --force included: R3's --force only
-// ever rewrites the config from defaults (the bound variant under
-// req.WithAgents); the same holds for a CLAUDE.md block reporting
-// ActionKept. A failure after at least one earlier write already landed is
-// wrapped in ErrPartialWrite; a failure before anything was written is
-// returned as-is.
+// Applying writes the feature root, then every plugin, skill and agent
+// file reporting ActionCreated or ActionMerged (Rule 6's OriginOlder
+// upgrade, guarded by verifyFileUnchanged against a concurrent edit), then
+// the CLAUDE.md block, then the config file last, so the config file — the
+// repository's opt-in marker — never appears before everything else has
+// landed. A plugin, skill or agent file already present and unedited
+// (ActionUnchanged) or edited locally (ActionKept) is never rewritten,
+// --force included: R3's --force only ever rewrites the config from
+// defaults (the bound variant under req.WithAgents); the same holds for a
+// CLAUDE.md block reporting ActionKept. A failure after at least one
+// earlier write already landed is wrapped in ErrPartialWrite; a failure
+// before anything was written is returned as-is.
 func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, error) {
 	if req.Host != "" && !validHost(req.Host) {
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
@@ -274,6 +310,10 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return Result{}, ErrAgentsNeedHost
 	}
 
+	if req.EditAgents && req.Host != HostClaudeCode {
+		return Result{}, ErrEditAgentsNeedHost
+	}
+
 	configArt, cfg, err := planConfig(nearest, root, req.Force, req.WithAgents)
 	if err != nil {
 		return Result{}, err
@@ -287,16 +327,24 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 	}
 
 	var (
-		pluginArts []pluginArtifact
-		agentArts  []pluginArtifact
-		snippetArt snippetArtifact
-		hasSnippet bool
+		pluginArts             []pluginArtifact
+		skillArts              []pluginArtifact
+		agentArts              []pluginArtifact
+		boundAgentArts         []boundAgentArtifact
+		snippetArt             snippetArtifact
+		hasSnippet             bool
+		agentsMissingSkillList = []MissingSkillAgent{}
 	)
 
 	if req.Host == HostClaudeCode {
 		h, _ := host.Lookup(host.ClaudeCode)
 
 		pluginArts, err = planPluginFiles(root, h, !req.NoHook)
+		if err != nil {
+			return Result{}, err
+		}
+
+		skillArts, err = planSkillFiles(root, h)
 		if err != nil {
 			return Result{}, err
 		}
@@ -314,17 +362,44 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		}
 
 		hasSnippet = true
+
+		home, homeErr := s.homeDir()
+		if homeErr != nil {
+			home = ""
+		}
+
+		if req.EditAgents {
+			boundAgentArts, err = planBoundAgents(root, home, cfg.Roles)
+			if err != nil {
+				return Result{}, err
+			}
+		}
+
+		agentsMissingSkillList, err = agentsMissingSkill(root, home, cfg.Roles)
+		if err != nil {
+			return Result{}, err
+		}
+
+		agentsMissingSkillList = subtractMergedBoundAgents(agentsMissingSkillList, boundAgentArts)
 	}
 
-	artifacts := make([]Artifact, 0, 3+len(pluginArts)+len(agentArts))
+	artifacts := make([]Artifact, 0, 3+len(pluginArts)+len(skillArts)+len(agentArts))
 	artifacts = append(artifacts, configArt, featureArt)
 
 	for _, p := range pluginArts {
 		artifacts = append(artifacts, p.Artifact)
 	}
 
+	for _, s := range skillArts {
+		artifacts = append(artifacts, s.Artifact)
+	}
+
 	for _, a := range agentArts {
 		artifacts = append(artifacts, a.Artifact)
+	}
+
+	for _, ba := range boundAgentArts {
+		artifacts = append(artifacts, ba.Artifact)
 	}
 
 	if hasSnippet {
@@ -336,33 +411,35 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		configBody = artifact.ConfigFileWithRoles()
 	}
 
-	writeArts := make([]pluginArtifact, 0, len(pluginArts)+len(agentArts))
+	writeArts := make([]pluginArtifact, 0, len(pluginArts)+len(skillArts)+len(agentArts))
 	writeArts = append(writeArts, pluginArts...)
+	writeArts = append(writeArts, skillArts...)
 	writeArts = append(writeArts, agentArts...)
 
 	res := Result{
-		Host:           req.Host,
-		DryRun:         req.DryRun,
-		Root:           root,
-		Artifacts:      artifacts,
-		Created:        []string{},
-		Modified:       []string{},
-		Removed:        []string{},
-		RolesToAdd:     rolesToAdd(req.WithAgents, configArt.Action, cfg.Roles),
-		NoHostDetected: noHostDetected,
-		DetectedBy:     detectedBy,
-		Print:          printArtifacts(artifacts, configBody, writeArts, snippetArt),
+		Host:               req.Host,
+		DryRun:             req.DryRun,
+		Root:               root,
+		Artifacts:          artifacts,
+		Created:            []string{},
+		Modified:           []string{},
+		Removed:            []string{},
+		RolesToAdd:         rolesToAdd(req.WithAgents, configArt.Action, cfg.Roles),
+		NoHostDetected:     noHostDetected,
+		DetectedBy:         detectedBy,
+		Print:              printArtifacts(artifacts, configBody, writeArts, boundAgentArts, snippetArt),
+		AgentsMissingSkill: agentsMissingSkillList,
 	}
 
 	if req.DryRun || req.Print {
 		return res, nil
 	}
 
-	if err := checkWritable(writableTargets(featureArt, writeArts, snippetArt, hasSnippet, configArt)); err != nil {
+	if err := checkWritable(writableTargets(featureArt, writeArts, boundAgentArts, snippetArt, hasSnippet, configArt)); err != nil {
 		return res, err
 	}
 
-	return apply(res, featureArt, writeArts, snippetArt, hasSnippet, configArt, configBody)
+	return apply(res, featureArt, writeArts, boundAgentArts, snippetArt, hasSnippet, configArt, configBody)
 }
 
 // rolesToAdd renders Result.RolesToAdd (R7): empty unless withAgents and
@@ -399,8 +476,14 @@ func rolesToAdd(withAgents bool, configAction Action, current config.RoleBinding
 }
 
 // apply writes featureArt, then every pluginArts entry reporting
-// ActionCreated (plugin files, then, under WithAgents, the three agent
-// files, both share this one list and its own write order), then
+// ActionCreated or ActionMerged (plugin files, then the brief-workflow
+// skill, then, under WithAgents, the three agent files — all share this one
+// list and its own write order) — an ActionMerged entry (an OriginOlder
+// render Rule 6 upgrades) re-reads its own path immediately before writing
+// (verifyFileUnchanged) and refuses ErrConcurrentEdit rather than
+// overwriting a file changed since planning — then every boundAgentArts
+// entry reporting ActionMerged (guarded by verifyBoundAgentUnchanged, then
+// ba.agentFile().write, which preserves the file's own mode), then
 // snippetArt (when hasSnippet, and it reports ActionCreated or
 // ActionMerged), then configArt last with configBody as its bytes — the
 // plain ConfigFile() or, under WithAgents, ConfigFileWithRoles() — into
@@ -408,7 +491,10 @@ func rolesToAdd(withAgents bool, configAction Action, current config.RoleBinding
 // for ActionMerged, since a merge rewrites bytes an existing file already
 // held. A write failure is wrapped in ErrPartialWrite iff at least one
 // earlier write already landed in this same call.
-func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippetArt snippetArtifact, hasSnippet bool, configArt Artifact, configBody []byte) (Result, error) {
+func apply(
+	res Result, featureArt Artifact, pluginArts []pluginArtifact, boundAgentArts []boundAgentArtifact,
+	snippetArt snippetArtifact, hasSnippet bool, configArt Artifact, configBody []byte,
+) (Result, error) {
 	var wroteSomething bool
 
 	if featureArt.Action == ActionCreated {
@@ -421,8 +507,18 @@ func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippet
 	}
 
 	for _, p := range pluginArts {
-		if p.Action != ActionCreated {
+		if p.Action != ActionCreated && p.Action != ActionMerged {
 			continue
+		}
+
+		if p.Action == ActionMerged {
+			if err := verifyFileUnchanged(p.Path, true, p.existing, "brief init"); err != nil {
+				if wroteSomething {
+					return res, markPartial(err)
+				}
+
+				return Result{}, err
+			}
 		}
 
 		if err := writePluginFile(p.Path, artifact.Render(p.renderKind)); err != nil {
@@ -433,14 +529,44 @@ func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippet
 			return Result{}, err
 		}
 
-		res.Created = append(res.Created, p.Path)
+		if p.Action == ActionCreated {
+			res.Created = append(res.Created, p.Path)
+		} else {
+			res.Modified = append(res.Modified, p.Path)
+		}
+
+		wroteSomething = true
+	}
+
+	for _, ba := range boundAgentArts {
+		if ba.Action != ActionMerged {
+			continue
+		}
+
+		if err := verifyBoundAgentUnchanged(ba, "brief init --edit-agents"); err != nil {
+			if wroteSomething {
+				return res, markPartial(err)
+			}
+
+			return Result{}, err
+		}
+
+		if err := ba.agentFile().write(ba.edited, ba.perm); err != nil {
+			if wroteSomething {
+				return res, markPartial(err)
+			}
+
+			return Result{}, err
+		}
+
+		res.Modified = append(res.Modified, ba.Path)
 		wroteSomething = true
 	}
 
 	if hasSnippet && (snippetArt.Action == ActionCreated || snippetArt.Action == ActionMerged) {
 		existedBefore := snippetArt.Action == ActionMerged
 
-		if err := verifySnippetUnchanged(snippetArt.Path, existedBefore, snippetArt.existing, "brief init"); err != nil {
+		if err := verifyFileUnchanged(snippetArt.Path, existedBefore, snippetArt.existing, "brief init"); err != nil {
 			if wroteSomething {
 				return res, markPartial(err)
 			}
@@ -482,15 +608,22 @@ func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippet
 	return res, nil
 }
 
-// pluginArtifact pairs one plugin file's Artifact with the
-// artifact.Kind its Render/Recognize digest list is checked against — a
-// different vocabulary from Artifact.Kind's own setup-level Kind (KindPlugin
-// or KindHook), kept out of Artifact itself since nothing outside this
-// package ever needs it.
+// pluginArtifact pairs one plugin file's Artifact with the artifact.Kind
+// its Render/Recognize digest list is checked against — a different
+// vocabulary from Artifact.Kind's own setup-level Kind (KindPlugin or
+// KindHook), kept out of Artifact itself since nothing outside this
+// package ever needs it — and, for an ActionMerged row (an OriginOlder
+// file being upgraded), the bytes planning actually read from disk:
+// apply's own write-path guard (verifyFileUnchanged, reused) re-reads
+// the path immediately before writing and refuses ErrConcurrentEdit unless
+// it still matches existing, the same read-modify-write protection the
+// CLAUDE.md merge already has. Nil for every Action other than
+// ActionMerged.
 type pluginArtifact struct {
 	Artifact
 
 	renderKind artifact.Kind
+	existing   []byte
 }
 
 // planPluginFiles plans every file h.Plugin(withHook) lists, each joined
@@ -507,12 +640,12 @@ func planPluginFiles(root string, h host.Host, withHook bool) ([]pluginArtifact,
 
 		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
-		art, err := planPluginFile(path, kind, f.Kind)
+		art, existing, err := planPluginFile(path, kind, f.Kind)
 		if err != nil {
 			return nil, err
 		}
 
-		out = append(out, pluginArtifact{Artifact: art, renderKind: f.Kind})
+		out = append(out, pluginArtifact{Artifact: art, renderKind: f.Kind, existing: existing})
 	}
 
 	return out, nil
@@ -529,51 +662,83 @@ func planAgentFiles(root string, h host.Host) ([]pluginArtifact, error) {
 	for _, f := range files {
 		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
-		art, err := planPluginFile(path, KindAgent, f.Kind)
+		art, existing, err := planPluginFile(path, KindAgent, f.Kind)
 		if err != nil {
 			return nil, err
 		}
 
-		out = append(out, pluginArtifact{Artifact: art, renderKind: f.Kind})
+		out = append(out, pluginArtifact{Artifact: art, renderKind: f.Kind, existing: existing})
 	}
 
 	return out, nil
 }
 
-// planPluginFile decides one plugin file's own Artifact, mirroring
+// planSkillFiles plans every file h.Skills() lists, each joined under
+// root, in that same order — mirroring planPluginFiles and planAgentFiles,
+// but every entry is tagged KindSkill: unlike Agents, Skills is planned on
+// every claude-code install, with or without WithAgents.
+func planSkillFiles(root string, h host.Host) ([]pluginArtifact, error) {
+	files := h.Skills()
+	out := make([]pluginArtifact, 0, len(files))
+
+	for _, f := range files {
+		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
+
+		art, existing, err := planPluginFile(path, KindSkill, f.Kind)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, pluginArtifact{Artifact: art, renderKind: f.Kind, existing: existing})
+	}
+
+	return out, nil
+}
+
+// planPluginFile decides one plugin file's own Artifact and, for an
+// OriginOlder file, the bytes planning read (returned separately so
+// planPluginFiles can carry them on pluginArtifact.existing) — mirroring
 // planConfigRemoval's own Lstat-first shape: missing reports ActionCreated;
 // a path that exists but is not a regular file (a directory, a symlink)
 // reports ActionKept, detail "not a regular file", never followed; a
 // regular file whose bytes are artifact.Recognize's OriginCurrent for
-// renderKind reports ActionUnchanged; any other bytes report ActionKept,
-// detail "edited locally" — Init never rewrites a plugin file the way
+// renderKind reports ActionUnchanged; OriginOlder — an earlier release's
+// own render, Rule 6 — reports ActionMerged, detail "updated", the file's
+// own bytes returned alongside so apply can guard the rewrite against a
+// concurrent edit; any other bytes (OriginEdited) report ActionKept, detail
+// "edited locally" — Init never rewrites an edited plugin file the way
 // --force rewrites the config. An ENOTDIR Lstat — an ancestor component
 // exists as something other than a directory — is treated the same as
 // "does not exist yet": os.IsNotExist never matches it, but the path still
 // is not there, and the pre-write check (checkWritable) is what refuses on
 // that blocking ancestor, not planning.
-func planPluginFile(path string, kind Kind, renderKind artifact.Kind) (Artifact, error) {
+func planPluginFile(path string, kind Kind, renderKind artifact.Kind) (Artifact, []byte, error) {
 	info, err := os.Lstat(path)
 
 	switch {
 	case os.IsNotExist(err), errors.Is(err, syscall.ENOTDIR):
-		return Artifact{Kind: kind, Path: path, Action: ActionCreated}, nil
+		return Artifact{Kind: kind, Path: path, Action: ActionCreated}, nil, nil
 	case err != nil:
-		return Artifact{}, fmt.Errorf("setup: lstat %s: %w", path, err)
+		return Artifact{}, nil, fmt.Errorf("setup: lstat %s: %w", path, err)
 	case !info.Mode().IsRegular():
-		return Artifact{Kind: kind, Path: path, Action: ActionKept, Detail: "not a regular file"}, nil
+		return Artifact{Kind: kind, Path: path, Action: ActionKept, Detail: "not a regular file"}, nil, nil
 	}
 
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return Artifact{}, fmt.Errorf("setup: read %s: %w", path, err)
+		return Artifact{}, nil, fmt.Errorf("setup: read %s: %w", path, err)
 	}
 
-	if artifact.Recognize(renderKind, body) == artifact.OriginCurrent {
-		return Artifact{Kind: kind, Path: path, Action: ActionUnchanged}, nil
+	switch artifact.Recognize(renderKind, body) {
+	case artifact.OriginCurrent:
+		return Artifact{Kind: kind, Path: path, Action: ActionUnchanged}, nil, nil
+	case artifact.OriginOlder:
+		return Artifact{Kind: kind, Path: path, Action: ActionMerged, Detail: "updated"}, body, nil
+	case artifact.OriginEdited:
+		return Artifact{Kind: kind, Path: path, Action: ActionKept, Detail: "edited locally"}, nil, nil
+	default:
+		return Artifact{Kind: kind, Path: path, Action: ActionKept, Detail: "edited locally"}, nil, nil
 	}
-
-	return Artifact{Kind: kind, Path: path, Action: ActionKept, Detail: "edited locally"}, nil
 }
 
 // writePluginFile creates path's parent directories (0o755) and then

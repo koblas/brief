@@ -348,11 +348,12 @@ func Test_uninstall_rejects_an_unknown_host(t *testing.T) {
 
 // Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_directories
 // pins R6's own removal order and directory pruning: the CLAUDE.md block
-// first, then the plugin's four rows report hooks.json, finish skill,
-// start skill, manifest — the reverse of Init's own write order — then the
-// config last, every row ActionRemoved, and afterward ".claude/skills/brief/"
-// is gone while ".claude/skills/" and ".claude/" (the host's own
-// directories, never brief's to remove) still stand.
+// first, then the brief-workflow skill, then the plugin's four rows report
+// hooks.json, finish skill, start skill, manifest — the reverse of Init's
+// own write order — then the config last, every row ActionRemoved, and
+// afterward ".claude/skills/brief/" is gone while ".claude/skills/" and
+// ".claude/" (the host's own directories, never brief's to remove) still
+// stand.
 func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_directories(t *testing.T) {
 	wd := t.TempDir()
 	srv := setup.NewServer()
@@ -365,14 +366,15 @@ func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_di
 	paths := pluginFilePaths(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
 
-	require.Len(t, res.Artifacts, 6)
+	require.Len(t, res.Artifacts, 7)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindSnippet, Path: paths.ClaudeMD, Action: setup.ActionRemoved}, res.Artifacts[0])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindHook, Path: paths.Hooks, Action: setup.ActionRemoved}, res.Artifacts[1])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionRemoved}, res.Artifacts[2])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionRemoved}, res.Artifacts[3])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionRemoved}, res.Artifacts[4])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, res.Artifacts[5])
-	assert.Equal(t, []string{paths.ClaudeMD, paths.Hooks, paths.Finish, paths.Start, paths.Manifest, configPath}, res.Removed)
+	assert.Equal(t, setup.Artifact{Kind: setup.KindSkill, Path: paths.Skill, Action: setup.ActionRemoved}, res.Artifacts[1])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindHook, Path: paths.Hooks, Action: setup.ActionRemoved}, res.Artifacts[2])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionRemoved}, res.Artifacts[3])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionRemoved}, res.Artifacts[4])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionRemoved}, res.Artifacts[5])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, res.Artifacts[6])
+	assert.Equal(t, []string{paths.ClaudeMD, paths.Skill, paths.Hooks, paths.Finish, paths.Start, paths.Manifest, configPath}, res.Removed)
 
 	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
 	assert.True(t, os.IsNotExist(statErr))
@@ -450,8 +452,8 @@ func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_u
 // Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directory
 // pins the missing-file branch: hooks.json never existed (a --no-hook
 // init), so it plans no row and no error, and the remaining three plugin
-// files plus the CLAUDE.md block still remove cleanly with the plugin
-// directory pruned.
+// files plus the brief-workflow skill and the CLAUDE.md block still remove
+// cleanly with the plugin directory pruned.
 func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directory(t *testing.T) {
 	wd := t.TempDir()
 	srv := setup.NewServer()
@@ -461,7 +463,7 @@ func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directo
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 5)
+	require.Len(t, res.Artifacts, 6)
 	for _, a := range res.Artifacts {
 		assert.NotEqual(t, setup.KindHook, a.Kind)
 		assert.Equal(t, setup.ActionRemoved, a.Action)
@@ -614,6 +616,100 @@ func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
 			body, readErr := os.ReadFile(planner)
 			require.NoError(t, readErr)
 			assert.Equal(t, edited, body)
+		})
+	}
+}
+
+// olderPlannerBytesForUninstall, olderImplementerBytesForUninstall are the
+// pre-SCENARIO-02 planner and implementer renders, captured mechanically
+// (%q dump) before agents.go changed — copied here since setup_test cannot
+// import an unexported artifact fixture (see agents_test.go's own
+// olderPlannerBytes/olderImplementerBytes, this file's own package-level
+// duplicate to keep this test self-contained within its own table).
+const (
+	olderPlannerBytesForUninstall = "---\nname: planner\ndescription: Turn a feature's specification into ordered scenario " +
+		"plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's " +
+		"specification into ordered scenario plans: run `brief new step <feature>` for the next " +
+		"scenario, then fill its plan file. Never write production or test code.\n"
+	olderImplementerBytesForUninstall = "---\nname: implementer\ndescription: Implement a feature's next open step, from brief " +
+		"start through brief finish.\n---\n\nRun `brief start <feature>` and implement its next " +
+		"open step, working from its output rather than reading the specification or earlier steps " +
+		"whole. Close the step with `brief finish <feature> <step> --handoff <path> --state " +
+		"<path>`.\n"
+)
+
+// Test_uninstall_removes_an_older_agent_file_without_force pins Rule 6 at
+// Uninstall's own removal path: a planner or implementer holding the
+// pre-SCENARIO-02 bytes is removed without --force — ActionRemoved, no
+// detail, ForceRemovable false, gone from disk — the same "older is not
+// edited" rule planPluginRemoval must apply to every plugin Kind. The
+// control row is the same fixture actually edited by hand: kept without
+// --force, ForceRemovable true, bytes untouched.
+func Test_uninstall_removes_an_older_agent_file_without_force(t *testing.T) {
+	cases := []struct {
+		name               string
+		role               string
+		seedBytes          []byte
+		wantAction         setup.Action
+		wantDetail         string
+		wantForceRemovable bool
+		wantRemoved        bool
+	}{
+		{
+			name: "older planner is removed without force", role: "planner",
+			seedBytes:  []byte(olderPlannerBytesForUninstall),
+			wantAction: setup.ActionRemoved, wantDetail: "", wantForceRemovable: false, wantRemoved: true,
+		},
+		{
+			name: "older implementer is removed without force", role: "implementer",
+			seedBytes:  []byte(olderImplementerBytesForUninstall),
+			wantAction: setup.ActionRemoved, wantDetail: "", wantForceRemovable: false, wantRemoved: true,
+		},
+		{
+			name: "edited planner is kept without force", role: "planner",
+			seedBytes:  []byte("---\nname: planner\nedited: true\n---\n"),
+			wantAction: setup.ActionKept, wantDetail: "edited locally", wantForceRemovable: true, wantRemoved: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := t.TempDir()
+			srv := setup.NewServer()
+			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+			require.NoError(t, err)
+
+			paths := agentFilePaths(wd)
+			path := paths.Planner
+			if c.role == "implementer" {
+				path = paths.Implementer
+			}
+			require.NoError(t, os.WriteFile(path, c.seedBytes, 0o600))
+
+			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+			require.NoError(t, err)
+
+			var art setup.Artifact
+			for _, a := range res.Artifacts {
+				if a.Path == path {
+					art = a
+				}
+			}
+			assert.Equal(t, c.wantAction, art.Action)
+			assert.Equal(t, c.wantDetail, art.Detail)
+			assert.Equal(t, c.wantForceRemovable, art.ForceRemovable)
+
+			_, statErr := os.Stat(path)
+			if c.wantRemoved {
+				assert.True(t, os.IsNotExist(statErr))
+
+				return
+			}
+
+			require.NoError(t, statErr)
+			body, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			assert.Equal(t, c.seedBytes, body)
 		})
 	}
 }

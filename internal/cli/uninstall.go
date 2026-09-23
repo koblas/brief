@@ -16,11 +16,15 @@ const uninstallInvocation = "brief uninstall --host claude-code"
 // uninstallLong is "brief uninstall"'s help prose.
 var uninstallLong = `Removes what "brief init" installed: the ".brief.yaml" config file, and,
 by default (--host claude-code), the Claude Code plugin under
-".claude/skills/brief/" — every file this binary would have written
-(recognized by digest, never by decoding it) is removed; a file whose
-bytes were edited locally is kept and reported instead, unless --force.
+".claude/skills/brief/" and the "brief-workflow" skill under
+".claude/skills/brief-workflow/" — every file this binary would have
+written (recognized by digest, never by decoding it) is removed; a file
+whose bytes were edited locally is kept and reported instead, unless
+--force. It also removes "brief-workflow" from the "skills:" list of the
+planner and implementer agents bound in ".brief.yaml", repository files
+only, unless the skill file itself is kept.
 The feature root and everything under it are never removed, nor is
-".claude/" or ".claude/skills/" above the plugin's own directory.
+".claude/" or ".claude/skills/" above brief's own directories.
 --dry-run prints the same report and removes nothing.
 
 ` + jsonFieldsParagraph("host", "dry_run", "created", "modified", "removed", "artifacts")
@@ -41,8 +45,11 @@ const leftInPlaceTail = "; the feature root and its contents were left in place"
 // uninstallDocument is uninstall's --json success document: the common
 // header first, then the request's own host and dry_run, every path this
 // call removed (absolute, never nil, empty under --dry-run or when nothing
-// was installed), created and modified always empty (uninstall never
-// writes), then one row per artifact in setup.Result's own order.
+// was installed), created always empty (uninstall never creates a file),
+// modified naming every path this call rewrote in place rather than
+// deleted — the CLAUDE.md block's own strip that leaves the file
+// non-empty, and a bound agent's own "skills:" edit (Rule 8) — then one
+// row per artifact in setup.Result's own order.
 type uninstallDocument struct {
 	jsonHeader
 
@@ -149,8 +156,9 @@ func withHostSuffix(base, host string) string {
 // parsed away and must be empty. host is "" when --host was not given,
 // defaulted to setup.HostClaudeCode here: uninstall's own plan for
 // claude-code is a superset of none's, so an omitted --host removes
-// everything brief installed.
-func runUninstall(ctx context.Context, wd string, rest []string, host string, dryRun, force bool, out reporter) error {
+// everything brief installed. extraSetupOpts threads a test's own
+// setup.WithHomeDir override (withSetupOpts) to setup.NewServer.
+func runUninstall(ctx context.Context, wd string, rest []string, host string, dryRun, force bool, out reporter, extraSetupOpts ...setup.Option) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief uninstall: too many arguments; run '%s'", uninstallInvocation))
 	}
@@ -159,7 +167,7 @@ func runUninstall(ctx context.Context, wd string, rest []string, host string, dr
 		host = setup.HostClaudeCode
 	}
 
-	srv := setup.NewServer()
+	srv := setup.NewServer(extraSetupOpts...)
 
 	res, err := srv.Uninstall(ctx, wd, setup.UninstallRequest{Host: host, DryRun: dryRun, Force: force})
 	if err != nil {

@@ -18,6 +18,13 @@ var ErrUnknownHost = errors.New("unknown host")
 // usage error rather than as a write refusal.
 var ErrAgentsNeedHost = errors.New("--with-agents requires --host claude-code")
 
+// ErrEditAgentsNeedHost is returned when InitRequest.EditAgents is set but
+// the resolved Host is not HostClaudeCode: --edit-agents only ever edits a
+// claude-code-bound agent file. Like ErrAgentsNeedHost it is a bare
+// sentinel, not a *RefusalError — an invocation defect cli reports as a
+// usage error rather than as a write refusal.
+var ErrEditAgentsNeedHost = errors.New("--edit-agents requires --host claude-code")
+
 // ErrNotADirectory is returned when the configured feature root already
 // exists as something other than a directory. It travels inside a
 // *RefusalError naming that path.

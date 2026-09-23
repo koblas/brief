@@ -3,11 +3,12 @@ package artifact
 // White-box package: classify is digestsFor's own unexported per-Kind
 // decision extracted for combinatorial reasons — the current/older/edited
 // precedence and the in-both-lists rule are impractical to drive through
-// the public Recognize surface without a real second digest in every Kind's
-// own compiled-in list, which does not exist yet (STATE.md: every
-// older…Digests list ships empty). This file drives the extracted logic
-// directly with a synthetic older list; snippet_test.go and artifact_test.go
-// cover the public surface.
+// the public Recognize surface for a Kind whose older…Digests list is still
+// empty (every Kind but KindAgentPlanner/KindAgentImplementer today; those
+// two are covered directly, through Recognize, by agents_test.go's
+// Test_previous_release_agent_renders_classify_as_older). This file drives
+// the extracted logic directly with a synthetic older list; snippet_test.go
+// and artifact_test.go cover the public surface.
 
 import (
 	"crypto/sha256"

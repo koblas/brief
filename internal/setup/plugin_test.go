@@ -14,10 +14,11 @@ import (
 
 // pluginPaths names the four claude-code plugin files' absolute paths
 // under one root, in R11's own stdout order: manifest, start skill,
-// finish skill, hook wiring, plus the CLAUDE.md instruction block's own
-// default (root) location.
+// finish skill, hook wiring, the brief-workflow skill (outside the plugin
+// directory), plus the CLAUDE.md instruction block's own default (root)
+// location.
 type pluginPaths struct {
-	Manifest, Start, Finish, Hooks, ClaudeMD string
+	Manifest, Start, Finish, Hooks, Skill, ClaudeMD string
 }
 
 // pluginFilePaths returns root's own pluginPaths.
@@ -29,6 +30,7 @@ func pluginFilePaths(root string) pluginPaths {
 		Start:    filepath.Join(base, "skills", "start", "SKILL.md"),
 		Finish:   filepath.Join(base, "skills", "finish", "SKILL.md"),
 		Hooks:    filepath.Join(base, "hooks", "hooks.json"),
+		Skill:    skillFilePath(root),
 		ClaudeMD: filepath.Join(root, "CLAUDE.md"),
 	}
 }
@@ -53,16 +55,17 @@ func Test_init_for_claude_code_writes_the_plugin_after_the_feature_root_and_befo
 	featureRoot := filepath.Join(wd, "docs", "specifications")
 	paths := pluginFilePaths(wd)
 
-	require.Len(t, res.Artifacts, 7)
+	require.Len(t, res.Artifacts, 8)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated}, res.Artifacts[0])
 	assert.Equal(t, setup.Artifact{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated}, res.Artifacts[1])
 	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionCreated}, res.Artifacts[2])
 	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionCreated}, res.Artifacts[3])
 	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionCreated}, res.Artifacts[4])
 	assert.Equal(t, setup.Artifact{Kind: setup.KindHook, Path: paths.Hooks, Action: setup.ActionCreated}, res.Artifacts[5])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindSnippet, Path: paths.ClaudeMD, Action: setup.ActionCreated}, res.Artifacts[6])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindSkill, Path: paths.Skill, Action: setup.ActionCreated}, res.Artifacts[6])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindSnippet, Path: paths.ClaudeMD, Action: setup.ActionCreated}, res.Artifacts[7])
 
-	assert.Equal(t, []string{featureRoot, paths.Manifest, paths.Start, paths.Finish, paths.Hooks, paths.ClaudeMD, configPath}, res.Created)
+	assert.Equal(t, []string{featureRoot, paths.Manifest, paths.Start, paths.Finish, paths.Hooks, paths.Skill, paths.ClaudeMD, configPath}, res.Created)
 
 	body, readErr := os.ReadFile(paths.Manifest)
 	require.NoError(t, readErr)
@@ -79,6 +82,10 @@ func Test_init_for_claude_code_writes_the_plugin_after_the_feature_root_and_befo
 	body, readErr = os.ReadFile(paths.Hooks)
 	require.NoError(t, readErr)
 	assert.Equal(t, artifact.ClaudeHooks(), body)
+
+	body, readErr = os.ReadFile(paths.Skill)
+	require.NoError(t, readErr)
+	assert.Equal(t, artifact.SkillWorkflow(), body)
 }
 
 // Test_init_from_a_subdirectory_installs_the_plugin_at_the_config_root pins
@@ -109,10 +116,10 @@ func Test_init_from_a_subdirectory_installs_the_plugin_at_the_config_root(t *tes
 
 // Test_init_with_no_hook_installs_everything_but_the_hook pins NoHook: the
 // control arm is Test_init_for_claude_code_writes_the_plugin_after_the_feature_root_and_before_the_config's
-// own seven-row run; with NoHook set, the manifest, both skills and the
-// CLAUDE.md block still install identically but hooks.json is planned,
-// written, or reported not at all — R5's block is never a host.File, so
-// --no-hook cannot affect it.
+// own eight-row run; with NoHook set, the manifest, both skills, the
+// brief-workflow skill and the CLAUDE.md block still install identically
+// but hooks.json is planned, written, or reported not at all — R5's block
+// is never a host.File, so --no-hook cannot affect it.
 func Test_init_with_no_hook_installs_everything_but_the_hook(t *testing.T) {
 	wd := t.TempDir()
 	srv := newServer(t)
@@ -120,13 +127,13 @@ func Test_init_with_no_hook_installs_everything_but_the_hook(t *testing.T) {
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, NoHook: true})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 6)
+	require.Len(t, res.Artifacts, 7)
 
 	kinds := make([]setup.Kind, len(res.Artifacts))
 	for i, a := range res.Artifacts {
 		kinds[i] = a.Kind
 	}
-	assert.Equal(t, []setup.Kind{setup.KindConfig, setup.KindFeatureRoot, setup.KindPlugin, setup.KindPlugin, setup.KindPlugin, setup.KindSnippet}, kinds)
+	assert.Equal(t, []setup.Kind{setup.KindConfig, setup.KindFeatureRoot, setup.KindPlugin, setup.KindPlugin, setup.KindPlugin, setup.KindSkill, setup.KindSnippet}, kinds)
 
 	hooks := pluginFilePaths(wd).Hooks
 	_, statErr := os.Stat(hooks)
@@ -135,9 +142,9 @@ func Test_init_with_no_hook_installs_everything_but_the_hook(t *testing.T) {
 }
 
 // Test_rerunning_init_for_claude_code_reports_every_plugin_file_unchanged
-// pins convergence (R3) for the plugin and the CLAUDE.md block: a second,
-// identical run reports every one of the seven artifacts ActionUnchanged
-// and writes nothing further.
+// pins convergence (R3) for the plugin, the skill and the CLAUDE.md block:
+// a second, identical run reports every one of the eight artifacts
+// ActionUnchanged and writes nothing further.
 func Test_rerunning_init_for_claude_code_reports_every_plugin_file_unchanged(t *testing.T) {
 	wd := t.TempDir()
 	srv := newServer(t)
@@ -148,7 +155,7 @@ func Test_rerunning_init_for_claude_code_reports_every_plugin_file_unchanged(t *
 
 	require.NoError(t, err)
 	assert.Empty(t, res.Created)
-	require.Len(t, res.Artifacts, 7)
+	require.Len(t, res.Artifacts, 8)
 	for _, a := range res.Artifacts {
 		assert.Equal(t, setup.ActionUnchanged, a.Action, "artifact %s must report unchanged", a.Path)
 	}
@@ -176,7 +183,7 @@ func Test_init_keeps_an_edited_plugin_file_even_under_force(t *testing.T) {
 
 	require.NoError(t, err)
 
-	require.Len(t, res.Artifacts, 7)
+	require.Len(t, res.Artifacts, 8)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated, Detail: "rewritten from defaults"}, res.Artifacts[0])
 	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: start, Action: setup.ActionKept, Detail: "edited locally"}, res.Artifacts[3])
 
@@ -203,7 +210,7 @@ func Test_init_keeps_a_plugin_path_that_is_not_a_regular_file(t *testing.T) {
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 7)
+	require.Len(t, res.Artifacts, 8)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: manifest, Action: setup.ActionKept, Detail: "not a regular file"}, res.Artifacts[2])
 	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: finish, Action: setup.ActionKept, Detail: "not a regular file"}, res.Artifacts[4])
 
@@ -213,7 +220,7 @@ func Test_init_keeps_a_plugin_path_that_is_not_a_regular_file(t *testing.T) {
 }
 
 // Test_init_dry_run_for_claude_code_writes_nothing pins R9 for the plugin:
-// the same seven rows a real run would report, and neither ".claude/" nor
+// the same eight rows a real run would report, and neither ".claude/" nor
 // "CLAUDE.md" present afterward.
 func Test_init_dry_run_for_claude_code_writes_nothing(t *testing.T) {
 	wd := t.TempDir()
@@ -222,7 +229,7 @@ func Test_init_dry_run_for_claude_code_writes_nothing(t *testing.T) {
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, DryRun: true})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 7)
+	require.Len(t, res.Artifacts, 8)
 	assert.Empty(t, res.Created)
 
 	_, statErr := os.Stat(filepath.Join(wd, ".claude"))

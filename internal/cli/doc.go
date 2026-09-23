@@ -34,8 +34,8 @@
 // "expected one of:" list while giving it a root-help row and a
 // "brief help completion" topic.
 //
-// "brief init [--host <name>] [--no-hook] [--with-agents] [--dry-run |
-// --print] [--force]" installs internal/setup's own config file and
+// "brief init [--host <name>] [--no-hook] [--with-agents] [--edit-agents]
+// [--dry-run | --print] [--force]" installs internal/setup's own config file and
 // feature root, converging on a second run; its refusal — a
 // *setup.RefusalError, checked ahead of a bare *config.InvalidConfigError
 // so its own "run 'brief init --force'" fix is never lost to the generic

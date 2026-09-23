@@ -77,9 +77,11 @@ func Test_doctor_prints_one_row_per_check_and_exits_0_in_a_healthy_repo(t *testi
 		"OK  env-path  self-brief  matches the running binary\n" +
 		"SKIP  host-plugin  .claude/skills/brief  not installed; fix: run 'brief init --host claude-code'\n" +
 		"SKIP  host-hook  .claude/skills/brief/hooks/hooks.json  not installed; fix: run 'brief init --host claude-code'\n" +
+		"SKIP  host-skill  .claude/skills/brief-workflow/SKILL.md  not installed; fix: run 'brief init --host claude-code'\n" +
 		"SKIP  host-snippet  CLAUDE.md  not installed; fix: run 'brief init --host claude-code'\n" +
 		"SKIP  host-agents  .claude/skills/brief/agents  not installed; fix: run 'brief init --with-agents'\n" +
-		"SKIP  roles  .brief.yaml  no roles bound; fix: run 'brief init --with-agents'\n"
+		"SKIP  roles  .brief.yaml  no roles bound; fix: run 'brief init --with-agents'\n" +
+		"SKIP  roles-skill  .brief.yaml  no bound planner or implementer brief can check\n"
 	assert.Equal(t, want, stdout.String())
 	assert.Equal(t, "brief doctor: setup ok; run 'brief check' for feature content\n", stderr.String())
 }
@@ -171,9 +173,9 @@ func Test_doctor_json_reports_absolute_paths_null_fix_and_counts(t *testing.T) {
 	assert.True(t, doc.OK)
 	assert.Equal(t, 0, doc.ExitCode)
 	assert.Equal(t, 7, doc.Counts.OK)
-	assert.Equal(t, 5, doc.Counts.Skip)
+	assert.Equal(t, 7, doc.Counts.Skip)
 	assert.Equal(t, 0, doc.Counts.Error)
-	assert.Len(t, doc.Checks, 12)
+	assert.Len(t, doc.Checks, 14)
 
 	configFile := doc.Checks[0]
 	assert.Equal(t, "config-file", configFile.ID)
@@ -199,9 +201,9 @@ func Test_doctor_json_writes_zero_stderr_bytes(t *testing.T) {
 
 // newFullyInstalledDoctorFixture builds newDoctorFixture's own baseline
 // plus a complete Claude Code integration — every Plugin(true) file, the
-// three role agents, a role-bound ".brief.yaml" and a root CLAUDE.md
-// snippet for the default feature directory — written from
-// internal/platform/artifact renders directly, mirroring
+// three role agents, the brief-workflow skill, a role-bound ".brief.yaml"
+// and a root CLAUDE.md snippet for the default feature directory —
+// written from internal/platform/artifact renders directly, mirroring
 // internal/doctor's own fixture.
 func newFullyInstalledDoctorFixture(t *testing.T) (string, string) {
 	t.Helper()
@@ -216,7 +218,7 @@ func newFullyInstalledDoctorFixture(t *testing.T) (string, string) {
 	h, ok := host.Lookup(host.ClaudeCode)
 	require.True(t, ok)
 
-	for _, f := range append(h.Plugin(true), h.Agents()...) {
+	for _, f := range append(append(h.Plugin(true), h.Agents()...), h.Skills()...) {
 		path := filepath.Join(wd, filepath.FromSlash(f.RelPath))
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, artifact.Render(f.Kind), 0o600))
@@ -243,6 +245,48 @@ func Test_doctor_reports_every_row_ok_when_fully_installed(t *testing.T) {
 	assert.NotContains(t, stdout.String(), "WARN")
 	assert.NotContains(t, stdout.String(), "SKIP")
 	assert.Equal(t, "brief doctor: setup ok; run 'brief check' for feature content\n", stderr.String())
+}
+
+// Test_doctor_reports_a_non_regular_host_skill_as_an_error_and_exits_1
+// pins host-skill's own ERROR arm at the CLI boundary: a SKILL.md replaced
+// by a directory is the one new ERROR row Rule 7 grants host-skill, and
+// exits 1.
+func Test_doctor_reports_a_non_regular_host_skill_as_an_error_and_exits_1(t *testing.T) {
+	wd, self := newFullyInstalledDoctorFixture(t)
+	skillPath := filepath.Join(wd, filepath.FromSlash(host.WorkflowSkillDir), "SKILL.md")
+	require.NoError(t, os.RemoveAll(skillPath))
+	require.NoError(t, os.MkdirAll(skillPath, 0o755))
+
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), wd, []string{"doctor"}, nil, &stdout, &stderr, noBuildInfo, doctorFakeSeams(t, self)...)
+
+	require.Error(t, err)
+	assert.Equal(t, 1, ExitCode(err))
+	assert.Contains(t, stdout.String(), "ERROR  host-skill  .claude/skills/brief-workflow/SKILL.md  not a regular file; fix: remove .claude/skills/brief-workflow/SKILL.md, then run 'brief init'\n")
+	assert.Equal(t, "brief doctor: 1 ERROR, 0 WARN; this checks setup only, run 'brief check' for feature content\n", stderr.String())
+}
+
+// Test_doctor_reports_roles_skill_ok_after_init_with_agents pins
+// roles-skill at the CLI boundary (S05): a repository set up end to end by
+// "brief init --host claude-code --with-agents" (planner/implementer bound
+// to brief's own rendered agents, which carry "skills: [brief-workflow]")
+// reports the exact roles-skill row, and doctor still exits 0.
+func Test_doctor_reports_roles_skill_ok_after_init_with_agents(t *testing.T) {
+	wd := t.TempDir()
+	var initStdout, initStderr bytes.Buffer
+
+	initErr := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &initStdout, &initStderr, noBuildInfo, emptyHomeSeam(t))
+	require.NoError(t, initErr)
+
+	self := filepath.Join(wd, "self-brief")
+	require.NoError(t, os.WriteFile(self, []byte("self"), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), wd, []string{"doctor"}, nil, &stdout, &stderr, noBuildInfo, doctorFakeSeams(t, self)...)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, ExitCode(err))
+	assert.Contains(t, stdout.String(), "OK  roles-skill  .brief.yaml  planner, implementer preload brief-workflow\n")
 }
 
 // Test_doctor_reports_env_path_error_when_not_on_path_and_the_plugin_is_installed

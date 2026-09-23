@@ -57,12 +57,30 @@ Only job: write implementation plan for given scenario. You write no code.
 
 ## Plan format
 
-Simple ordered checklist — no tables, no prose API design, no implementation details (no
-method bodies, no parameter values, no assertions).
+A checklist grouped into four phases — no tables, no prose API design, no implementation
+details (no method bodies, no parameter values, no assertions). The developer runs tests at
+phase boundaries, not per step, so **group by phase, never by file**: a plan that alternates
+red/green file by file forces a build-and-test round per pair.
 
-Each step is: `- [ ] Step N: \`file_or_symbol\` — one-line label (red / green / new / update)`
+- **Red** — every new or changed behaviour test, across all files. Each item names the test
+  and, in a few words, the reason it will fail (the assertion, not "does not compile").
+- **Green** — every production edit, across packages. Each item names the file/symbol.
+- **Sweep** — non-TDD chores, marked `(sweep)`: doc comments, exact-count assertion bumps,
+  and a single "fix what `go build ./... && golangci-lint run ./...` reports" item instead
+  of naming each `exhaustive` switch or interface implementer separately. The toolchain lists
+  those; the plan does not need to.
+- **Verify** — one item: full verification per `.claude/rules/agent-briefs.md`, plus any
+  mutation check, naming the guard and the test it must redden. Name only the guards that
+  matter; the developer mutates nothing the plan does not name.
+
+Each item is: `- [ ] Step N: \`file_or_symbol\` — one-line label`
 
 ```markdown
+---
+id: SCENARIO-01
+status: open
+---
+
 # SCENARIO-01: Owner withdraws from an existing account
 
 ## Scenario
@@ -74,30 +92,30 @@ Then the account balance is 150
 
 ## Implementation Plan
 
-- [ ] Step 1: `account_test.go` `Test_withdraw_reduces_the_balance` — Server-method test against the memory Store (red)
-- [ ] Step 2: `store.go` — add the persistence method the scenario needs to the `Store` interface (new)
-- [ ] Step 3: `memory.go` — implement the new method on the in-memory adapter (new)
-- [ ] Step 4: `handler.go` `(*Server).Withdraw` — business logic + invariant (green)
-- [ ] Step 5: `file_store.go` — implement the new method on the production adapter (update)
-- [ ] Step 6: `store_contract_test.go` — exercise the new method against both adapters (new)
-- [ ] Step 7: all tests green → mark SCENARIO-01 done in specification.md
+### Red
+- [ ] Step 1: `account_test.go` `Test_withdraw_reduces_the_balance` — Server-method test against the memory Store; fails: balance unchanged
+- [ ] Step 2: `store_contract_test.go` — exercise the new Store method against both adapters; fails: method missing on stub
+
+### Green
+- [ ] Step 3: `store.go` — add the persistence method to the `Store` interface
+- [ ] Step 4: `memory.go`, `file_store.go` — implement it on both adapters
+- [ ] Step 5: `handler.go` `(*Server).Withdraw` — business logic + invariant
+
+### Sweep
+- [ ] Step 6: fix what `go build ./... && golangci-lint run ./...` reports (sweep)
+- [ ] Step 7: `doc.go` — document the new invariant (sweep)
+
+### Verify
+- [ ] Step 8: full verification; mutate the invariant guard in `Withdraw` → `Test_withdraw_refuses_an_overdraft` goes red
 ```
 
-For a scenario that adds a command surface, the early steps are the command slice instead of
-a Store method, e.g.:
+For a scenario that adds a command surface, Red is the command-slice tests through `cli.Run`,
+and Green is the subcommand in `internal/cli`, the feature-package decision func, the output
+renderer and the `cmd/brief` wiring — together, in one phase.
 
-```markdown
-- [ ] Step 1: `run_test.go` `Test_returns_usage_error_when_the_path_is_missing` — command slice test through `cli.Run` (red)
-- [ ] Step 2: `internal/cli/summarize.go` — add the subcommand + its flags, delegating to the feature package (new)
-- [ ] Step 3: `internal/summarize/summarize.go` — pure decision func (green)
-- [ ] Step 4: `internal/cli/output.go` — render the result to the passed `io.Writer` (green)
-- [ ] Step 5: `cmd/brief/main.go` — wire the new dep via a `WithX` option and map its error to an exit code (update)
-- [ ] Step 6: all tests green → mark SCENARIO-XX done in specification.md
-```
-
-File starts with scenario ID as title, includes Gherkin scenario for reference, then the
-checklist. Only steps relevant to the scenario; skip anything already existing that needs no
-change.
+File starts with frontmatter (see `.claude/rules/agent-briefs.md`), then the scenario ID as
+title, the Gherkin scenario for reference, then the checklist. Only steps relevant to the
+scenario; skip anything already existing that needs no change.
 
 ## Handoff section — mandatory, last section of every plan
 

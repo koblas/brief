@@ -54,12 +54,24 @@ All Go commands run from the repo root.
    costs to settle now. A string the section does not cover, and that you cannot derive from
    a neighbouring command, is a question for the caller, not a blank to fill in silently.
 2. Read `docs/specifications/<feature-slug>/<scenario-id>.md` for your checklist.
-3. For each unchecked step, run one TDD cycle:
-   - Write failing test (RED).
-   - Write production code to make it green (GREEN).
-   - Refactor if useful; tests stay green (REFACTOR).
-   - Mark step `- [x]` in scenario plan file.
-4. All steps checked → run full test suite for affected module, confirm green.
+3. Execute the plan **phase by phase, not step by step**. TDD's unit is the scenario: every
+   test exists and is red before any production code for it is written. Run tests at phase
+   boundaries, not after each step.
+   - **Red** — write every new or changed test the plan lists, across all files, in one pass.
+     Run the targeted packages once. A first-pass compile failure because a symbol does not
+     exist yet is expected; add the minimal stub (signature, zero-value body) and re-run until
+     every new test fails **at its assertion, for the reason the plan predicts**. Read each
+     failure once. A compile cascade is not a red; an unexpected pass is a finding — say so.
+   - **Green** — make every production edit the plan lists, across packages, in one pass. Use
+     the narrow loop (`go test ./<pkg>/ -run '<pattern>'`) until the Red tests pass.
+   - **Sweep** — run `go build ./... && golangci-lint run ./...` once and fix everything it
+     reports (missing `exhaustive` cases, new interface implementers), then the plan's
+     non-TDD items: doc comments, exact-count assertion bumps. Sweep items get no red/green
+     cycle of their own.
+   - **Verify** — the full suite once, per `.claude/rules/agent-briefs.md` *Verification*.
+   - Tick each phase's items `- [x]` in one edit when that phase ends, not one edit per item.
+   - Mutation-verify **only the guards the plan names**. Do not add mutation checks of your own.
+4. All phases ticked and Verify green → continue.
 5. Mark scenario `- [x]` in `## BDD Acceptance Progress` of
    `docs/specifications/<feature-slug>/specification.md`.
 6. **Rewrite `docs/specifications/<feature-slug>/STATE.md`** — see below. Do this last,
@@ -194,11 +206,11 @@ consumer boundary verified (per finding), skipped-with-reason (list), blocked (l
 
 ## Notes
 
-- Plan lists artifacts in architect's recommended order. TDD still dictates micro-order: about
-  to create a class that has a corresponding test in plan → write test first. Plan malformed on
-  this point → fix order as you go.
-- RED may mean "compile-fails" while dependencies are introduced, not only "runnable but
-  failing". Both count as red.
+- Plan is grouped into Red / Green / Sweep / Verify phases. An older plan written as a flat
+  per-file list → group its steps into those phases yourself before starting, and say so in
+  your report.
+- "Compile-fails" is a first pass only. A test counts as red once it compiles against a stub
+  and fails at its own assertion.
 - Step that cannot go green after reasonable effort → stop and report. Never bypass tests or
   mark incomplete work done.
 - Project-wide code rules (dependency rule, functional-options DI, Store + adapters, thin

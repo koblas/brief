@@ -3,6 +3,7 @@ package setup_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/artifact"
@@ -30,12 +31,12 @@ func agentFilePaths(root string) agentPaths {
 }
 
 // Test_init_with_agents_writes_three_agents_and_a_config_binding_them pins
-// the fresh-repository happy path: ten rows in order (config, feature
-// root, the four plugin files, the three agents, then the snippet), each
-// agent ActionCreated with KindAgent, the config's own bytes equal
-// artifact.ConfigFileWithRoles(), the three agent files' own bytes equal
-// their own render, and RolesToAdd is empty — the config this run wrote
-// already binds every role.
+// the fresh-repository happy path: eleven rows in order (config, feature
+// root, the four plugin files, the brief-workflow skill, the three agents,
+// then the snippet), each agent ActionCreated with KindAgent, the config's
+// own bytes equal artifact.ConfigFileWithRoles(), the three agent files'
+// own bytes equal their own render, and RolesToAdd is empty — the config
+// this run wrote already binds every role.
 func Test_init_with_agents_writes_three_agents_and_a_config_binding_them(t *testing.T) {
 	wd := t.TempDir()
 	srv := newServer(t)
@@ -43,7 +44,7 @@ func Test_init_with_agents_writes_three_agents_and_a_config_binding_them(t *test
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 10)
+	require.Len(t, res.Artifacts, 11)
 
 	kinds := make([]setup.Kind, len(res.Artifacts))
 	for i, a := range res.Artifacts {
@@ -52,16 +53,17 @@ func Test_init_with_agents_writes_three_agents_and_a_config_binding_them(t *test
 	assert.Equal(t, []setup.Kind{
 		setup.KindConfig, setup.KindFeatureRoot,
 		setup.KindPlugin, setup.KindPlugin, setup.KindPlugin, setup.KindHook,
+		setup.KindSkill,
 		setup.KindAgent, setup.KindAgent, setup.KindAgent,
 		setup.KindSnippet,
 	}, kinds)
 
 	paths := agentFilePaths(wd)
-	assert.Equal(t, paths.Planner, res.Artifacts[6].Path)
-	assert.Equal(t, paths.Implementer, res.Artifacts[7].Path)
-	assert.Equal(t, paths.Reviewer, res.Artifacts[8].Path)
+	assert.Equal(t, paths.Planner, res.Artifacts[7].Path)
+	assert.Equal(t, paths.Implementer, res.Artifacts[8].Path)
+	assert.Equal(t, paths.Reviewer, res.Artifacts[9].Path)
 
-	for _, i := range []int{6, 7, 8} {
+	for _, i := range []int{7, 8, 9} {
 		assert.Equalf(t, setup.ActionCreated, res.Artifacts[i].Action, "artifact %d must be created", i)
 	}
 
@@ -86,7 +88,7 @@ func Test_init_with_agents_writes_three_agents_and_a_config_binding_them(t *test
 
 // Test_rerunning_init_with_agents_reports_every_agent_unchanged pins R3's
 // convergence for the three agent files: a second, identical run reports
-// every one of the ten artifacts ActionUnchanged and writes nothing
+// every one of the eleven artifacts ActionUnchanged and writes nothing
 // further.
 func Test_rerunning_init_with_agents_reports_every_agent_unchanged(t *testing.T) {
 	wd := t.TempDir()
@@ -98,7 +100,7 @@ func Test_rerunning_init_with_agents_reports_every_agent_unchanged(t *testing.T)
 
 	require.NoError(t, err)
 	assert.Empty(t, res.Created)
-	require.Len(t, res.Artifacts, 10)
+	require.Len(t, res.Artifacts, 11)
 	for _, a := range res.Artifacts {
 		assert.Equalf(t, setup.ActionUnchanged, a.Action, "artifact %s must report unchanged", a.Path)
 	}
@@ -335,8 +337,175 @@ func Test_init_with_agents_for_host_none_refuses_and_writes_nothing(t *testing.T
 	assert.Empty(t, entries)
 }
 
+// olderPlannerBytes, olderImplementerBytes are the pre-SCENARIO-02 planner
+// and implementer renders, captured mechanically (%q dump) before agents.go
+// changed — the same literal artifact's own agents_test.go pins against
+// Recognize, copied here since setup_test cannot import an unexported
+// artifact fixture.
+const (
+	olderPlannerBytes     = "---\nname: planner\ndescription: Turn a feature's specification into ordered scenario plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's specification into ordered scenario plans: run `brief new step <feature>` for the next scenario, then fill its plan file. Never write production or test code.\n"
+	olderImplementerBytes = "---\nname: implementer\ndescription: Implement a feature's next open step, from brief start through brief finish.\n---\n\nRun `brief start <feature>` and implement its next open step, working from its output rather than reading the specification or earlier steps whole. Close the step with `brief finish <feature> <step> --handoff <path> --state <path>`.\n"
+)
+
+// Test_init_with_agents_upgrades_an_older_agent_file pins Rule 6 at Init's
+// own write path: a planner or implementer file holding the pre-SCENARIO-02
+// bytes is upgraded — ActionMerged, detail "updated", bytes rewritten to
+// today's own ruled render, path in Result.Modified — the generic
+// OriginOlder branch planPluginFile/apply share with every plugin Kind.
+// The control rows pin the two branches that must NOT move: an edited file
+// stays ActionKept "edited locally", untouched, and today's own current
+// render stays ActionUnchanged, untouched.
+func Test_init_with_agents_upgrades_an_older_agent_file(t *testing.T) {
+	cases := []struct {
+		name         string
+		role         string
+		seedBytes    []byte
+		wantAction   setup.Action
+		wantDetail   string
+		wantBytes    []byte
+		wantModified bool
+	}{
+		{
+			name: "older planner is merged and updated", role: "planner",
+			seedBytes:  []byte(olderPlannerBytes),
+			wantAction: setup.ActionMerged, wantDetail: "updated",
+			wantBytes: artifact.AgentPlanner(), wantModified: true,
+		},
+		{
+			name: "older implementer is merged and updated", role: "implementer",
+			seedBytes:  []byte(olderImplementerBytes),
+			wantAction: setup.ActionMerged, wantDetail: "updated",
+			wantBytes: artifact.AgentImplementer(), wantModified: true,
+		},
+		{
+			name: "edited planner stays kept", role: "planner",
+			seedBytes:  []byte("---\nname: planner\nedited: true\n---\n"),
+			wantAction: setup.ActionKept, wantDetail: "edited locally",
+			wantBytes: []byte("---\nname: planner\nedited: true\n---\n"), wantModified: false,
+		},
+		{
+			name: "current implementer stays unchanged", role: "implementer",
+			seedBytes:  artifact.AgentImplementer(),
+			wantAction: setup.ActionUnchanged, wantDetail: "",
+			wantBytes: artifact.AgentImplementer(), wantModified: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := t.TempDir()
+			srv := newServer(t)
+			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+			require.NoError(t, err)
+
+			paths := agentFilePaths(wd)
+
+			path := paths.Planner
+			if c.role == "implementer" {
+				path = paths.Implementer
+			}
+			require.NoError(t, os.WriteFile(path, c.seedBytes, 0o600))
+
+			res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+			require.NoError(t, err)
+
+			var art setup.Artifact
+			for _, a := range res.Artifacts {
+				if a.Path == path {
+					art = a
+				}
+			}
+			assert.Equal(t, c.wantAction, art.Action)
+			assert.Equal(t, c.wantDetail, art.Detail)
+			assert.Equal(t, c.wantModified, slices.Contains(res.Modified, path))
+
+			body, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			assert.Equal(t, c.wantBytes, body)
+		})
+	}
+}
+
+// Test_init_with_agents_dry_run_and_print_show_an_older_agent_upgrade pins
+// R9 for an ActionMerged agent row: --dry-run reports the merged row and
+// leaves the file byte-identical to the older bytes it seeded; --print
+// emits a PrintMerge PrintArtifact carrying today's own full render as its
+// Body, mirroring the snippet's own bare-block precedent, and also writes
+// nothing.
+func Test_init_with_agents_dry_run_and_print_show_an_older_agent_upgrade(t *testing.T) {
+	wd := t.TempDir()
+	srv := newServer(t)
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+	require.NoError(t, err)
+
+	planner := agentFilePaths(wd).Planner
+	require.NoError(t, os.WriteFile(planner, []byte(olderPlannerBytes), 0o600))
+
+	dryRes, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true, DryRun: true})
+	require.NoError(t, err)
+
+	var dryArt setup.Artifact
+	for _, a := range dryRes.Artifacts {
+		if a.Path == planner {
+			dryArt = a
+		}
+	}
+	assert.Equal(t, setup.ActionMerged, dryArt.Action)
+	assert.Equal(t, "updated", dryArt.Detail)
+
+	body, readErr := os.ReadFile(planner)
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte(olderPlannerBytes), body)
+
+	printRes, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true, Print: true})
+	require.NoError(t, err)
+
+	var printArt setup.PrintArtifact
+	var found bool
+	for _, p := range printRes.Print {
+		if p.Path == planner {
+			printArt = p
+			found = true
+		}
+	}
+	require.True(t, found, "planner.md must appear in Result.Print")
+	assert.Equal(t, setup.PrintMerge, printArt.Action)
+	assert.Equal(t, string(artifact.AgentPlanner()), printArt.Body)
+
+	body, readErr = os.ReadFile(planner)
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte(olderPlannerBytes), body)
+}
+
+// Test_init_without_agents_leaves_an_older_agent_file_alone pins the same
+// "no flag, no plan, no row" rule this file already pins for an
+// unrecognized agent file: a planner holding the pre-SCENARIO-02 bytes is
+// never read or rewritten by a plain "init --host claude-code" (no
+// --with-agents) — no KindAgent row at all — and the file on disk stays
+// byte-identical.
+func Test_init_without_agents_leaves_an_older_agent_file_alone(t *testing.T) {
+	wd := t.TempDir()
+	srv := newServer(t)
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
+	require.NoError(t, err)
+
+	planner := agentFilePaths(wd).Planner
+	require.NoError(t, os.WriteFile(planner, []byte(olderPlannerBytes), 0o600))
+
+	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
+	require.NoError(t, err)
+
+	for _, a := range res.Artifacts {
+		assert.NotEqual(t, setup.KindAgent, a.Kind)
+	}
+
+	body, readErr := os.ReadFile(planner)
+	require.NoError(t, readErr)
+	assert.Equal(t, []byte(olderPlannerBytes), body)
+}
+
 // Test_init_with_agents_dry_run_writes_nothing_but_reports_roles_to_add
-// pins R9 for --with-agents: the same ten rows a real run would report,
+// pins R9 for --with-agents: the same eleven rows a real run would report,
 // RolesToAdd still populated against the pre-existing config the fixture
 // seeds, and nothing written to disk.
 func Test_init_with_agents_dry_run_writes_nothing_but_reports_roles_to_add(t *testing.T) {
@@ -349,7 +518,7 @@ func Test_init_with_agents_dry_run_writes_nothing_but_reports_roles_to_add(t *te
 
 	require.NoError(t, err)
 	assert.True(t, res.DryRun)
-	require.Len(t, res.Artifacts, 10)
+	require.Len(t, res.Artifacts, 11)
 	assert.Empty(t, res.Created)
 	assert.Equal(t, []string{
 		"roles:",

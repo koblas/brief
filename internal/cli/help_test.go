@@ -75,7 +75,7 @@ Usage:
   brief status                     print a FEATURE/DONE/BLOCKED/NEXT table of every feature
   brief check [feature] [--hook <host>]
                                    report faults finish would now refuse to write over
-  brief init [--host <name>] [--no-hook] [--with-agents] [--dry-run | --print] [--force] [--json]
+  brief init [--host <name>] [--no-hook] [--with-agents] [--edit-agents] [--dry-run | --print] [--force] [--json]
                                    install brief's config and agent-host integration
   brief doctor [--json]            check brief's setup: config, feature root, host integration
   brief uninstall [--host <name>] [--dry-run] [--force] [--json]
@@ -933,6 +933,139 @@ func Test_every_command_help_names_its_json_documents_top_level_fields(t *testin
 			}
 		})
 	}
+}
+
+// normalizeWhitespace collapses every run of whitespace in s to a single
+// space, so a hand-wrapped Long string's own line breaks never defeat a
+// Contains check against a sentence copied from specification.md as one
+// unbroken line.
+func normalizeWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// Test_init_help_names_the_brief_workflow_skill pins the ruled sentence
+// specification.md's "Surface & Copy" section adds to initLong, right
+// after the --with-agents sentence: whitespace-normalized, since initLong
+// hand-wraps its own prose.
+func Test_init_help_names_the_brief_workflow_skill(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	const sentence = `Every claude-code install also writes a "brief-workflow" skill under ".claude/skills/brief-workflow/", which agents preload by listing it in their frontmatter "skills:".`
+	assert.Contains(t, normalizeWhitespace(stdout.String()), sentence)
+
+	const missingSkillSentence = `init never edits an agent file of yours by default; stderr instead lists each planner or implementer bound in ".brief.yaml" whose agent lacks it.`
+	assert.Contains(t, normalizeWhitespace(stdout.String()), missingSkillSentence)
+
+	assert.True(t, wholeWordPresent(t, stdout.String(), "agents_missing_skill"))
+}
+
+// Test_init_help_names_edit_agents pins the ruled "--edit-agents" flag help
+// and the initLong sentence Surface & Copy adds for it (S07):
+// whitespace-normalized, since both hand-wrap.
+func Test_init_help_names_edit_agents(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	normalized := normalizeWhitespace(stdout.String())
+
+	const flagUsage = `add "brief-workflow" to the "skills:" list of the planner and implementer agents bound in .brief.yaml (repository files only)`
+	assert.Contains(t, normalized, flagUsage)
+
+	const sentence = `--edit-agents adds it to those agents' "skills:" lists, for agent files under ".claude/agents/" only; one under "~/.claude" is always left for you to edit.`
+	assert.Contains(t, normalized, sentence)
+
+	assert.Contains(t, stdout.String(), "--edit-agents")
+}
+
+// Test_uninstall_help_names_the_bound_agent_skill_removal pins the ruled
+// sentence specification.md's "Surface & Copy" section adds to
+// uninstallLong, right after the "...unless --force." sentence and before
+// "The feature root...": whitespace-normalized, since uninstallLong
+// hand-wraps its own prose.
+func Test_uninstall_help_names_the_bound_agent_skill_removal(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	const sentence = `It also removes "brief-workflow" from the "skills:" list of the planner and implementer agents bound in ".brief.yaml", repository files only, unless the skill file itself is kept.`
+	assert.Contains(t, normalizeWhitespace(stdout.String()), sentence)
+}
+
+// Test_uninstall_help_names_the_workflow_skill_directory pins the
+// product-vision fix round's own correction: uninstallLong's opening
+// sentence must say the "brief-workflow" skill directory is removed
+// alongside the plugin — the original wording named only the plugin,
+// never disclosing that the skill itself goes too.
+func Test_uninstall_help_names_the_workflow_skill_directory(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	const pluginAndSkillSentence = `the Claude Code plugin under ".claude/skills/brief/" and the "brief-workflow" skill under ".claude/skills/brief-workflow/"`
+	assert.Contains(t, normalizeWhitespace(stdout.String()), pluginAndSkillSentence)
+}
+
+// Test_uninstall_help_left_in_place_clause_names_briefs_own_directories
+// pins the product-vision fix round's own correction to uninstallLong's
+// closing "left in place" clause: it must speak of brief's own directories
+// generally, not just "the plugin's own directory", since the
+// "brief-workflow" skill directory is a sibling the opening sentence now
+// names too (Test_uninstall_help_names_the_workflow_skill_directory).
+func Test_uninstall_help_left_in_place_clause_names_briefs_own_directories(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	normalized := normalizeWhitespace(stdout.String())
+
+	const leftInPlaceClause = `nor is ".claude/" or ".claude/skills/" above brief's own directories.`
+	assert.Contains(t, normalized, leftInPlaceClause)
+
+	assert.NotContains(t, normalized, "above the plugin's own directory")
+}
+
+// Test_doctor_help_names_role_resolution_and_the_brief_workflow_skill pins
+// the ruled sentence specification.md's "Surface & Copy" section gives
+// doctorLong (S05), replacing the old roles clause: whitespace-normalized,
+// since doctorLong hand-wraps its own prose. The stale "reading
+// ~/.claude/agents" wording it replaces must be gone.
+func Test_doctor_help_names_role_resolution_and_the_brief_workflow_skill(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"doctor", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	sentence := `— plus whether each role bound in ".brief.yaml" resolves to an agent, matched by its frontmatter "name:" anywhere under ".claude/agents/", then` +
+		` "~/.claude/agents/" when the repository defines none, and whether the bound planner and implementer preload the "brief-workflow" skill.`
+	normalized := normalizeWhitespace(stdout.String())
+	assert.Contains(t, normalized, sentence)
+	assert.NotContains(t, normalized, `reading "~/.claude/agents"`)
 }
 
 // Test_status_and_check_help_say_the_text_layout_may_change pins the

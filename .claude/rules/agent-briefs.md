@@ -16,6 +16,11 @@ go test -race ./<touched package>/...
 golangci-lint run ./...
 ```
 
+**Narrow loop while working, full run once.** During a scenario's Red and Green phases run
+only the packages and tests in play — `go test ./internal/setup/ -run 'Skill|Init'`. Run the
+four commands above once, in the Verify phase. A full suite after every edit is the most
+expensive habit a scenario can have and proves nothing the final run does not.
+
 Rules:
 
 - **Never pipe a verification command through `head`/`tail`.** It hides failures below the
@@ -34,7 +39,8 @@ Rules:
 
 `docs/specifications/<feature>/SCENARIO-XX.md` is read by `brief` itself (`brief status`,
 `brief check`). The architect writes it starting with frontmatter, then the heading, with the
-checklist under `## Implementation Plan`:
+checklist under `## Implementation Plan`, grouped under `### Red`, `### Green`, `### Sweep`
+and `### Verify` subheadings (see the architect's plan format):
 
 ```markdown
 ---
@@ -83,6 +89,9 @@ silently reverted a file to a previous commit's contents.
 
 Rules:
 
+- **Mutate only the guards the plan names.** The architect picks which guards matter; the
+  developer does not add mutation checks of its own. A mutation per step is how a scenario
+  doubles its tool calls without proving anything the named ones do not.
 - **Verify guards INDIVIDUALLY.** Two guards that only go red when BOTH are disabled means
   either can be deleted silently. Disable one at a time.
 - A mutation that breaks compilation is **not** evidence. If every test fails, you proved

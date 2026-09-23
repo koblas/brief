@@ -129,6 +129,29 @@ func Test_claude_code_lists_three_agent_files(t *testing.T) {
 	}
 }
 
+// Test_claude_code_lists_the_workflow_skill_outside_the_plugin_directory
+// pins Skills' own contract (Rule 1/Rule 2): one File at
+// host.WorkflowSkillDir + "/SKILL.md", kind artifact.KindSkillWorkflow, not
+// Hook, and not living under host.PluginDir — the workflow skill is a
+// standalone project skill, never an entry inside the "brief" plugin — and
+// a fresh copy per call, mirroring Plugin's and Agents' own contract, so a
+// caller mutating one returned slice never affects a later call.
+func Test_claude_code_lists_the_workflow_skill_outside_the_plugin_directory(t *testing.T) {
+	h := newClaudeCode(t)
+
+	first := h.Skills()
+
+	require.Len(t, first, 1)
+	assert.Equal(t, host.WorkflowSkillDir+"/SKILL.md", first[0].RelPath)
+	assert.Equal(t, artifact.KindSkillWorkflow, first[0].Kind)
+	assert.False(t, first[0].Hook)
+	assert.False(t, strings.HasPrefix(first[0].RelPath, host.PluginDir+"/"), "%s must not live under %s", first[0].RelPath, host.PluginDir)
+
+	first[0].RelPath = "mutated"
+	second := h.Skills()
+	assert.Equal(t, host.WorkflowSkillDir+"/SKILL.md", second[0].RelPath)
+}
+
 // Test_claude_code_lists_its_instruction_files_in_priority_order pins
 // InstructionFiles's own contract (R5): the repository-root CLAUDE.md
 // first, ".claude/CLAUDE.md" second — the order setup's own location rule

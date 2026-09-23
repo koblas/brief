@@ -4,15 +4,25 @@ package doctor
 // own black-box table cannot reach economically:
 //
 //   - originRow is host.go's own unexported origin→row mapping. Every
-//     compiled-in older digest list (internal/platform/artifact) ships empty
-//     (STATE.md), so no real file's bytes ever classify as
-//     artifact.OriginOlder through artifact.Recognize or
-//     artifact.RecognizeSnippet today — the OriginOlder arm host-plugin,
-//     host-hook, host-snippet and host-agents all share is reachable only by
-//     calling originRow directly with a synthetic artifact.OriginOlder
-//     value, as this file does. Every other arm (present/missing, edited,
-//     current) is covered black-box in host_test.go through the real
-//     artifact.Recognize/RecognizeSnippet path.
+//     compiled-in older digest list but the planner and implementer agents'
+//     own (internal/platform/artifact) still ships empty, so no real
+//     host-plugin, host-hook or host-snippet fixture's bytes ever classify
+//     as artifact.OriginOlder through artifact.Recognize or
+//     artifact.RecognizeSnippet — those three rows' own OriginOlder arm is
+//     reachable only by calling originRow directly with a synthetic
+//     artifact.OriginOlder value, as this file does. host-agents' own
+//     OriginOlder arm is covered black-box instead, in host_test.go's
+//     Test_diagnose_classifies_host_agents ("an older planner render"),
+//     through the real artifact.Recognize path. Every other arm
+//     (present/missing, edited, current) is covered black-box in
+//     host_test.go the same way.
+//   - hostSkillRow is host.go's own unexported state→row mapping for
+//     host-skill. olderSkillWorkflowDigests ships empty, the same as every
+//     other Kind but the planner and implementer agents', so its own
+//     OriginOlder arm is reachable only by calling hostSkillRow directly
+//     with a synthetic integrationFileState carrying artifact.OriginOlder,
+//     mirroring originRow's own case above. Every other arm is covered
+//     black-box, in host_test.go's Test_diagnose_classifies_host_skill.
 //   - nonRegularKind's own default (neither-symlink-nor-directory) arm needs
 //     a mode a black-box fixture cannot portably construct: os.Symlink and
 //     os.Mkdir work on every platform this project targets, but a named
@@ -90,6 +100,25 @@ func Test_originRow_reports_older_as_warn_with_the_init_fix(t *testing.T) {
 			assert.Equal(t, c.olderFix, *fix)
 		})
 	}
+}
+
+// Test_hostSkillRow_reports_an_older_render_as_warn pins host-skill's own
+// OriginOlder arm, reachable only through this synthetic call.
+func Test_hostSkillRow_reports_an_older_render_as_warn(t *testing.T) {
+	state := integrationFileState{
+		path:    "/repo/.claude/skills/brief-workflow/SKILL.md",
+		present: true,
+		regular: true,
+		origin:  artifact.OriginOlder,
+	}
+
+	check := hostSkillRow("/repo", "/repo", state, true)
+
+	assert.Equal(t, "host-skill", check.ID)
+	assert.Equal(t, SeverityWarn, check.Severity)
+	assert.Contains(t, check.Detail, "installed by an older brief release")
+	require.NotNil(t, check.Fix)
+	assert.Equal(t, runInit, *check.Fix)
 }
 
 // Test_nonRegularKind_reports_no_kind_for_a_fifo pins nonRegularKind's own

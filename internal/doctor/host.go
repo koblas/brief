@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/host"
 )
@@ -208,11 +209,15 @@ func relPathsWithOrigin(states []integrationFileState, origin artifact.Origin) [
 // with fix olderFix; OriginEdited is OK "edited locally" + suffix;
 // OriginCurrent (and any other value) is OK "installed", plain. suffix is
 // appended verbatim — a multi-file row (host-plugin, host-agents) passes
-// ": <rel, ...>", a single-subject row (host-hook, host-snippet) passes "".
-// This is the one place every host row's own origin precedence lives, so
-// the four can never drift from each other; it is also the only way to
-// reach the OriginOlder arm at all today, since every compiled-in older
-// digest list ships empty.
+// ": <rel, ...>", a single-subject row (host-hook, host-skill, host-snippet)
+// passes "". This is the one place every host row's own origin precedence
+// lives, so the five can never drift from each other. The planner and
+// implementer agent renders are the one pair whose own older-digest list is
+// non-empty (Rule 6), so host-agents' own OriginOlder arm is reachable
+// through a real fixture; host-plugin's, host-hook's, host-skill's and
+// host-snippet's own OriginOlder arms are reachable only through
+// host_internal_test.go's direct, synthetic call, since every other Kind's
+// older-digest list is empty.
 func originRow(origin artifact.Origin, olderFix, suffix string) (Severity, string, *string) {
 	switch origin {
 	case artifact.OriginOlder:
@@ -228,7 +233,12 @@ func originRow(origin artifact.Origin, olderFix, suffix string) (Severity, strin
 
 // anyIntegrationFilePresent reports whether any file of h.Plugin(true) ∪
 // h.Agents() is present under root, of any file type — the predicate
-// host-plugin's and host-hook's own SKIP rows share (R13).
+// host-plugin's, host-hook's and host-skill's own SKIP rows share (R13).
+// h.Skills() is deliberately excluded: the skill is never an install
+// signal (Rule 1) — uninstall can leave an edited SKILL.md behind after
+// every other file is removed, and counting it here would flip
+// host-plugin back to ERROR "incomplete", host-hook to WARN and env-path
+// to ERROR after a clean uninstall.
 func anyIntegrationFilePresent(root string, h host.Host) bool {
 	return anyPresent(probeIntegrationFiles(root, h.Plugin(true))) || anyPresent(probeIntegrationFiles(root, h.Agents()))
 }
@@ -668,68 +678,19 @@ func hostSnippetCheck(wd, root string, states []snippetCandidateState, dir strin
 	}
 }
 
-// roleBindingResult classifies one role's own binding value against the
-// filesystem.
-type roleBindingResult int
-
-const (
-	// roleUnbound marks an empty binding.
-	roleUnbound roleBindingResult = iota
-	// roleResolved marks a binding whose own agent file was found.
-	roleResolved
-	// roleUnresolved marks a non-empty binding whose own agent file was
-	// not found.
-	roleUnresolved
-	// roleUnverified marks a "<plugin>:<name>" binding for a plugin other
-	// than "brief" — doctor has no file layout to check it against, so it
-	// counts as bound without being verified.
-	roleUnverified
-)
-
-// resolveRoleBinding classifies value (a config.RoleBindings field) against
-// root and, for a bare name, an injected home (R7): "" is roleUnbound; a
-// "brief:<name>" binding is roleResolved when
-// "<root>/.claude/skills/brief/agents/<name>.md" or, overriding it,
-// "<root>/.claude/agents/<name>.md" is a regular file, roleUnresolved
-// otherwise; any other "<plugin>:<name>" is roleUnverified; a bare "<name>"
-// is roleResolved via "<root>/.claude/agents/<name>.md" or
-// "<home>/.claude/agents/<name>.md" (home errors, or an empty home, are
-// treated as no home directory at all), roleUnresolved otherwise.
-func (s *Server) resolveRoleBinding(root, value string) roleBindingResult {
-	if value == "" {
-		return roleUnbound
+// resolveRoleBinding resolves home (R7) and classifies value (a
+// config.RoleBindings field) against root via agentfile.ResolveBinding —
+// the binding-classification logic setup's own missing-skill report reuses
+// (agentfile.Binding, Rule 5). doctor stays the caller here rather than
+// agentfile itself resolving home, since only doctor carries s.homeDir's
+// own injectable seam (setup.WithHomeDir mirrors it independently).
+func (s *Server) resolveRoleBinding(root, value string) agentfile.Binding {
+	home, err := s.homeDir()
+	if err != nil {
+		home = ""
 	}
 
-	if plugin, agent, ok := strings.Cut(value, ":"); ok {
-		if plugin != "brief" {
-			return roleUnverified
-		}
-
-		if fileIsRegular(filepath.Join(root, host.PluginDir, "agents", agent+".md")) ||
-			fileIsRegular(filepath.Join(root, ".claude", "agents", agent+".md")) {
-			return roleResolved
-		}
-
-		return roleUnresolved
-	}
-
-	if fileIsRegular(filepath.Join(root, ".claude", "agents", value+".md")) {
-		return roleResolved
-	}
-
-	if home, err := s.homeDir(); err == nil && home != "" && fileIsRegular(filepath.Join(home, ".claude", "agents", value+".md")) {
-		return roleResolved
-	}
-
-	return roleUnresolved
-}
-
-// fileIsRegular reports whether path exists and is a regular file,
-// following symlinks.
-func fileIsRegular(path string) bool {
-	info, err := os.Stat(path)
-
-	return err == nil && info.Mode().IsRegular()
+	return agentfile.ResolveBinding(root, home, value)
 }
 
 // roleBinding names one role position alongside its own configured value,
@@ -752,30 +713,65 @@ func rolesCheckUnparseable(nearest string) Check {
 	return Check{ID: "roles", Severity: SeveritySkip, Path: nearest, Detail: ".brief.yaml did not parse"}
 }
 
+// duplicateDefinitionProblem returns roles' own duplicate-definition WARN
+// text when defs — a bare-name binding's own agentfile.Find results —
+// names more than one project-scope definition, or "" when there is at
+// most one, or when defs' own scope is ScopeUser: the duplicate WARN is
+// project scope only, matching its own copy's "under .claude/agents".
+// <rel> is root-relative and slash-separated; defs is already in lexical
+// walk order, so the message's own path order follows it unchanged.
+func duplicateDefinitionProblem(root, role, value string, defs []agentfile.Definition) string {
+	if len(defs) < 2 || defs[0].Scope != agentfile.ScopeProject {
+		return ""
+	}
+
+	rels := make([]string, 0, len(defs))
+
+	for _, d := range defs {
+		rel, err := filepath.Rel(root, d.Path)
+		if err != nil {
+			rel = d.Path
+		}
+
+		rels = append(rels, filepath.ToSlash(rel))
+	}
+
+	return fmt.Sprintf("%s: %s defined %d times under .claude/agents (%s)", role, value, len(defs), strings.Join(rels, ", "))
+}
+
 // rolesCheck builds roles' own row for a parsed config: every binding
-// empty is SKIP "no roles bound"; any unbound position or unresolved
-// binding is WARN, detail listing each ("planner unbound; reviewer:
-// brief:reviewer not found"), never ERROR (roles are reported, not
-// enforced); everything bound and resolved is OK "planner, implementer,
-// reviewer bound", with "not verified: <role>" appended for each
-// roleUnverified binding.
+// empty is SKIP "no roles bound"; any unbound position, unresolved
+// binding, or bare-name binding with more than one project-scope
+// definition is WARN, detail listing each problem in RoleBindings' own
+// order ("planner unbound; reviewer: brief:reviewer not found"), never
+// ERROR (roles are reported, not enforced); everything else bound and
+// resolved is OK "planner, implementer, reviewer bound", with one suffix
+// per role, in RoleBindings' own order: "user-level: <role>" for a bare
+// name resolved only through the injected home, "not verified: <role>"
+// for any other "<plugin>:<name>" binding.
 func (s *Server) rolesCheck(root, nearest string, bindings [3]roleBinding) Check {
 	if bindings[0].value == "" && bindings[1].value == "" && bindings[2].value == "" {
 		return Check{ID: "roles", Severity: SeveritySkip, Path: nearest, Detail: "no roles bound", Fix: new(runInitWithAgents)}
 	}
 
-	var problems, notVerified []string
+	var problems, suffixes []string
 
 	for _, b := range bindings {
-		switch s.resolveRoleBinding(root, b.value) {
-		case roleUnbound:
+		res := s.resolveRoleBinding(root, b.value)
+
+		switch res.State {
+		case agentfile.BindingUnbound:
 			problems = append(problems, b.name+" unbound")
-		case roleUnresolved:
+		case agentfile.BindingUnresolved:
 			problems = append(problems, fmt.Sprintf("%s: %s not found", b.name, b.value))
-		case roleUnverified:
-			notVerified = append(notVerified, b.name)
-		case roleResolved:
-			// nothing to report
+		case agentfile.BindingUnverified:
+			suffixes = append(suffixes, "not verified: "+b.name)
+		case agentfile.BindingResolved:
+			if dup := duplicateDefinitionProblem(root, b.name, b.value, res.Defs); dup != "" {
+				problems = append(problems, dup)
+			} else if len(res.Defs) > 0 && res.Defs[0].Scope == agentfile.ScopeUser {
+				suffixes = append(suffixes, "user-level: "+b.name)
+			}
 		}
 	}
 
@@ -785,21 +781,216 @@ func (s *Server) rolesCheck(root, nearest string, bindings [3]roleBinding) Check
 		return Check{ID: "roles", Severity: SeverityWarn, Path: nearest, Detail: strings.Join(problems, "; "), Fix: &fix}
 	}
 
-	verifiedDetail := make([]string, 0, 1+len(notVerified))
+	verifiedDetail := make([]string, 0, 1+len(suffixes))
 	verifiedDetail = append(verifiedDetail, "planner, implementer, reviewer bound")
-
-	for _, name := range notVerified {
-		verifiedDetail = append(verifiedDetail, "not verified: "+name)
-	}
+	verifiedDetail = append(verifiedDetail, suffixes...)
 
 	detail := strings.Join(verifiedDetail, "; ")
 
 	return Check{ID: "roles", Severity: SeverityOK, Path: nearest, Detail: detail}
 }
 
+// hostSkillMissingDetail is host-skill's own WARN detail when the skill
+// file is absent while some other Claude Code integration file
+// (Plugin(true) ∪ Agents()) is present: a bound role names the skill by
+// its bare "brief-workflow" name and can never preload a file that is not
+// there.
+const hostSkillMissingDetail = "not installed; bound agents cannot preload it"
+
+// skillFileOf returns h.Skills()'s own first entry, host-skill's subject
+// file. Every Host today returns exactly one; if a second is ever added,
+// this row reports only the first — it does not surface the rest.
+func skillFileOf(h host.Host) host.File {
+	files := h.Skills()
+	if len(files) == 0 {
+		return host.File{}
+	}
+
+	return files[0]
+}
+
+// hostSkillNotRegularFix is host-skill's own "not a regular file" ERROR
+// fix: a plain "run 'brief init'" cannot clear this state by itself,
+// since Init's own render step never overwrites an existing path of the
+// wrong kind (a directory or symlink standing where the skill file
+// belongs), so the fix names removing it first.
+const hostSkillNotRegularFix = "remove " + host.WorkflowSkillDir + "/SKILL.md, then " + runInit
+
+// hostSkillRow builds host-skill's own row from state — already probed by
+// probeIntegrationFile against skillFileOf(h) — and installed, whether any
+// Plugin(true) ∪ Agents() file is present: absent while nothing else is
+// installed is SKIP "not installed"; absent while a plugin or agent file
+// is present is WARN (hostSkillMissingDetail); unreadable is WARN; not a
+// regular file is ERROR (hostSkillNotRegularFix), the one new ERROR arm
+// Rule 7 grants this row; everything else — present, regular, and
+// classified by origin — goes through originRow, single-subject (no
+// suffix), the same "run 'brief init'" fix host-hook and host-snippet
+// share. A present skill always classifies itself, whatever installed
+// carries: only the absent arm consults it.
+func hostSkillRow(wd, root string, state integrationFileState, installed bool) Check {
+	if !state.present {
+		if !installed {
+			return Check{ID: "host-skill", Severity: SeveritySkip, Path: state.path, Detail: "not installed", Fix: new(runInitClaudeCode)}
+		}
+
+		return Check{ID: "host-skill", Severity: SeverityWarn, Path: state.path, Detail: hostSkillMissingDetail, Fix: new(runInit)}
+	}
+
+	if state.unreadable {
+		return Check{ID: "host-skill", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(wd, root, state.path, state.statFailed))}
+	}
+
+	if !state.regular {
+		return Check{ID: "host-skill", Severity: SeverityError, Path: state.path, Detail: "not a regular file", Fix: new(hostSkillNotRegularFix)}
+	}
+
+	sev, detail, fix := originRow(state.origin, runInit, "")
+
+	return Check{ID: "host-skill", Severity: sev, Path: state.path, Detail: detail, Fix: fix}
+}
+
+// hostSkillCheck probes skillFileOf(h) under root and builds host-skill's
+// own row from the result via hostSkillRow.
+func hostSkillCheck(wd, root string, h host.Host, installed bool) Check {
+	return hostSkillRow(wd, root, probeIntegrationFile(root, skillFileOf(h)), installed)
+}
+
+// rolesSkillNoConfigDetail is roles-skill's own SKIP detail whenever no
+// config was found, a found config did not parse, or neither planner nor
+// implementer resolved to an agent this row could check (unbound,
+// unresolved, or bound to another plugin) — R7's arms collapse to one
+// wording: there is nothing here for the row to speak to yet.
+const rolesSkillNoConfigDetail = "no bound planner or implementer brief can check"
+
+// rolesSkillOKText renders roles-skill's own OK sentence for checked, the
+// roles this row actually verified — resolved and not bound to another
+// plugin — in planner-then-implementer order: unlike roles' own OK
+// detail, it never names a role it did not check, since the roles row
+// already WARNs one left unbound or unresolved, and a "; not verified:
+// <role>" suffix (rolesSkillCheck's own) covers one bound elsewhere. Both
+// checked is "planner, implementer preload brief-workflow"; exactly one is
+// "<role> preloads brief-workflow". checked is never empty here —
+// rolesSkillCheck returns SKIP first when it is.
+func rolesSkillOKText(checked []string) string {
+	if len(checked) == 1 {
+		return fmt.Sprintf("%s preloads %s", checked[0], artifact.WorkflowSkillName)
+	}
+
+	return fmt.Sprintf("%s preload %s", strings.Join(checked, ", "), artifact.WorkflowSkillName)
+}
+
+// rolesSkillMissingFix is the WARN fix roles-skill shares across every
+// case where at least one resolved role does not preload the skill.
+const rolesSkillMissingFix = `add "brief-workflow" to the "skills:" list of each agent named, or run 'brief init --edit-agents' for those in the repository`
+
+// rolesSkillCheckNoConfig builds roles-skill's own row when no
+// ".brief.yaml" was found anywhere: SKIP, Path "" (R13's own "" when
+// none), Fix nil — unlike roles' own no-config SKIP, which carries a fix.
+func rolesSkillCheckNoConfig() Check {
+	return Check{ID: "roles-skill", Severity: SeveritySkip, Detail: rolesSkillNoConfigDetail}
+}
+
+// rolesSkillCheckUnparseable builds roles-skill's own row when nearest
+// exists but does not parse: SKIP, naming nearest, Fix nil.
+func rolesSkillCheckUnparseable(nearest string) Check {
+	return Check{ID: "roles-skill", Severity: SeveritySkip, Path: nearest, Detail: rolesSkillNoConfigDetail}
+}
+
+// rolesSkillMissingEntry renders roles-skill's own WARN entry for one
+// role whose resolved agent does not preload artifact.WorkflowSkillName:
+// "<role>: <value> does not preload brief-workflow", plus, when that
+// agent's own frontmatter sets omitClaudeMd: true, a suffix naming the
+// consequence.
+func rolesSkillMissingEntry(role, value string, omitClaudeMd bool) string {
+	entry := fmt.Sprintf("%s: %s does not preload %s", role, value, artifact.WorkflowSkillName)
+	if omitClaudeMd {
+		entry += " and omits CLAUDE.md, so it never sees brief's instructions"
+	}
+
+	return entry
+}
+
+// roleLacksSkill reports whether res's own resolved agent(s) do not
+// preload artifact.WorkflowSkillName, via agentfile.Binding's own
+// LackingSkill — the single decision point every "lacks the skill"
+// question (this row and setup's own missing-skill report) shares: a
+// non-empty result means lacking, and the omitClaudeMd suffix follows
+// LackingSkill's own "any" rule, true when any returned Definition sets
+// it — a "brief:*" binding's own Load failure returns a zero Frontmatter,
+// so it never sets the suffix.
+func roleLacksSkill(res agentfile.Binding) (bool, bool) {
+	defs := res.LackingSkill(artifact.WorkflowSkillName)
+	if len(defs) == 0 {
+		return false, false
+	}
+
+	for _, d := range defs {
+		if d.Frontmatter.OmitClaudeMd {
+			return true, true
+		}
+	}
+
+	return true, false
+}
+
+// rolesSkillCheck builds roles-skill's own row for a parsed config,
+// considering only planner and implementer (product verdict item 1 — the
+// reviewer role is deliberately excluded, R15): SKIP
+// (rolesSkillNoConfigDetail) when neither resolves
+// (agentfile.BindingResolved — a BindingUnverified binding does not itself
+// count, so two other-plugin bindings SKIP too); any resolved role whose
+// agent does not preload the skill (roleLacksSkill) is WARN, one entry per
+// lacking role (rolesSkillMissingEntry), joined "; ", in
+// planner-then-implementer order; otherwise OK, naming only checked — the
+// roles this row actually verified, in that same order (rolesSkillOKText)
+// — plus "; not verified: <role>" per role bound to another plugin. A role
+// left unbound or unresolved contributes to neither checked nor a suffix
+// here, since the roles row already reports it.
+func (s *Server) rolesSkillCheck(root, nearest string, planner, implementer roleBinding) Check {
+	bindings := [2]roleBinding{planner, implementer}
+
+	var (
+		checked  []string
+		problems []string
+		suffixes []string
+	)
+
+	for _, b := range bindings {
+		res := s.resolveRoleBinding(root, b.value)
+
+		switch res.State {
+		case agentfile.BindingUnverified:
+			suffixes = append(suffixes, "not verified: "+b.name)
+		case agentfile.BindingResolved:
+			checked = append(checked, b.name)
+
+			if lacking, omitClaudeMd := roleLacksSkill(res); lacking {
+				problems = append(problems, rolesSkillMissingEntry(b.name, b.value, omitClaudeMd))
+			}
+		case agentfile.BindingUnbound, agentfile.BindingUnresolved:
+			// The roles row already reports this position; roles-skill
+			// has nothing of its own to add.
+		}
+	}
+
+	if len(checked) == 0 {
+		return Check{ID: "roles-skill", Severity: SeveritySkip, Path: nearest, Detail: rolesSkillNoConfigDetail}
+	}
+
+	if len(problems) > 0 {
+		fix := rolesSkillMissingFix
+
+		return Check{ID: "roles-skill", Severity: SeverityWarn, Path: nearest, Detail: strings.Join(problems, "; "), Fix: &fix}
+	}
+
+	detail := strings.Join(append([]string{rolesSkillOKText(checked)}, suffixes...), "; ")
+
+	return Check{ID: "roles-skill", Severity: SeverityOK, Path: nearest, Detail: detail}
+}
+
 // runInit is short for "run 'brief init'" — the fix text repeated across
-// host-plugin, host-hook and host-snippet rows whenever a plain re-run
-// would repair the finding.
+// host-plugin, host-hook, host-skill and host-snippet rows whenever a
+// plain re-run would repair the finding.
 const runInit = "run 'brief init'"
 
 // runInitClaudeCode is the SKIP fix every "not installed" host row shares.

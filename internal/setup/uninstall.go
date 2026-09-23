@@ -28,36 +28,52 @@ type UninstallRequest struct {
 
 // Uninstall plans then, unless req.DryRun, applies the removal of
 // everything Init installed: for req.Host == HostClaudeCode, the CLAUDE.md
-// block, that host's own agent files (host.Host.Agents, always planned)
-// and plugin files, then the config file; for HostNone, the config file
-// alone. Recognition is digest-only (artifact.Recognize) — Uninstall never
-// decodes the config, or a plugin or agent file, the way Init does, so it
-// has no refusal class of its own; an invalid, unparseable, or locally
-// edited file is simply "edited locally", the same as any other byte
-// mismatch. No config found anywhere (config.LocateInRepo's own bounded
+// block, then, unless the skill is itself being kept (Rule 8's own gate,
+// below), one KindBoundAgent row per planBoundAgentRemovals target, that
+// host's own agent files (host.Host.Agents, always planned) and plugin
+// files, then the config file; for HostNone, the config file alone.
+// Recognition is digest-only (artifact.Recognize) — Uninstall never decodes
+// the config, or a plugin or agent file, the way Init does, so it has no
+// refusal class of its own; an invalid, unparseable, or locally edited file
+// is simply "edited locally", the same as any other byte mismatch, kept
+// unless --force. An OriginOlder file (Rule 6) is not an edit: it is
+// removed the same as a current one, without --force, since its bytes are
+// still brief's own, just an earlier release's. No config found anywhere
+// (config.LocateInRepo's own bounded
 // walk-up, R3 — an ancestor config above the nearest enclosing git
 // repository is treated as though it did not exist, the same rule Init
 // applies to its own install root) and no plugin or agent file found either
 // means zero artifacts, reported by cli as "nothing installed".
 //
 // Artifacts lists, for HostClaudeCode, the CLAUDE.md block first
-// (planSnippetRemoval), then the three agent files reversed (reviewer,
-// implementer, planner), then a claude-code host's own plugin files — hook
-// wiring, finish skill, start skill, manifest, the reverse of the order
-// Init installs them in — ahead of the config file, always last: the
-// config, this repository's opt-in marker, is always removed last, so a
-// failure partway through never removes it while something else still is.
-// A plugin or agent file Lstat finds missing (never installed, or a
-// --no-hook init's own hook file) plans no row and no error; a CLAUDE.md
-// candidate found but carrying no recognized block plans no row either.
-// Apply strips or deletes the CLAUDE.md block first, then removes every
-// ActionRemoved artifact in that same order, then, for HostClaudeCode,
-// prunes the plugin's own now-empty directories deepest-first ("agents/"
-// included), stopping at host.PluginDir — never above it, and never
-// touching a directory still holding a file brief did not write. A
-// failure after at least one artifact was already removed is wrapped in
-// ErrPartialWrite, distinguishing a partial uninstall from one that
-// changed nothing.
+// (planSnippetRemoval), then Rule 8's own bound-agent rows, then the three
+// agent files reversed (reviewer, implementer, planner), then a
+// claude-code host's own plugin files — hook wiring, finish skill, start
+// skill, manifest, the reverse of the order Init installs them in — ahead
+// of the config file, always last: the config, this repository's opt-in
+// marker, is always removed last, so a failure partway through never
+// removes it while something else still is. A plugin or agent file Lstat
+// finds missing (never installed, or a --no-hook init's own hook file)
+// plans no row and no error; a CLAUDE.md candidate found but carrying no
+// recognized block plans no row either.
+//
+// Rule 8's own gate: the bound-agent rows are planned only when the
+// brief-workflow skill's own row is not itself ActionKept — an edited
+// SKILL.md without --force, or one that is not a regular file even with
+// --force. Roles come from config.Inspect(nearest): nearest == "" or any
+// read or decode failure means no bound rows at all, never a refusal —
+// Uninstall's own config removal stays digest-only, the same as everywhere
+// else in this file. home is s.homeDir, "" on failure.
+//
+// Apply strips or deletes the CLAUDE.md block first, then rewrites every
+// bound-agent target in place (never deleting one), then removes every
+// other ActionRemoved artifact in that same order, then, for
+// HostClaudeCode, prunes the plugin's own now-empty directories
+// deepest-first ("agents/" included), stopping at host.PluginDir — never
+// above it, and never touching a directory still holding a file brief did
+// not write. A failure after at least one artifact was already removed or
+// rewritten is wrapped in ErrPartialWrite, distinguishing a partial
+// uninstall from one that changed nothing.
 func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (Result, error) {
 	if !validHost(req.Host) {
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
@@ -74,18 +90,20 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 	}
 
 	res := Result{
-		Host:      req.Host,
-		DryRun:    req.DryRun,
-		Root:      root,
-		Artifacts: []Artifact{},
-		Created:   []string{},
-		Modified:  []string{},
-		Removed:   []string{},
+		Host:               req.Host,
+		DryRun:             req.DryRun,
+		Root:               root,
+		Artifacts:          []Artifact{},
+		Created:            []string{},
+		Modified:           []string{},
+		Removed:            []string{},
+		AgentsMissingSkill: []MissingSkillAgent{},
 	}
 
 	var (
-		snippetArt snippetArtifact
-		hasSnippet bool
+		snippetArt     snippetArtifact
+		hasSnippet     bool
+		boundAgentArts []boundAgentArtifact
 	)
 
 	if req.Host == HostClaudeCode {
@@ -103,6 +121,46 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 			hasSnippet = true
 		}
 
+		var (
+			skillArts []Artifact
+			skillKept bool
+		)
+
+		for _, f := range h.Skills() {
+			path := filepath.Join(root, filepath.FromSlash(f.RelPath))
+
+			art, present, err := planPluginRemoval(path, KindSkill, f.Kind, req.Force)
+			if err != nil {
+				return Result{}, err
+			}
+
+			if present {
+				skillArts = append(skillArts, art)
+
+				if art.Action == ActionKept {
+					skillKept = true
+				}
+			}
+		}
+
+		if !skillKept && nearest != "" {
+			home, homeErr := s.homeDir()
+			if homeErr != nil {
+				home = ""
+			}
+
+			if cfg, _, inspectErr := config.Inspect(nearest); inspectErr == nil {
+				boundAgentArts, err = planBoundAgentRemovals(root, home, cfg.Roles)
+				if err != nil {
+					return Result{}, err
+				}
+			}
+		}
+
+		for _, ba := range boundAgentArts {
+			res.Artifacts = append(res.Artifacts, ba.Artifact)
+		}
+
 		for _, f := range slices.Backward(h.Agents()) {
 			path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
@@ -115,6 +173,8 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 				res.Artifacts = append(res.Artifacts, art)
 			}
 		}
+
+		res.Artifacts = append(res.Artifacts, skillArts...)
 
 		files := h.Plugin(true)
 
@@ -150,7 +210,7 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 		return res, nil
 	}
 
-	return applyUninstall(res, root, req.Host, snippetArt, hasSnippet)
+	return applyUninstall(res, root, req.Host, snippetArt, hasSnippet, boundAgentArts)
 }
 
 // planPluginRemoval decides one plugin file's own removal Artifact,
@@ -158,11 +218,13 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 // row at all. A path that exists but is not a regular file (os.Lstat — a
 // directory, a symlink) reports ActionKept, detail "not a regular file",
 // regardless of force — never followed. A regular file whose bytes are
-// artifact.Recognize's OriginCurrent for renderKind is always
-// ActionRemoved, no detail. Any other bytes report detail "edited
-// locally": unless force is set, ActionKept with ForceRemovable true;
-// with force, ActionRemoved with ForceRemovable false — the field is true
-// only while --force could still act on the artifact, never once it
+// artifact.Recognize's OriginCurrent or OriginOlder for renderKind is
+// always ActionRemoved, no detail — Rule 6: an earlier release's own render
+// is not a local edit, so uninstall removes it the same as today's own,
+// without needing --force. Any other bytes (OriginEdited) report detail
+// "edited locally": unless force is set, ActionKept with ForceRemovable
+// true; with force, ActionRemoved with ForceRemovable false — the field is
+// true only while --force could still act on the artifact, never once it
 // already has.
 func planPluginRemoval(path string, kind Kind, renderKind artifact.Kind, force bool) (Artifact, bool, error) {
 	info, err := os.Lstat(path)
@@ -181,7 +243,7 @@ func planPluginRemoval(path string, kind Kind, renderKind artifact.Kind, force b
 		return Artifact{}, false, fmt.Errorf("setup: read %s: %w", path, err)
 	}
 
-	if artifact.Recognize(renderKind, body) == artifact.OriginCurrent {
+	if origin := artifact.Recognize(renderKind, body); origin == artifact.OriginCurrent || origin == artifact.OriginOlder {
 		return Artifact{Kind: kind, Path: path, Action: ActionRemoved}, true, nil
 	}
 
@@ -193,10 +255,11 @@ func planPluginRemoval(path string, kind Kind, renderKind artifact.Kind, force b
 }
 
 // pluginPruneDirs lists every directory applyUninstall may remove once
-// empty, deepest first, ending at host.PluginDir itself — R6's ownership
-// boundary: brief owns the plugin directory, never ".claude/skills/" or
-// ".claude/" above it, both of which may hold a host's or an adopter's own
-// files.
+// empty, deepest first: every directory under host.PluginDir, then
+// host.PluginDir itself, then host.WorkflowSkillDir — R6's ownership
+// boundary: brief owns the plugin directory and the workflow skill's own
+// directory, never ".claude/skills/" or ".claude/" above either one, both
+// of which may hold a host's or an adopter's own files.
 var pluginPruneDirs = []string{
 	filepath.Join(host.PluginDir, "skills", "start"),
 	filepath.Join(host.PluginDir, "skills", "finish"),
@@ -205,6 +268,7 @@ var pluginPruneDirs = []string{
 	filepath.Join(host.PluginDir, ".claude-plugin"),
 	filepath.Join(host.PluginDir, "agents"),
 	host.PluginDir,
+	host.WorkflowSkillDir,
 }
 
 // pruneEmptyPluginDirs removes every pluginPruneDirs entry under root that
@@ -283,18 +347,23 @@ func planConfigRemoval(path string, force bool) (Artifact, bool, error) {
 // applyUninstall strips or deletes the CLAUDE.md block first (when
 // hasSnippet and snippetArt reports ActionRemoved: a rewrite with its
 // remaining bytes goes to res.Modified, an emptied file is deleted and
-// goes to res.Removed), then removes every other res.Artifacts entry
-// reporting ActionRemoved, in list order, appending each removed path to
-// res.Removed as it lands, then, for hostName == HostClaudeCode, prunes the
-// plugin's own now-empty directories (pruneEmptyPluginDirs) — never added
-// to res.Removed, which names files only, symmetric with Result.Created. A
-// failure after at least one earlier removal already landed is wrapped in
-// ErrPartialWrite; a failure before any removal landed is returned as-is.
-func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifact, hasSnippet bool) (Result, error) {
+// goes to res.Removed), then rewrites every boundAgentArts entry in place
+// (Rule 8: verifyBoundAgentUnchanged against a concurrent edit, then
+// ba.agentFile().write, which preserves the file's own mode — never
+// deleted, so it is appended to res.Modified, not res.Removed), then removes
+// every other res.Artifacts entry reporting ActionRemoved except a KindBoundAgent
+// one (already handled above), in list order, appending each removed path
+// to res.Removed as it lands, then, for hostName == HostClaudeCode, prunes
+// the plugin's own now-empty directories (pruneEmptyPluginDirs) — never
+// added to res.Removed, which names files only, symmetric with
+// Result.Created. A failure after at least one earlier write already
+// landed is wrapped in ErrPartialWrite; a failure before any write landed
+// is returned as-is.
+func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifact, hasSnippet bool, boundAgentArts []boundAgentArtifact) (Result, error) {
 	var removedAny bool
 
 	if hasSnippet && snippetArt.Action == ActionRemoved {
-		if err := verifySnippetUnchanged(snippetArt.Path, true, snippetArt.existing, "brief uninstall"); err != nil {
+		if err := verifyFileUnchanged(snippetArt.Path, true, snippetArt.existing, "brief uninstall"); err != nil {
 			return Result{}, err
 		}
 
@@ -325,8 +394,29 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 		removedAny = true
 	}
 
+	for _, ba := range boundAgentArts {
+		if err := verifyBoundAgentUnchanged(ba, "brief uninstall"); err != nil {
+			if removedAny {
+				return res, markPartial(err)
+			}
+
+			return Result{}, err
+		}
+
+		if err := ba.agentFile().write(ba.edited, ba.perm); err != nil {
+			if removedAny {
+				return res, markPartial(err)
+			}
+
+			return Result{}, err
+		}
+
+		res.Modified = append(res.Modified, ba.Path)
+		removedAny = true
+	}
+
 	for _, a := range res.Artifacts {
-		if a.Kind == KindSnippet || a.Action != ActionRemoved {
+		if a.Kind == KindSnippet || a.Kind == KindBoundAgent || a.Action != ActionRemoved {
 			continue
 		}
 

@@ -15,11 +15,12 @@ import (
 // newHealthyDoctorFixture builds a wd with a valid, role-bound
 // ".brief.yaml", its default feature root ("docs/specifications"), a
 // ".git" directory, and a fully installed Claude Code integration — the
-// plugin manifest, both skills, the hook, the three role agents
-// (host.Lookup(host.ClaudeCode)'s own paths, each written from its own
-// artifact.Render) and a root CLAUDE.md holding SnippetBlock for the
-// configured feature directory. This is the baseline every case in this
-// file starts from, mutated by exactly one deviation per test.
+// plugin manifest, both plugin skills, the hook, the three role agents,
+// the brief-workflow skill (host.Lookup(host.ClaudeCode)'s own paths, each
+// written from its own artifact.Render) and a root CLAUDE.md holding
+// SnippetBlock for the configured feature directory. This is the baseline
+// every case in this file starts from, mutated by exactly one deviation
+// per test.
 func newHealthyDoctorFixture(t *testing.T) string {
 	t.Helper()
 
@@ -41,6 +42,10 @@ func newHealthyDoctorFixture(t *testing.T) string {
 	}
 
 	for _, f := range h.Agents() {
+		writeHostFile(t, wd, f.RelPath, artifact.Render(f.Kind))
+	}
+
+	for _, f := range h.Skills() {
 		writeHostFile(t, wd, f.RelPath, artifact.Render(f.Kind))
 	}
 
@@ -102,10 +107,10 @@ func checkIDs(report doctor.Report) []string {
 // Test_diagnose_reports_every_check_ok_in_a_healthy_repository pins the
 // fixed row order (config-file, config-parse, config-values,
 // config-shadow, root-dir, env-git, env-path, host-plugin, host-hook,
-// host-snippet, host-agents, roles) and that a fully healthy, fully
-// installed repository reports every row OK — not merely "not ERROR or
-// WARN", which a SKIP row (the no-config arm's own shape) would also
-// satisfy.
+// host-skill, host-snippet, host-agents, roles, roles-skill) and that a
+// fully healthy, fully installed repository reports every row OK — not
+// merely "not ERROR or WARN", which a SKIP row (the no-config arm's own
+// shape) would also satisfy.
 func Test_diagnose_reports_every_check_ok_in_a_healthy_repository(t *testing.T) {
 	wd := newHealthyDoctorFixture(t)
 	self := filepath.Join(wd, "self-brief")
@@ -121,7 +126,7 @@ func Test_diagnose_reports_every_check_ok_in_a_healthy_repository(t *testing.T) 
 
 	assert.Equal(t, []string{
 		"config-file", "config-parse", "config-values", "config-shadow", "root-dir", "env-git", "env-path",
-		"host-plugin", "host-hook", "host-snippet", "host-agents", "roles",
+		"host-plugin", "host-hook", "host-skill", "host-snippet", "host-agents", "roles", "roles-skill",
 	}, checkIDs(report))
 
 	for _, c := range report.Checks {
@@ -512,8 +517,10 @@ func Test_diagnose_classifies_env_path(t *testing.T) {
 // pins env-path's own ERROR arm (R13): brief missing from PATH is ERROR
 // when the Claude Code integration is installed — any Plugin(true) ∪
 // Agents() file present, or a snippet block found — and unchanged WARN
-// otherwise. The three cases differ in exactly one variable: what, if
-// anything, is installed.
+// otherwise. The brief-workflow skill alone does not count (Rule 1: the
+// skill is not an install signal, since uninstall can leave an edited
+// SKILL.md behind after everything else is removed). The four cases
+// differ in exactly one variable: what, if anything, is installed.
 func Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -540,6 +547,17 @@ func Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed(t
 				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), block, 0o600))
 			},
 			wantSeverity: doctor.SeverityError,
+		},
+		{
+			name: "not on PATH, only the brief-workflow skill is installed",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				for _, f := range h.Skills() {
+					writeHostArtifact(t, wd, f)
+				}
+			},
+			wantSeverity: doctor.SeverityWarn,
 		},
 		{
 			name:         "not on PATH, nothing is installed",

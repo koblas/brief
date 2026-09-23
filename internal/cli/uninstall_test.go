@@ -215,9 +215,9 @@ func Test_uninstall_dry_run_with_nothing_installed_reports_it(t *testing.T) {
 
 // Test_uninstall_for_claude_code_removes_the_plugin_then_the_config pins
 // the user-visible contract: rows in removal order — the CLAUDE.md block
-// first, then hooks.json, finish skill, start skill, manifest, then
-// ".brief.yaml" last — every one "removed", and the claude-code
-// next-action suffix.
+// first, then the brief-workflow skill, then hooks.json, finish skill,
+// start skill, manifest, then ".brief.yaml" last — every one "removed",
+// and the claude-code next-action suffix.
 func Test_uninstall_for_claude_code_removes_the_plugin_then_the_config(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -232,6 +232,7 @@ func Test_uninstall_for_claude_code_removes_the_plugin_then_the_config(t *testin
 	require.NoError(t, err)
 	assert.Equal(t, ""+
 		"removed CLAUDE.md\n"+
+		"removed .claude/skills/brief-workflow/SKILL.md\n"+
 		"removed .claude/skills/brief/hooks/hooks.json\n"+
 		"removed .claude/skills/brief/skills/finish/SKILL.md\n"+
 		"removed .claude/skills/brief/skills/start/SKILL.md\n"+

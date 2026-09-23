@@ -6,9 +6,9 @@ import (
 )
 
 // Kind names one of the file shapes this package renders: the ".brief.yaml"
-// config, a Claude Code plugin's manifest, its two skill files and its
-// hook wiring — a snippet and agent files each add their own Kind and
-// digest list as init grows to write them.
+// config, a Claude Code plugin's manifest, its two skill files and its hook
+// wiring, three role-agent files, the brief-workflow skill installed
+// outside the plugin (SkillWorkflow), and a snippet.
 type Kind string
 
 const (
@@ -29,6 +29,8 @@ const (
 	KindAgentImplementer Kind = "agent-implementer"
 	// KindAgentReviewer is AgentReviewer's own Kind.
 	KindAgentReviewer Kind = "agent-reviewer"
+	// KindSkillWorkflow is SkillWorkflow's own Kind.
+	KindSkillWorkflow Kind = "skill-workflow"
 	// KindSnippet is SnippetBlock's own Kind. Unlike every other Kind, it is
 	// never passed to Render or Recognize: SnippetBlock takes a feature
 	// directory Render's own signature carries no room for, and Recognize's
@@ -121,9 +123,19 @@ var agentPlannerDigests = [][32]byte{
 	sha256.Sum256(AgentPlanner()),
 }
 
+// olderAgentPlannerBytes is an earlier release's own AgentPlanner render, a
+// fixed byte literal — never a live render call, which would make this list
+// duplicate agentPlannerDigests and the OriginOlder arm unreachable.
+const olderAgentPlannerBytes = "---\nname: planner\ndescription: Turn a feature's specification into ordered scenario " +
+	"plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's " +
+	"specification into ordered scenario plans: run `brief new step <feature>` for the next " +
+	"scenario, then fill its plan file. Never write production or test code.\n"
+
 // olderAgentPlannerDigests holds the sha256 digest of every earlier
-// release's own AgentPlanner render, empty until a release changes it.
-var olderAgentPlannerDigests = [][32]byte{}
+// release's own AgentPlanner render, one fixed literal per release.
+var olderAgentPlannerDigests = [][32]byte{
+	sha256.Sum256([]byte(olderAgentPlannerBytes)),
+}
 
 // agentImplementerDigests holds the sha256 digest of this release's own
 // AgentImplementer render.
@@ -131,9 +143,21 @@ var agentImplementerDigests = [][32]byte{
 	sha256.Sum256(AgentImplementer()),
 }
 
+// olderAgentImplementerBytes is an earlier release's own AgentImplementer
+// render, a fixed byte literal — never a live render call, which would make
+// this list duplicate agentImplementerDigests and the OriginOlder arm
+// unreachable.
+const olderAgentImplementerBytes = "---\nname: implementer\ndescription: Implement a feature's next open step, from brief " +
+	"start through brief finish.\n---\n\nRun `brief start <feature>` and implement its next " +
+	"open step, working from its output rather than reading the specification or earlier steps " +
+	"whole. Close the step with `brief finish <feature> <step> --handoff <path> --state " +
+	"<path>`.\n"
+
 // olderAgentImplementerDigests holds the sha256 digest of every earlier
-// release's own AgentImplementer render, empty until a release changes it.
-var olderAgentImplementerDigests = [][32]byte{}
+// release's own AgentImplementer render, one fixed literal per release.
+var olderAgentImplementerDigests = [][32]byte{
+	sha256.Sum256([]byte(olderAgentImplementerBytes)),
+}
 
 // agentReviewerDigests holds the sha256 digest of this release's own
 // AgentReviewer render.
@@ -144,6 +168,16 @@ var agentReviewerDigests = [][32]byte{
 // olderAgentReviewerDigests holds the sha256 digest of every earlier
 // release's own AgentReviewer render, empty until a release changes it.
 var olderAgentReviewerDigests = [][32]byte{}
+
+// skillWorkflowDigests holds the sha256 digest of this release's own
+// SkillWorkflow render.
+var skillWorkflowDigests = [][32]byte{
+	sha256.Sum256(SkillWorkflow()),
+}
+
+// olderSkillWorkflowDigests holds the sha256 digest of every earlier
+// release's own SkillWorkflow render, empty until a release changes it.
+var olderSkillWorkflowDigests = [][32]byte{}
 
 // Recognize reports body's Origin against kind's own compiled-in digest
 // lists: OriginCurrent when body's sha256 digest matches one of this
@@ -196,6 +230,8 @@ func digestsFor(kind Kind) ([][32]byte, [][32]byte) {
 		return agentImplementerDigests, olderAgentImplementerDigests
 	case KindAgentReviewer:
 		return agentReviewerDigests, olderAgentReviewerDigests
+	case KindSkillWorkflow:
+		return skillWorkflowDigests, olderSkillWorkflowDigests
 	case KindSnippet:
 		// Deliberately excluded: SnippetBlock/RecognizeSnippet are the
 		// snippet's own render and recognize functions (see doc.go).

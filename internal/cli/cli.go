@@ -307,6 +307,18 @@ const noHookFlagUsage = "install the plugin without its PostToolUse hook\n(no ef
 // scraper.
 const withAgentsFlagUsage = "install the three role agents (the resolved\nhost must be claude-code)"
 
+// editAgentsFlagUsage is init's --edit-agents flag's usage string (Surface
+// & Copy's own words, verbatim). Its value is double-quoted, never
+// backticked — pflag turns a backticked word into a placeholder, which
+// "skills:" and "brief-workflow" must never become. Wrapped across three
+// lines rather than Surface & Copy's own two — like every other multi-line
+// flag usage in this file, the embedded newlines are pflag's own wrapping
+// cue (see handoffFlagUsage), not part of the ruled copy itself; two lines
+// alone pushes the second past the 80-column budget once pflag indents it
+// under "--edit-agents"'s own column.
+const editAgentsFlagUsage = "add \"brief-workflow\" to the \"skills:\" list of the planner\n" +
+	"and implementer agents bound in .brief.yaml\n(repository files only)"
+
 // hookFlagUsage is check's --hook flag's usage string. Its embedded newline
 // is pflag's own wrapping cue — see handoffFlagUsage. The backquoted "host"
 // is the generic placeholder (see hostFlagUsage); host.HookHosts() names
@@ -534,11 +546,14 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		})
 	finishCmd.Annotations[writesFilesAnnotation] = "true"
 
-	initCmd := leafCommand("init [--host <name>] [--no-hook] [--with-agents] [--dry-run | --print] [--force] [--json]", "install brief's config and agent-host integration", initInvocation, initLong,
+	const initUse = "init [--host <name>] [--no-hook] [--with-agents] [--edit-agents] [--dry-run | --print] [--force] [--json]"
+
+	initCmd := leafCommand(initUse, "install brief's config and agent-host integration", initInvocation, initLong,
 		func(fs *pflag.FlagSet) {
 			fs.String("host", "", hostFlagUsage)
 			fs.Bool("no-hook", false, noHookFlagUsage)
 			fs.Bool("with-agents", false, withAgentsFlagUsage)
+			fs.Bool("edit-agents", false, editAgentsFlagUsage)
 			fs.Bool("dry-run", false, dryRunFlagUsage)
 			fs.Bool("print", false, printFlagUsage)
 			fs.Bool("force", false, forceFlagUsage)
@@ -548,11 +563,12 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			host, _ := cmd.Flags().GetString("host")
 			noHook, _ := cmd.Flags().GetBool("no-hook")
 			withAgents, _ := cmd.Flags().GetBool("with-agents")
+			editAgents, _ := cmd.Flags().GetBool("edit-agents")
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			printFlag, _ := cmd.Flags().GetBool("print")
 			force, _ := cmd.Flags().GetBool("force")
 
-			return runInit(cmd.Context(), wd, args, host, noHook, withAgents, dryRun, printFlag, force, out.forCommand(cmd), rs.setupOpts...)
+			return runInit(cmd.Context(), wd, args, host, noHook, withAgents, editAgents, dryRun, printFlag, force, out.forCommand(cmd), rs.setupOpts...)
 		})
 	initCmd.Annotations[writesFilesAnnotation] = "true"
 
@@ -568,7 +584,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			force, _ := cmd.Flags().GetBool("force")
 
-			return runUninstall(cmd.Context(), wd, args, host, dryRun, force, out.forCommand(cmd))
+			return runUninstall(cmd.Context(), wd, args, host, dryRun, force, out.forCommand(cmd), rs.setupOpts...)
 		})
 	uninstallCmd.Annotations[writesFilesAnnotation] = "true"
 

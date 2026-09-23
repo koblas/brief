@@ -33,17 +33,18 @@ func Test_init_json_is_one_exact_document(t *testing.T) {
 	want := `{"schema":1,"command":"init","ok":true,"exit_code":0,"host":"none","detected_by":null,"dry_run":false,"created":[` +
 		jsonString(t, featureRoot) + `,` + jsonString(t, configPath) + `],"modified":[],"artifacts":[` +
 		`{"kind":"config","path":` + jsonString(t, configPath) + `,"action":"created","detail":null},` +
-		`{"kind":"feature-root","path":` + jsonString(t, featureRoot) + `,"action":"created","detail":null}],"roles_to_add":[]}` + "\n"
+		`{"kind":"feature-root","path":` + jsonString(t, featureRoot) + `,"action":"created","detail":null}],"roles_to_add":[],"agents_missing_skill":[]}` + "\n"
 
 	assert.Equal(t, want, stdout.String())
 }
 
 // Test_init_json_for_claude_code_carries_plugin_and_hook_kinds pins the
 // JSON "kind" vocabulary (R11): "plugin" for the manifest and both skills,
-// "hook" for hooks.json, "snippet" for CLAUDE.md, "host" echoing
-// "claude-code", and every created path listed in write order (feature
-// root, then the four plugin files, then CLAUDE.md, config last) — files
-// only, never a directory.
+// "hook" for hooks.json, "skill" for the brief-workflow skill, "snippet"
+// for CLAUDE.md, "host" echoing "claude-code", and every created path
+// listed in write order (feature root, then the four plugin files, the
+// brief-workflow skill, then CLAUDE.md, config last) — files only, never a
+// directory.
 func Test_init_json_for_claude_code_carries_plugin_and_hook_kinds(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -71,11 +72,12 @@ func Test_init_json_for_claude_code_carries_plugin_and_hook_kinds(t *testing.T) 
 	start := filepath.Join(base, "skills", "start", "SKILL.md")
 	finish := filepath.Join(base, "skills", "finish", "SKILL.md")
 	hooks := filepath.Join(base, "hooks", "hooks.json")
+	skill := filepath.Join(wd, ".claude", "skills", "brief-workflow", "SKILL.md")
 	featureRoot := filepath.Join(wd, "docs", "specifications")
 	configPath := filepath.Join(wd, ".brief.yaml")
 	claudeMD := filepath.Join(wd, "CLAUDE.md")
 
-	assert.Equal(t, []string{featureRoot, manifest, start, finish, hooks, claudeMD, configPath}, doc.Created)
+	assert.Equal(t, []string{featureRoot, manifest, start, finish, hooks, skill, claudeMD, configPath}, doc.Created)
 
 	kindByPath := map[string]string{}
 	for _, a := range doc.Artifacts {
@@ -85,6 +87,7 @@ func Test_init_json_for_claude_code_carries_plugin_and_hook_kinds(t *testing.T) 
 	assert.Equal(t, "plugin", kindByPath[start])
 	assert.Equal(t, "plugin", kindByPath[finish])
 	assert.Equal(t, "hook", kindByPath[hooks])
+	assert.Equal(t, "skill", kindByPath[skill])
 	assert.Equal(t, "snippet", kindByPath[claudeMD])
 }
 
@@ -178,6 +181,10 @@ func Test_init_print_json_is_one_exact_document(t *testing.T) {
 	assert.NotContains(t, doc, "created")
 	assert.NotContains(t, doc, "modified")
 	assert.NotContains(t, doc, "roles_to_add")
+	// Green on arrival: --print --json never computed agents_missing_skill
+	// before this field existed either. Kept as a regression pin, matching
+	// the roles_to_add precedent right above.
+	assert.NotContains(t, doc, "agents_missing_skill")
 
 	var artifacts []struct {
 		Path   string `json:"path"`

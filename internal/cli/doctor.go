@@ -19,8 +19,10 @@ environment (a ".git" above the working directory, and whether the
 "brief" on PATH matches the one running), and, for Claude Code, the
 skills-directory plugin, its hook, the CLAUDE.md instruction block and the
 three role agents — plus whether each role bound in ".brief.yaml" resolves
-to an agent file, reading "~/.claude/agents" for a bare role name found
-nowhere in the repository. It never reads a feature's own content — that
+to an agent, matched by its frontmatter "name:" anywhere under
+".claude/agents/", then "~/.claude/agents/" when the repository defines
+none, and whether the bound planner and implementer preload the
+"brief-workflow" skill. It never reads a feature's own content — that
 is brief check's job.
 
 Prints one row per check, in a fixed order:

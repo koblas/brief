@@ -41,10 +41,11 @@ func Test_uninstall_json_is_one_exact_document(t *testing.T) {
 }
 
 // Test_uninstall_json_for_claude_code_removes_plugin_and_hook_files pins
-// the same "kind" vocabulary on removal: "snippet" for CLAUDE.md, "hook"
-// for hooks.json, "plugin" for the rest, "host" echoing "claude-code", and
-// removed naming files only, in removal order (CLAUDE.md first) — never
-// the pruned, now-empty plugin directory.
+// the same "kind" vocabulary on removal: "snippet" for CLAUDE.md, "skill"
+// for the brief-workflow skill, "hook" for hooks.json, "plugin" for the
+// rest, "host" echoing "claude-code", and removed naming files only, in
+// removal order (CLAUDE.md first) — never the pruned, now-empty plugin
+// directory.
 func Test_uninstall_json_for_claude_code_removes_plugin_and_hook_files(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -77,10 +78,11 @@ func Test_uninstall_json_for_claude_code_removes_plugin_and_hook_files(t *testin
 	start := filepath.Join(base, "skills", "start", "SKILL.md")
 	finish := filepath.Join(base, "skills", "finish", "SKILL.md")
 	hooks := filepath.Join(base, "hooks", "hooks.json")
+	skill := filepath.Join(wd, ".claude", "skills", "brief-workflow", "SKILL.md")
 	configPath := filepath.Join(wd, ".brief.yaml")
 	claudeMD := filepath.Join(wd, "CLAUDE.md")
 
-	assert.Equal(t, []string{claudeMD, hooks, finish, start, manifest, configPath}, doc.Removed)
+	assert.Equal(t, []string{claudeMD, skill, hooks, finish, start, manifest, configPath}, doc.Removed)
 
 	kindByPath := map[string]string{}
 	for _, a := range doc.Artifacts {
@@ -88,6 +90,7 @@ func Test_uninstall_json_for_claude_code_removes_plugin_and_hook_files(t *testin
 	}
 	assert.Equal(t, "hook", kindByPath[hooks])
 	assert.Equal(t, "plugin", kindByPath[manifest])
+	assert.Equal(t, "skill", kindByPath[skill])
 	assert.Equal(t, "snippet", kindByPath[claudeMD])
 }
 
