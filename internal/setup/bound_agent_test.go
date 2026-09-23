@@ -334,6 +334,33 @@ func Test_init_edit_agents_leaves_non_targets_alone(t *testing.T) {
 		assert.Equal(t, setup.ActionMerged, row2.Action)
 	})
 
+	t.Run("a symlink to a regular file inside root is still kept as not a regular file (isolates the leaf-mode check from the escape check)", func(t *testing.T) {
+		wd := t.TempDir()
+		home := t.TempDir()
+		writeConfigWithRoles(t, wd, "", "developer", "")
+
+		targetPath := filepath.Join(wd, "real.md")
+		body := "---\nname: developer\n---\n\nbody\n"
+		require.NoError(t, os.WriteFile(targetPath, []byte(body), 0o600))
+
+		linkPath := filepath.Join(wd, ".claude", "agents", "developer.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(linkPath), 0o755))
+		require.NoError(t, os.Symlink(targetPath, linkPath))
+
+		srv := newServerWithHome(t, home)
+		res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, EditAgents: true})
+		require.NoError(t, err)
+
+		row := findBoundAgentRow(t, res, linkPath)
+		assert.Equal(t, setup.ActionKept, row.Action)
+		assert.Equal(t, "not a regular file", row.Detail)
+
+		targetAfter, readErr := os.ReadFile(targetPath)
+		require.NoError(t, readErr)
+		assert.Equal(t, body, string(targetAfter))
+	})
+
+
 	t.Run("a .claude symlinked outside the repo gets no row; a real .claude is merged (control)", func(t *testing.T) {
 		wd := t.TempDir()
 		home := t.TempDir()
@@ -379,6 +406,60 @@ func Test_init_edit_agents_leaves_non_targets_alone(t *testing.T) {
 		row := findBoundAgentRow(t, res2, realPath)
 		assert.Equal(t, setup.ActionMerged, row.Action)
 	})
+}
+
+// Test_init_edit_agents_falls_back_when_the_text_edit_cannot_be_verified
+// pins the shared post-edit gate (boundAgentEditVerified): addWorkflowSkill
+// is a surgical text scan, not a YAML parser, and each case here is a shape
+// it misjudges — its own output either duplicates the "skills:" key or
+// folds an unrelated line onto the inserted one. The gate catches every
+// one by re-decoding the edit and comparing it against the original
+// Skills plus brief-workflow; a mismatch falls back to the same
+// ActionKept row and detail an unrecognized shape gets, and the file is
+// never written.
+func Test_init_edit_agents_falls_back_when_the_text_edit_cannot_be_verified(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "space before the colon: a second skills: line would be inserted, producing a duplicate key",
+			body: "---\nname: developer\nskills : [a]\n---\n\nbody\n",
+		},
+		{
+			name: "quoted key: a second skills: line would be inserted, producing a duplicate key",
+			body: "---\nname: developer\n\"skills\": [a]\n---\n\nbody\n",
+		},
+		{
+			name: "block item folded onto the next line: the inserted item absorbs the continuation",
+			body: "---\nname: developer\nskills:\n  - a\n    continued\n---\n\nbody\n",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := t.TempDir()
+			home := t.TempDir()
+			writeConfigWithRoles(t, wd, "", "developer", "")
+			path := filepath.Join(wd, ".claude", "agents", "developer.md")
+			writeMissingSkillAgent(t, path, c.body)
+
+			srv := newServerWithHome(t, home)
+			res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, EditAgents: true})
+			require.NoError(t, err)
+
+			row := findBoundAgentRow(t, res, path)
+			assert.Equal(t, setup.ActionKept, row.Action)
+			assert.Equal(t, `skills: is not a list brief can edit; add brief-workflow by hand`, row.Detail)
+
+			after, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			assert.Equal(t, c.body, string(after))
+
+			require.Len(t, res.AgentsMissingSkill, 1)
+			assert.Equal(t, path, res.AgentsMissingSkill[0].Path)
+		})
+	}
 }
 
 // Test_init_edit_agents_edits_a_shared_agent_once pins the dedupe rule:

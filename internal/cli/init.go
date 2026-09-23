@@ -217,7 +217,7 @@ const missingSkillHeader = `bound agents do not preload the brief-workflow skill
 // missingSkillLines renders one line per agents entry (Surface & Copy),
 // grouped by scope — every ScopeProject entry first, then every
 // ScopeUser one, each group in agents' own relative order — so the rows an
-// adopter can fix by rerunning init (--edit-agents, S07) come before the
+// adopter can fix by rerunning init with --edit-agents come before the
 // one under "~/.claude" that is always left for them to edit by hand: a
 // project row is "  <displayPath(wd, path)> (<role>)", a user row is
 // "  ~/<home-relative slash path> (<role>; user-level, edit by hand)".
@@ -269,6 +269,16 @@ func hasBoundAgentArtifact(artifacts []setup.Artifact) bool {
 	}
 
 	return false
+}
+
+// printEditAgentsNothingToEdit writes editAgentsNothingToEditLine to
+// out.stderr when editAgents is set and artifacts carries no
+// setup.KindBoundAgent row — the print-mode and write-mode render paths'
+// own shared guard.
+func printEditAgentsNothingToEdit(out reporter, editAgents bool, artifacts []setup.Artifact) {
+	if editAgents && !hasBoundAgentArtifact(artifacts) {
+		fmt.Fprintf(out.stderr, "brief init: %s\n", editAgentsNothingToEditLine)
+	}
 }
 
 // runInit implements "brief init [--host <name>] [--no-hook]
@@ -339,9 +349,7 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 	if printOnly {
 		renderPrint(out.stdout, wd, res.Print)
 
-		if editAgents && !hasBoundAgentArtifact(res.Artifacts) {
-			fmt.Fprintf(out.stderr, "brief init: %s\n", editAgentsNothingToEditLine)
-		}
+		printEditAgentsNothingToEdit(out, editAgents, res.Artifacts)
 
 		fmt.Fprintf(out.stderr, "brief init: %s\n", unwrittenLine(res.Print))
 
@@ -360,9 +368,7 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 		}
 	}
 
-	if editAgents && !hasBoundAgentArtifact(res.Artifacts) {
-		fmt.Fprintf(out.stderr, "brief init: %s\n", editAgentsNothingToEditLine)
-	}
+	printEditAgentsNothingToEdit(out, editAgents, res.Artifacts)
 
 	if len(res.AgentsMissingSkill) > 0 {
 		fmt.Fprintf(out.stderr, "brief init: %s\n", missingSkillHeader)

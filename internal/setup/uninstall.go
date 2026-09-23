@@ -403,7 +403,7 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 			return Result{}, err
 		}
 
-		if err := writeBoundAgent(ba.Path, ba.edited, ba.perm); err != nil {
+		if err := writeBoundAgent(ba.resolvedRoot, ba.rel, ba.edited, ba.perm); err != nil {
 			if removedAny {
 				return res, markPartial(err)
 			}

@@ -234,9 +234,11 @@ func Test_apply_uninstall_refuses_a_bound_agent_edited_after_planning(t *testing
 
 	boundAgentArts := []boundAgentArtifact{{
 		Kind: KindBoundAgent, Path: agentPath, Action: ActionRemoved, Detail: "brief-workflow from skills",
-		existing: staleBytes,
-		edited:   editedBytes,
-		perm:     0o600,
+		existing:     staleBytes,
+		edited:       editedBytes,
+		perm:         0o600,
+		resolvedRoot: wd,
+		rel:          "developer.md",
 	}}
 
 	t.Run("changed since planning: refused, untouched", func(t *testing.T) {

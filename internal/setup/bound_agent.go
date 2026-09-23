@@ -207,14 +207,13 @@ func editFlowList(lines []string, keyIdx int, value string) ([]string, string, s
 // end with "]" on this same line (a multi-line flow list, or one with a
 // trailing comment) or holds a nested list or mapping ("[" or "{" inside
 // the brackets) — either disqualifies the whole value as unrecognized
-// (shapeOther).
+// (shapeOther). An inner value that is empty, or holds only whitespace
+// ("[ ]"), is treated the same as "[]"; a single trailing comma ("[a,]") is
+// stripped before appending, so the result is always a well-formed flow
+// list rather than one with a dangling comma.
 func rewriteFlowList(value string) (string, bool) {
 	if !strings.HasSuffix(value, "]") {
 		return "", false
-	}
-
-	if value == "[]" {
-		return "[" + artifact.WorkflowSkillName + "]", true
 	}
 
 	inner := value[1 : len(value)-1]
@@ -222,7 +221,14 @@ func rewriteFlowList(value string) (string, bool) {
 		return "", false
 	}
 
-	return "[" + inner + ", " + artifact.WorkflowSkillName + "]", true
+	trimmed := strings.TrimSpace(inner)
+	if trimmed == "" {
+		return "[" + artifact.WorkflowSkillName + "]", true
+	}
+
+	trimmed = strings.TrimRight(strings.TrimSuffix(trimmed, ","), " \t")
+
+	return "[" + trimmed + ", " + artifact.WorkflowSkillName + "]", true
 }
 
 // boundAgentBlockListItems returns the line indices of the contiguous run
@@ -440,10 +446,14 @@ func removeFlowListItem(lines []string, keyIdx int, value string) ([]string, boo
 // "]" on this same line (a multi-line flow list, or one with a trailing
 // comment), holds a nested list or mapping ("[" or "{" inside the
 // brackets), or does not name the skill as a plain, unquoted,
-// comma-separated token. rewritten is "" when removing the skill empties
-// the list — removeFlowListItem then drops the whole "skills:" line rather
-// than writing "skills: []", the same "drop when empty" rule
-// removeBlockListItem follows for its own last item.
+// comma-separated token. A comma-separated token that is empty once
+// trimmed — the artifact of a leading, trailing or doubled comma — is
+// dropped rather than kept, so "[brief-workflow,]" empties exactly like
+// "[brief-workflow]" instead of surviving as a dangling comma. rewritten is
+// "" when removing the skill empties the list — removeFlowListItem then
+// drops the whole "skills:" line rather than writing "skills: []", the
+// same "drop when empty" rule removeBlockListItem follows for its own last
+// item.
 func removeFromFlowList(value string) (rewritten string, ok bool) {
 	if !strings.HasSuffix(value, "]") {
 		return "", false
@@ -464,6 +474,10 @@ func removeFromFlowList(value string) (rewritten string, ok bool) {
 
 	for _, raw := range items {
 		item := strings.TrimSpace(raw)
+		if item == "" {
+			continue
+		}
+
 		if item == artifact.WorkflowSkillName && !found {
 			found = true
 
@@ -487,17 +501,24 @@ func removeFromFlowList(value string) (rewritten string, ok bool) {
 // boundAgentArtifact pairs one bound-agent file's own Artifact with the
 // bytes planning read (existing), the bytes a merge would write (edited),
 // the inserted or rewritten line (line, terminator stripped — --print's
-// own body), and the file's own Lstat'd permission bits (perm) — writing
-// through them preserves the adopter's own mode rather than a fixed one.
-// edited, line and perm are the zero value for every Action other than
-// ActionMerged.
+// own body), the file's own Lstat'd permission bits (perm) — writing
+// through them preserves the adopter's own mode rather than a fixed one —
+// and resolvedRoot/rel, the same symlink-resolved root and root-relative
+// path the escape check already computed at planning time, so
+// writeBoundAgent can write through an os.Root confined to resolvedRoot
+// rather than re-resolving path's own directory at apply time, when a
+// symlink swapped in between planning and applying could otherwise escape
+// it. edited, line, perm, resolvedRoot and rel are the zero value for
+// every Action other than ActionMerged or ActionRemoved.
 type boundAgentArtifact struct {
 	Artifact
 
-	existing []byte
-	edited   []byte
-	line     string
-	perm     fs.FileMode
+	existing     []byte
+	edited       []byte
+	line         string
+	perm         fs.FileMode
+	resolvedRoot string
+	rel          string
 }
 
 // boundAgentTargets selects --edit-agents' and Uninstall's own shared
@@ -593,15 +614,29 @@ func planBoundAgentRemovals(root, home string, roles config.RoleBindings) ([]bou
 	return out, nil
 }
 
+// boundAgentUneditableDetail is ActionKept's own detail (Surface & Copy)
+// for a "skills:" shape addWorkflowSkill cannot edit, and for one whose
+// edit fails boundAgentEditVerified's own check — an edit this package
+// cannot prove correct is never applied, and is reported the same as one
+// it never attempted.
+const boundAgentUneditableDetail = "skills: is not a list brief can edit; add brief-workflow by hand"
+
 // planBoundAgent plans one bound-agent target at path: a non-regular leaf
 // (Lstat) is ActionKept, detail "not a regular file", never read; a
 // regular leaf whose own resolved path escapes resolvedRoot (a ".claude"
 // symlinked outside the repository — filepath.Rel starting with "..")
-// contributes no row at all (ok is false), and is never edited; otherwise
-// path is read once, membership decided via agentfile.Parse on that same
-// byte slice, and addWorkflowSkill's own shape maps to ActionUnchanged
-// (already listed), ActionKept (any other shape, Rule 4's own boundary),
-// or ActionMerged (edited).
+// contributes no row at all (ok is false), and is never edited. Otherwise
+// path is read once: a frontmatter that does not itself decode
+// (agentfile.Parse) is never edited, ActionKept with
+// boundAgentUneditableDetail — addWorkflowSkill's own text scan has no
+// decoded Skills to append to, or verify against. A frontmatter that
+// already names the skill is ActionUnchanged. Any other shape is edited
+// through addWorkflowSkill and the result checked by
+// boundAgentEditVerified: a verified edit is ActionMerged; one
+// addWorkflowSkill reports shapeOther, or one boundAgentEditVerified
+// rejects — the edited bytes decode into something other than fm's own
+// Skills plus the skill, a sign the text scan found a shape it
+// misjudged — is ActionKept with the same detail, never written.
 func planBoundAgent(path, resolvedRoot string) (boundAgentArtifact, bool, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -629,31 +664,64 @@ func planBoundAgent(path, resolvedRoot string) (boundAgentArtifact, bool, error)
 		return boundAgentArtifact{}, false, fmt.Errorf("setup: read %s: %w", path, err)
 	}
 
-	fm, parseErr := agentfile.Parse(existing)
-	alreadyListed := parseErr == nil && slices.Contains(fm.Skills, artifact.WorkflowSkillName)
-
-	edited, line, shape := addWorkflowSkill(existing, alreadyListed)
-
 	art := Artifact{Kind: KindBoundAgent, Path: path}
 
-	switch shape {
-	case shapeAlreadyListed:
-		art.Action = ActionUnchanged
-	case shapeOther:
+	fm, parseErr := agentfile.Parse(existing)
+
+	switch {
+	case parseErr != nil:
 		art.Action = ActionKept
-		art.Detail = "skills: is not a list brief can edit; add brief-workflow by hand"
-	case shapeNoKey, shapeBlockList, shapeFlowList:
-		art.Action = ActionMerged
-		art.Detail = "brief-workflow added to skills"
+		art.Detail = boundAgentUneditableDetail
+
+		return boundAgentArtifact{Artifact: art}, true, nil
+	case fm.HasSkill(artifact.WorkflowSkillName):
+		art.Action = ActionUnchanged
+
+		return boundAgentArtifact{Artifact: art}, true, nil
 	}
 
+	edited, line, shape := addWorkflowSkill(existing, false)
+
+	if shape == shapeOther || !boundAgentEditVerified(fm, edited) {
+		art.Action = ActionKept
+		art.Detail = boundAgentUneditableDetail
+
+		return boundAgentArtifact{Artifact: art}, true, nil
+	}
+
+	art.Action = ActionMerged
+	art.Detail = "brief-workflow added to skills"
+
 	return boundAgentArtifact{
-		Artifact: art,
-		existing: existing,
-		edited:   edited,
-		line:     line,
-		perm:     info.Mode().Perm(),
+		Artifact:     art,
+		existing:     existing,
+		edited:       edited,
+		line:         line,
+		perm:         info.Mode().Perm(),
+		resolvedRoot: resolvedRoot,
+		rel:          rel,
 	}, true, nil
+}
+
+// boundAgentEditVerified reports whether editing existing's own frontmatter
+// into edited produced exactly the expected result — the shared post-edit
+// gate addWorkflowSkill and removeWorkflowSkill's own surgical text edits
+// both need, since neither understands YAML well enough to prove its own
+// output correct: edited must itself decode (agentfile.Parse), name the
+// same agent (Name unchanged), and its own Skills must equal fm's own
+// Skills with artifact.WorkflowSkillName appended, in order — anything
+// else means the text edit landed on a shape it misjudged (a folded block
+// continuation, a quoted flow item split on an internal comma, a duplicate
+// entry) and must not be applied.
+func boundAgentEditVerified(fm agentfile.Frontmatter, edited []byte) bool {
+	newFM, err := agentfile.Parse(edited)
+	if err != nil || newFM.Name != fm.Name {
+		return false
+	}
+
+	want := append(slices.Clone(fm.Skills), artifact.WorkflowSkillName)
+
+	return slices.Equal(newFM.Skills, want)
 }
 
 // planBoundAgentRemoval plans one bound-agent target's own removal Artifact
@@ -664,10 +732,13 @@ func planBoundAgent(path, resolvedRoot string) (boundAgentArtifact, bool, error)
 // reports a shape it cannot edit, only what it removed. Otherwise path is
 // read once, membership decided via agentfile.Parse on that same byte
 // slice (the same loose decode planBoundAgent uses); an entry not listed,
-// or one removeWorkflowSkill reports unremovable (a quoted, commented or
+// one removeWorkflowSkill reports unremovable (a quoted, commented or
 // multi-line value, or any other shape addWorkflowSkill would call
-// shapeOther), contributes no row either — Surface & Copy's own "no row for
-// a shape it can't edit" rule. A removable, listed entry is ActionRemoved,
+// shapeOther), or one boundAgentRemovalVerified rejects — the edited bytes
+// decode into something other than fm's own Skills with the skill dropped,
+// a sign the text edit removed the wrong entry or left a duplicate behind
+// — contributes no row either, Surface & Copy's own "no row for a shape it
+// can't edit" rule. A removable, listed, verified entry is ActionRemoved,
 // carrying existing, edited and perm for applyUninstall's own write.
 func planBoundAgentRemoval(path, resolvedRoot string) (boundAgentArtifact, bool, error) {
 	info, err := os.Lstat(path)
@@ -695,25 +766,52 @@ func planBoundAgentRemoval(path, resolvedRoot string) (boundAgentArtifact, bool,
 	}
 
 	fm, parseErr := agentfile.Parse(existing)
-	listed := parseErr == nil && slices.Contains(fm.Skills, artifact.WorkflowSkillName)
-
-	if !listed {
+	if parseErr != nil || !fm.HasSkill(artifact.WorkflowSkillName) {
 		return boundAgentArtifact{}, false, nil
 	}
 
 	edited, removable := removeWorkflowSkill(existing)
-	if !removable {
+	if !removable || !boundAgentRemovalVerified(fm, edited) {
 		return boundAgentArtifact{}, false, nil
 	}
 
 	art := Artifact{Kind: KindBoundAgent, Path: path, Action: ActionRemoved, Detail: "brief-workflow from skills"}
 
 	return boundAgentArtifact{
-		Artifact: art,
-		existing: existing,
-		edited:   edited,
-		perm:     info.Mode().Perm(),
+		Artifact:     art,
+		existing:     existing,
+		edited:       edited,
+		perm:         info.Mode().Perm(),
+		resolvedRoot: resolvedRoot,
+		rel:          rel,
 	}, true, nil
+}
+
+// boundAgentRemovalVerified reports whether editing existing's own
+// frontmatter into edited removed exactly one artifact.WorkflowSkillName
+// entry and nothing else — the removal side of the shared post-edit gate
+// (boundAgentEditVerified's own inverse): edited must itself decode
+// (agentfile.Parse), name the same agent (Name unchanged), no longer list
+// the skill at all, and its own Skills must equal fm's own Skills with
+// exactly the entries named skill removed, in order — a duplicate entry
+// that removeWorkflowSkill only strips one of, or a text edit that landed
+// on the wrong item, still shows the skill listed or drops an entry the
+// removal never touched, and fails this check.
+func boundAgentRemovalVerified(fm agentfile.Frontmatter, edited []byte) bool {
+	newFM, err := agentfile.Parse(edited)
+	if err != nil || newFM.Name != fm.Name || newFM.HasSkill(artifact.WorkflowSkillName) {
+		return false
+	}
+
+	want := make([]string, 0, len(fm.Skills))
+
+	for _, s := range fm.Skills {
+		if s != artifact.WorkflowSkillName {
+			want = append(want, s)
+		}
+	}
+
+	return slices.Equal(newFM.Skills, want)
 }
 
 // subtractMergedBoundAgents removes every path boundAgentArts merged from
@@ -744,34 +842,53 @@ func subtractMergedBoundAgents(list []MissingSkillAgent, boundAgentArts []boundA
 	return out
 }
 
-// writeBoundAgent atomically replaces path's bytes with body, through
-// internal/platform/atomicfile, preserving perm (the file's own Lstat'd
-// permission bits at planning time) rather than a fixed mode — unlike
-// writePluginFile and writeSnippetFile, which hardcode 0o644 for a file
-// brief itself owns, a bound agent file is the adopter's own and must keep
-// whatever mode it already had.
-func writeBoundAgent(path string, body []byte, perm fs.FileMode) error {
-	dir := filepath.Dir(path)
-
-	root, err := os.OpenRoot(dir)
+// writeBoundAgent atomically replaces the bound-agent file at
+// resolvedRoot/rel — planning time's own symlink-resolved root and
+// root-relative path (boundAgentArtifact.resolvedRoot, .rel) — with body,
+// through internal/platform/atomicfile, preserving perm (the file's own
+// Lstat'd permission bits at planning time) rather than a fixed mode —
+// unlike writePluginFile and writeSnippetFile, which hardcode 0o644 for a
+// file brief itself owns, a bound agent file is the adopter's own and must
+// keep whatever mode it already had. Writing through an os.Root opened at
+// resolvedRoot, rather than re-resolving the leaf's own directory from its
+// original (possibly symlinked) path at apply time, keeps the write
+// confined to the same root the escape check already verified at planning
+// time — a symlink swapped in between the two can only ever point
+// somewhere still inside resolvedRoot.
+func writeBoundAgent(resolvedRoot, rel string, body []byte, perm fs.FileMode) error {
+	root, err := os.OpenRoot(resolvedRoot)
 	if err != nil {
-		return fmt.Errorf("setup: open %s: %w", dir, err)
+		return fmt.Errorf("setup: open %s: %w", resolvedRoot, err)
 	}
 	defer func() { _ = root.Close() }()
 
-	w, err := atomicfile.Create(root, filepath.Base(path), perm)
+	dir := filepath.Dir(rel)
+	if dir != "." {
+		sub, subErr := root.OpenRoot(dir)
+		if subErr != nil {
+			return fmt.Errorf("setup: open %s: %w", filepath.Join(resolvedRoot, dir), subErr)
+		}
+		defer func() { _ = sub.Close() }()
+
+		root = sub
+	}
+
+	name := filepath.Base(rel)
+	full := filepath.Join(resolvedRoot, rel)
+
+	w, err := atomicfile.Create(root, name, perm)
 	if err != nil {
-		return fmt.Errorf("setup: write %s: %w", path, err)
+		return fmt.Errorf("setup: write %s: %w", full, err)
 	}
 
 	if _, err := w.Write(body); err != nil {
 		_ = w.Close()
 
-		return fmt.Errorf("setup: write %s: %w", path, err)
+		return fmt.Errorf("setup: write %s: %w", full, err)
 	}
 
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("setup: write %s: %w", path, err)
+		return fmt.Errorf("setup: write %s: %w", full, err)
 	}
 
 	return nil

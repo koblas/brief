@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -119,6 +120,11 @@ func Load(path string) (Frontmatter, error) {
 	}
 
 	return decode(body)
+}
+
+// HasSkill reports whether fm's own Skills names skill.
+func (fm Frontmatter) HasSkill(skill string) bool {
+	return slices.Contains(fm.Skills, skill)
 }
 
 // Parse decodes body's own YAML frontmatter into a Frontmatter — the

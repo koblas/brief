@@ -6,9 +6,12 @@ package setup
 // decisions (bound_agent_test.go, black-box).
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Test_add_workflow_skill_edits_only_the_skills_line pins addWorkflowSkill's
@@ -94,6 +97,20 @@ func Test_add_workflow_skill_edits_only_the_skills_line(t *testing.T) {
 			body:      "---\nname: developer\nskills: []\n---\n\nbody\n",
 			wantBody:  "---\nname: developer\nskills: [brief-workflow]\n---\n\nbody\n",
 			wantLine:  "skills: [brief-workflow]",
+			wantShape: shapeFlowList,
+		},
+		{
+			name:      "flow list, whitespace only [ ]: treated as empty",
+			body:      "---\nname: developer\nskills: [ ]\n---\n\nbody\n",
+			wantBody:  "---\nname: developer\nskills: [brief-workflow]\n---\n\nbody\n",
+			wantLine:  "skills: [brief-workflow]",
+			wantShape: shapeFlowList,
+		},
+		{
+			name:      "flow list, trailing comma: the stray comma is not carried into the result",
+			body:      "---\nname: developer\nskills: [other-skill,]\n---\n\nbody\n",
+			wantBody:  "---\nname: developer\nskills: [other-skill, brief-workflow]\n---\n\nbody\n",
+			wantLine:  "skills: [other-skill, brief-workflow]",
 			wantShape: shapeFlowList,
 		},
 		{
@@ -234,6 +251,18 @@ func Test_remove_workflow_skill_edits_only_the_skills_line(t *testing.T) {
 			wantOK:   true,
 		},
 		{
+			name:     "flow list, trailing comma, only item: the whole skills: line is dropped, not skills: []",
+			body:     "---\nname: developer\nskills: [brief-workflow,]\n---\n\nbody\n",
+			wantBody: "---\nname: developer\n---\n\nbody\n",
+			wantOK:   true,
+		},
+		{
+			name:     "flow list, trailing comma, another item remains",
+			body:     "---\nname: developer\nskills: [a, brief-workflow,]\n---\n\nbody\n",
+			wantBody: "---\nname: developer\nskills: [a]\n---\n\nbody\n",
+			wantOK:   true,
+		},
+		{
 			name:     "block list, item removed, others remain",
 			body:     "---\nname: developer\nskills:\n  - a\n  - brief-workflow\n---\n\nbody\n",
 			wantBody: "---\nname: developer\nskills:\n  - a\n---\n\nbody\n",
@@ -291,4 +320,61 @@ func Test_remove_workflow_skill_edits_only_the_skills_line(t *testing.T) {
 			assert.Equal(t, c.wantBody, string(edited))
 		})
 	}
+}
+
+// Test_plan_bound_agent_dangling_symlink and
+// Test_plan_bound_agent_removal_dangling_symlink call planBoundAgent and
+// planBoundAgentRemoval directly, unexported, since a dangling symlink
+// never reaches either through Init's or Uninstall's own real flow:
+// agentfile.Find reads a candidate's bytes to decode its "name:" before it
+// is ever a target, and a dangling symlink's own os.ReadFile always fails,
+// so it is filtered out before boundAgentTargets ever sees it. Both pin
+// os.Lstat, not os.Stat, deciding "not a regular file": Stat follows a
+// symlink and would error on one with no target, which os.Lstat never
+// does.
+func Test_plan_bound_agent_dangling_symlink(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "developer.md")
+	require.NoError(t, os.Symlink(filepath.Join(root, "missing-target.md"), path))
+
+	art, ok, err := planBoundAgent(path, root)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, ActionKept, art.Action)
+	assert.Equal(t, "not a regular file", art.Detail)
+}
+
+func Test_plan_bound_agent_removal_dangling_symlink(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "developer.md")
+	require.NoError(t, os.Symlink(filepath.Join(root, "missing-target.md"), path))
+
+	art, ok, err := planBoundAgentRemoval(path, root)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Equal(t, boundAgentArtifact{}, art)
+}
+
+// Test_write_bound_agent_is_confined_to_resolved_root pins
+// writeBoundAgent's own root confinement: rel's own leading directory is
+// resolved through an os.Root opened at resolvedRoot, planning time's own
+// symlink-resolved root, rather than re-resolved from a raw path at apply
+// time. Simulating a symlink swapped in between planning and applying —
+// the leaf's own parent directory now points outside resolvedRoot — must
+// refuse the write rather than silently follow it outside.
+func Test_write_bound_agent_is_confined_to_resolved_root(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "agents"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "agents", "developer.md"), []byte("original"), 0o600))
+
+	require.NoError(t, os.RemoveAll(filepath.Join(root, "agents")))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "agents")))
+
+	err := writeBoundAgent(root, filepath.Join("agents", "developer.md"), []byte("new body"), 0o600)
+	require.Error(t, err)
+
+	_, statErr := os.Stat(filepath.Join(outside, "developer.md"))
+	assert.True(t, os.IsNotExist(statErr), "the write must never land outside resolvedRoot")
 }

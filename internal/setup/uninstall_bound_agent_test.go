@@ -317,6 +317,28 @@ func Test_uninstall_leaves_non_targets_alone(t *testing.T) {
 		assert.Equal(t, baselineBody, string(targetAfter))
 	})
 
+	t.Run("a symlink to a regular file inside root gets no row (isolates the leaf-mode check from the escape check)", func(t *testing.T) {
+		wd := t.TempDir()
+		home := t.TempDir()
+		srv := installClaudeCode(t, wd, home, "", "developer", "", false)
+
+		targetPath := filepath.Join(wd, "real.md")
+		require.NoError(t, os.WriteFile(targetPath, []byte(baselineBody), 0o600))
+
+		linkPath := filepath.Join(wd, ".claude", "agents", "developer.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(linkPath), 0o755))
+		require.NoError(t, os.Symlink(targetPath, linkPath))
+
+		res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+		require.NoError(t, err)
+
+		assertNoBoundAgentRow(t, res, linkPath)
+
+		targetAfter, readErr := os.ReadFile(targetPath)
+		require.NoError(t, readErr)
+		assert.Equal(t, baselineBody, string(targetAfter))
+	})
+
 	t.Run("a .claude symlinked outside the repo gets no row (dry run)", func(t *testing.T) {
 		wd := t.TempDir()
 		home := t.TempDir()
@@ -416,6 +438,57 @@ func Test_uninstall_leaves_non_targets_alone(t *testing.T) {
 		require.NoError(t, readErr)
 		assert.Equal(t, baselineBody, string(after))
 	})
+}
+
+// Test_uninstall_leaves_bound_agent_untouched_when_the_removal_cannot_be_verified
+// pins the shared post-edit gate (boundAgentRemovalVerified), removal's own
+// side of the same check Test_init_edit_agents_falls_back_when_the_text_edit_cannot_be_verified
+// pins for addWorkflowSkill: removeWorkflowSkill is a surgical text scan
+// too, and each case here is a shape it misjudges — a comma inside a
+// quoted item splits the naive comma-join, or a duplicate entry leaves one
+// instance behind after removing only the first. The gate catches every
+// one by re-decoding the edit and confirming the skill is gone and every
+// other entry survived unchanged; a mismatch contributes no row at all —
+// the same "no row for a shape it can't edit" rule an unremovable shape
+// gets — and the file is never written.
+func Test_uninstall_leaves_bound_agent_untouched_when_the_removal_cannot_be_verified(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "quoted flow item holding a comma: the naive comma-split cuts inside it",
+			body: "---\nname: developer\nskills: [\"x, brief-workflow, y\", 'brief-workflow']\n---\n\nbody\n",
+		},
+		{
+			name: "duplicate flow entries: only the first is removed, the skill is still listed",
+			body: "---\nname: developer\nskills: [brief-workflow, brief-workflow]\n---\n\nbody\n",
+		},
+		{
+			name: "duplicate block entries: only the first is removed, the skill is still listed",
+			body: "---\nname: developer\nskills:\n  - brief-workflow\n  - brief-workflow\n---\n\nbody\n",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := t.TempDir()
+			home := t.TempDir()
+			srv := installClaudeCode(t, wd, home, "", "developer", "", false)
+
+			path := filepath.Join(wd, ".claude", "agents", "developer.md")
+			writeMissingSkillAgent(t, path, c.body)
+
+			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
+			require.NoError(t, err)
+
+			assertNoBoundAgentRow(t, res, path)
+
+			after, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			assert.Equal(t, c.body, string(after))
+		})
+	}
 }
 
 // Test_uninstall_edits_a_shared_bound_agent_once pins the dedupe rule:

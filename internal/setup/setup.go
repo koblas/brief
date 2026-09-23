@@ -547,7 +547,7 @@ func apply(
 			return Result{}, err
 		}
 
-		if err := writeBoundAgent(ba.Path, ba.edited, ba.perm); err != nil {
+		if err := writeBoundAgent(ba.resolvedRoot, ba.rel, ba.edited, ba.perm); err != nil {
 			if wroteSomething {
 				return res, markPartial(err)
 			}

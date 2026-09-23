@@ -3,7 +3,6 @@ package agentfile
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/koblas/brief/internal/platform/host"
@@ -125,7 +124,7 @@ func (b Binding) LackingSkill(skill string) []Definition {
 		var out []Definition
 
 		for _, d := range b.Defs {
-			if !hasSkill(d.Frontmatter.Skills, skill) {
+			if !d.Frontmatter.HasSkill(skill) {
 				out = append(out, d)
 			}
 		}
@@ -138,14 +137,9 @@ func (b Binding) LackingSkill(skill string) []Definition {
 		return []Definition{{Path: b.Path, Scope: ScopeProject}}
 	}
 
-	if hasSkill(fm.Skills, skill) {
+	if fm.HasSkill(skill) {
 		return nil
 	}
 
 	return []Definition{{Path: b.Path, Scope: ScopeProject, Frontmatter: fm}}
-}
-
-// hasSkill reports whether skills names skill.
-func hasSkill(skills []string, skill string) bool {
-	return slices.Contains(skills, skill)
 }

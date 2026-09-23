@@ -337,6 +337,22 @@ func Test_resolve_binding_classifies_by_prefix(t *testing.T) {
 		assert.Equal(t, agentfile.BindingUnresolved, b.State)
 	})
 
+	t.Run("a directory at the override path is not regular; falls back to the plugin path", func(t *testing.T) {
+		root := t.TempDir()
+		home := t.TempDir()
+
+		overridePath := filepath.Join(root, ".claude", "agents", "implementer.md")
+		require.NoError(t, os.MkdirAll(overridePath, 0o755))
+
+		pluginPath := filepath.Join(root, ".claude", "skills", "brief", "agents", "implementer.md")
+		writeAgentFile(t, pluginPath, "---\nname: implementer\n---\n\nplugin body\n")
+
+		b := agentfile.ResolveBinding(root, home, "brief:implementer")
+
+		require.Equal(t, agentfile.BindingResolved, b.State)
+		assert.Equal(t, pluginPath, b.Path)
+	})
+
 	t.Run("another plugin prefix is unverified", func(t *testing.T) {
 		root := t.TempDir()
 		home := t.TempDir()
@@ -440,6 +456,14 @@ func Test_lacking_skill_returns_each_definition_without_it(t *testing.T) {
 func Test_find_edge_cases(t *testing.T) {
 	t.Run("an empty home skips the user scope", func(t *testing.T) {
 		root := t.TempDir()
+
+		// A relative ".claude/agents" resolves against the process's own
+		// working directory when home is joined unguarded — seeding that
+		// directory with a real match proves the empty-home guard, not
+		// merely the absence of anything to find.
+		cwd := t.TempDir()
+		t.Chdir(cwd)
+		writeAgentFile(t, filepath.Join(cwd, ".claude", "agents", "developer.md"), "---\nname: developer\n---\n\nbody\n")
 
 		defs := agentfile.Find(root, "", "developer")
 
