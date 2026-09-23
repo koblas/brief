@@ -72,6 +72,21 @@ func Test_Mem_implicit_ancestor_directories_survive_removing_their_last_child(t 
 	assert.Empty(t, entries)
 }
 
+// Test_Mem_WriteFile_clones_the_caller_s_buffer proves WriteFile stores its
+// own copy of data: mutating the caller's slice after WriteFile returns must
+// not change what a later ReadFile sees.
+func Test_Mem_WriteFile_clones_the_caller_s_buffer(t *testing.T) {
+	m := rwfs.NewMem(fstest.MapFS{})
+	data := []byte("hello")
+
+	require.NoError(t, m.WriteFile("a.txt", data, 0o600))
+	data[0] = 'H'
+
+	got, err := m.ReadFile("a.txt")
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(got), "mutating the caller's buffer after WriteFile must not reach stored content")
+}
+
 // Test_Mem_is_safe_for_concurrent_use runs WriteFile from many goroutines
 // against distinct names, guarding the shared map with m's own mutex. Each
 // goroutine writes a name no other goroutine touches, so this proves the

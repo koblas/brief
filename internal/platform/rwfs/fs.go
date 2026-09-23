@@ -58,4 +58,18 @@ type FS interface {
 	// fs.ErrNotExist when name does not exist, and one wrapping
 	// syscall.ENOTEMPTY when name is a directory that still has entries.
 	Remove(name string) error
+
+	// CreateExclusive creates name with data and perm, refusing to touch an
+	// existing entry rather than replacing it. It returns a *fs.PathError
+	// wrapping fs.ErrExist when name already exists, of any type, and one
+	// wrapping fs.ErrNotExist when name's parent does not exist.
+	//
+	// Unlike WriteFile, CreateExclusive gives no atomicity guarantee against
+	// a partial write on the OS adapter: it writes directly to name rather
+	// than a temp sibling it renames into place, so a crash between opening
+	// name and finishing the write can leave a concurrent reader observing a
+	// truncated file at name itself. It exists for a caller — such as
+	// internal/scaffold's create-only-if-absent step files — that must never
+	// overwrite an existing entry and has no need to replace one.
+	CreateExclusive(name string, data []byte, perm fs.FileMode) error
 }

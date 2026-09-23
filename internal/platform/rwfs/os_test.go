@@ -35,15 +35,22 @@ func Test_OS_refuses_a_symlink_that_escapes_the_root(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Test_OS_reports_a_permission_error_when_the_directory_forbids_writing
-// pins that the OS adapter surfaces a real permission failure rather than
-// silently succeeding, unlike Mem which never consults the mode it records.
-// Running as root bypasses permission checks entirely, so the test skips
-// itself in that environment rather than reporting a false pass.
-func Test_OS_reports_a_permission_error_when_the_directory_forbids_writing(t *testing.T) {
+// skipIfRoot skips t when running as the root user, for a test whose
+// premise is a permission check that root bypasses entirely — reporting a
+// false pass rather than exercising the check.
+func skipIfRoot(t *testing.T) {
+	t.Helper()
+
 	if os.Geteuid() == 0 {
 		t.Skip("permission checks do not apply to root")
 	}
+}
+
+// Test_OS_reports_a_permission_error_when_the_directory_forbids_writing
+// pins that the OS adapter surfaces a real permission failure rather than
+// silently succeeding, unlike Mem which never consults the mode it records.
+func Test_OS_reports_a_permission_error_when_the_directory_forbids_writing(t *testing.T) {
+	skipIfRoot(t)
 
 	dir := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "locked"), 0o500))

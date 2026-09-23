@@ -25,6 +25,18 @@ func assertPathError(t *testing.T, err error, name string) {
 	assert.NotEmpty(t, pe.Op)
 }
 
+// requireENOTDIR requires err to be a *fs.PathError naming name whose chain
+// matches syscall.ENOTDIR — the portable POSIX errno both os.Root.FS() (
+// confirmed on darwin) and rwfs.Mem report when a read reaches through an
+// ancestor that exists but is not a directory.
+func requireENOTDIR(t *testing.T, err error, name string) {
+	t.Helper()
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, syscall.ENOTDIR)
+	assertPathError(t, err, name)
+}
+
 // testContract exercises the rwfs.FS contract against a freshly constructed
 // filesystem from mk, called once per subtest. Both the OS and Mem adapters
 // run it and must pass identically. Grouped into one function per method
@@ -43,6 +55,8 @@ func testContract(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 	testContractMkdir(t, mk)
 	testContractRemove(t, mk)
 	testContractRead(t, mk)
+	testContractReadThroughFileAncestor(t, mk)
+	testContractCreateExclusive(t, mk)
 	testContractInvalidNames(t, mk)
 
 	t.Run("fs.TestFS validates a seeded tree", func(t *testing.T) {
@@ -100,6 +114,48 @@ func testContractWriteFile(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 		info, err := fsys.Stat("a.txt")
 		require.NoError(t, err)
 		assert.Equal(t, fs.FileMode(0o400), info.Mode().Perm())
+	})
+
+	// replacing a symlink applies the given perm rather than the symlink's
+	// own — confirmed empirically against os.Root: renaming a fresh regular
+	// file over a symlink's name replaces the link with the new file, so
+	// replaceMode's IsRegular() gate must not treat a symlink as the
+	// "existing" case WriteFile otherwise preserves.
+	t.Run("replace over a symlink applies the given perm and turns it into a regular file", func(t *testing.T) {
+		fsys := mk(t) // pre-seeded with a-symlink -> symlink-target.txt, mode ModeSymlink|0o777
+
+		require.NoError(t, fsys.WriteFile("a-symlink", []byte("new contents"), 0o600))
+
+		info, err := fsys.Lstat("a-symlink")
+		require.NoError(t, err)
+		assert.Zero(t, info.Mode()&fs.ModeSymlink, "replace must not leave the entry a symlink")
+		assert.True(t, info.Mode().IsRegular())
+		assert.Equal(t, fs.FileMode(0o600), info.Mode().Perm())
+
+		got, err := fsys.ReadFile("a-symlink")
+		require.NoError(t, err)
+		assert.Equal(t, "new contents", string(got))
+
+		// the symlink's own former target is untouched.
+		target, err := fsys.ReadFile("symlink-target.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "target contents", string(target))
+	})
+
+	// confirmed empirically against os.Root: renaming a regular file over an
+	// existing directory (empty or not) fails with EEXIST, not EISDIR.
+	t.Run("WriteFile fails when name already exists as a directory", func(t *testing.T) {
+		fsys := mk(t)
+		require.NoError(t, fsys.MkdirAll("d", 0o755))
+
+		err := fsys.WriteFile("d", []byte("x"), 0o600)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, fs.ErrExist)
+		assertPathError(t, err, "d")
+		info, statErr := fsys.Stat("d")
+		require.NoError(t, statErr)
+		assert.True(t, info.IsDir())
 	})
 
 	t.Run("WriteFile fails with a missing parent", func(t *testing.T) {
@@ -287,9 +343,10 @@ func testContractRead(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 	})
 
 	statLstatCases := []struct {
-		name string
-		seed func(t *testing.T, fsys rwfs.FS)
-		path string
+		name    string
+		seed    func(t *testing.T, fsys rwfs.FS)
+		path    string
+		wantDir bool
 	}{
 		{
 			name: "a regular file",
@@ -297,7 +354,8 @@ func testContractRead(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 				t.Helper()
 				require.NoError(t, fsys.WriteFile("f.txt", []byte("x"), 0o600))
 			},
-			path: "f.txt",
+			path:    "f.txt",
+			wantDir: false,
 		},
 		{
 			name: "a directory",
@@ -305,7 +363,8 @@ func testContractRead(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 				t.Helper()
 				require.NoError(t, fsys.MkdirAll("d", 0o755))
 			},
-			path: "d",
+			path:    "d",
+			wantDir: true,
 		},
 	}
 	for _, c := range statLstatCases {
@@ -318,6 +377,8 @@ func testContractRead(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 			lstatInfo, lstatErr := fsys.Lstat(c.path)
 			require.NoError(t, lstatErr)
 
+			assert.Equal(t, c.wantDir, statInfo.IsDir(), "Stat().IsDir()")
+			assert.Equal(t, c.wantDir, lstatInfo.IsDir(), "Lstat().IsDir()")
 			assert.Equal(t, statInfo.IsDir(), lstatInfo.IsDir())
 			assert.Equal(t, statInfo.Name(), lstatInfo.Name())
 		})
@@ -333,6 +394,103 @@ func testContractRead(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 		target, err := fsys.ReadLink("a-symlink")
 		require.NoError(t, err)
 		assert.Equal(t, "symlink-target.txt", target)
+	})
+}
+
+// testContractReadThroughFileAncestor covers every read method's response
+// to a name that reaches through a proper ancestor already occupied by a
+// regular file — confirmed empirically against os.Root.FS() on darwin to
+// report syscall.ENOTDIR, the same sentinel rwfs.Mem's notDirAncestor
+// already reports for the write side.
+func testContractReadThroughFileAncestor(t *testing.T, mk func(t *testing.T) rwfs.FS) {
+	t.Helper()
+
+	ancestorCases := []struct {
+		name string
+		path string
+	}{
+		{name: "immediate parent is a file", path: "f.txt/sub"},
+		{name: "grandparent is a file", path: "f.txt/sub/deep"},
+	}
+	for _, c := range ancestorCases {
+		t.Run("reads fail when "+c.name, func(t *testing.T) {
+			fsys := mk(t)
+			require.NoError(t, fsys.WriteFile("f.txt", []byte("x"), 0o600))
+
+			_, err := fsys.Stat(c.path)
+			requireENOTDIR(t, err, c.path)
+
+			_, err = fsys.Lstat(c.path)
+			requireENOTDIR(t, err, c.path)
+
+			_, err = fsys.ReadFile(c.path)
+			requireENOTDIR(t, err, c.path)
+
+			_, err = fsys.ReadDir(c.path)
+			requireENOTDIR(t, err, c.path)
+
+			_, err = fsys.Open(c.path)
+			requireENOTDIR(t, err, c.path)
+		})
+	}
+}
+
+// testContractCreateExclusive covers CreateExclusive: fresh create, refusing
+// an existing entry of any type, and the missing-parent case. Confirmed
+// empirically against os.Root.OpenFile with O_EXCL: an existing file, an
+// existing directory, and a missing parent each report the same sentinel
+// this pins.
+func testContractCreateExclusive(t *testing.T, mk func(t *testing.T) rwfs.FS) {
+	t.Helper()
+
+	t.Run("creates a file with the given content and permission", func(t *testing.T) {
+		fsys := mk(t)
+
+		require.NoError(t, fsys.CreateExclusive("a.txt", []byte("hello"), 0o600))
+
+		got, err := fsys.ReadFile("a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, "hello", string(got))
+
+		info, err := fsys.Stat("a.txt")
+		require.NoError(t, err)
+		assert.Equal(t, fs.FileMode(0o600), info.Mode().Perm())
+	})
+
+	t.Run("fails with fs.ErrExist when a file already exists", func(t *testing.T) {
+		fsys := mk(t)
+		require.NoError(t, fsys.CreateExclusive("a.txt", []byte("first"), 0o600))
+
+		err := fsys.CreateExclusive("a.txt", []byte("second"), 0o600)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, fs.ErrExist)
+		assertPathError(t, err, "a.txt")
+
+		got, readErr := fsys.ReadFile("a.txt")
+		require.NoError(t, readErr)
+		assert.Equal(t, "first", string(got), "a refused create must not touch the existing content")
+	})
+
+	t.Run("fails with fs.ErrExist when a directory already exists at name", func(t *testing.T) {
+		fsys := mk(t)
+		require.NoError(t, fsys.MkdirAll("d", 0o755))
+
+		err := fsys.CreateExclusive("d", []byte("x"), 0o600)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, fs.ErrExist)
+		assertPathError(t, err, "d")
+	})
+
+	t.Run("fails with fs.ErrNotExist when the parent is missing", func(t *testing.T) {
+		fsys := mk(t)
+
+		err := fsys.CreateExclusive("missing/child.txt", []byte("x"), 0o600)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		assertPathError(t, err, "missing/child.txt")
 	})
 }
 
@@ -359,6 +517,7 @@ func testContractInvalidNames(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 			require.ErrorIs(t, fsys.Mkdir(c.name, 0o755), fs.ErrInvalid)
 			require.ErrorIs(t, fsys.MkdirAll(c.name, 0o755), fs.ErrInvalid)
 			require.ErrorIs(t, fsys.Remove(c.name), fs.ErrInvalid)
+			require.ErrorIs(t, fsys.CreateExclusive(c.name, []byte("x"), 0o600), fs.ErrInvalid)
 		})
 	}
 }

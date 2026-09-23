@@ -67,7 +67,10 @@ func materializeAncestors(fsys fstest.MapFS) {
 // Snapshot returns a copy of m's current contents — a fresh map holding
 // freshly cloned *fstest.MapFile values — safe for a caller to inspect,
 // compare, or mutate without racing further calls on m or affecting m's own
-// state.
+// state. The copy includes an explicit fs.ModeDir entry for every directory
+// materialized only because some deeper entry's path implied it — the same
+// entries NewMem and MkdirAll add — not just the entries a caller wrote
+// explicitly.
 func (m *Mem) Snapshot() fstest.MapFS {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -239,12 +242,13 @@ func (m *Mem) Mkdir(name string, perm fs.FileMode) error {
 		return err
 	}
 
+	// notDirAncestor, run by checkName above, already rejects a parent that
+	// exists as something other than a directory; only "parent missing"
+	// remains to check here.
 	parent := path.Dir(name)
 	if parent != "." {
-		if info, err := m.fsys.Lstat(parent); err != nil {
+		if _, err := m.fsys.Lstat(parent); err != nil {
 			return &fs.PathError{Op: "mkdir", Path: name, Err: fs.ErrNotExist}
-		} else if !info.IsDir() {
-			return &fs.PathError{Op: "mkdir", Path: name, Err: syscall.ENOTDIR}
 		}
 	}
 
@@ -303,25 +307,64 @@ func (m *Mem) WriteFile(name string, data []byte, perm fs.FileMode) error {
 		return err
 	}
 
+	// notDirAncestor, run by checkName above, already rejects a parent that
+	// exists as something other than a directory; only "parent missing"
+	// remains to check here.
 	parent := path.Dir(name)
 	if parent != "." {
-		if info, err := m.fsys.Lstat(parent); err != nil {
+		if _, err := m.fsys.Lstat(parent); err != nil {
 			return &fs.PathError{Op: "writefile", Path: name, Err: fs.ErrNotExist}
-		} else if !info.IsDir() {
-			return &fs.PathError{Op: "writefile", Path: name, Err: syscall.ENOTDIR}
 		}
 	}
 
+	// Confirmed empirically against os.Root: renaming a regular file over an
+	// existing directory fails with EEXIST, not EISDIR, so that is the
+	// sentinel a caller can rely on from either adapter.
 	mode := perm
 	if existing, err := m.fsys.Lstat(name); err == nil {
 		if existing.IsDir() {
-			return &fs.PathError{Op: "writefile", Path: name, Err: syscall.EISDIR}
+			return &fs.PathError{Op: "writefile", Path: name, Err: fs.ErrExist}
 		}
 
-		mode = existing.Mode().Perm()
+		// A replace keeps the existing mode only when it is a regular file.
+		// Gating on IsRegular() matches atomicfile.replaceMode: without it,
+		// replacing a symlink would hand its (often 0o777) mode to the new
+		// regular file that takes its place, instead of perm.
+		if existing.Mode().IsRegular() {
+			mode = existing.Mode().Perm()
+		}
 	}
 
 	m.fsys[name] = &fstest.MapFile{Data: bytes.Clone(data), Mode: mode, ModTime: time.Time{}}
+
+	return nil
+}
+
+// CreateExclusive creates name with data and perm. See rwfs.FS for the
+// contract.
+func (m *Mem) CreateExclusive(name string, data []byte, perm fs.FileMode) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.checkName("createexclusive", name); err != nil {
+		return err
+	}
+
+	// notDirAncestor, run by checkName above, already rejects a parent that
+	// exists as something other than a directory; only "parent missing"
+	// remains to check here.
+	parent := path.Dir(name)
+	if parent != "." {
+		if _, err := m.fsys.Lstat(parent); err != nil {
+			return &fs.PathError{Op: "createexclusive", Path: name, Err: fs.ErrNotExist}
+		}
+	}
+
+	if _, err := m.fsys.Lstat(name); err == nil {
+		return &fs.PathError{Op: "createexclusive", Path: name, Err: fs.ErrExist}
+	}
+
+	m.fsys[name] = &fstest.MapFile{Data: bytes.Clone(data), Mode: perm, ModTime: time.Time{}}
 
 	return nil
 }

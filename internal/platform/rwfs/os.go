@@ -1,6 +1,7 @@
 package rwfs
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -140,12 +141,38 @@ func (o *OS) WriteFile(name string, data []byte, perm fs.FileMode) error {
 		return &fs.PathError{Op: "writefile", Path: name, Err: err}
 	}
 
-	if _, err := w.Write(data); err != nil {
-		return &fs.PathError{Op: "writefile", Path: name, Err: err}
+	// Close must run even when Write failed: per atomicfile.PendingFile,
+	// Close — not Write — is what closes the descriptor and, since Write
+	// failed, abandons the replacement and removes the temp sibling.
+	_, writeErr := w.Write(data)
+	closeErr := w.Close()
+
+	if joined := errors.Join(writeErr, closeErr); joined != nil {
+		return &fs.PathError{Op: "writefile", Path: name, Err: joined}
 	}
 
-	if err := w.Close(); err != nil {
-		return &fs.PathError{Op: "writefile", Path: name, Err: err}
+	return nil
+}
+
+// CreateExclusive creates name with data and perm, refusing an existing
+// entry rather than replacing it. See rwfs.FS for the contract, including
+// the partial-write guarantee this method does not give that WriteFile
+// does.
+func (o *OS) CreateExclusive(name string, data []byte, perm fs.FileMode) error {
+	if !fs.ValidPath(name) {
+		return &fs.PathError{Op: "createexclusive", Path: name, Err: fs.ErrInvalid}
+	}
+
+	f, err := o.root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	if err != nil {
+		return &fs.PathError{Op: "createexclusive", Path: name, Err: err}
+	}
+
+	_, writeErr := f.Write(data)
+	closeErr := f.Close()
+
+	if joined := errors.Join(writeErr, closeErr); joined != nil {
+		return &fs.PathError{Op: "createexclusive", Path: name, Err: joined}
 	}
 
 	return nil

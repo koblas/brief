@@ -1,7 +1,8 @@
 // Package rwfs is a read-write filesystem port: FS composes the standard
 // library's own read-side interfaces (fs.FS, fs.ReadFileFS, fs.ReadDirFS,
 // fs.StatFS, fs.ReadLinkFS) with the minimal write operations brief's
-// production code performs — Mkdir, MkdirAll, WriteFile and Remove.
+// production code performs — Mkdir, MkdirAll, WriteFile, CreateExclusive and
+// Remove.
 //
 // OS is the production adapter, confined to a directory tree by an
 // *os.Root; WriteFile goes through internal/platform/atomicfile so a
@@ -26,4 +27,10 @@
 //     umask, the same as any os.OpenFile call; a replace is not (see
 //     internal/platform/atomicfile). Mem never applies a umask — a create's
 //     perm argument lands exactly as given.
+//   - Atomicity: WriteFile's replace-without-partial-write guarantee is
+//     specific to that method. CreateExclusive writes directly to name on
+//     the OS adapter rather than through a temp sibling, so a crash between
+//     open and the write completing can leave a concurrent reader observing
+//     a truncated file. Mem's CreateExclusive has no partial-write case at
+//     all: its write is one in-memory assignment under m's own mutex.
 package rwfs
