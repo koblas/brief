@@ -16,6 +16,12 @@ const ClaudeCode = "claude-code"
 // claude-code skills-directory plugin file lives under (R4).
 const PluginDir = ".claude/skills/brief"
 
+// WorkflowSkillDir is the path, relative to a repository's install root,
+// the brief-workflow skill lives under — a standalone project skill,
+// outside PluginDir, so an agent preloads it by its own bare name
+// "brief-workflow" (Rule 2).
+const WorkflowSkillDir = ".claude/skills/brief-workflow"
+
 // claudeCodePluginFiles lists claudeCode's own Plugin(true) files, in
 // install order: the manifest, the start skill, the finish skill, then the
 // PostToolUse hook wiring last.
@@ -126,6 +132,17 @@ var claudeCodeAgentFiles = []File{
 // Agents returns claudeCodeAgentFiles, a fresh copy per call.
 func (claudeCode) Agents() []File {
 	return append([]File(nil), claudeCodeAgentFiles...)
+}
+
+// claudeCodeSkillFiles lists claudeCode's own Skills: the one
+// brief-workflow SKILL.md file, outside PluginDir.
+var claudeCodeSkillFiles = []File{
+	{RelPath: WorkflowSkillDir + "/SKILL.md", Kind: artifact.KindSkillWorkflow},
+}
+
+// Skills returns claudeCodeSkillFiles, a fresh copy per call.
+func (claudeCode) Skills() []File {
+	return append([]File(nil), claudeCodeSkillFiles...)
 }
 
 // claudeCodeInstructionFiles lists claudeCode's own InstructionFiles, in

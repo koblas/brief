@@ -218,6 +218,9 @@ func Test_recognize_classifies_each_plugin_file_against_its_own_kind(t *testing.
 		{name: "agent reviewer: one byte edited", kind: artifact.KindAgentReviewer, body: editOneByte(artifact.AgentReviewer()), want: artifact.OriginEdited},
 		{name: "skill start bytes checked against skill finish's kind", kind: artifact.KindSkillFinish, body: artifact.SkillStart(), want: artifact.OriginEdited},
 		{name: "agent planner bytes checked against agent reviewer's kind", kind: artifact.KindAgentReviewer, body: artifact.AgentPlanner(), want: artifact.OriginEdited},
+		{name: "workflow skill: current render", kind: artifact.KindSkillWorkflow, body: artifact.SkillWorkflow(), want: artifact.OriginCurrent},
+		{name: "workflow skill: one byte edited", kind: artifact.KindSkillWorkflow, body: editOneByte(artifact.SkillWorkflow()), want: artifact.OriginEdited},
+		{name: "skill start bytes checked against workflow skill's kind", kind: artifact.KindSkillWorkflow, body: artifact.SkillStart(), want: artifact.OriginEdited},
 	}
 
 	for _, c := range cases {
@@ -330,6 +333,61 @@ func Test_skill_files_are_user_invoked_and_scoped_to_their_command(t *testing.T)
 			assert.Contains(t, body, c.runs)
 		})
 	}
+}
+
+// wantSkillWorkflow is the brief-workflow skill's ruled bytes, transcribed
+// independently from specification.md's own "The skill file" block — never
+// derived from artifact.SkillWorkflow() or artifact.Render(), so this test
+// actually proves the render against the spec rather than against itself.
+const wantSkillWorkflow = "---\n" +
+	"description: brief's step protocol — pick up a feature's next open step with brief start, tick its checklist as items go green, close it with " +
+	"brief finish. Use when planning or implementing a step of a brief-tracked feature.\n" +
+	"user-invocable: false\n" +
+	"allowed-tools:\n" +
+	"  - Bash(brief start *)\n" +
+	"  - Bash(brief finish *)\n" +
+	"  - Bash(brief new step *)\n" +
+	"  - Bash(brief status *)\n" +
+	"  - Bash(brief check *)\n" +
+	"---\n" +
+	"\n" +
+	"# brief step protocol\n" +
+	"\n" +
+	"A feature is a directory of markdown: a specification, ordered step files, and one\n" +
+	"state file. `brief status` lists every feature and its next open step.\n" +
+	"\n" +
+	"1. **Start.** `brief start <feature>` prints the next open step — its id, acceptance\n" +
+	"   criteria and checklist — and the decisions it inherits from the state file. Work\n" +
+	"   from that output; do not read the specification or earlier handoffs whole. It\n" +
+	"   writes nothing.\n" +
+	"2. **Work.** As each checklist item goes green, tick it by hand in the step file:\n" +
+	"   `- [ ]` becomes `- [x]`. This is the only bookkeeping edit you make yourself.\n" +
+	"   `brief finish` refuses while any item is unticked.\n" +
+	"3. **Finish.** Write two bodies to scratch files (or pass `-` for one, read from stdin):\n" +
+	"   - the handoff: what this step decided, what it left undone, what the next step\n" +
+	"     must know;\n" +
+	"   - the state: a COMPLETE replacement of the feature's state file — every inherited\n" +
+	"     section `brief start` printed, updated, not just this step's delta. Anything you\n" +
+	"     leave out is dropped.\n" +
+	"   Then run `brief finish <feature> <step> --handoff <path> --state <path>`. It ticks\n" +
+	"   the progress list, marks the step done, writes the step's handoff file and replaces\n" +
+	"   the state file — all or nothing. A refusal names what to fix (an unticked item, a\n" +
+	"   missing state heading, a body over its line cap) and changes no files; fix it and\n" +
+	"   run it again.\n" +
+	"4. **Add a step.** `brief new step <feature>` scaffolds the next step file and its\n" +
+	"   progress entry; fill in its body.\n" +
+	"\n" +
+	"Never tick the progress list, mark a step done, write a handoff file or edit the state\n" +
+	"file by hand: `brief finish` is the only way a step closes. Headings, file names and\n" +
+	"caps are configured per repository, and brief's own output names the ones in force.\n" +
+	"`brief <command> --help` covers every flag.\n"
+
+// Test_workflow_skill_renders_the_ruled_bytes pins artifact.SkillWorkflow()
+// against wantSkillWorkflow, a literal transcribed from specification.md
+// rather than from the render itself — R1's own promise that the skill's
+// bytes are exactly what the spec ruled, not merely self-consistent.
+func Test_workflow_skill_renders_the_ruled_bytes(t *testing.T) {
+	assert.Equal(t, []byte(wantSkillWorkflow), artifact.SkillWorkflow())
 }
 
 // uncomment strips exactly one leading "#" from every line not beginning

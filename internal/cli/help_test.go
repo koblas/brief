@@ -935,6 +935,31 @@ func Test_every_command_help_names_its_json_documents_top_level_fields(t *testin
 	}
 }
 
+// normalizeWhitespace collapses every run of whitespace in s to a single
+// space, so a hand-wrapped Long string's own line breaks never defeat a
+// Contains check against a sentence copied from specification.md as one
+// unbroken line.
+func normalizeWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// Test_init_help_names_the_brief_workflow_skill pins the ruled sentence
+// specification.md's "Surface & Copy" section adds to initLong, right
+// after the --with-agents sentence: whitespace-normalized, since initLong
+// hand-wraps its own prose.
+func Test_init_help_names_the_brief_workflow_skill(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	const sentence = `Every claude-code install also writes a "brief-workflow" skill under ".claude/skills/brief-workflow/", which agents preload by listing it in their frontmatter "skills:".`
+	assert.Contains(t, normalizeWhitespace(stdout.String()), sentence)
+}
+
 // Test_status_and_check_help_say_the_text_layout_may_change pins the
 // exact sentence status, check and doctor's own Long end with, after
 // their JSON paragraph; start and finish are the control arm, since no

@@ -55,6 +55,10 @@ const (
 	// under InitRequest.WithAgents; Uninstall always plans their removal
 	// regardless of any flag Init was run with.
 	KindAgent Kind = "agent"
+	// KindSkill is the brief-workflow skill file (host.Host.Skills),
+	// installed on every claude-code install, with or without WithAgents —
+	// unlike KindAgent, it lives outside host.PluginDir.
+	KindSkill Kind = "skill"
 	// KindSnippet is the CLAUDE.md instruction block (R5).
 	KindSnippet Kind = "snippet"
 )
@@ -161,16 +165,17 @@ type Artifact struct {
 // request, Root is the absolute install root both operated against —
 // config.LocateInRepo's directory, or wd when no config was found, or when
 // the config found lies above the nearest enclosing git repository (R3) —
-// Artifacts lists what was found and what happened to it — for Init, the config
-// file, the feature root, then a claude-code host's own plugin manifest,
-// start skill, finish skill, hook wiring, and, under WithAgents, the three
-// role-agent files, then the CLAUDE.md block last, the fixed order R11's
-// stdout rows render in; for Uninstall, the CLAUDE.md block first, then a
-// claude-code host's own agent files (reviewer, implementer, planner —
-// always planned, independent of any flag Init was run with) and plugin
-// files (hook, finish skill, start skill, manifest), then the config file
-// last, so a partial uninstall never removes the repository's opt-in
-// marker before everything else. Created names every path Init wrote that
+// Artifacts lists what was found and what happened to it — for Init, the
+// config file, the feature root, then a claude-code host's own plugin
+// manifest, start skill, finish skill, hook wiring, the brief-workflow
+// skill, and, under WithAgents, the three role-agent files, then the
+// CLAUDE.md block last, the fixed order R11's stdout rows render in; for
+// Uninstall, the CLAUDE.md block first, then a claude-code host's own
+// agent files (reviewer, implementer, planner — always planned,
+// independent of any flag Init was run with), the brief-workflow skill,
+// and plugin files (hook, finish skill, start skill, manifest), then the
+// config file last, so a partial uninstall never removes the repository's
+// opt-in marker before everything else. Created names every path Init wrote that
 // did not exist before; Modified names every path either command rewrote
 // in place — Init's own CLAUDE.md merge or replace, Uninstall's own
 // CLAUDE.md block strip that leaves the file non-empty; Removed names
@@ -211,10 +216,12 @@ type Result struct {
 // Init plans then, unless req.DryRun, applies brief's own install: the
 // config file, the feature root the kept or freshly written config names,
 // and, for req.Host == HostClaudeCode, that host's own skills-directory
-// plugin files (host.Host.Plugin), under req.WithAgents its three
-// role-agent files (host.Host.Agents, R7) — with a config this same call
-// creates or --force-rewrites bound to them (artifact.AgentBindings) — and
-// its CLAUDE.md instruction block (R5, planSnippet) — independent of
+// plugin files (host.Host.Plugin), the brief-workflow skill
+// (host.Host.Skills) — written on every claude-code install, with or
+// without req.WithAgents — under req.WithAgents its three role-agent files
+// (host.Host.Agents, R7) — with a config this same call creates or
+// --force-rewrites bound to them (artifact.AgentBindings) — and its
+// CLAUDE.md instruction block (R5, planSnippet) — independent of
 // req.NoHook, which only ever omits the hook file. Every refusal — an
 // unknown host, req.WithAgents without a resolved HostClaudeCode
 // (ErrAgentsNeedHost), an invalid existing config, a feature root that
@@ -232,10 +239,10 @@ type Result struct {
 // disk. With no enclosing git repository anywhere above wd, Init keeps its
 // own plain ancestor walk, unbounded, exactly as before this rule existed.
 //
-// Applying writes the feature root, then every plugin and agent file
-// reporting ActionCreated, then the CLAUDE.md block, then the config file
-// last, so the config file — the repository's opt-in marker — never
-// appears before everything else has landed. A plugin or agent file
+// Applying writes the feature root, then every plugin, skill and agent
+// file reporting ActionCreated, then the CLAUDE.md block, then the config
+// file last, so the config file — the repository's opt-in marker — never
+// appears before everything else has landed. A plugin, skill or agent file
 // already present and unedited (ActionUnchanged) or edited locally
 // (ActionKept) is never rewritten, --force included: R3's --force only
 // ever rewrites the config from defaults (the bound variant under
@@ -288,6 +295,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 
 	var (
 		pluginArts []pluginArtifact
+		skillArts  []pluginArtifact
 		agentArts  []pluginArtifact
 		snippetArt snippetArtifact
 		hasSnippet bool
@@ -297,6 +305,11 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		h, _ := host.Lookup(host.ClaudeCode)
 
 		pluginArts, err = planPluginFiles(root, h, !req.NoHook)
+		if err != nil {
+			return Result{}, err
+		}
+
+		skillArts, err = planSkillFiles(root, h)
 		if err != nil {
 			return Result{}, err
 		}
@@ -316,11 +329,15 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		hasSnippet = true
 	}
 
-	artifacts := make([]Artifact, 0, 3+len(pluginArts)+len(agentArts))
+	artifacts := make([]Artifact, 0, 3+len(pluginArts)+len(skillArts)+len(agentArts))
 	artifacts = append(artifacts, configArt, featureArt)
 
 	for _, p := range pluginArts {
 		artifacts = append(artifacts, p.Artifact)
+	}
+
+	for _, s := range skillArts {
+		artifacts = append(artifacts, s.Artifact)
 	}
 
 	for _, a := range agentArts {
@@ -336,8 +353,9 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		configBody = artifact.ConfigFileWithRoles()
 	}
 
-	writeArts := make([]pluginArtifact, 0, len(pluginArts)+len(agentArts))
+	writeArts := make([]pluginArtifact, 0, len(pluginArts)+len(skillArts)+len(agentArts))
 	writeArts = append(writeArts, pluginArts...)
+	writeArts = append(writeArts, skillArts...)
 	writeArts = append(writeArts, agentArts...)
 
 	res := Result{
@@ -399,15 +417,16 @@ func rolesToAdd(withAgents bool, configAction Action, current config.RoleBinding
 }
 
 // apply writes featureArt, then every pluginArts entry reporting
-// ActionCreated (plugin files, then, under WithAgents, the three agent
-// files, both share this one list and its own write order), then
-// snippetArt (when hasSnippet, and it reports ActionCreated or
-// ActionMerged), then configArt last with configBody as its bytes — the
-// plain ConfigFile() or, under WithAgents, ConfigFileWithRoles() — into
-// res's own Created or Modified list — Created for ActionCreated, Modified
-// for ActionMerged, since a merge rewrites bytes an existing file already
-// held. A write failure is wrapped in ErrPartialWrite iff at least one
-// earlier write already landed in this same call.
+// ActionCreated (plugin files, then the brief-workflow skill, then, under
+// WithAgents, the three agent files — all share this one list and its own
+// write order), then snippetArt (when hasSnippet, and it reports
+// ActionCreated or ActionMerged), then configArt last with configBody as
+// its bytes — the plain ConfigFile() or, under WithAgents,
+// ConfigFileWithRoles() — into res's own Created or Modified list —
+// Created for ActionCreated, Modified for ActionMerged, since a merge
+// rewrites bytes an existing file already held. A write failure is wrapped
+// in ErrPartialWrite iff at least one earlier write already landed in this
+// same call.
 func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippetArt snippetArtifact, hasSnippet bool, configArt Artifact, configBody []byte) (Result, error) {
 	var wroteSomething bool
 
@@ -530,6 +549,28 @@ func planAgentFiles(root string, h host.Host) ([]pluginArtifact, error) {
 		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
 		art, err := planPluginFile(path, KindAgent, f.Kind)
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, pluginArtifact{Artifact: art, renderKind: f.Kind})
+	}
+
+	return out, nil
+}
+
+// planSkillFiles plans every file h.Skills() lists, each joined under
+// root, in that same order — mirroring planPluginFiles and planAgentFiles,
+// but every entry is tagged KindSkill: unlike Agents, Skills is planned on
+// every claude-code install, with or without WithAgents.
+func planSkillFiles(root string, h host.Host) ([]pluginArtifact, error) {
+	files := h.Skills()
+	out := make([]pluginArtifact, 0, len(files))
+
+	for _, f := range files {
+		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
+
+		art, err := planPluginFile(path, KindSkill, f.Kind)
 		if err != nil {
 			return nil, err
 		}

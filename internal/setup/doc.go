@@ -2,14 +2,16 @@
 // applies the ".brief.yaml" config file, the feature root a repository
 // needs before brief's other commands work in it, and, for
 // HostClaudeCode, that host's own skills-directory plugin files
-// (internal/platform/host.Host.Plugin), under WithAgents its three
-// role-agent files (host.Host.Agents, R7), and the CLAUDE.md instruction
-// block (R5); Uninstall plans and applies removing everything Init
-// installed, agent files included regardless of any flag Init was run
-// with. Both plan every artifact and decide every refusal before the
-// first byte is written or removed, so a DryRun request computes exactly
-// what a real run would and a refusal never leaves a partial tree behind
-// on its own account.
+// (internal/platform/host.Host.Plugin), the brief-workflow skill
+// (internal/platform/host.Host.Skills) on every claude-code install
+// regardless of WithAgents, under WithAgents its three role-agent files
+// (host.Host.Agents, R7), and the CLAUDE.md instruction block (R5);
+// Uninstall plans and applies removing everything Init installed, agent
+// and skill files included regardless of any flag Init was run with. Both
+// plan every artifact and decide every refusal before the first byte is
+// written or removed, so a DryRun request computes exactly what a real run
+// would and a refusal never leaves a partial tree behind on its own
+// account.
 //
 // WithAgents binds every role only in a config this same Init call
 // creates or, under --force, rewrites — R7's "an existing config is never
@@ -84,23 +86,25 @@
 // least one artifact already landed is wrapped in ErrPartialWrite instead,
 // distinguishing it from a refusal that changed nothing on disk. Init's
 // own artifact list carries the config first, the feature root, then the
-// plugin's own files in host.Host.Plugin's write order, then the CLAUDE.md
-// block last; applying instead writes the feature root, the plugin files,
-// the CLAUDE.md block, then the config file last, so the config — the
-// repository's opt-in marker — never lands before everything else has.
-// Uninstall's own list carries the CLAUDE.md block first, then the
+// plugin's own files in host.Host.Plugin's write order, then the
+// brief-workflow skill, then, under WithAgents, the three role-agent
+// files, then the CLAUDE.md block last; applying writes in that same
+// order, so the config — the repository's opt-in marker — never lands
+// before everything else has. Uninstall's own list carries the CLAUDE.md
+// block first, then the agent files reversed, then the skill, then the
 // plugin's files in the reverse of Init's write order, then the config
 // file last, and applies in that same order, so a partial uninstall never
 // removes the opt-in marker while something else still stands. The
 // feature root and everything under it is never an Uninstall artifact at
 // all, and is never removed; nor is ".claude/" or ".claude/skills/" above
-// the plugin's own directory — brief owns only host.PluginDir and below,
-// and the CLAUDE.md candidates InstructionFiles names (R6).
+// the plugin's own directory or the skill's own directory — brief owns
+// only host.PluginDir and below, host.WorkflowSkillDir, and the CLAUDE.md
+// candidates InstructionFiles names (R6).
 //
 // setup writes through the real filesystem — internal/platform/atomicfile
-// for the config file's, every plugin file's and CLAUDE.md's own
-// byte-identical replace, os.MkdirAll for the feature root and a plugin
-// file's parent directories, os.Remove for Uninstall's own file and
+// for the config file's, every plugin and skill file's and CLAUDE.md's own
+// byte-identical replace, os.MkdirAll for the feature root and a plugin or
+// skill file's parent directories, os.Remove for Uninstall's own file and
 // now-empty-directory removals (never RemoveAll) — imports only
 // internal/platform/config, internal/platform/artifact,
 // internal/platform/atomicfile and internal/platform/host alongside the

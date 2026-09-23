@@ -116,6 +116,19 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 			}
 		}
 
+		for _, f := range h.Skills() {
+			path := filepath.Join(root, filepath.FromSlash(f.RelPath))
+
+			art, present, err := planPluginRemoval(path, KindSkill, f.Kind, req.Force)
+			if err != nil {
+				return Result{}, err
+			}
+
+			if present {
+				res.Artifacts = append(res.Artifacts, art)
+			}
+		}
+
 		files := h.Plugin(true)
 
 		for _, f := range slices.Backward(files) {
@@ -193,10 +206,11 @@ func planPluginRemoval(path string, kind Kind, renderKind artifact.Kind, force b
 }
 
 // pluginPruneDirs lists every directory applyUninstall may remove once
-// empty, deepest first, ending at host.PluginDir itself — R6's ownership
-// boundary: brief owns the plugin directory, never ".claude/skills/" or
-// ".claude/" above it, both of which may hold a host's or an adopter's own
-// files.
+// empty, deepest first: every directory under host.PluginDir, then
+// host.PluginDir itself, then host.WorkflowSkillDir — R6's ownership
+// boundary: brief owns the plugin directory and the workflow skill's own
+// directory, never ".claude/skills/" or ".claude/" above either one, both
+// of which may hold a host's or an adopter's own files.
 var pluginPruneDirs = []string{
 	filepath.Join(host.PluginDir, "skills", "start"),
 	filepath.Join(host.PluginDir, "skills", "finish"),
@@ -205,6 +219,7 @@ var pluginPruneDirs = []string{
 	filepath.Join(host.PluginDir, ".claude-plugin"),
 	filepath.Join(host.PluginDir, "agents"),
 	host.PluginDir,
+	host.WorkflowSkillDir,
 }
 
 // pruneEmptyPluginDirs removes every pluginPruneDirs entry under root that

@@ -13,9 +13,9 @@ import (
 
 // Test_init_print_returns_pending_bodies_and_writes_nothing pins R9's own
 // artifact set at the Server boundary: a fresh, plain claude-code install
-// reports the config, every plugin file and the CLAUDE.md block, each
-// PrintCreate, bodies equal to what a real run would write, and the tree
-// byte-identical before and after.
+// reports the config, every plugin file, the brief-workflow skill and the
+// CLAUDE.md block, each PrintCreate, bodies equal to what a real run would
+// write, and the tree byte-identical before and after.
 func Test_init_print_returns_pending_bodies_and_writes_nothing(t *testing.T) {
 	wd := t.TempDir()
 	before := snapshotTree(t, wd)
@@ -35,6 +35,7 @@ func Test_init_print_returns_pending_bodies_and_writes_nothing(t *testing.T) {
 		{Path: paths.Start, Action: setup.PrintCreate, Body: string(artifact.SkillStart())},
 		{Path: paths.Finish, Action: setup.PrintCreate, Body: string(artifact.SkillFinish())},
 		{Path: paths.Hooks, Action: setup.PrintCreate, Body: string(artifact.ClaudeHooks())},
+		{Path: paths.Skill, Action: setup.PrintCreate, Body: string(artifact.SkillWorkflow())},
 		{Path: paths.ClaudeMD, Action: setup.PrintCreate, Body: string(artifact.SnippetBlock("docs/specifications"))},
 	}
 	assert.Equal(t, want, res.Print)

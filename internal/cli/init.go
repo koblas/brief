@@ -27,7 +27,10 @@ three role agents (planner, implementer, reviewer) under the plugin's own
 "agents/" directory; it requires the resolved host to be claude-code, and
 binds every role to them in ".brief.yaml" only when this same run creates
 that file — an existing config is never edited, and stderr instead lists
-the "roles:" lines to add by hand for any role still unbound. Writes
+the "roles:" lines to add by hand for any role still unbound. Every
+claude-code install also writes a "brief-workflow" skill under
+".claude/skills/brief-workflow/", which agents preload by listing it in
+their frontmatter "skills:". Writes
 ".brief.yaml" with every key present but commented out, documenting each
 setting in place (live under --with-agents only for "roles:" and its
 three children, when this run creates the file), and creates the

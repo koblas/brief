@@ -75,7 +75,7 @@ func printArtifacts(artifacts []Artifact, configBody []byte, writeArts []pluginA
 			body = configBody
 		case KindFeatureRoot:
 			// Never reached: the feature root is excluded above.
-		case KindPlugin, KindHook, KindAgent:
+		case KindPlugin, KindHook, KindSkill, KindAgent:
 			body = bodies[a.Path]
 		}
 

@@ -30,12 +30,12 @@ func agentFilePaths(root string) agentPaths {
 }
 
 // Test_init_with_agents_writes_three_agents_and_a_config_binding_them pins
-// the fresh-repository happy path: ten rows in order (config, feature
-// root, the four plugin files, the three agents, then the snippet), each
-// agent ActionCreated with KindAgent, the config's own bytes equal
-// artifact.ConfigFileWithRoles(), the three agent files' own bytes equal
-// their own render, and RolesToAdd is empty — the config this run wrote
-// already binds every role.
+// the fresh-repository happy path: eleven rows in order (config, feature
+// root, the four plugin files, the brief-workflow skill, the three agents,
+// then the snippet), each agent ActionCreated with KindAgent, the config's
+// own bytes equal artifact.ConfigFileWithRoles(), the three agent files'
+// own bytes equal their own render, and RolesToAdd is empty — the config
+// this run wrote already binds every role.
 func Test_init_with_agents_writes_three_agents_and_a_config_binding_them(t *testing.T) {
 	wd := t.TempDir()
 	srv := newServer(t)
@@ -43,7 +43,7 @@ func Test_init_with_agents_writes_three_agents_and_a_config_binding_them(t *test
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 10)
+	require.Len(t, res.Artifacts, 11)
 
 	kinds := make([]setup.Kind, len(res.Artifacts))
 	for i, a := range res.Artifacts {
@@ -52,16 +52,17 @@ func Test_init_with_agents_writes_three_agents_and_a_config_binding_them(t *test
 	assert.Equal(t, []setup.Kind{
 		setup.KindConfig, setup.KindFeatureRoot,
 		setup.KindPlugin, setup.KindPlugin, setup.KindPlugin, setup.KindHook,
+		setup.KindSkill,
 		setup.KindAgent, setup.KindAgent, setup.KindAgent,
 		setup.KindSnippet,
 	}, kinds)
 
 	paths := agentFilePaths(wd)
-	assert.Equal(t, paths.Planner, res.Artifacts[6].Path)
-	assert.Equal(t, paths.Implementer, res.Artifacts[7].Path)
-	assert.Equal(t, paths.Reviewer, res.Artifacts[8].Path)
+	assert.Equal(t, paths.Planner, res.Artifacts[7].Path)
+	assert.Equal(t, paths.Implementer, res.Artifacts[8].Path)
+	assert.Equal(t, paths.Reviewer, res.Artifacts[9].Path)
 
-	for _, i := range []int{6, 7, 8} {
+	for _, i := range []int{7, 8, 9} {
 		assert.Equalf(t, setup.ActionCreated, res.Artifacts[i].Action, "artifact %d must be created", i)
 	}
 
@@ -86,7 +87,7 @@ func Test_init_with_agents_writes_three_agents_and_a_config_binding_them(t *test
 
 // Test_rerunning_init_with_agents_reports_every_agent_unchanged pins R3's
 // convergence for the three agent files: a second, identical run reports
-// every one of the ten artifacts ActionUnchanged and writes nothing
+// every one of the eleven artifacts ActionUnchanged and writes nothing
 // further.
 func Test_rerunning_init_with_agents_reports_every_agent_unchanged(t *testing.T) {
 	wd := t.TempDir()
@@ -98,7 +99,7 @@ func Test_rerunning_init_with_agents_reports_every_agent_unchanged(t *testing.T)
 
 	require.NoError(t, err)
 	assert.Empty(t, res.Created)
-	require.Len(t, res.Artifacts, 10)
+	require.Len(t, res.Artifacts, 11)
 	for _, a := range res.Artifacts {
 		assert.Equalf(t, setup.ActionUnchanged, a.Action, "artifact %s must report unchanged", a.Path)
 	}
@@ -336,7 +337,7 @@ func Test_init_with_agents_for_host_none_refuses_and_writes_nothing(t *testing.T
 }
 
 // Test_init_with_agents_dry_run_writes_nothing_but_reports_roles_to_add
-// pins R9 for --with-agents: the same ten rows a real run would report,
+// pins R9 for --with-agents: the same eleven rows a real run would report,
 // RolesToAdd still populated against the pre-existing config the fixture
 // seeds, and nothing written to disk.
 func Test_init_with_agents_dry_run_writes_nothing_but_reports_roles_to_add(t *testing.T) {
@@ -349,7 +350,7 @@ func Test_init_with_agents_dry_run_writes_nothing_but_reports_roles_to_add(t *te
 
 	require.NoError(t, err)
 	assert.True(t, res.DryRun)
-	require.Len(t, res.Artifacts, 10)
+	require.Len(t, res.Artifacts, 11)
 	assert.Empty(t, res.Created)
 	assert.Equal(t, []string{
 		"roles:",

@@ -71,6 +71,65 @@ func renderSkill(description, allowedTools, argumentHint, invocation string) []b
 	return []byte(b.String())
 }
 
+// skillWorkflowBody is SkillWorkflow's own exact bytes, ruled by
+// specification.md's "The skill file" block: a YAML frontmatter block
+// scoping allowed-tools to brief's step-protocol verbs, user-invocable
+// false (it is preloaded via an agent's frontmatter "skills:", never run as
+// a slash command), and a body teaching the brief start / tick / brief
+// finish / brief new step protocol.
+const skillWorkflowBody = "---\n" +
+	"description: brief's step protocol — pick up a feature's next open step with brief start, tick its checklist as items go green, close it with " +
+	"brief finish. Use when planning or implementing a step of a brief-tracked feature.\n" +
+	"user-invocable: false\n" +
+	"allowed-tools:\n" +
+	"  - Bash(brief start *)\n" +
+	"  - Bash(brief finish *)\n" +
+	"  - Bash(brief new step *)\n" +
+	"  - Bash(brief status *)\n" +
+	"  - Bash(brief check *)\n" +
+	"---\n" +
+	"\n" +
+	"# brief step protocol\n" +
+	"\n" +
+	"A feature is a directory of markdown: a specification, ordered step files, and one\n" +
+	"state file. `brief status` lists every feature and its next open step.\n" +
+	"\n" +
+	"1. **Start.** `brief start <feature>` prints the next open step — its id, acceptance\n" +
+	"   criteria and checklist — and the decisions it inherits from the state file. Work\n" +
+	"   from that output; do not read the specification or earlier handoffs whole. It\n" +
+	"   writes nothing.\n" +
+	"2. **Work.** As each checklist item goes green, tick it by hand in the step file:\n" +
+	"   `- [ ]` becomes `- [x]`. This is the only bookkeeping edit you make yourself.\n" +
+	"   `brief finish` refuses while any item is unticked.\n" +
+	"3. **Finish.** Write two bodies to scratch files (or pass `-` for one, read from stdin):\n" +
+	"   - the handoff: what this step decided, what it left undone, what the next step\n" +
+	"     must know;\n" +
+	"   - the state: a COMPLETE replacement of the feature's state file — every inherited\n" +
+	"     section `brief start` printed, updated, not just this step's delta. Anything you\n" +
+	"     leave out is dropped.\n" +
+	"   Then run `brief finish <feature> <step> --handoff <path> --state <path>`. It ticks\n" +
+	"   the progress list, marks the step done, writes the step's handoff file and replaces\n" +
+	"   the state file — all or nothing. A refusal names what to fix (an unticked item, a\n" +
+	"   missing state heading, a body over its line cap) and changes no files; fix it and\n" +
+	"   run it again.\n" +
+	"4. **Add a step.** `brief new step <feature>` scaffolds the next step file and its\n" +
+	"   progress entry; fill in its body.\n" +
+	"\n" +
+	"Never tick the progress list, mark a step done, write a handoff file or edit the state\n" +
+	"file by hand: `brief finish` is the only way a step closes. Headings, file names and\n" +
+	"caps are configured per repository, and brief's own output names the ones in force.\n" +
+	"`brief <command> --help` covers every flag.\n"
+
+// SkillWorkflow renders ".claude/skills/brief-workflow/SKILL.md": the
+// step-protocol skill any agent — brief's own or one the repository already
+// has — preloads via its frontmatter "skills:" to learn brief start /
+// tick-by-hand / brief finish / brief new step. Unlike SkillStart and
+// SkillFinish, it is not user-invocable and carries no argument-hint: it is
+// never run as a slash command, only preloaded.
+func SkillWorkflow() []byte {
+	return []byte(skillWorkflowBody)
+}
+
 // claudeHooksFile is ClaudeHooks's own JSON shape: the settings.json hook
 // format code.claude.com/docs/en/hooks documents, scoped to one
 // PostToolUse entry.
@@ -144,6 +203,8 @@ func Render(kind Kind) []byte {
 		return AgentImplementer()
 	case KindAgentReviewer:
 		return AgentReviewer()
+	case KindSkillWorkflow:
+		return SkillWorkflow()
 	case KindSnippet:
 		// Deliberately excluded: SnippetBlock is the snippet's own render
 		// function, taking the feature directory Render's signature has no

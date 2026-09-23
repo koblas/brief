@@ -13,12 +13,13 @@ import (
 // refusal.
 var ErrMalformedPayload = errors.New("malformed hook payload")
 
-// File names one file a host's skills-directory plugin installs: RelPath
-// is its path relative to the repository's install root (forward-slash
-// separated; a caller joins it with filepath.Join, which normalizes for
-// its own platform), Kind is the artifact.Kind whose Render and Recognize
-// this file's bytes belong to, and Hook marks the file as the host's own
-// hook wiring — the one file Plugin(false) leaves out.
+// File names one file Plugin, Agents or Skills lists: RelPath is its path
+// relative to the repository's install root (forward-slash separated; a
+// caller joins it with filepath.Join, which normalizes for its own
+// platform), Kind is the artifact.Kind whose Render and Recognize this
+// file's bytes belong to, and Hook marks the file as the host's own hook
+// wiring — the one file Plugin(false) leaves out; Agents' and Skills' own
+// files never set it.
 type File struct {
 	RelPath string
 	Kind    artifact.Kind
@@ -54,6 +55,14 @@ type Host interface {
 	// independent of any flag Init was run with, and always in the reverse
 	// of this order.
 	Agents() []File
+	// Skills returns the one file the brief-workflow skill installs (R1/R2):
+	// unlike Plugin, it is written on every install for this host, with or
+	// without WithAgents, and unlike Agents its file lives outside
+	// PluginDir — it is a standalone project skill any agent preloads by
+	// bare name, never an entry inside the "brief" plugin. Uninstall always
+	// plans its removal, independent of any flag Init was run with, the
+	// same as Agents.
+	Skills() []File
 	// InstructionFiles returns the repository-root-relative paths (forward
 	// slash separated) of every file this host reads project instructions
 	// from, in the priority order setup's own CLAUDE.md-block location rule

@@ -194,6 +194,7 @@ func Test_init_for_claude_code_installs_the_plugin_and_says_where_to_start_claud
 		"created .claude/skills/brief/skills/start/SKILL.md\n"+
 		"created .claude/skills/brief/skills/finish/SKILL.md\n"+
 		"created .claude/skills/brief/hooks/hooks.json\n"+
+		"created .claude/skills/brief-workflow/SKILL.md\n"+
 		"created CLAUDE.md\n", stdout.String())
 	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
 
@@ -235,6 +236,7 @@ func Test_init_no_hook_omits_the_hook_row(t *testing.T) {
 		"created .claude/skills/brief/.claude-plugin/plugin.json\n"+
 		"created .claude/skills/brief/skills/start/SKILL.md\n"+
 		"created .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"created .claude/skills/brief-workflow/SKILL.md\n"+
 		"created CLAUDE.md\n", stdout.String())
 
 	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief", "hooks", "hooks.json"))
@@ -282,6 +284,7 @@ func Test_init_rerunning_for_claude_code_reports_unchanged_and_edited_files_kept
 		"unchanged .claude/skills/brief/skills/start/SKILL.md\n"+
 		"kept .claude/skills/brief/skills/finish/SKILL.md (edited locally)\n"+
 		"unchanged .claude/skills/brief/hooks/hooks.json\n"+
+		"unchanged .claude/skills/brief-workflow/SKILL.md\n"+
 		"unchanged CLAUDE.md\n", stdout.String())
 	assert.Equal(t, "brief init: already installed; nothing changed\n", stderr.String())
 }
@@ -314,12 +317,45 @@ func Test_init_merging_only_the_snippet_reports_installed_not_nothing_changed(t 
 		"unchanged .claude/skills/brief/skills/start/SKILL.md\n"+
 		"unchanged .claude/skills/brief/skills/finish/SKILL.md\n"+
 		"unchanged .claude/skills/brief/hooks/hooks.json\n"+
+		"unchanged .claude/skills/brief-workflow/SKILL.md\n"+
 		"merged CLAUDE.md (block updated)\n", stdout.String())
 	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
 
 	body, readErr := os.ReadFile(filepath.Join(wd, "CLAUDE.md"))
 	require.NoError(t, readErr)
 	assert.Equal(t, artifact.SnippetBlock("docs/specifications"), body)
+}
+
+// Test_init_over_an_install_without_the_workflow_skill_creates_only_it pins
+// the upgrade path every current adopter hits: a repository already
+// carrying every other claude-code artifact but no brief-workflow skill
+// (the pre-S01 shape) reruns to print exactly one "created" row, and stderr
+// still reads the ordinary "installed for claude-code; …" line —
+// initNextAction is kind-generic, not skill-specific.
+func Test_init_over_an_install_without_the_workflow_skill_creates_only_it(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(filepath.Join(wd, ".claude", "skills", "brief-workflow", "SKILL.md")))
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = cli.Run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, cli.ExitCode(err))
+	assert.Equal(t, ""+
+		"unchanged .brief.yaml\n"+
+		"unchanged docs/specifications/\n"+
+		"unchanged .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"unchanged .claude/skills/brief/skills/start/SKILL.md\n"+
+		"unchanged .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"unchanged .claude/skills/brief/hooks/hooks.json\n"+
+		"created .claude/skills/brief-workflow/SKILL.md\n"+
+		"unchanged CLAUDE.md\n", stdout.String())
+	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
 }
 
 // Test_init_with_agents_installs_three_agents_and_binds_roles pins the
@@ -343,6 +379,7 @@ func Test_init_with_agents_installs_three_agents_and_binds_roles(t *testing.T) {
 		"created .claude/skills/brief/skills/start/SKILL.md\n"+
 		"created .claude/skills/brief/skills/finish/SKILL.md\n"+
 		"created .claude/skills/brief/hooks/hooks.json\n"+
+		"created .claude/skills/brief-workflow/SKILL.md\n"+
 		"created .claude/skills/brief/agents/planner.md\n"+
 		"created .claude/skills/brief/agents/implementer.md\n"+
 		"created .claude/skills/brief/agents/reviewer.md\n"+
@@ -473,6 +510,7 @@ func Test_init_print_writes_bodies_to_stdout_and_nothing_to_disk(t *testing.T) {
 			"\n# .claude/skills/brief/skills/start/SKILL.md (create)\n" + string(artifact.SkillStart()) +
 			"\n# .claude/skills/brief/skills/finish/SKILL.md (create)\n" + string(artifact.SkillFinish()) +
 			"\n# .claude/skills/brief/hooks/hooks.json (create)\n" + string(artifact.ClaudeHooks()) +
+			"\n# .claude/skills/brief-workflow/SKILL.md (create)\n" + string(artifact.SkillWorkflow()) +
 			"\n# CLAUDE.md (create)\n" + string(artifact.SnippetBlock("docs/specifications")) + "\n"
 		assert.Equal(t, want, stdout.String())
 

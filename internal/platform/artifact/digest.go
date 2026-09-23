@@ -6,9 +6,9 @@ import (
 )
 
 // Kind names one of the file shapes this package renders: the ".brief.yaml"
-// config, a Claude Code plugin's manifest, its two skill files and its
-// hook wiring — a snippet and agent files each add their own Kind and
-// digest list as init grows to write them.
+// config, a Claude Code plugin's manifest, its two skill files and its hook
+// wiring, three role-agent files, the brief-workflow skill installed
+// outside the plugin (SkillWorkflow), and a snippet.
 type Kind string
 
 const (
@@ -29,6 +29,8 @@ const (
 	KindAgentImplementer Kind = "agent-implementer"
 	// KindAgentReviewer is AgentReviewer's own Kind.
 	KindAgentReviewer Kind = "agent-reviewer"
+	// KindSkillWorkflow is SkillWorkflow's own Kind.
+	KindSkillWorkflow Kind = "skill-workflow"
 	// KindSnippet is SnippetBlock's own Kind. Unlike every other Kind, it is
 	// never passed to Render or Recognize: SnippetBlock takes a feature
 	// directory Render's own signature carries no room for, and Recognize's
@@ -145,6 +147,16 @@ var agentReviewerDigests = [][32]byte{
 // release's own AgentReviewer render, empty until a release changes it.
 var olderAgentReviewerDigests = [][32]byte{}
 
+// skillWorkflowDigests holds the sha256 digest of this release's own
+// SkillWorkflow render.
+var skillWorkflowDigests = [][32]byte{
+	sha256.Sum256(SkillWorkflow()),
+}
+
+// olderSkillWorkflowDigests holds the sha256 digest of every earlier
+// release's own SkillWorkflow render, empty until a release changes it.
+var olderSkillWorkflowDigests = [][32]byte{}
+
 // Recognize reports body's Origin against kind's own compiled-in digest
 // lists: OriginCurrent when body's sha256 digest matches one of this
 // binary's own current renders for kind, OriginOlder when it matches only
@@ -196,6 +208,8 @@ func digestsFor(kind Kind) ([][32]byte, [][32]byte) {
 		return agentImplementerDigests, olderAgentImplementerDigests
 	case KindAgentReviewer:
 		return agentReviewerDigests, olderAgentReviewerDigests
+	case KindSkillWorkflow:
+		return skillWorkflowDigests, olderSkillWorkflowDigests
 	case KindSnippet:
 		// Deliberately excluded: SnippetBlock/RecognizeSnippet are the
 		// snippet's own render and recognize functions (see doc.go).
