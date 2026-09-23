@@ -3,6 +3,7 @@ package artifact
 import (
 	"embed"
 	"fmt"
+	"path"
 )
 
 // files holds every fixed artifact brief installs, byte for byte as it is
@@ -15,11 +16,12 @@ import (
 //go:embed files
 var files embed.FS
 
-// mustReadFile returns name's own bytes from files. name is always one of
+// mustReadFile returns name's own bytes from files, joining with path (not
+// filepath): embed.FS paths are always slash-separated. name is always one of
 // this package's own fixed paths, so a missing file is a build-time
 // packaging bug, not a runtime condition a caller can act on.
 func mustReadFile(name string) []byte {
-	body, err := files.ReadFile("files/" + name)
+	body, err := files.ReadFile(path.Join("files", name))
 	if err != nil {
 		panic(fmt.Sprintf("artifact: read embedded %s: %v", name, err))
 	}
