@@ -217,9 +217,28 @@ const missingSkillHeaderBase = `bound agents do not preload the brief-workflow s
 // missingSkillFixable reports whether a is a row "--edit-agents" could
 // still reach — setup's own planBoundAgent verdict (setup.ReachFixable),
 // never re-derived here: cli only maps setup.MissingSkillAgent.Reach to
-// display text and grouping.
+// display text and grouping. A ScopeProject row whose Reach is anything
+// other than the three setup ever assigns a row planBoundAgent itself
+// cannot merge (setup.ReachNotRegular, setup.ReachUneditable,
+// setup.ReachEscaped) is treated as fixable too — the fallback every other
+// group's own filter needs so a row can never silently vanish from the
+// report if that invariant is ever broken elsewhere. A ScopeUser row is
+// never fixable regardless of Reach — "--edit-agents" never targets one
+// (Rule 3) — which is what keeps setup.ReachNone, the legitimate value
+// every ScopeUser row carries, out of this fallback.
 func missingSkillFixable(a setup.MissingSkillAgent) bool {
-	return a.Reach == setup.ReachFixable
+	if a.Scope != agentfile.ScopeProject {
+		return false
+	}
+
+	switch a.Reach {
+	case setup.ReachNotRegular, setup.ReachUneditable, setup.ReachEscaped:
+		return false
+	case setup.ReachFixable, setup.ReachNone:
+		return true
+	default:
+		return true
+	}
 }
 
 // missingSkillHeader renders init's own missing-skill stderr block header

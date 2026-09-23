@@ -2,7 +2,11 @@
 // be pinned against an injected, empty home directory: through cli.Run a
 // bare "init" would detect against the developer's own "~/.claude", which
 // exists for nearly every Claude Code user and would make these tests
-// depend on the machine they happen to run on.
+// depend on the machine they happen to run on. It also calls
+// missingSkillHeader and missingSkillLines directly, unexported: both are
+// pure functions of a []setup.MissingSkillAgent, and their own combined
+// four-group rendering is pinned against hand-built rows rather than
+// through real agent files on disk.
 
 package cli
 
@@ -514,20 +518,29 @@ func Test_init_missing_skill_lists_an_uneditable_shape_without_edit_agents(t *te
 
 // Test_missing_skill_lines_group_order pins missingSkillHeader and
 // missingSkillLines' own combined rendering across the four-group order
-// (Surface & Copy) every pairwise Reach combination must sort by: fixable,
-// then a project row setup.planBoundAgent itself cannot reach — not
-// regular, an uneditable "skills:" shape — combined, then an escaping
-// project row, then every user-level row. wd is a fixed string;
+// (Surface & Copy) every Reach combination must sort by: fixable, then a
+// project row setup.planBoundAgent itself cannot reach — not regular, an
+// uneditable "skills:" shape — combined, then an escaping project row,
+// then every user-level row. The group-1/2, group-2/3 and group-3/4 cases
+// below each pin one adjacent transition; since the render order is a
+// fixed sequence of passes, those three adjacent transitions together
+// already pin every non-adjacent one too (a group-1/3 case adds nothing a
+// group-1/2 and group-2/3 pair does not already catch — confirmed by
+// swapping the fixable and escaped passes, which reddens both). Within the
+// combined not-regular/uneditable group, rows keep agents' own relative
+// order rather than being resorted by Reach — the two same-group cases
+// below each put one of each Reach in both role orders, so a rewrite that
+// splits the group into two Reach-ordered passes reddens exactly one of
+// the two, whichever order the split renders first. wd is a fixed string;
 // missingSkillHeader and missingSkillLines never touch the filesystem, so
 // every Reach combination can be pinned directly without constructing real
-// agent files.
+// agent files. headerSuffixed and headerPlain are missingSkillHeaderLine
+// and missingSkillHeaderLinePlain's own unprefixed counterparts —
+// missingSkillHeader itself renders without the "brief init: " prefix
+// runInit prepends — so a direct call can be compared against them as-is.
 func Test_missing_skill_lines_group_order(t *testing.T) {
 	const wd = "/repo"
 
-	// missingSkillHeader renders without the "brief init: " prefix runInit
-	// itself prepends — headerSuffixed/headerPlain are missingSkillHeaderLine
-	// and missingSkillHeaderLinePlain's own unprefixed counterparts, so a
-	// direct call to missingSkillHeader can be compared against them as-is.
 	headerSuffixed := strings.TrimPrefix(missingSkillHeaderLine, "brief init: ")
 	headerPlain := strings.TrimPrefix(missingSkillHeaderLinePlain, "brief init: ")
 
@@ -537,52 +550,94 @@ func Test_missing_skill_lines_group_order(t *testing.T) {
 		return strings.Join(lines, "\n") + "\n"
 	}
 
-	t.Run("fixable implementer, escaping planner: fixable first, header suffixed", func(t *testing.T) {
+	planner := func(reach setup.MissingSkillReach) setup.MissingSkillAgent {
+		return setup.MissingSkillAgent{Role: "planner", Agent: "planner", Path: filepath.Join(wd, ".claude", "agents", "planner.md"), Scope: agentfile.ScopeProject, Reach: reach}
+	}
+	implementer := func(reach setup.MissingSkillReach) setup.MissingSkillAgent {
+		return setup.MissingSkillAgent{Role: "implementer", Agent: "developer", Path: filepath.Join(wd, ".claude", "agents", "developer.md"), Scope: agentfile.ScopeProject, Reach: reach}
+	}
+	userPlanner := setup.MissingSkillAgent{Role: "planner", Agent: "planner", Scope: agentfile.ScopeUser, ScopeRelPath: ".claude/agents/planner.md", Reach: setup.ReachNone}
+
+	cases := []struct {
+		name   string
+		agents []setup.MissingSkillAgent
+		want   string
+	}{
+		{
+			name:   "escaping implementer, user-level planner: group 3 before group 4, header plain",
+			agents: []setup.MissingSkillAgent{userPlanner, implementer(setup.ReachEscaped)},
+			want: headerPlain + "\n" +
+				"  .claude/agents/developer.md (implementer; outside the repository, edit by hand)\n" +
+				"  ~/.claude/agents/planner.md (planner; user-level, edit by hand)\n",
+		},
+		{
+			name:   "in-repo unfixable planner, fixable implementer: group 1 before group 2, header suffixed",
+			agents: []setup.MissingSkillAgent{planner(setup.ReachUneditable), implementer(setup.ReachFixable)},
+			want: headerSuffixed + "\n" +
+				"  .claude/agents/developer.md (implementer)\n" +
+				"  .claude/agents/planner.md (planner; skills: is not a list brief can edit, edit by hand)\n",
+		},
+		{
+			name:   "in-repo unfixable planner, escaping implementer: group 2 before group 3, header plain",
+			agents: []setup.MissingSkillAgent{planner(setup.ReachNotRegular), implementer(setup.ReachEscaped)},
+			want: headerPlain + "\n" +
+				"  .claude/agents/planner.md (planner; not a regular file, edit by hand)\n" +
+				"  .claude/agents/developer.md (implementer; outside the repository, edit by hand)\n",
+		},
+		{
+			name:   "not-regular planner, uneditable implementer: both in group 2, role order kept, not resorted by Reach",
+			agents: []setup.MissingSkillAgent{planner(setup.ReachNotRegular), implementer(setup.ReachUneditable)},
+			want: headerPlain + "\n" +
+				"  .claude/agents/planner.md (planner; not a regular file, edit by hand)\n" +
+				"  .claude/agents/developer.md (implementer; skills: is not a list brief can edit, edit by hand)\n",
+		},
+		{
+			name:   "uneditable planner, not-regular implementer: both in group 2, role order kept, not resorted by Reach",
+			agents: []setup.MissingSkillAgent{planner(setup.ReachUneditable), implementer(setup.ReachNotRegular)},
+			want: headerPlain + "\n" +
+				"  .claude/agents/planner.md (planner; skills: is not a list brief can edit, edit by hand)\n" +
+				"  .claude/agents/developer.md (implementer; not a regular file, edit by hand)\n",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, renderBlock(false, c.agents))
+		})
+	}
+}
+
+// Test_missing_skill_lines_treats_a_scope_project_row_carrying_reach_none_as_fixable
+// pins missingSkillFixable's own defensive fallback: setup's own
+// agentsMissingSkill can never actually hand cli a ScopeProject row
+// carrying setup.ReachNone — the value every ScopeUser row legitimately
+// carries, and the zero value any other broken invariant would leave
+// behind too — since an internal error aborts the whole report rather
+// than emitting a row missingSkillReach never classified. missingSkillLines
+// must not silently drop such a row if that invariant is ever broken —
+// every other group's own filter excludes it too, so a row landing in none
+// of them vanishes from the report entirely. Rendering it in the fixable
+// group reuses that group's own existing line format, no new copy. The
+// control proves the fallback is scoped to ScopeProject alone: the
+// identical Reach value on a ScopeUser row — setup's own legitimate case —
+// still renders user-level, not fixable.
+func Test_missing_skill_lines_treats_a_scope_project_row_carrying_reach_none_as_fixable(t *testing.T) {
+	const wd = "/repo"
+
+	t.Run("ScopeProject carrying ReachNone renders fixable, not dropped", func(t *testing.T) {
 		agents := []setup.MissingSkillAgent{
-			{Role: "planner", Agent: "planner", Path: filepath.Join(wd, ".claude", "agents", "planner.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachEscaped},
-			{Role: "implementer", Agent: "developer", Path: filepath.Join(wd, ".claude", "agents", "developer.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachFixable},
+			{Role: "implementer", Agent: "developer", Path: filepath.Join(wd, ".claude", "agents", "developer.md"), Scope: agentfile.ScopeProject, Reach: setup.MissingSkillReach("")},
 		}
 
-		want := headerSuffixed + "\n" +
-			"  .claude/agents/developer.md (implementer)\n" +
-			"  .claude/agents/planner.md (planner; outside the repository, edit by hand)\n"
-		assert.Equal(t, want, renderBlock(false, agents))
+		assert.Equal(t, []string{"  .claude/agents/developer.md (implementer)"}, missingSkillLines(wd, agents))
 	})
 
-	t.Run("escaping implementer, user-level planner: escaping before user, header plain", func(t *testing.T) {
+	t.Run("control: the identical Reach on a ScopeUser row still renders user-level", func(t *testing.T) {
 		agents := []setup.MissingSkillAgent{
-			{Role: "planner", Agent: "planner", Scope: agentfile.ScopeUser, ScopeRelPath: ".claude/agents/planner.md", Reach: setup.ReachNone},
-			{Role: "implementer", Agent: "developer", Path: filepath.Join(wd, ".claude", "agents", "developer.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachEscaped},
+			{Role: "implementer", Agent: "developer", Scope: agentfile.ScopeUser, ScopeRelPath: ".claude/agents/developer.md", Reach: setup.ReachNone},
 		}
 
-		want := headerPlain + "\n" +
-			"  .claude/agents/developer.md (implementer; outside the repository, edit by hand)\n" +
-			"  ~/.claude/agents/planner.md (planner; user-level, edit by hand)\n"
-		assert.Equal(t, want, renderBlock(false, agents))
-	})
-
-	t.Run("in-repo unfixable planner, fixable implementer: fixable first, unfixable second, header suffixed", func(t *testing.T) {
-		agents := []setup.MissingSkillAgent{
-			{Role: "planner", Agent: "planner", Path: filepath.Join(wd, ".claude", "agents", "planner.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachUneditable},
-			{Role: "implementer", Agent: "developer", Path: filepath.Join(wd, ".claude", "agents", "developer.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachFixable},
-		}
-
-		want := headerSuffixed + "\n" +
-			"  .claude/agents/developer.md (implementer)\n" +
-			"  .claude/agents/planner.md (planner; skills: is not a list brief can edit, edit by hand)\n"
-		assert.Equal(t, want, renderBlock(false, agents))
-	})
-
-	t.Run("in-repo unfixable planner, escaping implementer: unfixable before escaping, header plain", func(t *testing.T) {
-		agents := []setup.MissingSkillAgent{
-			{Role: "planner", Agent: "planner", Path: filepath.Join(wd, ".claude", "agents", "planner.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachNotRegular},
-			{Role: "implementer", Agent: "developer", Path: filepath.Join(wd, ".claude", "agents", "developer.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachEscaped},
-		}
-
-		want := headerPlain + "\n" +
-			"  .claude/agents/planner.md (planner; not a regular file, edit by hand)\n" +
-			"  .claude/agents/developer.md (implementer; outside the repository, edit by hand)\n"
-		assert.Equal(t, want, renderBlock(false, agents))
+		assert.Equal(t, []string{"  ~/.claude/agents/developer.md (implementer; user-level, edit by hand)"}, missingSkillLines(wd, agents))
 	})
 }
 

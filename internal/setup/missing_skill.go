@@ -32,8 +32,8 @@ const (
 	// merge the skill into.
 	ReachFixable MissingSkillReach = "fixable"
 	// ReachNotRegular marks a ScopeProject row whose own leaf is not a
-	// regular file (a symlink whose own target still resolves inside the
-	// repository).
+	// regular file (a symlink, wherever its own target resolves — Lstat
+	// decides this before any escape check runs).
 	ReachNotRegular MissingSkillReach = "not-regular"
 	// ReachUneditable marks a ScopeProject row whose "skills:" frontmatter
 	// shape planBoundAgent cannot edit, or whose frontmatter does not
@@ -90,9 +90,13 @@ func agentsMissingSkill(root, home string, roles config.RoleBindings) ([]Missing
 		}
 
 		for _, d := range b.LackingSkill(artifact.WorkflowSkillName) {
-			reach, reachErr := missingSkillReach(d, resolvedRoot)
+			reach, keep, reachErr := missingSkillReach(d, resolvedRoot)
 			if reachErr != nil {
-				return nil, reachErr
+				return nil, fmt.Errorf("setup: check %s for %s: %w", d.Path, artifact.WorkflowSkillName, reachErr)
+			}
+
+			if !keep {
+				continue
 			}
 
 			out = append(out, MissingSkillAgent{
@@ -112,39 +116,51 @@ func agentsMissingSkill(root, home string, roles config.RoleBindings) ([]Missing
 // missingSkillReach classifies d — one MissingSkillAgent's own source
 // Definition — via planBoundAgent, the same verdict "--edit-agents" would
 // itself reach, called here in the same plan-only shape planBoundAgents
-// itself calls it in (no write ever happens from this path): ReachNone for
-// a ScopeUser Definition, which planBoundAgent never targets; ReachEscaped
-// when planBoundAgent contributes no row at all (ok false — the resolved
-// path escapes resolvedRoot); ReachFixable when it returns a row with
-// Action other than ActionKept — the same "still reachable" condition
-// planBoundAgents' own apply step relies on; otherwise ReachNotRegular or
-// ReachUneditable, read off the row's own Detail. A planBoundAgent error
-// propagates unchanged — d.Path having already been read once to build the
-// report in the first place, a fresh Lstat/EvalSymlinks/ReadFile failure
-// here means it changed underneath this run.
-func missingSkillReach(d agentfile.Definition, resolvedRoot string) (MissingSkillReach, error) {
+// itself calls it in (no write ever happens from this path): ReachNone,
+// keep true, for a ScopeUser Definition, which planBoundAgent never
+// targets; keep false, reach "", when planBoundAgent's own fresh read
+// finds the skill already listed (ActionUnchanged) — d having been read
+// once already, by agentfile.Find, to build the report in the first
+// place, a fresh read disagreeing means the skill reached the file in the
+// window between the two, and the row no longer belongs in the report at
+// all; ReachEscaped when planBoundAgent contributes no row at all (ok
+// false — the resolved path escapes resolvedRoot); ReachFixable for
+// ActionMerged, the "still reachable" condition planBoundAgents' own apply
+// step relies on; otherwise (ActionKept) ReachNotRegular or
+// ReachUneditable, read off the row's own Detail — ReachUneditable's own
+// "frontmatter does not parse" case is, like ActionUnchanged above, only
+// reachable if d's file changed between agentfile.Find's own successful
+// decode and this fresh read. A planBoundAgent error propagates unchanged,
+// keep false — d.Path having already been read once to build the report in
+// the first place, a fresh Lstat/EvalSymlinks/ReadFile failure here means
+// it changed underneath this run.
+func missingSkillReach(d agentfile.Definition, resolvedRoot string) (MissingSkillReach, bool, error) {
 	if d.Scope != agentfile.ScopeProject {
-		return ReachNone, nil
+		return ReachNone, true, nil
 	}
 
 	art, ok, err := planBoundAgent(d.Path, resolvedRoot)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	if !ok {
-		return ReachEscaped, nil
+		return ReachEscaped, true, nil
 	}
 
-	if art.Action != ActionKept {
-		return ReachFixable, nil
+	switch art.Action {
+	case ActionUnchanged:
+		return "", false, nil
+	case ActionMerged:
+		return ReachFixable, true, nil
+	case ActionCreated, ActionRemoved, ActionKept:
 	}
 
 	if art.Detail == boundAgentNotRegularDetail {
-		return ReachNotRegular, nil
+		return ReachNotRegular, true, nil
 	}
 
-	return ReachUneditable, nil
+	return ReachUneditable, true, nil
 }
 
 // scopeRelPath renders d's own path relative to home, slash-separated, for
