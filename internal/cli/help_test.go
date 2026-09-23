@@ -988,6 +988,24 @@ func Test_init_help_names_edit_agents(t *testing.T) {
 	assert.Contains(t, stdout.String(), "--edit-agents")
 }
 
+// Test_uninstall_help_names_the_bound_agent_skill_removal pins the ruled
+// sentence specification.md's "Surface & Copy" section adds to
+// uninstallLong, right after the "...unless --force." sentence and before
+// "The feature root...": whitespace-normalized, since uninstallLong
+// hand-wraps its own prose.
+func Test_uninstall_help_names_the_bound_agent_skill_removal(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	const sentence = `It also removes "brief-workflow" from the "skills:" list of the planner and implementer agents bound in ".brief.yaml", repository files only, unless the skill file itself is kept.`
+	assert.Contains(t, normalizeWhitespace(stdout.String()), sentence)
+}
+
 // Test_doctor_help_names_role_resolution_and_the_brief_workflow_skill pins
 // the ruled sentence specification.md's "Surface & Copy" section gives
 // doctorLong (S05), replacing the old roles clause: whitespace-normalized,

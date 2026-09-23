@@ -188,3 +188,107 @@ func Test_add_workflow_skill_edits_only_the_skills_line(t *testing.T) {
 		})
 	}
 }
+
+// Test_remove_workflow_skill_edits_only_the_skills_line pins
+// removeWorkflowSkill's full shape matrix, addWorkflowSkill's own inverse
+// (Surface & Copy, Rule 8): every body already carries a top-level
+// "skills:" key naming "brief-workflow" in some form — membership itself is
+// planBoundAgentRemoval's own concern (agentfile.Parse), never this
+// function's; what this table pins is only whether, and how, the surgical
+// text edit can remove it.
+func Test_remove_workflow_skill_edits_only_the_skills_line(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		wantBody string
+		wantOK   bool
+	}{
+		{
+			name:     "single-item flow list: the whole skills: line is dropped",
+			body:     "---\nname: developer\nskills: [brief-workflow]\n---\n\nbody\n",
+			wantBody: "---\nname: developer\n---\n\nbody\n",
+			wantOK:   true,
+		},
+		{
+			name:     "single-item flow list, CRLF file: the whole skills: line is dropped, CR preserved elsewhere",
+			body:     "---\r\nname: developer\r\nskills: [brief-workflow]\r\n---\r\n\r\nbody\r\n",
+			wantBody: "---\r\nname: developer\r\n---\r\n\r\nbody\r\n",
+			wantOK:   true,
+		},
+		{
+			name:     "flow list, brief-workflow last: [a, brief-workflow] -> [a]",
+			body:     "---\nname: developer\nskills: [a, brief-workflow]\n---\n\nbody\n",
+			wantBody: "---\nname: developer\nskills: [a]\n---\n\nbody\n",
+			wantOK:   true,
+		},
+		{
+			name:     "flow list, brief-workflow first: [brief-workflow, a] -> [a]",
+			body:     "---\nname: developer\nskills: [brief-workflow, a]\n---\n\nbody\n",
+			wantBody: "---\nname: developer\nskills: [a]\n---\n\nbody\n",
+			wantOK:   true,
+		},
+		{
+			name:     "flow list, brief-workflow in the middle: [a, brief-workflow, b] -> [a, b]",
+			body:     "---\nname: developer\nskills: [a, brief-workflow, b]\n---\n\nbody\n",
+			wantBody: "---\nname: developer\nskills: [a, b]\n---\n\nbody\n",
+			wantOK:   true,
+		},
+		{
+			name:     "block list, item removed, others remain",
+			body:     "---\nname: developer\nskills:\n  - a\n  - brief-workflow\n---\n\nbody\n",
+			wantBody: "---\nname: developer\nskills:\n  - a\n---\n\nbody\n",
+			wantOK:   true,
+		},
+		{
+			name:     "block list, only item: the skills: key line is dropped too",
+			body:     "---\nname: developer\nskills:\n  - brief-workflow\n---\n\nbody\n",
+			wantBody: "---\nname: developer\n---\n\nbody\n",
+			wantOK:   true,
+		},
+		{
+			name:     "block list, only item, CRLF file: the skills: key line is dropped too",
+			body:     "---\r\nname: developer\r\nskills:\r\n  - brief-workflow\r\n---\r\n\r\nbody\r\n",
+			wantBody: "---\r\nname: developer\r\n---\r\n\r\nbody\r\n",
+			wantOK:   true,
+		},
+		{
+			name:     "a skills: line after the closing --- is untouched",
+			body:     "---\nname: developer\nskills: [brief-workflow]\n---\n\nskills: something\n",
+			wantBody: "---\nname: developer\n---\n\nskills: something\n",
+			wantOK:   true,
+		},
+		{
+			name:     "quoted flow item: unremovable",
+			body:     "---\nname: developer\nskills: [\"brief-workflow\"]\n---\n\nbody\n",
+			wantBody: "---\nname: developer\nskills: [\"brief-workflow\"]\n---\n\nbody\n",
+			wantOK:   false,
+		},
+		{
+			name:     "quoted block item: unremovable",
+			body:     "---\nname: developer\nskills:\n  - \"brief-workflow\"\n---\n\nbody\n",
+			wantBody: "---\nname: developer\nskills:\n  - \"brief-workflow\"\n---\n\nbody\n",
+			wantOK:   false,
+		},
+		{
+			name:     "flow list with a trailing comment: unremovable",
+			body:     "---\nname: developer\nskills: [brief-workflow] # comment\n---\n\nbody\n",
+			wantBody: "---\nname: developer\nskills: [brief-workflow] # comment\n---\n\nbody\n",
+			wantOK:   false,
+		},
+		{
+			name:     "multi-line flow list: unremovable",
+			body:     "---\nname: developer\nskills: [other,\n  brief-workflow]\n---\n\nbody\n",
+			wantBody: "---\nname: developer\nskills: [other,\n  brief-workflow]\n---\n\nbody\n",
+			wantOK:   false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			edited, ok := removeWorkflowSkill([]byte(c.body))
+
+			assert.Equal(t, c.wantOK, ok)
+			assert.Equal(t, c.wantBody, string(edited))
+		})
+	}
+}

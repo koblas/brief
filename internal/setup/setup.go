@@ -185,16 +185,21 @@ type Artifact struct {
 // manifest, start skill, finish skill, hook wiring, the brief-workflow
 // skill, and, under WithAgents, the three role-agent files, then the
 // CLAUDE.md block last, the fixed order R11's stdout rows render in; for
-// Uninstall, the CLAUDE.md block first, then a claude-code host's own
-// agent files (reviewer, implementer, planner — always planned,
-// independent of any flag Init was run with), the brief-workflow skill,
-// and plugin files (hook, finish skill, start skill, manifest), then the
-// config file last, so a partial uninstall never removes the repository's
-// opt-in marker before everything else. Created names every path Init wrote that
-// did not exist before; Modified names every path either command rewrote
-// in place — Init's own CLAUDE.md merge or replace, an ActionMerged plugin,
-// skill or agent file Init upgrades from an OriginOlder render (Rule 6),
-// Uninstall's own CLAUDE.md block strip that leaves the file non-empty;
+// Uninstall, the CLAUDE.md block first, then one KindBoundAgent row per
+// planBoundAgentRemovals target (Rule 8, planned only when the
+// brief-workflow skill's own row is not itself ActionKept), then a
+// claude-code host's own agent files (reviewer, implementer, planner —
+// always planned, independent of any flag Init was run with), the
+// brief-workflow skill, and plugin files (hook, finish skill, start skill,
+// manifest), then the config file last, so a partial uninstall never
+// removes the repository's opt-in marker before everything else. Created
+// names every path Init wrote that did not exist before; Modified names
+// every path either command rewrote in place — Init's own CLAUDE.md merge
+// or replace, an ActionMerged plugin, skill or agent file Init upgrades
+// from an OriginOlder render (Rule 6), Uninstall's own CLAUDE.md block
+// strip that leaves the file non-empty, and Uninstall's own bound-agent
+// "skills:" edit (Rule 8) — a bound-agent row is ActionRemoved but never
+// appears in Removed, since the file itself is rewritten, not deleted;
 // Removed names
 // every path Uninstall actually deleted — both absolute, in the order each
 // command touched them. A pruned, now-empty plugin directory is never in

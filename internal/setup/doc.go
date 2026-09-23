@@ -99,15 +99,27 @@
 // in that same
 // order, so the config — the repository's opt-in marker — never lands
 // before everything else has. Uninstall's own list carries the CLAUDE.md
-// block first, then the agent files reversed, then the skill, then the
-// plugin's files in the reverse of Init's write order, then the config
-// file last, and applies in that same order, so a partial uninstall never
-// removes the opt-in marker while something else still stands. The
-// feature root and everything under it is never an Uninstall artifact at
-// all, and is never removed; nor is ".claude/" or ".claude/skills/" above
-// the plugin's own directory or the skill's own directory — brief owns
-// only host.PluginDir and below, host.WorkflowSkillDir, and the CLAUDE.md
-// candidates InstructionFiles names (R6).
+// block first, then bound-agent…, agent…, skill, plugin…, config — the
+// reverse of Init's own order above — and applies in that same order, so a
+// partial uninstall never removes the opt-in marker while something else
+// still stands. The feature root and everything under it is never an
+// Uninstall artifact at all, and is never removed; nor is ".claude/" or
+// ".claude/skills/" above the plugin's own directory or the skill's own
+// directory — brief owns only host.PluginDir and below,
+// host.WorkflowSkillDir, and the CLAUDE.md candidates InstructionFiles
+// names (R6).
+//
+// Uninstall's own bound-agent rows (Rule 8, planBoundAgentRemovals) are
+// planned only when the brief-workflow skill's own row is not itself
+// ActionKept — an edited SKILL.md without --force, or one that is not a
+// regular file even with --force keeps every bound agent's own entry too,
+// no row at all. removeWorkflowSkill is addWorkflowSkill's own inverse; a
+// shape it cannot edit — the same shapeOther boundary addWorkflowSkill
+// draws, plus a quoted or commented entry the loose membership decode
+// (agentfile.Parse) cannot tell from a plain one — gets no row rather than
+// ActionKept: Uninstall reports only what it removed. The row is
+// ActionRemoved, but the file is rewritten in place, never deleted — its
+// path lands in Result.Modified, not Result.Removed.
 //
 // setup writes through the real filesystem — internal/platform/atomicfile
 // for the config file's, every plugin and skill file's and CLAUDE.md's own

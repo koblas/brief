@@ -584,7 +584,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			dryRun, _ := cmd.Flags().GetBool("dry-run")
 			force, _ := cmd.Flags().GetBool("force")
 
-			return runUninstall(cmd.Context(), wd, args, host, dryRun, force, out.forCommand(cmd))
+			return runUninstall(cmd.Context(), wd, args, host, dryRun, force, out.forCommand(cmd), rs.setupOpts...)
 		})
 	uninstallCmd.Annotations[writesFilesAnnotation] = "true"
 
