@@ -143,8 +143,16 @@ func Test_init_with_agents_follows_the_detected_host(t *testing.T) {
 }
 
 // missingSkillHeaderLine is the exact stderr header init's own missing-skill
-// block renders (Surface & Copy), including the "brief init: " prefix.
+// block renders (Surface & Copy) when at least one listed agent is one
+// "--edit-agents" could still reach and this run did not already pass it,
+// including the "brief init: " prefix.
 const missingSkillHeaderLine = `brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each, or rerun with --edit-agents:`
+
+// missingSkillHeaderLinePlain is missingSkillHeaderLine's own counterpart
+// (Surface & Copy) rendered instead whenever suggesting "--edit-agents"
+// could not help: this run already passed it, or every listed agent
+// already carries its own "edit by hand" annotation.
+const missingSkillHeaderLinePlain = `brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each:`
 
 // installedNextActionLine is the exact stderr next-action line an explicit
 // "--host claude-code" run reports once at least one artifact changed and
@@ -159,7 +167,11 @@ const installedNextActionLine = "brief init: installed for claude-code; start Cl
 // display groups project-scope rows ahead of user-scope ones, distinct
 // from Result.AgentsMissingSkill's own role-major order (setup's own
 // missing_skill_test.go pins that order directly). Neither agent file is
-// touched, and a --dry-run sub-case reports the identical block.
+// touched, and a --dry-run sub-case reports the identical block. The
+// "--edit-agents" sub-case merges the fixable project row and re-checks
+// the header itself: once this run already carries the flag, the header
+// never suggests it again, even though a listed row (the user-level one)
+// remains — missingSkillHeaderLinePlain, not missingSkillHeaderLine.
 func Test_init_lists_bound_agents_missing_the_workflow_skill(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -240,7 +252,7 @@ func Test_init_lists_bound_agents_missing_the_workflow_skill(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, stdout.String(), "merged .claude/agents/developer/Agent.md (brief-workflow added to skills)\n")
 
-		wantBlock := missingSkillHeaderLine + "\n" +
+		wantBlock := missingSkillHeaderLinePlain + "\n" +
 			"  ~/.claude/agents/planner.md (planner; user-level, edit by hand)\n"
 		assert.Equal(t, wantBlock+installedNextActionLine+"\n", stderr.String())
 
@@ -292,7 +304,7 @@ func Test_init_edit_agents_says_nothing_to_edit(t *testing.T) {
 		require.NoError(t, err)
 
 		nothingIdx := strings.Index(stderr.String(), nothingToEditLine)
-		missingIdx := strings.Index(stderr.String(), missingSkillHeaderLine)
+		missingIdx := strings.Index(stderr.String(), missingSkillHeaderLinePlain)
 		require.NotEqual(t, -1, nothingIdx)
 		require.NotEqual(t, -1, missingIdx)
 		assert.Less(t, nothingIdx, missingIdx)
@@ -308,6 +320,96 @@ func Test_init_edit_agents_says_nothing_to_edit(t *testing.T) {
 		assert.Empty(t, stderr.String())
 		assert.NotContains(t, stdout.String(), "nothing to edit")
 	})
+}
+
+// Test_init_missing_skill_header_omits_edit_agents_suggestion_when_it_cannot_help
+// pins missingSkillHeader's own conditional suffix (product-vision fix
+// round): ", or rerun with --edit-agents:" is appended only when this run
+// did not already carry the flag AND at least one listed agent is one
+// "--edit-agents" could still reach — a bare-name project binding, not
+// escaping the repository. Two ways that condition fails, both getting the
+// plain header: no "--edit-agents" was given, but the only lacking agent
+// is user-level (which the flag could never reach); "--edit-agents" was
+// given and already tried its one bound agent, which it could not edit (an
+// unrecognized "skills:" shape, left "kept").
+func Test_init_missing_skill_header_omits_edit_agents_suggestion_when_it_cannot_help(t *testing.T) {
+	t.Run("no --edit-agents given, only a user-level agent remains", func(t *testing.T) {
+		wd := t.TempDir()
+		home := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+			"feature-directory: docs/specifications\nroles:\n  planner: planner\n",
+		), 0o600))
+
+		homePlanner := filepath.Join(home, ".claude", "agents", "planner.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(homePlanner), 0o755))
+		require.NoError(t, os.WriteFile(homePlanner, []byte("---\nname: planner\n---\n\nbody\n"), 0o600))
+
+		seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+		require.NoError(t, err)
+		assert.Contains(t, stderr.String(), missingSkillHeaderLinePlain+"\n")
+		assert.NotContains(t, stderr.String(), "rerun with --edit-agents")
+	})
+
+	t.Run("--edit-agents given, already kept its one bound agent as uneditable", func(t *testing.T) {
+		wd := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+			"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
+		), 0o600))
+
+		agentPath := filepath.Join(wd, ".claude", "agents", "developer.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
+		require.NoError(t, os.WriteFile(agentPath, []byte("---\nname: developer\nskills: brief-workflow\n---\n\nbody\n"), 0o600))
+
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+
+		require.NoError(t, err)
+		assert.Contains(t, stdout.String(), "kept .claude/agents/developer.md (skills: is not a list brief can edit; add brief-workflow by hand)\n")
+		assert.Contains(t, stderr.String(), missingSkillHeaderLinePlain+"\n")
+		assert.NotContains(t, stderr.String(), "rerun with --edit-agents")
+	})
+}
+
+// Test_init_missing_skill_lists_an_escaping_bound_agent_separately pins the
+// third missing-skill row shape (product-vision fix round): a bound
+// implementer resolved only through a ".claude" symlinked outside the
+// repository is listed with "; outside the repository, edit by hand" —
+// distinct from a real project row and from a user-level one — and its
+// presence alone (no in-repository row) still keeps the header plain, since
+// "--edit-agents" cannot reach it either.
+func Test_init_missing_skill_lists_an_escaping_bound_agent_separately(t *testing.T) {
+	wd := t.TempDir()
+	home := t.TempDir()
+	outsideClaude := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+		"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
+	), 0o600))
+
+	agentPath := filepath.Join(outsideClaude, "agents", "developer.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
+	require.NoError(t, os.WriteFile(agentPath, []byte("---\nname: developer\n---\n\nbody\n"), 0o600))
+	require.NoError(t, os.Symlink(outsideClaude, filepath.Join(wd, ".claude")))
+
+	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+	var stdout, stderr bytes.Buffer
+
+	// --dry-run: a real run would also need to create the plugin/skill
+	// files under the symlinked ".claude" for the first time, which trips
+	// R10's own writability pre-check (Lstat never resolves a symlink at
+	// the exact path it is asked to check) — an unrelated concern this
+	// test is not proving; the missing-skill report itself is computed
+	// identically either way (bound_agent_test.go's own precedent).
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--dry-run"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+	require.NoError(t, err)
+	assert.Contains(t, stderr.String(), missingSkillHeaderLinePlain+"\n")
+	assert.NotContains(t, stderr.String(), "rerun with --edit-agents")
+	assert.Contains(t, stderr.String(), "  .claude/agents/developer.md (implementer; outside the repository, edit by hand)\n")
 }
 
 // Test_init_edit_agents_requires_claude_code pins the exit-2 refusal when

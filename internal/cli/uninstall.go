@@ -16,14 +16,15 @@ const uninstallInvocation = "brief uninstall --host claude-code"
 // uninstallLong is "brief uninstall"'s help prose.
 var uninstallLong = `Removes what "brief init" installed: the ".brief.yaml" config file, and,
 by default (--host claude-code), the Claude Code plugin under
-".claude/skills/brief/" — every file this binary would have written
-(recognized by digest, never by decoding it) is removed; a file whose
-bytes were edited locally is kept and reported instead, unless --force.
-It also removes "brief-workflow" from the "skills:" list of the planner
-and implementer agents bound in ".brief.yaml", repository files only,
-unless the skill file itself is kept.
+".claude/skills/brief/" and the "brief-workflow" skill under
+".claude/skills/brief-workflow/" — every file this binary would have
+written (recognized by digest, never by decoding it) is removed; a file
+whose bytes were edited locally is kept and reported instead, unless
+--force. It also removes "brief-workflow" from the "skills:" list of the
+planner and implementer agents bound in ".brief.yaml", repository files
+only, unless the skill file itself is kept.
 The feature root and everything under it are never removed, nor is
-".claude/" or ".claude/skills/" above the plugin's own directory.
+".claude/" or ".claude/skills/" above brief's own directories.
 --dry-run prints the same report and removes nothing.
 
 ` + jsonFieldsParagraph("host", "dry_run", "created", "modified", "removed", "artifacts")

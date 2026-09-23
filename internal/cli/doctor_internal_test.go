@@ -81,7 +81,7 @@ func Test_doctor_prints_one_row_per_check_and_exits_0_in_a_healthy_repo(t *testi
 		"SKIP  host-snippet  CLAUDE.md  not installed; fix: run 'brief init --host claude-code'\n" +
 		"SKIP  host-agents  .claude/skills/brief/agents  not installed; fix: run 'brief init --with-agents'\n" +
 		"SKIP  roles  .brief.yaml  no roles bound; fix: run 'brief init --with-agents'\n" +
-		"SKIP  roles-skill  .brief.yaml  no planner or implementer bound\n"
+		"SKIP  roles-skill  .brief.yaml  no bound planner or implementer brief can check\n"
 	assert.Equal(t, want, stdout.String())
 	assert.Equal(t, "brief doctor: setup ok; run 'brief check' for feature content\n", stderr.String())
 }
@@ -262,7 +262,7 @@ func Test_doctor_reports_a_non_regular_host_skill_as_an_error_and_exits_1(t *tes
 
 	require.Error(t, err)
 	assert.Equal(t, 1, ExitCode(err))
-	assert.Contains(t, stdout.String(), "ERROR  host-skill  .claude/skills/brief-workflow/SKILL.md  not a regular file; fix: run 'brief init'\n")
+	assert.Contains(t, stdout.String(), "ERROR  host-skill  .claude/skills/brief-workflow/SKILL.md  not a regular file; fix: remove .claude/skills/brief-workflow/SKILL.md, then run 'brief init'\n")
 	assert.Equal(t, "brief doctor: 1 ERROR, 0 WARN; this checks setup only, run 'brief check' for feature content\n", stderr.String())
 }
 

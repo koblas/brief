@@ -809,17 +809,25 @@ func skillFileOf(h host.Host) host.File {
 	return files[0]
 }
 
+// hostSkillNotRegularFix is host-skill's own "not a regular file" ERROR
+// fix: unlike host-hook's own identical arm (an untracked defect — see
+// STATE.md), a plain "run 'brief init'" cannot clear this state by
+// itself. Init's own render step never overwrites an existing path of the
+// wrong kind (a directory or symlink standing where the skill file
+// belongs), so the fix names removing it first.
+const hostSkillNotRegularFix = "remove " + host.WorkflowSkillDir + "/SKILL.md, then " + runInit
+
 // hostSkillRow builds host-skill's own row from state — already probed by
 // probeIntegrationFile against skillFileOf(h) — and installed, whether any
 // Plugin(true) ∪ Agents() file is present: absent while nothing else is
 // installed is SKIP "not installed"; absent while a plugin or agent file
 // is present is WARN (hostSkillMissingDetail); unreadable is WARN; not a
-// regular file is ERROR, the one new ERROR arm Rule 7 grants this row;
-// everything else — present, regular, and classified by origin — goes
-// through originRow, single-subject (no suffix), the same "run 'brief
-// init'" fix host-hook and host-snippet share. A present skill always
-// classifies itself, whatever installed carries: only the absent arm
-// consults it.
+// regular file is ERROR (hostSkillNotRegularFix), the one new ERROR arm
+// Rule 7 grants this row; everything else — present, regular, and
+// classified by origin — goes through originRow, single-subject (no
+// suffix), the same "run 'brief init'" fix host-hook and host-snippet
+// share. A present skill always classifies itself, whatever installed
+// carries: only the absent arm consults it.
 func hostSkillRow(wd, root string, state integrationFileState, installed bool) Check {
 	if !state.present {
 		if !installed {
@@ -834,7 +842,7 @@ func hostSkillRow(wd, root string, state integrationFileState, installed bool) C
 	}
 
 	if !state.regular {
-		return Check{ID: "host-skill", Severity: SeverityError, Path: state.path, Detail: "not a regular file", Fix: new(runInit)}
+		return Check{ID: "host-skill", Severity: SeverityError, Path: state.path, Detail: "not a regular file", Fix: new(hostSkillNotRegularFix)}
 	}
 
 	sev, detail, fix := originRow(state.origin, runInit, "")
@@ -850,15 +858,27 @@ func hostSkillCheck(wd, root string, h host.Host, installed bool) Check {
 
 // rolesSkillNoConfigDetail is roles-skill's own SKIP detail whenever no
 // config was found, a found config did not parse, or neither planner nor
-// implementer is bound and resolved — R7's three no-op arms collapse to
-// one wording.
-const rolesSkillNoConfigDetail = "no planner or implementer bound"
+// implementer resolved to an agent this row could check (unbound,
+// unresolved, or bound to another plugin) — R7's arms collapse to one
+// wording: there is nothing here for the row to speak to yet.
+const rolesSkillNoConfigDetail = "no bound planner or implementer brief can check"
 
-// rolesSkillOKDetail is roles-skill's own fixed OK sentence: unlike
-// roles' own OK detail, it never lists which of planner/implementer
-// actually resolved — the roles row already WARNs a role left unbound or
-// unresolved, so roles-skill only ever reports on a role it could check.
-const rolesSkillOKDetail = "planner, implementer preload brief-workflow"
+// rolesSkillOKText renders roles-skill's own OK sentence for checked, the
+// roles this row actually verified — resolved and not bound to another
+// plugin — in planner-then-implementer order: unlike roles' own OK
+// detail, it never names a role it did not check, since the roles row
+// already WARNs one left unbound or unresolved, and a "; not verified:
+// <role>" suffix (rolesSkillCheck's own) covers one bound elsewhere. Both
+// checked is "planner, implementer preload brief-workflow"; exactly one is
+// "<role> preloads brief-workflow". checked is never empty here —
+// rolesSkillCheck returns SKIP first when it is.
+func rolesSkillOKText(checked []string) string {
+	if len(checked) == 1 {
+		return fmt.Sprintf("%s preloads %s", checked[0], artifact.WorkflowSkillName)
+	}
+
+	return fmt.Sprintf("%s preload %s", strings.Join(checked, ", "), artifact.WorkflowSkillName)
+}
 
 // rolesSkillMissingFix is the WARN fix roles-skill shares across every
 // case where at least one resolved role does not preload the skill.
@@ -917,22 +937,23 @@ func roleLacksSkill(res agentfile.Binding) (bool, bool) {
 // rolesSkillCheck builds roles-skill's own row for a parsed config,
 // considering only planner and implementer (product verdict item 1 — the
 // reviewer role is deliberately excluded, R15): SKIP
-// (rolesSkillNoConfigDetail) when neither is bound and resolved
+// (rolesSkillNoConfigDetail) when neither resolves
 // (agentfile.BindingResolved — a BindingUnverified binding does not itself
-// count, so two other-plugin bindings SKIP); any resolved role whose agent does not
-// preload the skill (roleLacksSkill) is WARN, one entry per lacking role
-// (rolesSkillMissingEntry), joined "; ", in planner-then-implementer
-// order; otherwise OK (rolesSkillOKDetail), plus "; not verified: <role>"
-// per role bound to another plugin — a role left unbound or unresolved
-// contributes neither a problem nor a suffix here, since the roles row
-// already reports it.
+// count, so two other-plugin bindings SKIP too); any resolved role whose
+// agent does not preload the skill (roleLacksSkill) is WARN, one entry per
+// lacking role (rolesSkillMissingEntry), joined "; ", in
+// planner-then-implementer order; otherwise OK, naming only checked — the
+// roles this row actually verified, in that same order (rolesSkillOKText)
+// — plus "; not verified: <role>" per role bound to another plugin. A role
+// left unbound or unresolved contributes to neither checked nor a suffix
+// here, since the roles row already reports it.
 func (s *Server) rolesSkillCheck(root, nearest string, planner, implementer roleBinding) Check {
 	bindings := [2]roleBinding{planner, implementer}
 
 	var (
-		anyResolved bool
-		problems    []string
-		suffixes    []string
+		checked  []string
+		problems []string
+		suffixes []string
 	)
 
 	for _, b := range bindings {
@@ -942,7 +963,7 @@ func (s *Server) rolesSkillCheck(root, nearest string, planner, implementer role
 		case agentfile.BindingUnverified:
 			suffixes = append(suffixes, "not verified: "+b.name)
 		case agentfile.BindingResolved:
-			anyResolved = true
+			checked = append(checked, b.name)
 
 			if lacking, omitClaudeMd := roleLacksSkill(res); lacking {
 				problems = append(problems, rolesSkillMissingEntry(b.name, b.value, omitClaudeMd))
@@ -953,7 +974,7 @@ func (s *Server) rolesSkillCheck(root, nearest string, planner, implementer role
 		}
 	}
 
-	if !anyResolved {
+	if len(checked) == 0 {
 		return Check{ID: "roles-skill", Severity: SeveritySkip, Path: nearest, Detail: rolesSkillNoConfigDetail}
 	}
 
@@ -963,7 +984,7 @@ func (s *Server) rolesSkillCheck(root, nearest string, planner, implementer role
 		return Check{ID: "roles-skill", Severity: SeverityWarn, Path: nearest, Detail: strings.Join(problems, "; "), Fix: &fix}
 	}
 
-	detail := strings.Join(append([]string{rolesSkillOKDetail}, suffixes...), "; ")
+	detail := strings.Join(append([]string{rolesSkillOKText(checked)}, suffixes...), "; ")
 
 	return Check{ID: "roles-skill", Severity: SeverityOK, Path: nearest, Detail: detail}
 }

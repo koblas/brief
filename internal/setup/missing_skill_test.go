@@ -76,6 +76,7 @@ func Test_init_reports_bound_agents_missing_the_workflow_skill(t *testing.T) {
 		assert.Equal(t, "developer", res.AgentsMissingSkill[0].Agent)
 		assert.Equal(t, path, res.AgentsMissingSkill[0].Path)
 		assert.Equal(t, agentfile.ScopeProject, res.AgentsMissingSkill[0].Scope)
+		assert.False(t, res.AgentsMissingSkill[0].Escaped, "a plain project agent under root does not escape it")
 
 		after, readErr := os.ReadFile(path)
 		require.NoError(t, readErr)

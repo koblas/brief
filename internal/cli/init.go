@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/koblas/brief/internal/platform/agentfile"
@@ -35,11 +36,11 @@ their frontmatter "skills:". init never edits an agent file of yours by
 default; stderr instead lists each planner or implementer bound in
 ".brief.yaml" whose agent lacks it. --edit-agents adds it to those agents'
 "skills:" lists, for agent files under ".claude/agents/" only; one under
-"~/.claude" is always left for you to edit. Writes
-".brief.yaml" with every key present but commented out, documenting each
-setting in place (live under --with-agents only for "roles:" and its
-three children, when this run creates the file), and creates the
-configured feature directory. Re-running converges: a valid existing
+"~/.claude" is always left for you to edit. Writes ".brief.yaml" with
+every key present but commented out, documenting each setting in place
+(live under --with-agents only for "roles:" and its three children, when
+this run creates the file), and creates the configured feature directory.
+Re-running converges: a valid existing
 config, and any plugin or agent file whose bytes are unedited, is kept
 as-is, and every artifact already installed reports "unchanged". An
 unparseable or invalid existing config refuses, naming the fix; --force
@@ -209,26 +210,58 @@ func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, ro
 	return fmt.Sprintf("%s in %s; start Claude Code in %s (or run /reload-plugins in a session already there), then 'brief new feature <name>'", label, rel, rel)
 }
 
-// missingSkillHeader is init's own missing-skill stderr block header
-// (Surface & Copy), minus the "brief init: " prefix every stderr line in
-// this file shares.
-const missingSkillHeader = `bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each, or rerun with --edit-agents:`
+// missingSkillHeaderBase is init's own missing-skill stderr block header's
+// invariant prefix (Surface & Copy), minus the "brief init: " prefix every
+// stderr line in this file shares.
+const missingSkillHeaderBase = `bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each`
 
-// missingSkillLines renders one line per agents entry (Surface & Copy),
-// grouped by scope — every ScopeProject entry first, then every
-// ScopeUser one, each group in agents' own relative order — so the rows an
-// adopter can fix by rerunning init with --edit-agents come before the
-// one under "~/.claude" that is always left for them to edit by hand: a
-// project row is "  <displayPath(wd, path)> (<role>)", a user row is
-// "  ~/<home-relative slash path> (<role>; user-level, edit by hand)".
-// This grouping is a display concern only — setup.Result.AgentsMissingSkill
-// itself stays in role-major order (setup's own missing_skill.go).
+// missingSkillFixableByEditAgents reports whether a is a row "--edit-agents"
+// could still reach: a ScopeProject binding whose own resolved path does
+// not escape the repository. A ScopeUser binding, or a ScopeProject one
+// that does (a ".claude" symlinked elsewhere), is always left to edit by
+// hand — missingSkillLines' own annotation says so on every such row.
+func missingSkillFixableByEditAgents(a setup.MissingSkillAgent) bool {
+	return a.Scope == agentfile.ScopeProject && !a.Escaped
+}
+
+// missingSkillHeader renders init's own missing-skill stderr block header
+// (Surface & Copy): the suffix ", or rerun with --edit-agents:" is
+// appended only when editAgents was not given on this run and at least one
+// listed agent is one it could still reach (missingSkillFixableByEditAgents)
+// — otherwise the header ends plain ":", since suggesting a flag that
+// either already ran, or cannot help any row left, would be a dead end.
+func missingSkillHeader(editAgents bool, agents []setup.MissingSkillAgent) string {
+	if !editAgents && slices.ContainsFunc(agents, missingSkillFixableByEditAgents) {
+		return missingSkillHeaderBase + `, or rerun with --edit-agents:`
+	}
+
+	return missingSkillHeaderBase + `:`
+}
+
+// missingSkillLines renders one line per agents entry (Surface & Copy), in
+// three groups — every row "--edit-agents" could still reach first, then
+// a ScopeProject row whose own resolved path escapes the repository, then
+// every ScopeUser row — each group in agents' own relative order, so the
+// rows an adopter can fix by rerunning init with --edit-agents come before
+// the ones always left for them to edit by hand: a fixable row is
+// "  <displayPath(wd, path)> (<role>)", an escaping row is
+// "  <displayPath(wd, path)> (<role>; outside the repository, edit by
+// hand)", a user row is "  ~/<home-relative slash path> (<role>;
+// user-level, edit by hand)". This grouping is a display concern only —
+// setup.Result.AgentsMissingSkill itself stays in role-major order
+// (setup's own missing_skill.go).
 func missingSkillLines(wd string, agents []setup.MissingSkillAgent) []string {
 	lines := make([]string, 0, len(agents))
 
 	for _, a := range agents {
-		if a.Scope != agentfile.ScopeUser {
+		if missingSkillFixableByEditAgents(a) {
 			lines = append(lines, fmt.Sprintf("  %s (%s)", displayPath(wd, a.Path), a.Role))
+		}
+	}
+
+	for _, a := range agents {
+		if a.Scope == agentfile.ScopeProject && a.Escaped {
+			lines = append(lines, fmt.Sprintf("  %s (%s; outside the repository, edit by hand)", displayPath(wd, a.Path), a.Role))
 		}
 	}
 
@@ -371,7 +404,7 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 	printEditAgentsNothingToEdit(out, editAgents, res.Artifacts)
 
 	if len(res.AgentsMissingSkill) > 0 {
-		fmt.Fprintf(out.stderr, "brief init: %s\n", missingSkillHeader)
+		fmt.Fprintf(out.stderr, "brief init: %s\n", missingSkillHeader(editAgents, res.AgentsMissingSkill))
 
 		for _, line := range missingSkillLines(wd, res.AgentsMissingSkill) {
 			fmt.Fprintln(out.stderr, line)

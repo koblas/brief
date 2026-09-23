@@ -822,7 +822,7 @@ func Test_diagnose_classifies_host_skill(t *testing.T) {
 			checkID:        "host-skill",
 			wantSeverity:   doctor.SeverityError,
 			wantDetail:     "not a regular file",
-			wantFix:        new(runInit),
+			wantFix:        new("remove " + skillPath + ", then " + runInit),
 			wantPathSuffix: skillPath,
 		},
 		{
@@ -1777,12 +1777,16 @@ type rolesSkillCase struct {
 // rules (S05): only the planner and implementer bindings are considered
 // (product verdict item 1 — reviewer is excluded); no config, an
 // unparseable config, or neither role bound and resolved is SKIP "no
-// planner or implementer bound", Fix nil; any resolved role whose agent
-// does not preload "brief-workflow" is WARN, one entry per lacking role
-// joined "; ", in planner-then-implementer order, with an omitClaudeMd
-// suffix only on an entry whose own agent sets it; otherwise OK "planner,
-// implementer preload brief-workflow", plus "; not verified: <role>" per
-// role bound to another plugin.
+// bound planner or implementer brief can check", Fix nil; any resolved
+// role whose agent does not preload "brief-workflow" is WARN, one entry
+// per lacking role joined "; ", in planner-then-implementer order, with
+// an omitClaudeMd suffix only on an entry whose own agent sets it;
+// otherwise OK, naming only the roles actually checked (resolved, not
+// bound to another plugin) — "planner, implementer preload brief-workflow"
+// when both, "<role> preloads brief-workflow" when one — plus "; not
+// verified: <role>" per role bound to another plugin: a role the row
+// never verified never appears in the leading clause, whether it is
+// unresolved (the roles row already WARNs it) or bound elsewhere.
 func Test_diagnose_classifies_roles_skill(t *testing.T) {
 	cases := []rolesSkillCase{
 		{
@@ -1793,7 +1797,7 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 			},
 			noConfig:     true,
 			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "no planner or implementer bound",
+			wantDetail:   "no bound planner or implementer brief can check",
 			wantFix:      nil,
 		},
 		{
@@ -1803,7 +1807,7 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: [not a scalar\n"), 0o600))
 			},
 			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "no planner or implementer bound",
+			wantDetail:   "no bound planner or implementer brief can check",
 			wantFix:      nil,
 		},
 		{
@@ -1814,7 +1818,7 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 				writePluginAgent(t, wd, "reviewer")
 			},
 			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "no planner or implementer bound",
+			wantDetail:   "no bound planner or implementer brief can check",
 			wantFix:      nil,
 		},
 		{
@@ -1824,7 +1828,7 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 				writeRolesConfig(t, wd, "my-planner", "my-implementer", "")
 			},
 			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "no planner or implementer bound",
+			wantDetail:   "no bound planner or implementer brief can check",
 			wantFix:      nil,
 		},
 		{
@@ -1834,7 +1838,7 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 				writeRolesConfig(t, wd, "acme:planner", "acme:implementer", "")
 			},
 			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "no planner or implementer bound",
+			wantDetail:   "no bound planner or implementer brief can check",
 			wantFix:      nil,
 		},
 		{
@@ -1895,7 +1899,7 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 				writePluginAgent(t, wd, "planner")
 			},
 			wantSeverity: doctor.SeverityOK,
-			wantDetail:   "planner, implementer preload brief-workflow; not verified: implementer",
+			wantDetail:   "planner preloads brief-workflow; not verified: implementer",
 			wantFix:      nil,
 		},
 		{
@@ -1949,7 +1953,7 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 				return home
 			},
 			wantSeverity: doctor.SeverityOK,
-			wantDetail:   "planner, implementer preload brief-workflow",
+			wantDetail:   "planner preloads brief-workflow",
 			wantFix:      nil,
 		},
 		{
@@ -1993,7 +1997,7 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 				writePluginAgent(t, wd, "planner")
 			},
 			wantSeverity: doctor.SeverityOK,
-			wantDetail:   "planner, implementer preload brief-workflow",
+			wantDetail:   "planner preloads brief-workflow",
 			wantFix:      nil,
 		},
 	}

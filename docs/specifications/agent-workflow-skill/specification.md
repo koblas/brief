@@ -226,16 +226,27 @@ Edit per agent file — frontmatter only, surgical line edit:
   `brief init: --edit-agents requires --host claude-code; run 'brief init --host claude-code --edit-agents'`
 
 Missing-skill report — stderr, exit 0, with or without the flag, listing agents still missing
-the skill after this run (after the planned run under `--dry-run`):
+the skill after this run (after the planned run under `--dry-run`). Header suffix
+`, or rerun with --edit-agents:` appears only when `--edit-agents` was **not** given on this run
+**and** at least one listed agent is one the flag could still reach (a bare-name project
+binding, not escaping the repository); otherwise the header ends plain
+`"skills:" list in each:` — a run that already carries the flag, or one where every remaining
+agent is already annotated "edit by hand", never suggests it. Rows, in scope order: every
+fixable project row first, then a project binding whose own resolved path escapes the
+repository (`; outside the repository, edit by hand` — `--edit-agents` cannot reach it either),
+then every user-level row (`; user-level, edit by hand`):
 
 ```
 brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each, or rerun with --edit-agents:
   .claude/agents/developer/Agent.md (implementer)
+  .claude/agents/legacy/outside.md (planner; outside the repository, edit by hand)
   ~/.claude/agents/planner.md (planner; user-level, edit by hand)
 ```
 
 `--json`: new field `agents_missing_skill`, after `roles_to_add`, always present, never null;
-items `{"role", "agent", "path" (absolute), "scope" ("project"|"user")}`. Omitted from the
+items `{"role", "agent", "path" (absolute), "scope" ("project"|"user")}` — an escaping-repository
+row keeps `"scope": "project"` (JSON carries no escaped flag; the "outside the repository"
+annotation is a text-mode display concern only). Omitted from the
 `--print --json` document. `jsonFieldsParagraph(...)` appends `"agents_missing_skill"`.
 
 `initLong` addition, after the `--with-agents` sentence:
@@ -251,6 +262,10 @@ items `{"role", "agent", "path" (absolute), "scope" ("project"|"user")}`. Omitte
 - When `SKILL.md` is kept as edited, the agent entries are kept too (no row).
 - `uninstallLong` addition:
   `It also removes "brief-workflow" from the "skills:" list of the planner and implementer agents bound in ".brief.yaml", repository files only, unless the skill file itself is kept.`
+- `uninstallLong`'s opening sentence names both directories it removes, not the plugin alone:
+  `...the Claude Code plugin under ".claude/skills/brief/" and the "brief-workflow" skill under ".claude/skills/brief-workflow/"...`; its own "left in place" clause reads
+  `...nor is ".claude/" or ".claude/skills/" above brief's own directories.` (was "above the
+  plugin's own directory" — under-disclosed that the skill directory is removed too).
 
 ### `brief doctor`
 
@@ -264,7 +279,7 @@ New rows are additive in `checks[]`; `counts` keeps its shape.
 | no claude-code install at all | SKIP | `not installed` | `run 'brief init --host claude-code'` |
 | missing while plugin installed | WARN | `not installed; bound agents cannot preload it` | `run 'brief init'` |
 | unreadable | WARN | `not readable (<reason>)` | existing `notReadableFix` |
-| not a regular file | ERROR | `not a regular file` | `run 'brief init'` |
+| not a regular file | ERROR | `not a regular file` | `remove .claude/skills/brief-workflow/SKILL.md, then run 'brief init'` (a plain re-run cannot clear it; host-hook has the same defect, left unfixed — see STATE.md) |
 | older release | WARN | `installed by an older brief release` | `run 'brief init'` |
 | edited | OK | `edited locally` | — |
 | current | OK | `installed` | — |
@@ -278,9 +293,9 @@ New rows are additive in `checks[]`; `counts` keeps its shape.
 
 | Case | Severity | Detail | Fix |
 |---|---|---|---|
-| no config / unparseable / neither role bound and resolved | SKIP | `no planner or implementer bound` | — |
+| no config / unparseable / neither role bound and resolved | SKIP | `no bound planner or implementer brief can check` | — |
 | any lacks the skill | WARN | `<role>: <name> does not preload brief-workflow` per agent, joined `; `; when that agent sets `omitClaudeMd: true`, append ` and omits CLAUDE.md, so it never sees brief's instructions` | `add "brief-workflow" to the "skills:" list of each agent named, or run 'brief init --edit-agents' for those in the repository` |
-| all satisfied | OK | `planner, implementer preload brief-workflow` (+ `; not verified: <role>` for other-plugin bindings) | — |
+| all satisfied | OK | names only the roles this row actually checked (resolved, not bound to another plugin), planner-then-implementer: `planner, implementer preload brief-workflow` when both, `<role> preloads brief-workflow` when one, plus `; not verified: <role>` per role bound to another plugin (excluded from the leading clause); a role left unbound or unresolved is silently omitted — the roles row already WARNs it. A run with no role checked but at least one other-plugin role bound falls back to the SKIP row above (nothing here for it to speak to). | — |
 
 Exit codes unchanged: 1 only when any row is ERROR.
 
