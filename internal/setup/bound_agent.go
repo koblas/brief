@@ -22,9 +22,8 @@ const boundAgentFrontmatterDelim = "---"
 
 // boundAgentOpenLen returns the number of leading bytes of s that make up
 // an opening frontmatter delimiter line, "---\n" or "---\r\n" — 0 when s
-// does not begin with either. addWorkflowSkill is only ever called on
-// bytes a caller already resolved through agentfile.Find (Rule 5), whose
-// frontmatter is already known to parse, so this is never 0 in practice.
+// does not begin with either, the case addWorkflowSkill and
+// removeWorkflowSkill both check for explicitly and treat as unrecognized.
 func boundAgentOpenLen(s string) int {
 	switch {
 	case strings.HasPrefix(s, boundAgentFrontmatterDelim+"\r\n"):
@@ -61,7 +60,9 @@ const (
 // existing's own text, so an "already listed" row here never has to
 // re-derive quoting or list-form nuance the text scanner below does not
 // understand: it is returned unedited with shapeAlreadyListed regardless
-// of the underlying shape. Otherwise the frontmatter is scanned, following
+// of the underlying shape. existing missing an opening "---" line, or
+// missing a closing one on its own line, is shapeOther too — never
+// fabricated. Otherwise the frontmatter is scanned, following
 // stepfile.DecodeFrontmatter's own "\n---" prefix cut, for a top-level
 // "skills:" line: none found (including one nested under another key, or
 // inside another key's own block scalar — neither begins at column 0)
@@ -85,7 +86,11 @@ func addWorkflowSkill(existing []byte, alreadyListed bool) ([]byte, string, skil
 	s := string(existing)
 	openLen := boundAgentOpenLen(s)
 	afterOpen := s[openLen:]
-	yamlPart, afterClose, _ := strings.Cut(afterOpen, "\n"+boundAgentFrontmatterDelim)
+	yamlPart, afterClose, found := strings.Cut(afterOpen, "\n"+boundAgentFrontmatterDelim)
+
+	if openLen == 0 || !found {
+		return existing, "", shapeOther
+	}
 
 	lines := strings.Split(yamlPart, "\n")
 
@@ -335,7 +340,11 @@ func removeWorkflowSkill(existing []byte) ([]byte, bool) {
 	s := string(existing)
 	openLen := boundAgentOpenLen(s)
 	afterOpen := s[openLen:]
-	yamlPart, afterClose, _ := strings.Cut(afterOpen, "\n"+boundAgentFrontmatterDelim)
+	yamlPart, afterClose, found := strings.Cut(afterOpen, "\n"+boundAgentFrontmatterDelim)
+
+	if openLen == 0 || !found {
+		return existing, false
+	}
 
 	lines := strings.Split(yamlPart, "\n")
 
@@ -505,7 +514,7 @@ func removeFromFlowList(value string) (rewritten string, ok bool) {
 // through them preserves the adopter's own mode rather than a fixed one —
 // and resolvedRoot/rel, the same symlink-resolved root and root-relative
 // path the escape check already computed at planning time, so
-// writeBoundAgent can write through an os.Root confined to resolvedRoot
+// ba.agentFile() can write through an os.Root confined to resolvedRoot
 // rather than re-resolving path's own directory at apply time, when a
 // symlink swapped in between planning and applying could otherwise escape
 // it. edited, line, perm, resolvedRoot and rel are the zero value for
@@ -519,6 +528,14 @@ type boundAgentArtifact struct {
 	perm         fs.FileMode
 	resolvedRoot string
 	rel          string
+}
+
+// agentFile returns the confinedAgentFile through which ba's own
+// verifyBoundAgentUnchanged re-read and apply-time write both happen — the
+// single construction site for both, so they can never disagree on which
+// resolvedRoot/rel pair they target.
+func (ba boundAgentArtifact) agentFile() confinedAgentFile {
+	return confinedAgentFile{resolvedRoot: ba.resolvedRoot, rel: ba.rel, displayPath: ba.Path}
 }
 
 // boundAgentTargets selects --edit-agents' and Uninstall's own shared
@@ -842,89 +859,137 @@ func subtractMergedBoundAgents(list []MissingSkillAgent, boundAgentArts []boundA
 	return out
 }
 
-// readBoundAgentFile reads rel from within resolvedRoot through the same
-// os.Root confinement writeBoundAgent writes through, for
-// verifyBoundAgentUnchanged's own pre-write re-read — so the bytes checked
-// for a concurrent edit are the exact bytes the following writeBoundAgent
-// call is about to replace, not whatever ba.Path's own symlink currently
-// resolves to.
-func readBoundAgentFile(resolvedRoot, rel string) ([]byte, error) {
-	root, err := os.OpenRoot(resolvedRoot)
+// confinedAgentFile is the single decision point behind every bound-agent
+// read-for-verify and write: resolvedRoot is root, symlinks resolved at
+// planning time; rel is resolvedRoot-relative — the same pair
+// boundAgentArtifact carries from planBoundAgent and
+// planBoundAgentRemoval. displayPath is the leaf's own original,
+// possibly-symlinked location (what the adopter typed) and names every
+// error read and write return. Both methods open their own os.Root at
+// resolvedRoot, confined to rel, rather than resolving displayPath's own
+// directory fresh: a directory component re-pointed at a symlink between
+// planning and either call can only ever land somewhere still inside
+// resolvedRoot, and read and write can never disagree about which root they
+// trust, since neither has any other way to reach the file.
+type confinedAgentFile struct {
+	resolvedRoot string
+	rel          string
+	displayPath  string
+}
+
+// read reads c's own file through an os.Root opened at c.resolvedRoot,
+// confined to c.rel. A component of c.rel that resolves, via a symlink,
+// outside c.resolvedRoot is refused rather than followed; a component that
+// is simply missing returns the ordinary os.IsNotExist-classifiable error
+// instead. Either way the error is returned unwrapped so os.IsNotExist and
+// its callers still classify it correctly. Only the os.OpenRoot failure
+// itself is wrapped, with c.displayPath.
+func (c confinedAgentFile) read() ([]byte, error) {
+	root, err := os.OpenRoot(c.resolvedRoot)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("setup: open %s: %w", c.displayPath, err)
 	}
 	defer func() { _ = root.Close() }()
 
-	return root.ReadFile(rel)
+	return root.ReadFile(c.rel)
 }
 
-// verifyBoundAgentUnchanged is verifyFileUnchanged's own bound-agent twin
-// (setup.go's and uninstall.go's own apply loops, immediately before
-// writeBoundAgent): it re-reads through readBoundAgentFile — resolvedRoot
-// and rel, the same symlink-resolved location the subsequent write targets
-// — rather than ba.Path directly. ba.Path may itself be a symlink; reading
-// through it fresh would follow wherever it currently resolves, which can
-// differ from resolvedRoot/rel when the symlink is re-pointed between
-// planning and applying, verifying (and reporting a concurrent edit on) the
-// wrong file entirely. ba.Path is still reported as the offending path — it
-// is what the adopter typed — but the bytes compared are always the ones
-// about to be overwritten.
-func verifyBoundAgentUnchanged(ba boundAgentArtifact, rerunCommand string) error {
-	current, err := readBoundAgentFile(ba.resolvedRoot, ba.rel)
-
-	return verifyReadUnchanged(ba.Path, true, ba.existing, current, err, rerunCommand)
-}
-
-// writeBoundAgent atomically replaces the bound-agent file at
-// resolvedRoot/rel — planning time's own symlink-resolved root and
-// root-relative path (boundAgentArtifact.resolvedRoot, .rel) — with body,
-// through internal/platform/atomicfile, preserving perm (the file's own
-// Lstat'd permission bits at planning time) rather than a fixed mode —
-// unlike writePluginFile and writeSnippetFile, which hardcode 0o644 for a
-// file brief itself owns, a bound agent file is the adopter's own and must
-// keep whatever mode it already had. Writing through an os.Root opened at
-// resolvedRoot, rather than re-resolving the leaf's own directory from its
-// original (possibly symlinked) path at apply time, keeps the write
-// confined to the same root the escape check already verified at planning
-// time — a symlink swapped in between the two can only ever point
-// somewhere still inside resolvedRoot. displayPath — boundAgentArtifact's
-// own Path, the leaf's original, possibly-symlinked location — names every
-// returned error rather than resolvedRoot/rel, since that is what the
-// adopter actually typed and what every other row's own error names.
-func writeBoundAgent(resolvedRoot, rel, displayPath string, body []byte, perm fs.FileMode) error {
-	root, err := os.OpenRoot(resolvedRoot)
+// write atomically replaces c's own file, through internal/platform/
+// atomicfile, via an os.Root opened at c.resolvedRoot and confined to
+// c.rel, preserving perm (the file's own Lstat'd permission bits at
+// planning time) rather than a fixed mode — unlike writePluginFile and
+// writeSnippetFile, which hardcode 0o644 for a file brief itself owns, a
+// bound agent file is the adopter's own and must keep whatever mode it
+// already had. Every error is wrapped with c.displayPath — the leaf's
+// original, possibly-symlinked location, what the adopter actually typed —
+// never c.resolvedRoot/c.rel.
+func (c confinedAgentFile) write(body []byte, perm fs.FileMode) error {
+	root, err := os.OpenRoot(c.resolvedRoot)
 	if err != nil {
-		return fmt.Errorf("setup: open %s: %w", displayPath, err)
+		return fmt.Errorf("setup: open %s: %w", c.displayPath, err)
 	}
 	defer func() { _ = root.Close() }()
 
-	dir := filepath.Dir(rel)
+	dir := filepath.Dir(c.rel)
 	if dir != "." {
 		sub, subErr := root.OpenRoot(dir)
 		if subErr != nil {
-			return fmt.Errorf("setup: open %s: %w", displayPath, subErr)
+			return fmt.Errorf("setup: open %s: %w", c.displayPath, subErr)
 		}
 		defer func() { _ = sub.Close() }()
 
 		root = sub
 	}
 
-	name := filepath.Base(rel)
+	name := filepath.Base(c.rel)
 
 	w, err := atomicfile.Create(root, name, perm)
 	if err != nil {
-		return fmt.Errorf("setup: write %s: %w", displayPath, err)
+		return fmt.Errorf("setup: write %s: %w", c.displayPath, err)
 	}
 
 	if _, err := w.Write(body); err != nil {
 		_ = w.Close()
 
-		return fmt.Errorf("setup: write %s: %w", displayPath, err)
+		return fmt.Errorf("setup: write %s: %w", c.displayPath, err)
 	}
 
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("setup: write %s: %w", displayPath, err)
+		return fmt.Errorf("setup: write %s: %w", c.displayPath, err)
 	}
 
 	return nil
+}
+
+// verifyBoundAgentUnchanged is verifyFileUnchanged's own bound-agent twin
+// (setup.go's and uninstall.go's own apply loops, immediately before
+// ba.agentFile().write): it re-reads through ba.agentFile()'s own
+// confinedAgentFile.read, confined to ba.resolvedRoot/ba.rel — the same
+// location the following write call is about to overwrite — rather than
+// ba.Path directly. A directory
+// component of ba.Path may itself be a symlink; reading through it fresh
+// would follow wherever it currently resolves, which can differ from
+// ba.resolvedRoot/ba.rel when that symlink is re-pointed between planning
+// and applying, verifying (and reporting a concurrent edit on) the wrong
+// file entirely. A non-NotExist read error — confinedAgentFile.read's own
+// confinement refusing to follow such a re-point — is classified by
+// boundAgentPathEscaped, never by matching the error's own text: an escaped
+// path is reported the same as a byte mismatch, a *RefusalError wrapping
+// ErrConcurrentEdit, rather than the bare wrapped read error a genuine
+// unexpected failure still gets. ba.Path is still reported as the offending
+// path — it is what the adopter typed — but the bytes compared are always
+// the ones about to be overwritten.
+func verifyBoundAgentUnchanged(ba boundAgentArtifact, rerunCommand string) error {
+	current, err := ba.agentFile().read()
+	if err != nil && !os.IsNotExist(err) && boundAgentPathEscaped(ba.Path, ba.resolvedRoot, ba.rel) {
+		return &RefusalError{
+			Path:    ba.Path,
+			Problem: "changed since it was planned",
+			Fix:     "rerun '" + rerunCommand + "'",
+			Err:     ErrConcurrentEdit,
+		}
+	}
+
+	return verifyReadUnchanged(ba.Path, true, ba.existing, current, err, rerunCommand)
+}
+
+// boundAgentPathEscaped reports whether displayPath no longer resolves to
+// resolvedRoot/rel at all — the condition that turns a
+// confinedAgentFile.read confinement refusal into a concurrent-edit
+// refusal rather than a bare error: a directory component re-pointed at a
+// symlink outside resolvedRoot between planning and this call. Decided by
+// resolving displayPath itself (filepath.EvalSymlinks), never by matching
+// against read's own error text. displayPath itself no longer existing is
+// treated as escaped too — the leaf was removed, which is exactly the kind
+// of change verifyBoundAgentUnchanged exists to catch — but any other
+// EvalSymlinks failure (an ancestor directory whose permissions changed,
+// say) is not: that is a genuine unexpected error, not a re-point, and
+// telling the caller to "rerun" it would not fix it.
+func boundAgentPathEscaped(displayPath, resolvedRoot, rel string) bool {
+	resolved, err := filepath.EvalSymlinks(displayPath)
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+
+	return resolved != filepath.Join(resolvedRoot, rel)
 }

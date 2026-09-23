@@ -348,10 +348,10 @@ func planConfigRemoval(path string, force bool) (Artifact, bool, error) {
 // hasSnippet and snippetArt reports ActionRemoved: a rewrite with its
 // remaining bytes goes to res.Modified, an emptied file is deleted and
 // goes to res.Removed), then rewrites every boundAgentArts entry in place
-// (Rule 8: verifyFileUnchanged against a concurrent edit, then
-// writeBoundAgent, which preserves the file's own mode — never deleted, so
-// it is appended to res.Modified, not res.Removed), then removes every
-// other res.Artifacts entry reporting ActionRemoved except a KindBoundAgent
+// (Rule 8: verifyBoundAgentUnchanged against a concurrent edit, then
+// ba.agentFile().write, which preserves the file's own mode — never
+// deleted, so it is appended to res.Modified, not res.Removed), then removes
+// every other res.Artifacts entry reporting ActionRemoved except a KindBoundAgent
 // one (already handled above), in list order, appending each removed path
 // to res.Removed as it lands, then, for hostName == HostClaudeCode, prunes
 // the plugin's own now-empty directories (pruneEmptyPluginDirs) — never
@@ -403,7 +403,7 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 			return Result{}, err
 		}
 
-		if err := writeBoundAgent(ba.resolvedRoot, ba.rel, ba.Path, ba.edited, ba.perm); err != nil {
+		if err := ba.agentFile().write(ba.edited, ba.perm); err != nil {
 			if removedAny {
 				return res, markPartial(err)
 			}

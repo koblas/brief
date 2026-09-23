@@ -163,7 +163,7 @@ func Test_apply_refuses_an_older_plugin_file_changed_since_planning(t *testing.T
 // merge, planning-time bytes carried on boundAgentArtifact.existing): the
 // file on disk now holds something else, so apply refuses, wrapping
 // ErrConcurrentEdit, and the file's own bytes are unchanged afterward,
-// proving apply never reached writeBoundAgent.
+// proving apply never reached ba.agentFile().write.
 func Test_apply_refuses_a_bound_agent_changed_since_planning(t *testing.T) {
 	wd := t.TempDir()
 	agentPath := filepath.Join(wd, "developer.md")
@@ -223,7 +223,7 @@ func Test_applyUninstall_refuses_when_CLAUDE_md_changed_since_planning(t *testin
 // boundAgentArtifact.existing): the file on disk now holds something else,
 // so applyUninstall refuses, wrapping ErrConcurrentEdit, and the file's own
 // bytes are unchanged afterward, proving applyUninstall never reached
-// writeBoundAgent. The control arm is the identical fixture with the file
+// ba.agentFile().write. The control arm is the identical fixture with the file
 // still holding exactly what planning read: applyUninstall proceeds and
 // rewrites it to the edited bytes.
 func Test_apply_uninstall_refuses_a_bound_agent_edited_after_planning(t *testing.T) {

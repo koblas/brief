@@ -478,8 +478,8 @@ func rolesToAdd(withAgents bool, configAction Action, current config.RoleBinding
 // render Rule 6 upgrades) re-reads its own path immediately before writing
 // (verifyFileUnchanged) and refuses ErrConcurrentEdit rather than
 // overwriting a file changed since planning — then every boundAgentArts
-// entry reporting ActionMerged (guarded by the same verifyFileUnchanged
-// check, then writeBoundAgent, which preserves the file's own mode), then
+// entry reporting ActionMerged (guarded by verifyBoundAgentUnchanged, then
+// ba.agentFile().write, which preserves the file's own mode), then
 // snippetArt (when hasSnippet, and it reports ActionCreated or
 // ActionMerged), then configArt last with configBody as its bytes — the
 // plain ConfigFile() or, under WithAgents, ConfigFileWithRoles() — into
@@ -547,7 +547,7 @@ func apply(
 			return Result{}, err
 		}
 
-		if err := writeBoundAgent(ba.resolvedRoot, ba.rel, ba.Path, ba.edited, ba.perm); err != nil {
+		if err := ba.agentFile().write(ba.edited, ba.perm); err != nil {
 			if wroteSomething {
 				return res, markPartial(err)
 			}

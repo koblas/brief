@@ -157,7 +157,7 @@
 // the name appended; every other shape is left alone (ActionKept). A
 // non-regular leaf (a symlink) is ActionKept without being read; a regular
 // leaf whose own resolved path escapes the resolved install root is
-// skipped entirely, contributing no row. writeBoundAgent preserves the
-// file's own Lstat'd permission bits, unlike writePluginFile's fixed
+// skipped entirely, contributing no row. confinedAgentFile.write preserves
+// the file's own Lstat'd permission bits, unlike writePluginFile's fixed
 // 0o644, since a bound agent file is the adopter's own.
 package setup

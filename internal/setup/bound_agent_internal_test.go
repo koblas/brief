@@ -3,15 +3,18 @@ package setup
 // White-box package: addWorkflowSkill and removeWorkflowSkill are
 // unexported, pinned here directly against hand-built frontmatter bytes,
 // independent of planBoundAgents' own file-finding and membership decisions
-// (bound_agent_test.go, black-box). planBoundAgent, planBoundAgentRemoval
-// and writeBoundAgent are also called directly here rather than through
+// (bound_agent_test.go, black-box). planBoundAgent, planBoundAgentRemoval,
+// confinedAgentFile (.read, .write) and verifyBoundAgentUnchanged are also
+// called or constructed directly here rather than through
 // srv.Init/srv.Uninstall, for inputs their real flow can never construct — a
 // dangling symlink, unparseable frontmatter, or a symlink re-pointed after
-// boundAgentTargets already selected a path: agentfile.Find filters every
-// candidate through a successful decode before it is ever a target, so each
-// of these is reachable in production only through the same kind of TOCTOU
-// window between Find's own scan (or planning) and this package's own next
-// read, never through the exported entry points' own real flow.
+// boundAgentTargets already selected a path (a directory component
+// swapped for one pointing outside resolvedRoot, or a leaf re-pointed at a
+// decoy): agentfile.Find filters every candidate through a successful
+// decode before it is ever a target, so each of these is reachable in
+// production only through the same kind of TOCTOU window between Find's own
+// scan (or planning) and this package's own next read or write, never
+// through the exported entry points' own real flow.
 
 import (
 	"os"
@@ -201,6 +204,27 @@ func Test_add_workflow_skill_edits_only_the_skills_line(t *testing.T) {
 			wantLine:  "skills: [brief-workflow]",
 			wantShape: shapeNoKey,
 		},
+		{
+			name:      "opening delimiter with no closing one: unrecognized, never fabricated",
+			body:      "---\n",
+			wantBody:  "---\n",
+			wantLine:  "",
+			wantShape: shapeOther,
+		},
+		{
+			name:      "no frontmatter at all: unrecognized, left untouched",
+			body:      "just body text\n",
+			wantBody:  "just body text\n",
+			wantLine:  "",
+			wantShape: shapeOther,
+		},
+		{
+			name:      "no opening delimiter, but a later line matches the closing scan: unrecognized",
+			body:      "name: developer\n---\n\nbody\n",
+			wantBody:  "name: developer\n---\n\nbody\n",
+			wantLine:  "",
+			wantShape: shapeOther,
+		},
 	}
 
 	for _, c := range cases {
@@ -318,6 +342,30 @@ func Test_remove_workflow_skill_edits_only_the_skills_line(t *testing.T) {
 			wantBody: "---\nname: developer\nskills: [other,\n  brief-workflow]\n---\n\nbody\n",
 			wantOK:   false,
 		},
+		{
+			name:     "opening delimiter with no closing one: unremovable, never fabricated",
+			body:     "---\n",
+			wantBody: "---\n",
+			wantOK:   false,
+		},
+		{
+			name:     "no frontmatter at all: unremovable",
+			body:     "just body text\n",
+			wantBody: "just body text\n",
+			wantOK:   false,
+		},
+		{
+			name:     "skills: present but no closing delimiter: unremovable, never fabricated",
+			body:     "---\nname: developer\nskills: [brief-workflow]\n",
+			wantBody: "---\nname: developer\nskills: [brief-workflow]\n",
+			wantOK:   false,
+		},
+		{
+			name:     "no opening delimiter, but a later line matches the closing scan: unremovable",
+			body:     "name: developer\nskills: [brief-workflow]\n---\n\nbody\n",
+			wantBody: "name: developer\nskills: [brief-workflow]\n---\n\nbody\n",
+			wantOK:   false,
+		},
 	}
 
 	for _, c := range cases {
@@ -368,19 +416,16 @@ func Test_plan_bound_agent_removal_dangling_symlink(t *testing.T) {
 // Test_plan_bound_agent_unparseable_frontmatter_is_never_merged pins
 // planBoundAgent's own parseErr != nil branch: a frontmatter that fails to
 // decode is kept, with boundAgentUneditableDetail, and never handed to
-// addWorkflowSkill at all — even though, for body below (an opening
-// delimiter with no closing one at all), addWorkflowSkill's own insert path
-// would otherwise fabricate a closing delimiter regardless: its "\n---" cut
-// finds none (Cut's own found is discarded), yet it unconditionally rejoins
-// "\n" + the delimiter onto the result anyway, and the fabricated edit would
-// itself re-parse clean — an empty Name matches fm's own zero-value Name,
-// and Skills == [brief-workflow] matches fm's own nil Skills plus the
-// skill — so boundAgentEditVerified alone would not catch it.
-// agentfile.Find would never hand a file like this to boundAgentTargets in
-// the first place, since it filters on decode success, so — like the
-// dangling symlink case above — this is reachable only through a direct
-// call, standing in for a TOCTOU window between Find's own scan and this
-// function's own read.
+// addWorkflowSkill at all — body below (an opening delimiter with no
+// closing one at all) is also the shape addWorkflowSkill's own openLen/
+// found guard rejects as shapeOther (Test_add_workflow_skill_edits_
+// only_the_skills_line's own "opening delimiter with no closing one" case),
+// so this test pins planBoundAgent's own short-circuit rather than relying
+// on that guard alone. agentfile.Find would never hand a file like this to
+// boundAgentTargets in the first place, since it filters on decode success,
+// so — like the dangling symlink case above — this is reachable only
+// through a direct call, standing in for a TOCTOU window between Find's own
+// scan and this function's own read.
 func Test_plan_bound_agent_unparseable_frontmatter_is_never_merged(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
@@ -396,24 +441,20 @@ func Test_plan_bound_agent_unparseable_frontmatter_is_never_merged(t *testing.T)
 	assert.Equal(t, ActionKept, art.Action)
 	assert.Equal(t, boundAgentUneditableDetail, art.Detail)
 	assert.Nil(t, art.edited)
-
-	current, readErr := os.ReadFile(path)
-	require.NoError(t, readErr)
-	assert.Equal(t, body, current)
 }
 
 // Test_write_bound_agent_is_confined_to_resolved_root pins
-// writeBoundAgent's own root confinement: rel's own leading directory is
-// resolved through an os.Root opened at resolvedRoot, planning time's own
-// symlink-resolved root, rather than re-resolved from a raw path at apply
-// time. Simulating a symlink swapped in between planning and applying —
-// the leaf's own parent directory now points outside resolvedRoot — must
-// refuse the write rather than silently follow it outside. displayPath is
-// deliberately a different string from resolvedRoot/rel, so the assertion
-// below can tell "the error names displayPath" apart from "the error
-// happens to name the same path either way" — this only exercises the
-// OpenRoot(dir) error site, one of writeBoundAgent's several displayPath
-// call sites.
+// confinedAgentFile.write's own root confinement: rel's own leading
+// directory is resolved through an os.Root opened at resolvedRoot, planning
+// time's own symlink-resolved root, rather than re-resolved from a raw path
+// at apply time. Simulating a symlink swapped in between planning and
+// applying — the leaf's own parent directory now points outside
+// resolvedRoot — must refuse the write rather than silently follow it
+// outside. displayPath is deliberately a different string from
+// resolvedRoot/rel, so the assertion below can tell "the error names
+// displayPath" apart from "the error happens to name the same path either
+// way" — this only exercises the OpenRoot(dir) error site, one of
+// confinedAgentFile.write's several displayPath call sites.
 func Test_write_bound_agent_is_confined_to_resolved_root(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
@@ -427,7 +468,9 @@ func Test_write_bound_agent_is_confined_to_resolved_root(t *testing.T) {
 	resolvedPath := filepath.Join(root, "agents", "developer.md")
 	displayPath := filepath.Join(root, "linked-agents", "developer.md")
 
-	err := writeBoundAgent(root, filepath.Join("agents", "developer.md"), displayPath, []byte("new body"), 0o600)
+	c := confinedAgentFile{resolvedRoot: root, rel: filepath.Join("agents", "developer.md"), displayPath: displayPath}
+	err := c.write([]byte("new body"), 0o600)
+
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), displayPath)
 	assert.NotContains(t, err.Error(), resolvedPath, "the error must name displayPath, not resolvedRoot/rel")
@@ -436,16 +479,35 @@ func Test_write_bound_agent_is_confined_to_resolved_root(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "the write must never land outside resolvedRoot")
 }
 
+// rePointSymlink removes the symlink at path and recreates it pointing at
+// target.
+func rePointSymlink(t *testing.T, path, target string) {
+	t.Helper()
+
+	require.NoError(t, os.Remove(path))
+	require.NoError(t, os.Symlink(target, path))
+}
+
+// tamperFile overwrites path's own bytes with body, simulating a hand edit
+// or a concurrent brief invocation landing between planning and applying.
+func tamperFile(t *testing.T, path string, body []byte) {
+	t.Helper()
+
+	require.NoError(t, os.WriteFile(path, body, 0o600))
+}
+
 // Test_verify_bound_agent_unchanged_reads_through_resolved_root pins
 // verifyBoundAgentUnchanged's own re-read target: resolvedRoot/rel, the
-// same location the following writeBoundAgent call is about to overwrite —
-// not ba.Path's own symlink, followed fresh. ba.Path is re-pointed, between
-// planning and this call, at a decoy crafted to hold the exact bytes
-// planning read — a check against ba.Path directly would wrongly pass —
-// while resolvedRoot/rel's own real target is independently changed in the
-// same window. verifyBoundAgentUnchanged must still refuse: the file about
-// to be overwritten did change, regardless of what ba.Path currently
-// resolves to.
+// same location the following ba.agentFile().write call is about to
+// overwrite — not ba.Path's own symlink, followed fresh. developerPath
+// (ba.Path) is
+// re-pointed, between planning and this call, at a decoy crafted to hold
+// the exact bytes planning read — a check against ba.Path directly would
+// wrongly pass, which the control assertion below proves — while
+// resolvedRoot/rel's own real target (targetA) is independently tampered
+// with in the same window. verifyBoundAgentUnchanged must still refuse: the
+// file about to be overwritten did change, regardless of what ba.Path
+// currently resolves to.
 func Test_verify_bound_agent_unchanged_reads_through_resolved_root(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
@@ -465,29 +527,131 @@ func Test_verify_bound_agent_unchanged_reads_through_resolved_root(t *testing.T)
 		rel:          filepath.Join("agents", "target-a.md"),
 	}
 
-	// developer.md is re-pointed at a decoy holding the exact bytes
-	// planning read...
 	targetB := filepath.Join(root, "agents", "target-b.md")
-	require.NoError(t, os.WriteFile(targetB, []byte("original"), 0o600))
-	require.NoError(t, os.Remove(developerPath))
-	require.NoError(t, os.Symlink(targetB, developerPath))
+	tamperFile(t, targetB, []byte("original"))
+	rePointSymlink(t, developerPath, targetB)
+	tamperFile(t, targetA, []byte("tampered"))
 
-	// ...while target-a.md itself — what writeBoundAgent is about to
-	// overwrite — is independently changed.
-	require.NoError(t, os.WriteFile(targetA, []byte("tampered"), 0o600))
-
-	// Control: a check against ba.Path directly would have missed this —
-	// the decoy still matches what planning read.
 	viaPath, pathErr := os.ReadFile(ba.Path)
 	require.NoError(t, pathErr)
 	require.Equal(t, ba.existing, viaPath, "control: the decoy must still match planning's own bytes")
 
 	verifyErr := verifyBoundAgentUnchanged(ba, "brief init --edit-agents")
 
-	require.Error(t, verifyErr)
 	assert.ErrorIs(t, verifyErr, ErrConcurrentEdit)
 
 	var refusal *RefusalError
 	require.ErrorAs(t, verifyErr, &refusal)
 	assert.Equal(t, developerPath, refusal.Path, "the reported path is still ba.Path — what the adopter typed")
+}
+
+// Test_confined_agent_file_read_refuses_a_directory_symlink_escape pins
+// confinedAgentFile.read's own os.Root confinement on the read side — the
+// write side is pinned separately by
+// Test_write_bound_agent_is_confined_to_resolved_root above. A directory
+// component of rel (the "agents" segment) is swapped, between planning and
+// this call, for a symlink pointing outside resolvedRoot, at a file holding
+// byte-identical content to the original — so a naive
+// os.ReadFile(filepath.Join(resolvedRoot, rel)) read would wrongly treat
+// the file as unchanged; read must refuse to follow the escape instead.
+func Test_confined_agent_file_read_refuses_a_directory_symlink_escape(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	outside, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "agents"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "agents", "developer.md"), []byte("original"), 0o600))
+
+	c := confinedAgentFile{
+		resolvedRoot: root,
+		rel:          filepath.Join("agents", "developer.md"),
+		displayPath:  filepath.Join(root, "agents", "developer.md"),
+	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "developer.md"), []byte("original"), 0o600))
+	require.NoError(t, os.RemoveAll(filepath.Join(root, "agents")))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "agents")))
+
+	_, readErr := c.read()
+
+	require.Error(t, readErr)
+	assert.False(t, os.IsNotExist(readErr), "a confinement refusal is not a not-exist error")
+}
+
+// Test_verify_bound_agent_unchanged_classifies_an_escape_as_concurrent_edit
+// pins verifyBoundAgentUnchanged's own classification of a non-NotExist
+// read error: when ba.Path no longer resolves to ba.resolvedRoot/ba.rel at
+// all — a directory component re-pointed outside resolvedRoot between
+// planning and this call, refused by confinedAgentFile.read's own
+// confinement — the failure is reported as the same *RefusalError wrapping
+// ErrConcurrentEdit a byte mismatch would produce, never a bare wrapped
+// read error. displayPath (ba.Path) is deliberately an in-root symlinked
+// leaf distinct from resolvedRoot/rel, so refusal.Path can be told apart
+// from the location actually read; outside/developer.md — where the escape
+// lands — holds byte-identical content to the original, so a read that
+// bypassed confinedAgentFile's own os.Root confinement would wrongly treat
+// the file as unchanged rather than escaped.
+func Test_verify_bound_agent_unchanged_classifies_an_escape_as_concurrent_edit(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	outside, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "agents"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "agents", "developer.md"), []byte("original"), 0o600))
+
+	displayPath := filepath.Join(root, "developer.md")
+	require.NoError(t, os.Symlink(filepath.Join(root, "agents", "developer.md"), displayPath))
+
+	ba := boundAgentArtifact{
+		Artifact:     Artifact{Path: displayPath},
+		existing:     []byte("original"),
+		resolvedRoot: root,
+		rel:          filepath.Join("agents", "developer.md"),
+	}
+
+	tamperFile(t, filepath.Join(outside, "developer.md"), []byte("original"))
+	require.NoError(t, os.RemoveAll(filepath.Join(root, "agents")))
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "agents")))
+
+	verifyErr := verifyBoundAgentUnchanged(ba, "brief init --edit-agents")
+
+	assert.ErrorIs(t, verifyErr, ErrConcurrentEdit)
+
+	var refusal *RefusalError
+	require.ErrorAs(t, verifyErr, &refusal)
+	assert.Equal(t, displayPath, refusal.Path)
+	assert.NotEqual(t, filepath.Join(root, "agents", "developer.md"), refusal.Path)
+}
+
+// Test_verify_bound_agent_unchanged_does_not_misclassify_a_permission_error
+// pins boundAgentPathEscaped's own narrower half: a read failure whose
+// displayPath still resolves to resolvedRoot/rel — a directory made
+// unreadable, rather than re-pointed — must not be reported as
+// ErrConcurrentEdit, since rerunning would not fix it.
+func Test_verify_bound_agent_unchanged_does_not_misclassify_a_permission_error(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "agents"), 0o755))
+	displayPath := filepath.Join(root, "agents", "developer.md")
+	require.NoError(t, os.WriteFile(displayPath, []byte("original"), 0o600))
+
+	ba := boundAgentArtifact{
+		Artifact:     Artifact{Path: displayPath},
+		existing:     []byte("original"),
+		resolvedRoot: root,
+		rel:          filepath.Join("agents", "developer.md"),
+	}
+
+	require.NoError(t, os.Chmod(filepath.Join(root, "agents"), 0o000))
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "agents"), 0o755) })
+
+	verifyErr := verifyBoundAgentUnchanged(ba, "brief init --edit-agents")
+
+	require.Error(t, verifyErr)
+	assert.NotErrorIs(t, verifyErr, ErrConcurrentEdit)
 }
