@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/koblas/brief/internal/platform/repo"
 	"gopkg.in/yaml.v3"
@@ -14,6 +16,41 @@ import (
 // configFileName is the one name Resolve looks for. init writes exactly
 // this name, and discovery must not drift from it.
 const configFileName = ".brief.yaml"
+
+// rootFS returns the production root FS: the whole namespace LocateWithinFS
+// walks, rooted at "/". This assumes a single-rooted, forward-slash
+// namespace — true for brief's darwin/linux target (no Windows evidence
+// anywhere in the tree: no CI workflow, devenv.nix names only a linux
+// Buildkite agent) — and is not evaluated on a Windows volume path
+// ("C:\..."), which fsName below cannot represent.
+func rootFS() fs.FS {
+	return os.DirFS("/")
+}
+
+// fsName maps abs, an absolute OS path, onto the name rootFS (or a test's
+// own fstest.MapFS standing in for it) expects: the leading path separator
+// stripped, forward-slash separated, "." for the root itself.
+func fsName(abs string) string {
+	trimmed := strings.TrimPrefix(filepath.ToSlash(abs), "/")
+	if trimmed == "" {
+		return "."
+	}
+
+	return trimmed
+}
+
+// rewritePathError swaps a *fs.PathError's own Path back to abs when it
+// came from a rootFS call through fsName's relative mapping, so a stat
+// failure's error text — embedded verbatim in InvalidConfigError.Error —
+// reads exactly as os.Stat(abs) itself would have produced. Any other
+// error shape passes through unchanged.
+func rewritePathError(err error, abs string) error {
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
+		return &fs.PathError{Op: pe.Op, Path: abs, Err: pe.Err}
+	}
+
+	return err
+}
 
 // Locate walks upward from startDir to the filesystem root looking for a
 // ".brief.yaml" file: nearest is the first one found (empty when none
@@ -48,24 +85,39 @@ func LocateWithin(startDir, boundary string) (string, []string, error) {
 		return "", nil, fmt.Errorf("resolve config: %w", err)
 	}
 
-	if _, statErr := os.Stat(abs); statErr != nil {
-		return "", nil, fmt.Errorf("resolve config: %w", &InvalidConfigError{Path: abs, Err: statErr})
+	nearest, shadowed, err := LocateWithinFS(rootFS(), abs, resolveBoundary(boundary))
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve config: %w", err)
 	}
 
-	boundaryAbs := resolveBoundary(boundary)
+	return nearest, shadowed, nil
+}
+
+// LocateWithinFS is LocateWithin's own core: fsys is the whole filesystem
+// namespace the walk runs against — production passes rootFS(), a test a
+// fstest.MapFS holding just the ancestors in play — and startAbs,
+// boundaryAbs are already absolute, slash-separated OS paths;
+// filepath.Abs's own cwd-dependent resolution stays in LocateWithin, never
+// here. The walk and the boundary comparison run entirely on startAbs's
+// own string form (filepath.Join / filepath.Dir), identical regardless of
+// fsys; only the existence checks go through it, by way of fsName.
+func LocateWithinFS(fsys fs.FS, startAbs, boundaryAbs string) (string, []string, error) {
+	if _, statErr := fs.Stat(fsys, fsName(startAbs)); statErr != nil {
+		return "", nil, &InvalidConfigError{Path: startAbs, Err: rewritePathError(statErr, startAbs)}
+	}
 
 	var nearest string
 
 	var shadowed []string
 
-	for dir := abs; ; {
-		path := filepath.Join(dir, configFileName)
+	for dir := startAbs; ; {
+		candidate := filepath.Join(dir, configFileName)
 
-		if _, statErr := os.Stat(path); statErr == nil {
+		if _, statErr := fs.Stat(fsys, fsName(candidate)); statErr == nil {
 			if nearest == "" {
-				nearest = path
+				nearest = candidate
 			} else {
-				shadowed = append(shadowed, path)
+				shadowed = append(shadowed, candidate)
 			}
 		}
 
