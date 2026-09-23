@@ -123,6 +123,21 @@ func Load(path string) (Frontmatter, error) {
 	return decode(body)
 }
 
+// LoadFS is Load's own fs.FS-backed twin: name's own bytes are read
+// through fsys rather than os.ReadFile, so (Binding).LackingSkill can
+// decode a "brief:*" binding's resolved file through the same Tree
+// ResolveBindingIn already resolved it against, in-memory in a test,
+// rather than reopening Path from scratch. It returns the same error
+// shape Load does for the identical bytes.
+func LoadFS(fsys fs.FS, name string) (Frontmatter, error) {
+	body, err := fs.ReadFile(fsys, name)
+	if err != nil {
+		return Frontmatter{}, err
+	}
+
+	return decode(body)
+}
+
 // HasSkill reports whether fm's own Skills names skill.
 func (fm Frontmatter) HasSkill(skill string) bool {
 	return slices.Contains(fm.Skills, skill)
