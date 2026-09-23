@@ -347,7 +347,7 @@ Scenario: SCENARIO-08 uninstall removes brief-workflow from bound agents
 - [x] SCENARIO-02: brief's planner and implementer agents preload the skill
 - [x] SCENARIO-03: doctor resolves a bound role by frontmatter name, project first
 - [x] SCENARIO-04: doctor reports the brief-workflow skill's health (host-skill)
-- [ ] SCENARIO-05: doctor checks bound planner/implementer preload the skill (roles-skill)
+- [x] SCENARIO-05: doctor checks bound planner/implementer preload the skill (roles-skill)
 - [ ] SCENARIO-06: init reports bound agents missing the skill
 - [ ] SCENARIO-07: init --edit-agents adds the skill to bound repository agents
 - [ ] SCENARIO-08: uninstall removes brief-workflow from bound agents

@@ -960,6 +960,27 @@ func Test_init_help_names_the_brief_workflow_skill(t *testing.T) {
 	assert.Contains(t, normalizeWhitespace(stdout.String()), sentence)
 }
 
+// Test_doctor_help_names_role_resolution_and_the_brief_workflow_skill pins
+// the ruled sentence specification.md's "Surface & Copy" section gives
+// doctorLong (S05), replacing the old roles clause: whitespace-normalized,
+// since doctorLong hand-wraps its own prose. The stale "reading
+// ~/.claude/agents" wording it replaces must be gone.
+func Test_doctor_help_names_role_resolution_and_the_brief_workflow_skill(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"doctor", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	sentence := `— plus whether each role bound in ".brief.yaml" resolves to an agent, matched by its frontmatter "name:" anywhere under ".claude/agents/", then` +
+		` "~/.claude/agents/" when the repository defines none, and whether the bound planner and implementer preload the "brief-workflow" skill.`
+	normalized := normalizeWhitespace(stdout.String())
+	assert.Contains(t, normalized, sentence)
+	assert.NotContains(t, normalized, `reading "~/.claude/agents"`)
+}
+
 // Test_status_and_check_help_say_the_text_layout_may_change pins the
 // exact sentence status, check and doctor's own Long end with, after
 // their JSON paragraph; start and finish are the control arm, since no

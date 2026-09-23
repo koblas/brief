@@ -122,6 +122,144 @@ func Test_find_returns_every_project_duplicate_in_lexical_order(t *testing.T) {
 	assert.Equal(t, second, defs[1].Path)
 }
 
+// Test_find_decodes_skills_and_omit_claude_md pins Frontmatter's own
+// Skills and OmitClaudeMd fields (S05): a block-list "skills:", a
+// one-line flow-list "skills: [brief-workflow]" and "omitClaudeMd: true"
+// all surface on the returned Definition's own Frontmatter.
+func Test_find_decodes_skills_and_omit_claude_md(t *testing.T) {
+	cases := []struct {
+		name             string
+		body             string
+		wantSkills       []string
+		wantOmitClaudeMd bool
+	}{
+		{
+			name: "block-list skills",
+			body: "---\nname: developer\nskills:\n  - brief-workflow\n  - other-skill\n---\n\nbody\n",
+			wantSkills: []string{"brief-workflow", "other-skill"},
+		},
+		{
+			name:       "flow-list skills",
+			body:       "---\nname: developer\nskills: [brief-workflow]\n---\n\nbody\n",
+			wantSkills: []string{"brief-workflow"},
+		},
+		{
+			name:             "omitClaudeMd true",
+			body:             "---\nname: developer\nomitClaudeMd: true\n---\n\nbody\n",
+			wantOmitClaudeMd: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			home := t.TempDir()
+			path := filepath.Join(root, ".claude", "agents", "developer.md")
+			writeAgentFile(t, path, c.body)
+
+			defs := agentfile.Find(root, home, "developer")
+
+			require.Len(t, defs, 1)
+			assert.Equal(t, c.wantSkills, defs[0].Frontmatter.Skills)
+			assert.Equal(t, c.wantOmitClaudeMd, defs[0].Frontmatter.OmitClaudeMd)
+		})
+	}
+}
+
+// Test_find_still_resolves_an_agent_whose_skills_or_omit_claude_md_is_malformed
+// pins the loose-decode contract (S05): a "skills:" or "omitClaudeMd:"
+// value in an unexpected shape must never drop the agent out of Rule 5
+// resolution — only Skills/OmitClaudeMd themselves fall back to their own
+// zero values. Green on arrival: findIn already ignores unknown-shaped
+// values for a field it does not yet decode at all; this pins the loose
+// decode as a guard against a stricter one being introduced later, not a
+// behavior change of its own.
+func Test_find_still_resolves_an_agent_whose_skills_or_omit_claude_md_is_malformed(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "scalar skills", body: "---\nname: developer\nskills: brief-workflow\n---\n\nbody\n"},
+		{name: "mapping skills", body: "---\nname: developer\nskills:\n  brief-workflow: true\n---\n\nbody\n"},
+		{name: "non-bool omitClaudeMd", body: "---\nname: developer\nomitClaudeMd: yes please\n---\n\nbody\n"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			home := t.TempDir()
+			path := filepath.Join(root, ".claude", "agents", "developer.md")
+			writeAgentFile(t, path, c.body)
+
+			defs := agentfile.Find(root, home, "developer")
+
+			require.Len(t, defs, 1, "a malformed skills/omitClaudeMd value must not drop the agent out of resolution")
+			assert.Nil(t, defs[0].Frontmatter.Skills)
+			assert.False(t, defs[0].Frontmatter.OmitClaudeMd)
+		})
+	}
+}
+
+// Test_load_decodes_one_agent_files_frontmatter pins Load's own contract
+// (S05): the single-file entry point a "brief:*" role binding's own
+// resolved file uses, sharing findIn's decode.
+func Test_load_decodes_one_agent_files_frontmatter(t *testing.T) {
+	cases := []struct {
+		name      string
+		body      string
+		wantErr   bool
+		wantName  string
+		wantSkill []string
+	}{
+		{
+			name:      "block-list skills",
+			body:      "---\nname: planner\nskills:\n  - brief-workflow\n---\n\nbody\n",
+			wantName:  "planner",
+			wantSkill: []string{"brief-workflow"},
+		},
+		{
+			name:     "scalar skills decodes loosely, no error",
+			body:     "---\nname: planner\nskills: brief-workflow\n---\n\nbody\n",
+			wantName: "planner",
+		},
+		{
+			name:    "no frontmatter",
+			body:    "just a plain agent file\n",
+			wantErr: true,
+		},
+		{
+			name:    "unparseable yaml",
+			body:    "---\nname: [this is not: valid\n---\n\nbody\n",
+			wantErr: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "agent.md")
+			require.NoError(t, os.WriteFile(path, []byte(c.body), 0o600))
+
+			fm, err := agentfile.Load(path)
+
+			if c.wantErr {
+				require.Error(t, err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, c.wantName, fm.Name)
+			assert.Equal(t, c.wantSkill, fm.Skills)
+		})
+	}
+
+	t.Run("missing file", func(t *testing.T) {
+		_, err := agentfile.Load(filepath.Join(t.TempDir(), "missing.md"))
+		require.Error(t, err)
+	})
+}
+
 func Test_find_edge_cases(t *testing.T) {
 	t.Run("an empty home skips the user scope", func(t *testing.T) {
 		root := t.TempDir()

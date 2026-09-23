@@ -107,10 +107,10 @@ func checkIDs(report doctor.Report) []string {
 // Test_diagnose_reports_every_check_ok_in_a_healthy_repository pins the
 // fixed row order (config-file, config-parse, config-values,
 // config-shadow, root-dir, env-git, env-path, host-plugin, host-hook,
-// host-skill, host-snippet, host-agents, roles) and that a fully healthy,
-// fully installed repository reports every row OK — not merely "not ERROR
-// or WARN", which a SKIP row (the no-config arm's own shape) would also
-// satisfy.
+// host-skill, host-snippet, host-agents, roles, roles-skill) and that a
+// fully healthy, fully installed repository reports every row OK — not
+// merely "not ERROR or WARN", which a SKIP row (the no-config arm's own
+// shape) would also satisfy.
 func Test_diagnose_reports_every_check_ok_in_a_healthy_repository(t *testing.T) {
 	wd := newHealthyDoctorFixture(t)
 	self := filepath.Join(wd, "self-brief")
@@ -126,7 +126,7 @@ func Test_diagnose_reports_every_check_ok_in_a_healthy_repository(t *testing.T) 
 
 	assert.Equal(t, []string{
 		"config-file", "config-parse", "config-values", "config-shadow", "root-dir", "env-git", "env-path",
-		"host-plugin", "host-hook", "host-skill", "host-snippet", "host-agents", "roles",
+		"host-plugin", "host-hook", "host-skill", "host-snippet", "host-agents", "roles", "roles-skill",
 	}, checkIDs(report))
 
 	for _, c := range report.Checks {

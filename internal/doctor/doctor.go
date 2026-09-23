@@ -25,8 +25,10 @@ const (
 	// installed (doctor cannot tell that apart from --no-hook), a
 	// host-agents file missing or not regular, a host-skill file missing
 	// while some other integration file is installed (a bound role can
-	// never preload a skill that is not there), or a roles position
-	// unbound or unresolved (roles are reported, never enforced).
+	// never preload a skill that is not there), a roles position unbound
+	// or unresolved, or a bound planner or implementer whose resolved
+	// agent does not preload the brief-workflow skill (roles and
+	// roles-skill are both reported, never enforced).
 	SeverityWarn Severity = "WARN"
 	// SeverityError marks a check whose subject would make another
 	// command refuse or misbehave: an unparseable config, an invalid
@@ -44,21 +46,22 @@ const (
 	// family when no ".brief.yaml" exists at all — or because its own
 	// subject was never installed at all: host-plugin, host-hook,
 	// host-skill, host-snippet and host-agents when no file of their own
-	// kind is present anywhere, and roles when no config was found or
-	// every binding is empty.
+	// kind is present anywhere, roles when no config was found or every
+	// binding is empty, and roles-skill under those same conditions or
+	// when neither planner nor implementer is bound and resolved.
 	SeveritySkip Severity = "SKIP"
 )
 
 // Check is one row of a Report: ID is doctor's own stable id (config-file,
 // config-parse, config-values, config-shadow, root-dir, env-git, env-path,
-// host-plugin, host-hook, host-skill, host-snippet, host-agents, roles),
-// Severity is this row's urgency, Path is the absolute path this row
-// concerns ("" when it names none), Detail is the English explanation, and
-// Fix, when non-nil, names the action that would resolve it. A SKIP row
-// carries a Fix too when its subject was simply never installed (naming
-// the install command); one whose subject could not be determined at all
-// (root-dir or roles behind an unparseable config) carries a nil Fix, the
-// same as every OK row.
+// host-plugin, host-hook, host-skill, host-snippet, host-agents, roles,
+// roles-skill), Severity is this row's urgency, Path is the absolute path
+// this row concerns ("" when it names none), Detail is the English
+// explanation, and Fix, when non-nil, names the action that would resolve
+// it. A SKIP row carries a Fix too when its subject was simply never
+// installed (naming the install command); one whose subject could not be
+// determined at all (root-dir or roles behind an unparseable config)
+// carries a nil Fix, the same as every OK row.
 type Check struct {
 	ID       string
 	Severity Severity
@@ -188,8 +191,8 @@ func NewServer(opts ...Option) *Server {
 
 // Diagnose reports wd's setup health: config-file, config-parse,
 // config-values, config-shadow, root-dir, env-git, env-path, host-plugin,
-// host-hook, host-skill, host-snippet, host-agents and roles, in that
-// fixed order. No
+// host-hook, host-skill, host-snippet, host-agents, roles and roles-skill,
+// in that fixed order. No
 // ".brief.yaml" anywhere reports config-file as WARN (fix "brief init")
 // and skips the rest of the config family — an un-inited repository is
 // not itself a fault. A found config that fails to decode reports
@@ -200,8 +203,8 @@ func NewServer(opts ...Option) *Server {
 // feature directory. config-shadow is always OK: a shadowed ancestor
 // config is informational, not a fault.
 //
-// The install root the six host rows and roles check against is
-// config.LocateInRepo's own directory whenever a config was found —
+// The install root the six host rows, roles and roles-skill check against
+// is config.LocateInRepo's own directory whenever a config was found —
 // parseable or not — else wd; a config found above the nearest enclosing
 // git repository (walked from wd) is treated as though none existed, the
 // same install-root rule init and uninstall apply (R3) — its config family
@@ -230,10 +233,11 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 	}
 
 	var (
-		checks     []Check
-		dir        string
-		dirKnown   bool
-		rolesCheck Check
+		checks          []Check
+		dir             string
+		dirKnown        bool
+		rolesCheck      Check
+		rolesSkillCheck Check
 	)
 
 	switch {
@@ -242,12 +246,14 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 		checks = append(checks, checkRootDir(absWd, absWd, config.Default().FeatureDirectory))
 		dir, dirKnown = config.Default().FeatureDirectory, true
 		rolesCheck = rolesCheckNoConfig()
+		rolesSkillCheck = rolesSkillCheckNoConfig()
 	default:
 		cfg, violations, inspectErr := config.Inspect(nearest)
 		if inspectErr != nil {
 			checks = append(checks, unparseableConfigChecks(nearest, shadowed, inspectErr)...)
 			checks = append(checks, Check{ID: "root-dir", Severity: SeveritySkip, Detail: rootDirUnknownDetail})
 			rolesCheck = rolesCheckUnparseable(nearest)
+			rolesSkillCheck = rolesSkillCheckUnparseable(nearest)
 		} else {
 			checks = append(checks, parseableConfigChecks(nearest, shadowed, violations)...)
 			checks = append(checks, checkRootDir(absWd, filepath.Dir(nearest), cfg.FeatureDirectory))
@@ -257,6 +263,10 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 				{name: "implementer", value: cfg.Roles.Implementer},
 				{name: "reviewer", value: cfg.Roles.Reviewer},
 			})
+			rolesSkillCheck = s.rolesSkillCheck(root, nearest,
+				roleBinding{name: "planner", value: cfg.Roles.Planner},
+				roleBinding{name: "implementer", value: cfg.Roles.Implementer},
+			)
 		}
 	}
 
@@ -275,6 +285,7 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 		hostSnippetCheck(absWd, root, snippetStates, dir, dirKnown),
 		hostAgentsCheck(absWd, root, h),
 		rolesCheck,
+		rolesSkillCheck,
 	)
 
 	return Report{Checks: checks}

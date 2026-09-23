@@ -80,7 +80,8 @@ func Test_doctor_prints_one_row_per_check_and_exits_0_in_a_healthy_repo(t *testi
 		"SKIP  host-skill  .claude/skills/brief-workflow/SKILL.md  not installed; fix: run 'brief init --host claude-code'\n" +
 		"SKIP  host-snippet  CLAUDE.md  not installed; fix: run 'brief init --host claude-code'\n" +
 		"SKIP  host-agents  .claude/skills/brief/agents  not installed; fix: run 'brief init --with-agents'\n" +
-		"SKIP  roles  .brief.yaml  no roles bound; fix: run 'brief init --with-agents'\n"
+		"SKIP  roles  .brief.yaml  no roles bound; fix: run 'brief init --with-agents'\n" +
+		"SKIP  roles-skill  .brief.yaml  no planner or implementer bound\n"
 	assert.Equal(t, want, stdout.String())
 	assert.Equal(t, "brief doctor: setup ok; run 'brief check' for feature content\n", stderr.String())
 }
@@ -172,9 +173,9 @@ func Test_doctor_json_reports_absolute_paths_null_fix_and_counts(t *testing.T) {
 	assert.True(t, doc.OK)
 	assert.Equal(t, 0, doc.ExitCode)
 	assert.Equal(t, 7, doc.Counts.OK)
-	assert.Equal(t, 6, doc.Counts.Skip)
+	assert.Equal(t, 7, doc.Counts.Skip)
 	assert.Equal(t, 0, doc.Counts.Error)
-	assert.Len(t, doc.Checks, 13)
+	assert.Len(t, doc.Checks, 14)
 
 	configFile := doc.Checks[0]
 	assert.Equal(t, "config-file", configFile.ID)
@@ -263,6 +264,29 @@ func Test_doctor_reports_a_non_regular_host_skill_as_an_error_and_exits_1(t *tes
 	assert.Equal(t, 1, ExitCode(err))
 	assert.Contains(t, stdout.String(), "ERROR  host-skill  .claude/skills/brief-workflow/SKILL.md  not a regular file; fix: run 'brief init'\n")
 	assert.Equal(t, "brief doctor: 1 ERROR, 0 WARN; this checks setup only, run 'brief check' for feature content\n", stderr.String())
+}
+
+// Test_doctor_reports_roles_skill_ok_after_init_with_agents pins
+// roles-skill at the CLI boundary (S05): a repository set up end to end by
+// "brief init --host claude-code --with-agents" (planner/implementer bound
+// to brief's own rendered agents, which carry "skills: [brief-workflow]")
+// reports the exact roles-skill row, and doctor still exits 0.
+func Test_doctor_reports_roles_skill_ok_after_init_with_agents(t *testing.T) {
+	wd := t.TempDir()
+	var initStdout, initStderr bytes.Buffer
+
+	initErr := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &initStdout, &initStderr, noBuildInfo, emptyHomeSeam(t))
+	require.NoError(t, initErr)
+
+	self := filepath.Join(wd, "self-brief")
+	require.NoError(t, os.WriteFile(self, []byte("self"), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), wd, []string{"doctor"}, nil, &stdout, &stderr, noBuildInfo, doctorFakeSeams(t, self)...)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, ExitCode(err))
+	assert.Contains(t, stdout.String(), "OK  roles-skill  .brief.yaml  planner, implementer preload brief-workflow\n")
 }
 
 // Test_doctor_reports_env_path_error_when_not_on_path_and_the_plugin_is_installed

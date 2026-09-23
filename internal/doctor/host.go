@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -702,9 +703,10 @@ const (
 // agentfile.Definition a bare-name binding's own agentfile.Find returned
 // — nil for a "brief:<name>", any other "<plugin>:<name>", or an unbound
 // or unresolved binding. rolesCheck derives the duplicate-definition WARN
-// and the "user-level:" OK suffix from defs; path exists so a later
-// consumer (S05's roles-skill) can read frontmatter from whichever file
-// actually resolved without re-deriving the "brief:*" filename rule.
+// and the "user-level:" OK suffix from defs; roles-skill reads defs (a
+// bare name) or agentfile.Load(path) (a "brief:*" binding) to tell
+// whether the resolved agent preloads the brief-workflow skill, without
+// re-deriving the "brief:*" filename rule.
 type roleResolution struct {
 	state roleBindingResult
 	path  string
@@ -920,6 +922,142 @@ func hostSkillRow(wd, root string, state integrationFileState, installed bool) C
 // own row from the result via hostSkillRow.
 func hostSkillCheck(wd, root string, h host.Host, installed bool) Check {
 	return hostSkillRow(wd, root, probeIntegrationFile(root, skillFileOf(h)), installed)
+}
+
+// rolesSkillNoConfigDetail is roles-skill's own SKIP detail whenever no
+// config was found, a found config did not parse, or neither planner nor
+// implementer is bound and resolved — R7's three no-op arms collapse to
+// one wording.
+const rolesSkillNoConfigDetail = "no planner or implementer bound"
+
+// rolesSkillOKDetail is roles-skill's own fixed OK sentence: unlike
+// roles' own OK detail, it never lists which of planner/implementer
+// actually resolved — the roles row already WARNs a role left unbound or
+// unresolved, so roles-skill only ever reports on a role it could check.
+const rolesSkillOKDetail = "planner, implementer preload brief-workflow"
+
+// rolesSkillMissingFix is the WARN fix roles-skill shares across every
+// case where at least one resolved role does not preload the skill.
+const rolesSkillMissingFix = `add "brief-workflow" to the "skills:" list of each agent named, or run 'brief init --edit-agents' for those in the repository`
+
+// rolesSkillCheckNoConfig builds roles-skill's own row when no
+// ".brief.yaml" was found anywhere: SKIP, Path "" (R13's own "" when
+// none), Fix nil — unlike roles' own no-config SKIP, which carries a fix.
+func rolesSkillCheckNoConfig() Check {
+	return Check{ID: "roles-skill", Severity: SeveritySkip, Detail: rolesSkillNoConfigDetail}
+}
+
+// rolesSkillCheckUnparseable builds roles-skill's own row when nearest
+// exists but does not parse: SKIP, naming nearest, Fix nil.
+func rolesSkillCheckUnparseable(nearest string) Check {
+	return Check{ID: "roles-skill", Severity: SeveritySkip, Path: nearest, Detail: rolesSkillNoConfigDetail}
+}
+
+// rolesSkillMissingEntry renders roles-skill's own WARN entry for one
+// role whose resolved agent does not preload artifact.WorkflowSkillName:
+// "<role>: <value> does not preload brief-workflow", plus, when that
+// agent's own frontmatter sets omitClaudeMd: true, a suffix naming the
+// consequence.
+func rolesSkillMissingEntry(role, value string, omitClaudeMd bool) string {
+	entry := fmt.Sprintf("%s: %s does not preload %s", role, value, artifact.WorkflowSkillName)
+	if omitClaudeMd {
+		entry += " and omits CLAUDE.md, so it never sees brief's instructions"
+	}
+
+	return entry
+}
+
+// hasWorkflowSkill reports whether skills names artifact.WorkflowSkillName.
+func hasWorkflowSkill(skills []string) bool {
+	return slices.Contains(skills, artifact.WorkflowSkillName)
+}
+
+// roleLacksSkill reports whether res's own resolved agent(s) do not
+// preload artifact.WorkflowSkillName: for a bare-name binding (res.defs
+// non-empty), any resolved agentfile.Definition lacking it is enough —
+// Claude Code loads duplicate definitions in unspecified order, so any one
+// lacking it makes the binding unreliable — and the omitClaudeMd suffix
+// follows the same "any" rule, from any lacking definition that sets it;
+// for a "brief:*" binding (res.defs nil), agentfile.Load(res.path)'s own
+// Frontmatter decides it, a load error counting as lacking, without a
+// suffix, since that file's own omitClaudeMd is then unknown.
+func roleLacksSkill(res roleResolution) (bool, bool) {
+	if len(res.defs) > 0 {
+		var lacking, omitClaudeMd bool
+
+		for _, d := range res.defs {
+			if !hasWorkflowSkill(d.Frontmatter.Skills) {
+				lacking = true
+
+				if d.Frontmatter.OmitClaudeMd {
+					omitClaudeMd = true
+				}
+			}
+		}
+
+		return lacking, omitClaudeMd
+	}
+
+	fm, err := agentfile.Load(res.path)
+	if err != nil {
+		return true, false
+	}
+
+	return !hasWorkflowSkill(fm.Skills), fm.OmitClaudeMd
+}
+
+// rolesSkillCheck builds roles-skill's own row for a parsed config,
+// considering only planner and implementer (product verdict item 1 — the
+// reviewer role is deliberately excluded, R15): SKIP
+// (rolesSkillNoConfigDetail) when neither is bound and resolved
+// (roleResolved — a roleUnverified binding does not itself count, so two
+// other-plugin bindings SKIP); any resolved role whose agent does not
+// preload the skill (roleLacksSkill) is WARN, one entry per lacking role
+// (rolesSkillMissingEntry), joined "; ", in planner-then-implementer
+// order; otherwise OK (rolesSkillOKDetail), plus "; not verified: <role>"
+// per role bound to another plugin — a role left unbound or unresolved
+// contributes neither a problem nor a suffix here, since the roles row
+// already reports it.
+func (s *Server) rolesSkillCheck(root, nearest string, planner, implementer roleBinding) Check {
+	bindings := [2]roleBinding{planner, implementer}
+
+	var (
+		anyResolved bool
+		problems    []string
+		suffixes    []string
+	)
+
+	for _, b := range bindings {
+		res := s.resolveRoleBinding(root, b.value)
+
+		switch res.state {
+		case roleUnverified:
+			suffixes = append(suffixes, "not verified: "+b.name)
+		case roleResolved:
+			anyResolved = true
+
+			if lacking, omitClaudeMd := roleLacksSkill(res); lacking {
+				problems = append(problems, rolesSkillMissingEntry(b.name, b.value, omitClaudeMd))
+			}
+		case roleUnbound, roleUnresolved:
+			// The roles row already reports this position; roles-skill
+			// has nothing of its own to add.
+		}
+	}
+
+	if !anyResolved {
+		return Check{ID: "roles-skill", Severity: SeveritySkip, Path: nearest, Detail: rolesSkillNoConfigDetail}
+	}
+
+	if len(problems) > 0 {
+		fix := rolesSkillMissingFix
+
+		return Check{ID: "roles-skill", Severity: SeverityWarn, Path: nearest, Detail: strings.Join(problems, "; "), Fix: &fix}
+	}
+
+	detail := strings.Join(append([]string{rolesSkillOKDetail}, suffixes...), "; ")
+
+	return Check{ID: "roles-skill", Severity: SeverityOK, Path: nearest, Detail: detail}
 }
 
 // runInit is short for "run 'brief init'" — the fix text repeated across

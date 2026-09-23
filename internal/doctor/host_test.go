@@ -1728,3 +1728,304 @@ func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 		})
 	}
 }
+
+// rolesSkillMissingFix is the WARN fix every roles-skill lacking-role case
+// shares.
+const rolesSkillMissingFix = `add "brief-workflow" to the "skills:" list of each agent named, or run 'brief init --edit-agents' for those in the repository`
+
+// blockSkillsFragment, flowSkillsFragment and scalarSkillsFragment are the
+// literal "skills:" YAML fragments rolesSkillCase setups embed in an agent
+// file's own frontmatter, each ending in its own trailing newline so a
+// caller can simply concatenate.
+const (
+	blockSkillsFragment  = "skills:\n  - brief-workflow\n"
+	flowSkillsFragment   = "skills: [brief-workflow]\n"
+	scalarSkillsFragment = "skills: brief-workflow\n"
+	omitClaudeMdTrue     = "omitClaudeMd: true\n"
+	omitClaudeMdLoose    = "omitClaudeMd: yes please\n"
+)
+
+// agentBody renders a minimal agent file's own frontmatter: "name:" plus
+// whatever literal "skills:"/"omitClaudeMd:" fragments the caller passes
+// (each already newline-terminated, or "" to omit the key entirely).
+func agentBody(name string, fragments ...string) string {
+	parts := append([]string{"---\nname: " + name + "\n"}, fragments...)
+	parts = append(parts, "---\n\nbody\n")
+
+	return strings.Join(parts, "")
+}
+
+// rolesSkillCase is one row of Test_diagnose_classifies_roles_skill: setup
+// mutates newHostFixture's own bare baseline, home overrides WithHomeDir
+// (an empty temp dir when nil), and the roles-skill row must carry
+// wantSeverity, wantDetail (exact) and wantFix (exact). wantRolesDetail,
+// when non-empty, also asserts the sibling "roles" row's own exact Detail
+// — the scalar-skills guard's own control, proving a loose decode never
+// drops the agent out of Rule 5 resolution.
+type rolesSkillCase struct {
+	name            string
+	setup           func(t *testing.T, wd string)
+	home            func(t *testing.T) string
+	noConfig        bool
+	wantSeverity    doctor.Severity
+	wantDetail      string
+	wantFix         *string
+	wantRolesDetail string
+}
+
+// Test_diagnose_classifies_roles_skill pins roles-skill's own resolution
+// rules (S05): only the planner and implementer bindings are considered
+// (product verdict item 1 — reviewer is excluded); no config, an
+// unparseable config, or neither role bound and resolved is SKIP "no
+// planner or implementer bound", Fix nil; any resolved role whose agent
+// does not preload "brief-workflow" is WARN, one entry per lacking role
+// joined "; ", in planner-then-implementer order, with an omitClaudeMd
+// suffix only on an entry whose own agent sets it; otherwise OK "planner,
+// implementer preload brief-workflow", plus "; not verified: <role>" per
+// role bound to another plugin.
+func Test_diagnose_classifies_roles_skill(t *testing.T) {
+	cases := []rolesSkillCase{
+		{
+			name: "no config anywhere",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				require.NoError(t, os.Remove(filepath.Join(wd, ".brief.yaml")))
+			},
+			noConfig:     true,
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no planner or implementer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "the config is unparseable",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: [not a scalar\n"), 0o600))
+			},
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no planner or implementer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "planner and implementer unbound, reviewer bound",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "", "", "brief:reviewer")
+				writePluginAgent(t, wd, "reviewer")
+			},
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no planner or implementer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "planner and implementer bound but not found",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "my-planner", "my-implementer", "")
+			},
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no planner or implementer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "planner and implementer are both other-plugin bindings",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "acme:planner", "acme:implementer", "")
+			},
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no planner or implementer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "bare names, block-list skills",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "my-planner", "my-implementer", "")
+				writeHostFile(t, wd, ".claude/agents/my-planner.md", []byte(agentBody("my-planner", blockSkillsFragment)))
+				writeHostFile(t, wd, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", blockSkillsFragment)))
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow",
+			wantFix:      nil,
+		},
+		{
+			name: "bare names, flow-list skills",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "my-planner", "my-implementer", "")
+				writeHostFile(t, wd, ".claude/agents/my-planner.md", []byte(agentBody("my-planner", flowSkillsFragment)))
+				writeHostFile(t, wd, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", flowSkillsFragment)))
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow",
+			wantFix:      nil,
+		},
+		{
+			name: "brief:planner/brief:implementer against rendered plugin agents",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "")
+				writePluginAgent(t, wd, "planner")
+				writePluginAgent(t, wd, "implementer")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow",
+			wantFix:      nil,
+		},
+		{
+			name: "brief:implementer overridden by a project file with no frontmatter",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "")
+				writePluginAgent(t, wd, "planner")
+				writePluginAgent(t, wd, "implementer")
+				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude", "agents"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "agents", "implementer.md"), []byte("not a claude code agent file\n"), 0o600))
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "implementer: brief:implementer does not preload brief-workflow",
+			wantFix:      new(rolesSkillMissingFix),
+		},
+		{
+			name: "planner resolved with the skill, implementer is an other-plugin binding",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "brief:planner", "acme:impl", "")
+				writePluginAgent(t, wd, "planner")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow; not verified: implementer",
+			wantFix:      nil,
+		},
+		{
+			name: "planner and implementer both lack the skill, implementer omits CLAUDE.md",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "my-planner", "my-implementer", "")
+				writeHostFile(t, wd, ".claude/agents/my-planner.md", []byte(agentBody("my-planner")))
+				writeHostFile(t, wd, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", omitClaudeMdTrue)))
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail: "planner: my-planner does not preload brief-workflow; " +
+				"implementer: my-implementer does not preload brief-workflow and omits CLAUDE.md, so it never sees brief's instructions",
+			wantFix: new(rolesSkillMissingFix),
+		},
+		{
+			name: "a non-bool omitClaudeMd never adds the suffix",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "", "my-implementer", "")
+				writeHostFile(t, wd, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", omitClaudeMdLoose)))
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "implementer: my-implementer does not preload brief-workflow",
+			wantFix:      new(rolesSkillMissingFix),
+		},
+		{
+			name: "reviewer lacks the skill but is excluded",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
+				writePluginAgent(t, wd, "planner")
+				writePluginAgent(t, wd, "implementer")
+				writeHostFile(t, wd, ".claude/agents/my-reviewer.md", []byte(agentBody("my-reviewer")))
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow",
+			wantFix:      nil,
+		},
+		{
+			name: "a user-level-only planner carries the skill",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "my-planner", "", "")
+			},
+			home: func(t *testing.T) string {
+				t.Helper()
+				home := t.TempDir()
+				require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "agents"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "agents", "my-planner.md"), []byte(agentBody("my-planner", blockSkillsFragment)), 0o600))
+				return home
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow",
+			wantFix:      nil,
+		},
+		{
+			// Control for the loose-decode contract: a scalar "skills:"
+			// value must not fail findIn's own whole-file decode — if it
+			// did, the implementer would resolve as "not found" and the
+			// roles row's own detail would gain an "implementer: … not
+			// found" problem instead of staying silent about it.
+			name: "scalar skills guards the loose decode",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "", "my-implementer", "")
+				writeHostFile(t, wd, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", scalarSkillsFragment)))
+			},
+			wantSeverity:    doctor.SeverityWarn,
+			wantDetail:      "implementer: my-implementer does not preload brief-workflow",
+			wantFix:         new(rolesSkillMissingFix),
+			wantRolesDetail: "planner unbound; reviewer unbound",
+		},
+		{
+			// Duplicate guard: two project definitions share the same
+			// frontmatter name, sorted second (path order) lacks the
+			// skill — the WARN must appear once for implementer, not
+			// twice.
+			name: "a duplicate definition WARNs once",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "", "dup-implementer", "")
+				writeHostFile(t, wd, ".claude/agents/aaa.md", []byte(agentBody("dup-implementer", blockSkillsFragment)))
+				writeHostFile(t, wd, ".claude/agents/zzz.md", []byte(agentBody("dup-implementer")))
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "implementer: dup-implementer does not preload brief-workflow",
+			wantFix:      new(rolesSkillMissingFix),
+		},
+		{
+			name: "planner resolved with the skill, implementer unbound",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "brief:planner", "", "")
+				writePluginAgent(t, wd, "planner")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow",
+			wantFix:      nil,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := newHostFixture(t)
+			c.setup(t, wd)
+
+			home := t.TempDir()
+			if c.home != nil {
+				home = c.home(t)
+			}
+
+			srv := doctor.NewServer(doctor.WithHomeDir(func() (string, error) { return home, nil }))
+			report := srv.Diagnose(t.Context(), wd)
+
+			check := findCheck(t, report, "roles-skill")
+			assert.Equal(t, c.wantSeverity, check.Severity)
+			assert.Equal(t, c.wantDetail, check.Detail)
+			assert.Equal(t, c.wantFix, check.Fix)
+
+			if c.noConfig {
+				assert.Empty(t, check.Path)
+			} else {
+				assert.Equal(t, filepath.Join(wd, ".brief.yaml"), check.Path)
+			}
+
+			if c.wantRolesDetail != "" {
+				roles := findCheck(t, report, "roles")
+				assert.Equal(t, c.wantRolesDetail, roles.Detail)
+			}
+		})
+	}
+}
