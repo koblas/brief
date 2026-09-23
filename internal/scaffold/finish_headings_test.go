@@ -70,11 +70,10 @@ func stateBodyShuffled(cfg config.Config) []byte {
 // Gotchas"), proving the text is read from configuration rather than
 // hardcoded.
 func Test_refuses_a_state_body_missing_a_required_heading(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	missingGotchas := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.Traps)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missingGotchas)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, missingGotchas)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 
@@ -90,11 +89,10 @@ func Test_refuses_a_state_body_missing_a_required_heading(t *testing.T) {
 // the trigger is markdown.Section's found return, never section content, so
 // a freshly scaffolded state file with every section empty is accepted.
 func Test_accepts_a_state_body_whose_sections_are_all_empty(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	empty := stateBodyEmptySections(fx.cfg)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, empty)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, empty)
 
 	require.NoError(t, err)
 }
@@ -103,18 +101,19 @@ func Test_accepts_a_state_body_whose_sections_are_all_empty(t *testing.T) {
 // records decision 2 as a green test, not only as prose: order is not
 // enforced, since assemble.stateSections reads every heading by name.
 func Test_accepts_a_state_body_whose_headings_are_out_of_configured_order(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	shuffled := stateBodyShuffled(fx.cfg)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, shuffled)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, shuffled)
 
 	require.NoError(t, err)
 }
 
 // Test_accepts_the_state_body_new_feature_writes hands Finish the exact
 // bytes NewFeature wrote to disk, read back rather than re-derived in the
-// test, so the pin is against production's own output.
+// test, so the pin is against production's own output. It stays on disk:
+// unlike the rest of this file, it exercises NewFeature, NewStep and
+// Finish together end to end.
 func Test_accepts_the_state_body_new_feature_writes(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -142,8 +141,7 @@ func Test_accepts_the_state_body_new_feature_writes(t *testing.T) {
 // This proves the check reuses markdown.Section, fence-aware, rather than a
 // substring scan.
 func Test_refuses_a_state_body_whose_headings_are_only_inside_a_fenced_block(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 
 	var body strings.Builder
 	body.WriteString("```\n")
@@ -153,7 +151,7 @@ func Test_refuses_a_state_body_whose_headings_are_only_inside_a_fenced_block(t *
 	body.WriteString("```\n")
 	fenced := []byte(body.String())
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fenced)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fenced)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 
@@ -166,10 +164,9 @@ func Test_refuses_a_state_body_whose_headings_are_only_inside_a_fenced_block(t *
 // covers the degenerate empty body: no heading is present, so the refusal
 // names the first entry in cfg.StateHeadings.Ordered().
 func Test_refuses_an_empty_state_body_naming_the_first_configured_heading(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, []byte(""))
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, []byte(""))
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 
@@ -185,11 +182,10 @@ func Test_refuses_an_empty_state_body_naming_the_first_configured_heading(t *tes
 // Test_refuses_a_state_body_missing_only_the_last_configured_heading and a
 // reverse-iteration mutation for the real proof.
 func Test_names_the_first_configured_heading_when_several_are_missing(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.BindingDecisions, fx.cfg.StateHeadings.Traps)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, missing)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 
@@ -203,11 +199,10 @@ func Test_names_the_first_configured_heading_when_several_are_missing(t *testing
 // the loop covers every position, not only index 0: only the last
 // configured heading is missing, so it must be the one named.
 func Test_refuses_a_state_body_missing_only_the_last_configured_heading(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.OpenDebts)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, missing)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 
@@ -220,11 +215,10 @@ func Test_refuses_a_state_body_missing_only_the_last_configured_heading(t *testi
 // check's position after the cap band: a body that is both over cap and
 // carries no headings at all reports ErrOverCap, not the heading sentinel.
 func Test_reports_the_state_cap_before_a_missing_heading(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	overCapNoHeadings := bodyOfLines(fx.cfg.StateCapLines + 1)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCapNoHeadings)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, overCapNoHeadings)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 	assert.NotErrorIs(t, err, scaffold.ErrMissingStateHeading)
@@ -235,11 +229,10 @@ func Test_reports_the_state_cap_before_a_missing_heading(t *testing.T) {
 // never closes reports ErrUnterminatedFence, not the heading sentinel — an
 // open fence leaves the headings unreadable in the first place.
 func Test_reports_the_state_s_unclosed_fence_before_a_missing_heading(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	unterminated := []byte("```\nunterminated\n")
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, unterminated)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, unterminated)
 
 	require.ErrorIs(t, err, scaffold.ErrUnterminatedFence)
 	assert.NotErrorIs(t, err, scaffold.ErrMissingStateHeading)
@@ -251,35 +244,29 @@ func Test_reports_the_state_s_unclosed_fence_before_a_missing_heading(t *testing
 // heading, not ErrAlreadyFinished, even though the body also differs from
 // what is recorded.
 func Test_a_state_body_missing_a_heading_on_a_done_step_reports_the_heading_not_the_re_finish_refusal(t *testing.T) {
-	fx := newFinishedFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishedFixtureFS(t)
 	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.Traps)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, missing)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 	assert.NotErrorIs(t, err, scaffold.ErrAlreadyFinished)
 }
 
 // Test_a_refused_missing_heading_leaves_every_file_byte_identical pairs the
-// snapshot probe with the modification-time probe, exactly as the cap
-// band's refusal tests do: the control arms for both probes already live in
-// finish_idempotent_test.go and are not duplicated here.
+// Mem snapshot probe against a control arm proving it can see a write —
+// Test_the_snapshot_probe_sees_a_write_on_a_legitimate_finish, in
+// finish_idempotent_test.go — not duplicated here. Mem.Snapshot includes
+// each entry's ModTime, which advances on every write including a
+// byte-identical rewrite, so equality alone already proves nothing was
+// touched, not merely that whatever was written reproduced the same bytes.
 func Test_a_refused_missing_heading_leaves_every_file_byte_identical(t *testing.T) {
-	fx := newFinishFixture(t)
-	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile}
-	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
-	before := snapshotTree(t, fx.featureDir())
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
+	before := fx.mem.Snapshot()
 	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.Traps)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, missing)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
-	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
-
-	after := modTimes(t, fx.featureDir(), names)
-	for _, name := range names {
-		assert.True(t, after[name].Equal(pinnedModTime), "%s mtime moved on a refused missing-heading finish", name)
-	}
+	assert.Equal(t, before, fx.mem.Snapshot())
 }

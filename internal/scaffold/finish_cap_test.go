@@ -1,10 +1,7 @@
 package scaffold_test
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -51,11 +48,10 @@ func stateBodyOfLines(cfg config.Config, n int) []byte {
 }
 
 func Test_refuses_a_handoff_one_line_over_the_configured_cap(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	overCap := bodyOfLines(fx.cfg.HandoffCapLines + 1)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", overCap, fx.newState)
+	_, err := fx.finish(t, "STEP-02", overCap, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 
@@ -73,58 +69,45 @@ func Test_refuses_a_handoff_one_line_over_the_configured_cap(t *testing.T) {
 // a body of exactly cfg.HandoffCapLines lines is accepted, both with and
 // without a trailing newline.
 func Test_accepts_a_handoff_of_exactly_the_configured_cap(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	atCap := bodyOfLines(fx.cfg.HandoffCapLines)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", atCap, fx.newState)
+	_, err := fx.finish(t, "STEP-02", atCap, fx.newState)
 
 	require.NoError(t, err)
 
-	got, readErr := os.ReadFile(fx.handoffPath())
+	got, readErr := fx.mem.ReadFile(fx.handoffName())
 	require.NoError(t, readErr)
 	assert.Equal(t, string(atCap), string(got))
 }
 
 func Test_accepts_a_handoff_of_exactly_the_configured_cap_with_no_trailing_newline(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	atCap := bodyOfLines(fx.cfg.HandoffCapLines)
 	atCap = []byte(strings.TrimSuffix(string(atCap), "\n"))
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", atCap, fx.newState)
+	_, err := fx.finish(t, "STEP-02", atCap, fx.newState)
 
 	require.NoError(t, err)
 
-	got, readErr := os.ReadFile(fx.handoffPath())
+	got, readErr := fx.mem.ReadFile(fx.handoffName())
 	require.NoError(t, readErr)
 	assert.Equal(t, string(atCap), string(got))
 }
 
 // Test_a_refused_over_cap_handoff_leaves_every_file_byte_identical pairs
-// the snapshot probe with the modification-time probe: a byte-snapshot
-// alone would still pass a refusal taken after a byte-identical rewrite
-// (see Test_the_snapshot_probe_sees_a_write_on_a_legitimate_finish and
-// Test_the_modification_time_probe_sees_a_write_when_the_progress_entry_diverges
-// in finish_idempotent_test.go for the control arms both probes already
-// have — not duplicated here).
+// the Mem snapshot probe with the control arm proving it can see a write
+// (Test_the_snapshot_probe_sees_a_write_on_a_legitimate_finish, in
+// finish_idempotent_test.go — not duplicated here).
 func Test_a_refused_over_cap_handoff_leaves_every_file_byte_identical(t *testing.T) {
-	fx := newFinishFixture(t)
-	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile}
-	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
-	before := snapshotTree(t, fx.featureDir())
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
+	before := fx.mem.Snapshot()
 	overCap := bodyOfLines(fx.cfg.HandoffCapLines + 1)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", overCap, fx.newState)
+	_, err := fx.finish(t, "STEP-02", overCap, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
-	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
-
-	after := modTimes(t, fx.featureDir(), names)
-	for _, name := range names {
-		assert.True(t, after[name].Equal(pinnedModTime), "%s mtime moved on a refused over-cap finish", name)
-	}
+	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
 // Test_an_over_cap_handoff_on_a_done_step_reports_the_cap_not_the_re_finish_refusal
@@ -134,22 +117,20 @@ func Test_a_refused_over_cap_handoff_leaves_every_file_byte_identical(t *testing
 // ErrAlreadyFinished — even though the supplied handoff also differs from
 // the one recorded on disk.
 func Test_an_over_cap_handoff_on_a_done_step_reports_the_cap_not_the_re_finish_refusal(t *testing.T) {
-	fx := newFinishedFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishedFixtureFS(t)
 	overCap := bodyOfLines(fx.cfg.HandoffCapLines + 1)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", overCap, fx.newState)
+	_, err := fx.finish(t, "STEP-02", overCap, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 	assert.NotErrorIs(t, err, scaffold.ErrAlreadyFinished)
 }
 
 func Test_refuses_a_state_body_one_line_over_the_configured_cap(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	overCap := bodyOfLines(fx.cfg.StateCapLines + 1)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCap)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, overCap)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 
@@ -167,56 +148,45 @@ func Test_refuses_a_state_body_one_line_over_the_configured_cap(t *testing.T) {
 // boundary: a body of exactly cfg.StateCapLines lines is accepted, both
 // with and without a trailing newline.
 func Test_accepts_a_state_body_of_exactly_the_configured_cap(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	atCap := stateBodyOfLines(fx.cfg, fx.cfg.StateCapLines)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, atCap)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, atCap)
 
 	require.NoError(t, err)
 
-	got, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
+	got, readErr := fx.mem.ReadFile(fx.cfg.StateFile)
 	require.NoError(t, readErr)
 	assert.Equal(t, string(atCap), string(got))
 }
 
 func Test_accepts_a_state_body_of_exactly_the_configured_cap_with_no_trailing_newline(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	atCap := stateBodyOfLines(fx.cfg, fx.cfg.StateCapLines)
 	atCap = []byte(strings.TrimSuffix(string(atCap), "\n"))
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, atCap)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, atCap)
 
 	require.NoError(t, err)
 
-	got, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
+	got, readErr := fx.mem.ReadFile(fx.cfg.StateFile)
 	require.NoError(t, readErr)
 	assert.Equal(t, string(atCap), string(got))
 }
 
 // Test_a_refused_over_cap_state_body_leaves_every_file_byte_identical pairs
-// the snapshot probe with the modification-time probe, exactly as
+// the Mem snapshot probe with the control arm, exactly as
 // Test_a_refused_over_cap_handoff_leaves_every_file_byte_identical does for
-// the handoff cap: the control arms for both probes already live in
-// finish_idempotent_test.go and are not duplicated here.
+// the handoff cap.
 func Test_a_refused_over_cap_state_body_leaves_every_file_byte_identical(t *testing.T) {
-	fx := newFinishFixture(t)
-	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile}
-	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
-	before := snapshotTree(t, fx.featureDir())
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
+	before := fx.mem.Snapshot()
 	overCap := bodyOfLines(fx.cfg.StateCapLines + 1)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCap)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, overCap)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
-	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
-
-	after := modTimes(t, fx.featureDir(), names)
-	for _, name := range names {
-		assert.True(t, after[name].Equal(pinnedModTime), "%s mtime moved on a refused over-cap finish", name)
-	}
+	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
 // Test_reports_the_handoff_cap_first_when_both_bodies_are_over_their_caps
@@ -225,12 +195,11 @@ func Test_a_refused_over_cap_state_body_leaves_every_file_byte_identical(t *test
 // vacuous without mutation (d) — swapping the two checkArgumentCap call
 // sites — since it also passes were the state check deleted entirely.
 func Test_reports_the_handoff_cap_first_when_both_bodies_are_over_their_caps(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	overHandoff := bodyOfLines(fx.cfg.HandoffCapLines + 1)
 	overState := bodyOfLines(fx.cfg.StateCapLines + 1)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", overHandoff, overState)
+	_, err := fx.finish(t, "STEP-02", overHandoff, overState)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 
@@ -245,11 +214,10 @@ func Test_reports_the_handoff_cap_first_when_both_bodies_are_over_their_caps(t *
 // over cap and opens a fence it never closes reports the cap, not the
 // fence.
 func Test_reports_the_state_cap_before_the_state_s_unclosed_fence(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 	overState := append(bodyOfLines(fx.cfg.StateCapLines), []byte("```\n")...)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, overState)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 	assert.NotErrorIs(t, err, scaffold.ErrUnterminatedFence)
@@ -263,11 +231,10 @@ func Test_reports_the_state_cap_before_the_state_s_unclosed_fence(t *testing.T) 
 // ErrAlreadyFinished, even though the supplied state also differs from the
 // one recorded on disk.
 func Test_an_over_cap_state_body_on_a_done_step_reports_the_cap_not_the_re_finish_refusal(t *testing.T) {
-	fx := newFinishedFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishedFixtureFS(t)
 	overCap := bodyOfLines(fx.cfg.StateCapLines + 1)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, overCap)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, overCap)
 
 	require.ErrorIs(t, err, scaffold.ErrOverCap)
 	assert.NotErrorIs(t, err, scaffold.ErrAlreadyFinished)

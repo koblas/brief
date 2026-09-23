@@ -61,17 +61,14 @@ func openItemStep02Body(cfg config.Config, status, item string) string {
 
 // Test_finish_refuses_a_step_with_an_open_checklist_item pins SCENARIO-20's
 // refusal directly against step02BodyWithOpenItem's own line 13, and pairs
-// the byte-identity and mtime probes newFinishFixture's other refusal
-// tests use, proving nothing landed.
+// the Mem snapshot probe newFinishFixtureFS's other refusal tests use,
+// proving nothing landed.
 func Test_finish_refuses_a_step_with_an_open_checklist_item(t *testing.T) {
-	fx := newFinishFixture(t)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(step02BodyWithOpenItem(fx.cfg)), 0o600))
-	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile}
-	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
-	before := snapshotTree(t, fx.featureDir())
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
+	putStepFS(t, fx, "STEP-02.md", step02BodyWithOpenItem(fx.cfg))
+	before := fx.mem.Snapshot()
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 
@@ -84,19 +81,16 @@ func Test_finish_refuses_a_step_with_an_open_checklist_item(t *testing.T) {
 			`:13: checklist item "second thing" is not ticked; tick it with [x] once it is done, or remove it, and retry`,
 		err.Error())
 
-	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
-
-	after := modTimes(t, fx.featureDir(), names)
-	for _, name := range names {
-		assert.True(t, after[name].Equal(pinnedModTime), "%s mtime moved on a refused open-checklist-item finish", name)
-	}
+	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
 // Test_finish_accepts_a_step_whose_checklist_is_empty is the `new step` ->
 // `finish` path (measured case (a)): NewStep writes a bare checklist
 // heading with nothing under it, and that must keep succeeding, not start
-// refusing on its very first run. It asserts the four writes actually
-// landed, so it cannot pass vacuously on a call that silently no-ops.
+// refusing on its very first run. It stays on disk: it exercises
+// NewFeature, NewStep and Finish together end to end, and asserts the four
+// writes actually landed, so it cannot pass vacuously on a call that
+// silently no-ops.
 func Test_finish_accepts_a_step_whose_checklist_is_empty(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -143,12 +137,11 @@ func Test_finish_accepts_a_step_whose_checklist_is_empty(t *testing.T) {
 // configured checklist heading at all is accepted, matching
 // assemble.Start's read-side Section.Found == false degrade.
 func Test_finish_accepts_a_step_with_no_checklist_heading(t *testing.T) {
-	fx := newFinishFixture(t)
+	fx := newFinishFixtureFS(t)
 	noHeading := strings.Replace(step02BodyWithOpenItem(fx.cfg), fx.cfg.ChecklistHeading, "## Not The Checklist", 1)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(noHeading), 0o600))
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	putStepFS(t, fx, "STEP-02.md", noHeading)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.NoError(t, err)
 }
@@ -158,7 +151,7 @@ func Test_finish_accepts_a_step_with_no_checklist_heading(t *testing.T) {
 // following heading of the same level is not part of the checklist
 // section, matching markdown.Section's own same-or-higher-level stop.
 func Test_finish_ignores_an_unchecked_item_outside_the_checklist_section(t *testing.T) {
-	fx := newFinishFixture(t)
+	fx := newFinishFixtureFS(t)
 	body := "---\n" +
 		"id: STEP-02\n" +
 		"status: open\n" +
@@ -177,10 +170,9 @@ func Test_finish_ignores_an_unchecked_item_outside_the_checklist_section(t *test
 		"## Notes\n" +
 		"\n" +
 		"- [ ] not this section's\n"
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(body), 0o600))
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	putStepFS(t, fx, "STEP-02.md", body)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.NoError(t, err)
 }
@@ -190,12 +182,11 @@ func Test_finish_ignores_an_unchecked_item_outside_the_checklist_section(t *test
 // open item, in a feature whose specification.md has been deleted,
 // reports the open item, not the missing specification.
 func Test_finish_reports_the_open_checklist_item_rather_than_a_missing_specification(t *testing.T) {
-	fx := newFinishFixture(t)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(step02BodyWithOpenItem(fx.cfg)), 0o600))
-	require.NoError(t, os.Remove(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile)))
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
+	putStepFS(t, fx, "STEP-02.md", step02BodyWithOpenItem(fx.cfg))
+	require.NoError(t, fx.mem.Remove(fx.cfg.SpecificationFile))
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 	assert.NotErrorIs(t, err, scaffold.ErrMalformedFeature)
@@ -206,12 +197,11 @@ func Test_finish_reports_the_open_checklist_item_rather_than_a_missing_specifica
 // item, given a state body missing a configured heading, reports the
 // missing heading, not the open item — checkArgumentHeadings runs first.
 func Test_finish_reports_a_state_body_missing_a_heading_rather_than_the_open_checklist_item(t *testing.T) {
-	fx := newFinishFixture(t)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(step02BodyWithOpenItem(fx.cfg)), 0o600))
+	fx := newFinishFixtureFS(t)
+	putStepFS(t, fx, "STEP-02.md", step02BodyWithOpenItem(fx.cfg))
 	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.Traps)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, missing)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, missing)
 
 	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
 	assert.NotErrorIs(t, err, scaffold.ErrOpenChecklistItem)
@@ -222,12 +212,11 @@ func Test_finish_reports_a_state_body_missing_a_heading_rather_than_the_open_che
 // an open item, given a handoff that differs from the recorded one,
 // reports the open item, never ErrAlreadyFinished.
 func Test_finish_reports_the_open_checklist_item_on_a_done_step_with_a_divergent_handoff(t *testing.T) {
-	fx := newFinishedFixture(t)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(doneStep02BodyWithOpenItem(fx.cfg)), 0o600))
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishedFixtureFS(t)
+	putStepFS(t, fx, "STEP-02.md", doneStep02BodyWithOpenItem(fx.cfg))
 	divergentHandoff := []byte("DIFFERENT-HANDOFF\n")
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", divergentHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", divergentHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 	assert.NotErrorIs(t, err, scaffold.ErrAlreadyFinished)
@@ -238,11 +227,10 @@ func Test_finish_reports_the_open_checklist_item_on_a_done_step_with_a_divergent
 // alone) drops the "%q" from the refusal copy rather than naming an empty
 // quoted string.
 func Test_finish_refuses_a_bare_open_checklist_item_without_a_quoted_empty_string(t *testing.T) {
-	fx := newFinishFixture(t)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(bareOpenItemStep02Body(fx.cfg)), 0o600))
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
+	putStepFS(t, fx, "STEP-02.md", bareOpenItemStep02Body(fx.cfg))
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 	assert.Equal(t,

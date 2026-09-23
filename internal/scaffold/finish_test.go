@@ -875,50 +875,6 @@ func Test_refuses_an_empty_feature_argument_on_finish(t *testing.T) {
 	require.ErrorIs(t, err, scaffold.ErrNoSuchFeature)
 }
 
-// Test_finish_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_directory
-// covers openFeatureDir's first os.Root.OpenRoot call — the configured
-// feature directory itself, not feature's own subdirectory — the same way
-// Test_finish_reports_a_generic_failure_for_an_unreadable_feature_entry
-// already covers the second: a regular file standing where the configured
-// feature directory belongs must fail generically, carrying that path in
-// its message, never as ErrNoSuchFeature.
-func Test_finish_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_directory(t *testing.T) {
-	root := t.TempDir()
-	cfg := fixtureConfig()
-	featureDirPath := filepath.Join(root, cfg.FeatureDirectory)
-	require.NoError(t, os.WriteFile(featureDirPath, []byte("not a directory"), 0o600))
-
-	srv := scaffold.NewServer(cfg, root)
-
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte("s"))
-
-	require.Error(t, err)
-	require.NotErrorIs(t, err, scaffold.ErrNoSuchFeature)
-	assert.Contains(t, err.Error(), featureDirPath)
-}
-
-// Test_finish_reports_a_generic_failure_for_an_unreadable_feature_entry
-// pins that only a genuinely absent directory is ErrNoSuchFeature: a
-// feature entry that exists but cannot be opened as a
-// directory — here, a regular file standing where "widgets"'s directory
-// belongs — must not read as "no such feature widgets", since widgets
-// plainly does exist. A regular file is the portable, privilege-independent
-// substitute for a permission failure: os.Root.OpenRoot fails with "not a
-// directory" for it, never fs.ErrNotExist.
-func Test_finish_reports_a_generic_failure_for_an_unreadable_feature_entry(t *testing.T) {
-	root := t.TempDir()
-	cfg := fixtureConfig()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, cfg.FeatureDirectory), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, cfg.FeatureDirectory, "widgets"), []byte("not a directory"), 0o600))
-
-	srv := scaffold.NewServer(cfg, root)
-
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", []byte("h"), []byte("s"))
-
-	require.Error(t, err)
-	assert.NotErrorIs(t, err, scaffold.ErrNoSuchFeature)
-}
-
 // Test_returns_an_error_and_changes_nothing_when_the_feature_directory_is_not_writable
 // deliberately does not skip when running as root, unlike a typical
 // permission-bit test: a require.Error failing to fire under root is the

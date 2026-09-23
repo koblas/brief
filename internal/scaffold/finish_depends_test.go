@@ -1,9 +1,6 @@
 package scaffold_test
 
 import (
-	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,32 +10,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// reopenStep01 rewrites newFinishFixture's STEP-01 from "status: done" to
-// "status: open", so STEP-02's depends-on: [STEP-01] — already declared by
-// step02Body — goes unmet: the fixture's happy path is already
-// dependency-satisfied (STEP-01 ships done), so a broken check could pass
-// the whole existing suite without this rewrite.
-func reopenStep01(t *testing.T, fx finishFixture) {
+// readStepFS reads name from fx's own rwfs.Mem as a string — the Mem
+// counterpart of readFileString(t, fx.stepPath(name)).
+func readStepFS(t *testing.T, fx finishFixtureFS, name string) string {
 	t.Helper()
 
-	reopened := strings.Replace(readFileString(t, fx.stepPath("STEP-01.md")), "status: done\n", "status: open\n", 1)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-01.md"), []byte(reopened), 0o600))
+	data, err := fx.mem.ReadFile(name)
+	require.NoError(t, err)
+
+	return string(data)
+}
+
+// reopenStep01FS rewrites newFinishFixtureFS's STEP-01 from "status: done"
+// to "status: open", so STEP-02's depends-on: [STEP-01] — already declared
+// by step02Body — goes unmet: the fixture's happy path is already
+// dependency-satisfied (STEP-01 ships done), so a broken check could pass
+// the whole existing suite without this rewrite.
+func reopenStep01FS(t *testing.T, fx finishFixtureFS) {
+	t.Helper()
+
+	reopened := strings.Replace(readStepFS(t, fx, "STEP-01.md"), "status: done\n", "status: open\n", 1)
+	putStepFS(t, fx, "STEP-01.md", reopened)
 }
 
 // Test_finish_refuses_a_step_whose_dependency_is_not_finished is SCENARIO-21's
 // core case: STEP-02 declares depends-on: [STEP-01], and STEP-01 is
-// reopened, so the refusal names STEP-01 and nothing lands — both
-// nothing-lands probes (byte-identity and the mtime pin) are asserted here,
-// since this test owns SCENARIO-21's nothing-lands proof.
+// reopened, so the refusal names STEP-01 and nothing lands.
 func Test_finish_refuses_a_step_whose_dependency_is_not_finished(t *testing.T) {
-	fx := newFinishFixture(t)
-	reopenStep01(t, fx)
-	names := []string{"STEP-01.md", "STEP-02.md", "STEP-03.md", fx.cfg.StateFile, fx.cfg.SpecificationFile}
-	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
-	before := snapshotTree(t, fx.featureDir())
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
+	reopenStep01FS(t, fx)
+	before := fx.mem.Snapshot()
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrUnmetDependency)
 
@@ -51,12 +54,7 @@ func Test_finish_refuses_a_step_whose_dependency_is_not_finished(t *testing.T) {
 			`: step "STEP-02" depends on "STEP-01", which is not finished; finish STEP-01 first, or remove it from this step's depends-on, and retry`,
 		err.Error())
 
-	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
-
-	after := modTimes(t, fx.featureDir(), names)
-	for _, name := range names {
-		assert.True(t, after[name].Equal(pinnedModTime), "%s mtime moved on a refused dependency finish", name)
-	}
+	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
 // Test_finish_refuses_a_dependency_id_that_names_no_step_file pins the
@@ -64,15 +62,12 @@ func Test_finish_refuses_a_step_whose_dependency_is_not_finished(t *testing.T) {
 // idx.Known is false and the copy says "names no step file" rather than
 // "is not finished".
 func Test_finish_refuses_a_dependency_id_that_names_no_step_file(t *testing.T) {
-	fx := newFinishFixture(t)
+	fx := newFinishFixtureFS(t)
 	unknownDep := strings.Replace(step02Body(fx.cfg), "depends-on: [STEP-01]\n", "depends-on: [STEP-99]\n", 1)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(unknownDep), 0o600))
-	names := []string{"STEP-01.md", "STEP-02.md", "STEP-03.md", fx.cfg.StateFile, fx.cfg.SpecificationFile}
-	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
-	before := snapshotTree(t, fx.featureDir())
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	putStepFS(t, fx, "STEP-02.md", unknownDep)
+	before := fx.mem.Snapshot()
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrUnmetDependency)
 
@@ -85,12 +80,7 @@ func Test_finish_refuses_a_dependency_id_that_names_no_step_file(t *testing.T) {
 			`: step "STEP-02" depends on "STEP-99", which names no step file; correct the id in this step's depends-on, or remove it, and retry`,
 		err.Error())
 
-	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
-
-	after := modTimes(t, fx.featureDir(), names)
-	for _, name := range names {
-		assert.True(t, after[name].Equal(pinnedModTime), "%s mtime moved on a refused dependency finish", name)
-	}
+	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
 // Test_finish_refuses_a_dependency_whose_step_file_does_not_parse pins
@@ -99,11 +89,10 @@ func Test_finish_refuses_a_dependency_id_that_names_no_step_file(t *testing.T) {
 // takes the "is not finished" branch, never "names no step file" and
 // never scaffold.ErrMalformedFeature, and never a pass.
 func Test_finish_refuses_a_dependency_whose_step_file_does_not_parse(t *testing.T) {
-	fx := newFinishFixture(t)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-01.md"), []byte("not frontmatter at all\n"), 0o600))
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
+	putStepFS(t, fx, "STEP-01.md", "not frontmatter at all\n")
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrUnmetDependency)
 	require.NotErrorIs(t, err, scaffold.ErrMalformedFeature)
@@ -119,12 +108,11 @@ func Test_finish_refuses_a_dependency_whose_step_file_does_not_parse(t *testing.
 // own id on both sides of the line — and is then permanently unfinishable
 // through this command until the frontmatter is edited by hand.
 func Test_finish_refuses_a_step_that_depends_on_itself(t *testing.T) {
-	fx := newFinishFixture(t)
+	fx := newFinishFixtureFS(t)
 	selfDep := strings.Replace(step02Body(fx.cfg), "depends-on: [STEP-01]\n", "depends-on: [STEP-02]\n", 1)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(selfDep), 0o600))
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	putStepFS(t, fx, "STEP-02.md", selfDep)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrUnmetDependency)
 
@@ -139,46 +127,44 @@ func Test_finish_refuses_a_step_that_depends_on_itself(t *testing.T) {
 // Test_finish_accepts_a_step_with_no_declared_dependencies is the control
 // arm for Decision 6: STEP-03 declares depends-on: [] in a feature that
 // also holds STEP-02, an unrelated not-done sibling — the scan is skipped
-// entirely, so STEP-03 finishes, and the four writes are asserted on disk
-// so this cannot pass on a silent no-op.
+// entirely, so STEP-03 finishes, and the four writes are asserted so this
+// cannot pass on a silent no-op.
 func Test_finish_accepts_a_step_with_no_declared_dependencies(t *testing.T) {
-	fx := newFinishFixture(t)
-	ticked := strings.Replace(readFileString(t, fx.stepPath("STEP-03.md")), "- [ ] not done yet\n", "- [x] not done yet\n", 1)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-03.md"), []byte(ticked), 0o600))
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
+	ticked := strings.Replace(readStepFS(t, fx, "STEP-03.md"), "- [ ] not done yet\n", "- [x] not done yet\n", 1)
+	putStepFS(t, fx, "STEP-03.md", ticked)
 	handoff := []byte("STEP-03 handoff\n")
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-03", handoff, fx.newState)
+	_, err := fx.finish(t, "STEP-03", handoff, fx.newState)
 	require.NoError(t, err)
 
-	stepGot, readErr := os.ReadFile(fx.stepPath("STEP-03.md"))
+	stepGot, readErr := fx.mem.ReadFile("STEP-03.md")
 	require.NoError(t, readErr)
 	assert.Contains(t, string(stepGot), "status: done")
 
-	specGot, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile))
+	specGot, readErr := fx.mem.ReadFile(fx.cfg.SpecificationFile)
 	require.NoError(t, readErr)
 	assert.Contains(t, string(specGot), "- [x] STEP-03")
 
-	stateGot, readErr := os.ReadFile(filepath.Join(fx.featureDir(), fx.cfg.StateFile))
+	stateGot, readErr := fx.mem.ReadFile(fx.cfg.StateFile)
 	require.NoError(t, readErr)
 	assert.Equal(t, string(fx.newState), string(stateGot))
 
-	handoffGot, readErr := os.ReadFile(filepath.Join(fx.featureDir(), "STEP-03"+fx.cfg.HandoffFileSuffix))
+	handoffGot, readErr := fx.mem.ReadFile("STEP-03" + fx.cfg.HandoffFileSuffix)
 	require.NoError(t, readErr)
 	assert.Equal(t, string(handoff), string(handoffGot))
 }
 
 // Test_finish_accepts_a_step_whose_dependency_is_done is the satisfied
-// side of the boundary: STEP-02 depends on STEP-01, which newFinishFixture
+// side of the boundary: STEP-02 depends on STEP-01, which newFinishFixtureFS
 // records status: done, and finishes normally.
 func Test_finish_accepts_a_step_whose_dependency_is_done(t *testing.T) {
-	fx := newFinishFixture(t)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
-	got, readErr := os.ReadFile(fx.stepPath("STEP-02.md"))
+	got, readErr := fx.mem.ReadFile("STEP-02.md")
 	require.NoError(t, readErr)
 
 	fm, _, parseErr := stepfile.ParseFrontmatter(got)
@@ -190,12 +176,11 @@ func Test_finish_accepts_a_step_whose_dependency_is_done(t *testing.T) {
 // pins SCENARIO-20's position ahead of this scenario's dependency check: a
 // step both un-ticked and blocked reports the open checklist item.
 func Test_finish_reports_an_open_checklist_item_before_an_unfinished_dependency(t *testing.T) {
-	fx := newFinishFixture(t)
-	reopenStep01(t, fx)
-	require.NoError(t, os.WriteFile(fx.stepPath("STEP-02.md"), []byte(step02BodyWithOpenItem(fx.cfg)), 0o600))
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishFixtureFS(t)
+	reopenStep01FS(t, fx)
+	putStepFS(t, fx, "STEP-02.md", step02BodyWithOpenItem(fx.cfg))
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 	assert.NotErrorIs(t, err, scaffold.ErrUnmetDependency)
@@ -206,15 +191,14 @@ func Test_finish_reports_an_open_checklist_item_before_an_unfinished_dependency(
 // step in a feature whose progress entry for it is missing reports the
 // dependency, not scaffold.ErrNoProgressEntry.
 func Test_finish_reports_an_unfinished_dependency_before_the_specification_read(t *testing.T) {
-	fx := newFinishFixture(t)
-	reopenStep01(t, fx)
+	fx := newFinishFixtureFS(t)
+	reopenStep01FS(t, fx)
 	spec := "# widgets\n\n" + fx.cfg.ProgressHeading + "\n\n" +
 		"- [ ] STEP-01: already done\n" +
 		"- [ ] STEP-03\n"
-	require.NoError(t, os.WriteFile(filepath.Join(fx.featureDir(), fx.cfg.SpecificationFile), []byte(spec), 0o600))
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	require.NoError(t, fx.mem.WriteFile(fx.cfg.SpecificationFile, []byte(spec), 0o600))
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrUnmetDependency)
 	assert.NotErrorIs(t, err, scaffold.ErrNoProgressEntry)
@@ -225,22 +209,14 @@ func Test_finish_reports_an_unfinished_dependency_before_the_specification_read(
 // not turn a same-inputs re-finish into a refusal — FirstUnmet's done
 // short-circuit is what keeps R11's no-op reachable on this tree.
 func Test_re_finishing_a_done_step_whose_dependency_is_open_with_recorded_inputs_stays_a_noop(t *testing.T) {
-	fx := newFinishedFixture(t)
-	reopenStep01(t, fx)
-	names := []string{"STEP-02.md", fx.cfg.StateFile, fx.cfg.SpecificationFile, "STEP-02" + fx.cfg.HandoffFileSuffix}
-	pinModTimes(t, fx.featureDir(), names, pinnedModTime)
-	before := snapshotTree(t, fx.featureDir())
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishedFixtureFS(t)
+	reopenStep01FS(t, fx)
+	before := fx.mem.Snapshot()
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", fx.newHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 	require.NoError(t, err)
 
-	assert.Equal(t, before, snapshotTree(t, fx.featureDir()))
-
-	after := modTimes(t, fx.featureDir(), names)
-	for _, name := range names {
-		assert.True(t, after[name].Equal(pinnedModTime), "%s mtime moved on what must be a no-op", name)
-	}
+	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
 // Test_re_finishing_a_done_step_whose_dependency_is_open_with_divergent_inputs_is_still_ErrAlreadyFinished
@@ -249,12 +225,11 @@ func Test_re_finishing_a_done_step_whose_dependency_is_open_with_recorded_inputs
 // scaffold.ErrUnmetDependency, because FirstUnmet short-circuits on the
 // dependant's own doneness before either branch of the new check applies.
 func Test_re_finishing_a_done_step_whose_dependency_is_open_with_divergent_inputs_is_still_ErrAlreadyFinished(t *testing.T) {
-	fx := newFinishedFixture(t)
-	reopenStep01(t, fx)
-	srv := scaffold.NewServer(fx.cfg, fx.root)
+	fx := newFinishedFixtureFS(t)
+	reopenStep01FS(t, fx)
 	divergentHandoff := []byte("DIFFERENT-HANDOFF-02\n")
 
-	_, err := srv.Finish(context.Background(), "widgets", "STEP-02", divergentHandoff, fx.newState)
+	_, err := fx.finish(t, "STEP-02", divergentHandoff, fx.newState)
 
 	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
 	assert.NotErrorIs(t, err, scaffold.ErrUnmetDependency)
