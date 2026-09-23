@@ -360,7 +360,6 @@ func Test_init_edit_agents_leaves_non_targets_alone(t *testing.T) {
 		assert.Equal(t, body, string(targetAfter))
 	})
 
-
 	t.Run("a .claude symlinked outside the repo gets no row; a real .claude is merged (control)", func(t *testing.T) {
 		wd := t.TempDir()
 		home := t.TempDir()

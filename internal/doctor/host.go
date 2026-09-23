@@ -797,9 +797,9 @@ func (s *Server) rolesCheck(root, nearest string, bindings [3]roleBinding) Check
 // there.
 const hostSkillMissingDetail = "not installed; bound agents cannot preload it"
 
-// skillFileOf returns h.Skills()'s own single entry, host-skill's subject
-// file — never hardcoded, so a future second Skills() entry surfaces here
-// rather than being silently ignored by a row that only checks the first.
+// skillFileOf returns h.Skills()'s own first entry, host-skill's subject
+// file. Every Host today returns exactly one; if a second is ever added,
+// this row reports only the first — it does not surface the rest.
 func skillFileOf(h host.Host) host.File {
 	files := h.Skills()
 	if len(files) == 0 {

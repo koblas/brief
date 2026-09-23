@@ -395,7 +395,7 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 	}
 
 	for _, ba := range boundAgentArts {
-		if err := verifyFileUnchanged(ba.Path, true, ba.existing, "brief uninstall"); err != nil {
+		if err := verifyBoundAgentUnchanged(ba, "brief uninstall"); err != nil {
 			if removedAny {
 				return res, markPartial(err)
 			}
@@ -403,7 +403,7 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 			return Result{}, err
 		}
 
-		if err := writeBoundAgent(ba.resolvedRoot, ba.rel, ba.edited, ba.perm); err != nil {
+		if err := writeBoundAgent(ba.resolvedRoot, ba.rel, ba.Path, ba.edited, ba.perm); err != nil {
 			if removedAny {
 				return res, markPartial(err)
 			}

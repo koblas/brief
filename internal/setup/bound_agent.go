@@ -842,6 +842,39 @@ func subtractMergedBoundAgents(list []MissingSkillAgent, boundAgentArts []boundA
 	return out
 }
 
+// readBoundAgentFile reads rel from within resolvedRoot through the same
+// os.Root confinement writeBoundAgent writes through, for
+// verifyBoundAgentUnchanged's own pre-write re-read — so the bytes checked
+// for a concurrent edit are the exact bytes the following writeBoundAgent
+// call is about to replace, not whatever ba.Path's own symlink currently
+// resolves to.
+func readBoundAgentFile(resolvedRoot, rel string) ([]byte, error) {
+	root, err := os.OpenRoot(resolvedRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+
+	return root.ReadFile(rel)
+}
+
+// verifyBoundAgentUnchanged is verifyFileUnchanged's own bound-agent twin
+// (setup.go's and uninstall.go's own apply loops, immediately before
+// writeBoundAgent): it re-reads through readBoundAgentFile — resolvedRoot
+// and rel, the same symlink-resolved location the subsequent write targets
+// — rather than ba.Path directly. ba.Path may itself be a symlink; reading
+// through it fresh would follow wherever it currently resolves, which can
+// differ from resolvedRoot/rel when the symlink is re-pointed between
+// planning and applying, verifying (and reporting a concurrent edit on) the
+// wrong file entirely. ba.Path is still reported as the offending path — it
+// is what the adopter typed — but the bytes compared are always the ones
+// about to be overwritten.
+func verifyBoundAgentUnchanged(ba boundAgentArtifact, rerunCommand string) error {
+	current, err := readBoundAgentFile(ba.resolvedRoot, ba.rel)
+
+	return verifyReadUnchanged(ba.Path, true, ba.existing, current, err, rerunCommand)
+}
+
 // writeBoundAgent atomically replaces the bound-agent file at
 // resolvedRoot/rel — planning time's own symlink-resolved root and
 // root-relative path (boundAgentArtifact.resolvedRoot, .rel) — with body,
@@ -854,11 +887,14 @@ func subtractMergedBoundAgents(list []MissingSkillAgent, boundAgentArts []boundA
 // original (possibly symlinked) path at apply time, keeps the write
 // confined to the same root the escape check already verified at planning
 // time — a symlink swapped in between the two can only ever point
-// somewhere still inside resolvedRoot.
-func writeBoundAgent(resolvedRoot, rel string, body []byte, perm fs.FileMode) error {
+// somewhere still inside resolvedRoot. displayPath — boundAgentArtifact's
+// own Path, the leaf's original, possibly-symlinked location — names every
+// returned error rather than resolvedRoot/rel, since that is what the
+// adopter actually typed and what every other row's own error names.
+func writeBoundAgent(resolvedRoot, rel, displayPath string, body []byte, perm fs.FileMode) error {
 	root, err := os.OpenRoot(resolvedRoot)
 	if err != nil {
-		return fmt.Errorf("setup: open %s: %w", resolvedRoot, err)
+		return fmt.Errorf("setup: open %s: %w", displayPath, err)
 	}
 	defer func() { _ = root.Close() }()
 
@@ -866,7 +902,7 @@ func writeBoundAgent(resolvedRoot, rel string, body []byte, perm fs.FileMode) er
 	if dir != "." {
 		sub, subErr := root.OpenRoot(dir)
 		if subErr != nil {
-			return fmt.Errorf("setup: open %s: %w", filepath.Join(resolvedRoot, dir), subErr)
+			return fmt.Errorf("setup: open %s: %w", displayPath, subErr)
 		}
 		defer func() { _ = sub.Close() }()
 
@@ -874,21 +910,20 @@ func writeBoundAgent(resolvedRoot, rel string, body []byte, perm fs.FileMode) er
 	}
 
 	name := filepath.Base(rel)
-	full := filepath.Join(resolvedRoot, rel)
 
 	w, err := atomicfile.Create(root, name, perm)
 	if err != nil {
-		return fmt.Errorf("setup: write %s: %w", full, err)
+		return fmt.Errorf("setup: write %s: %w", displayPath, err)
 	}
 
 	if _, err := w.Write(body); err != nil {
 		_ = w.Close()
 
-		return fmt.Errorf("setup: write %s: %w", full, err)
+		return fmt.Errorf("setup: write %s: %w", displayPath, err)
 	}
 
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("setup: write %s: %w", full, err)
+		return fmt.Errorf("setup: write %s: %w", displayPath, err)
 	}
 
 	return nil

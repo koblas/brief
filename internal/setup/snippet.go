@@ -427,21 +427,32 @@ func writeSnippetFile(path string, body []byte) error {
 func verifyFileUnchanged(path string, existedBefore bool, existing []byte, rerunCommand string) error {
 	current, err := os.ReadFile(path)
 
+	return verifyReadUnchanged(path, existedBefore, existing, current, err, rerunCommand)
+}
+
+// verifyReadUnchanged is verifyFileUnchanged's own shared compare —
+// verifyBoundAgentUnchanged's own re-read goes through a different path
+// (readBoundAgentFile, confined to resolvedRoot/rel rather than a raw
+// os.ReadFile), but the comparison and refusal it renders from current,
+// existing and readErr is identical either way. displayPath names the
+// RefusalError and any wrapped read error; it need not be the path actually
+// read.
+func verifyReadUnchanged(displayPath string, existedBefore bool, existing, current []byte, readErr error, rerunCommand string) error {
 	switch {
-	case err == nil:
+	case readErr == nil:
 		if existedBefore && bytes.Equal(current, existing) {
 			return nil
 		}
-	case os.IsNotExist(err):
+	case os.IsNotExist(readErr):
 		if !existedBefore {
 			return nil
 		}
 	default:
-		return fmt.Errorf("setup: read %s: %w", path, err)
+		return fmt.Errorf("setup: read %s: %w", displayPath, readErr)
 	}
 
 	return &RefusalError{
-		Path:    path,
+		Path:    displayPath,
 		Problem: "changed since it was planned",
 		Fix:     "rerun '" + rerunCommand + "'",
 		Err:     ErrConcurrentEdit,

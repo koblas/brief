@@ -539,7 +539,7 @@ func apply(
 			continue
 		}
 
-		if err := verifyFileUnchanged(ba.Path, true, ba.existing, "brief init --edit-agents"); err != nil {
+		if err := verifyBoundAgentUnchanged(ba, "brief init --edit-agents"); err != nil {
 			if wroteSomething {
 				return res, markPartial(err)
 			}
@@ -547,7 +547,7 @@ func apply(
 			return Result{}, err
 		}
 
-		if err := writeBoundAgent(ba.resolvedRoot, ba.rel, ba.edited, ba.perm); err != nil {
+		if err := writeBoundAgent(ba.resolvedRoot, ba.rel, ba.Path, ba.edited, ba.perm); err != nil {
 			if wroteSomething {
 				return res, markPartial(err)
 			}
