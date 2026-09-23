@@ -94,7 +94,9 @@
 // own artifact list carries the config first, the feature root, then the
 // plugin's own files in host.Host.Plugin's write order, then the
 // brief-workflow skill, then, under WithAgents, the three role-agent
-// files, then the CLAUDE.md block last; applying writes in that same
+// files, then, under EditAgents, one KindBoundAgent row per
+// planBoundAgents target, then the CLAUDE.md block last; applying writes
+// in that same
 // order, so the config — the repository's opt-in marker — never lands
 // before everything else has. Uninstall's own list carries the CLAUDE.md
 // block first, then the agent files reversed, then the skill, then the
@@ -126,5 +128,24 @@
 // roles-skill row makes. It reads from planConfig's own post-run
 // config.Roles, computed only for HostClaudeCode, before the DryRun/Print
 // return so both carry it, and is empty — never nil — otherwise, including
-// on every Uninstall Result.
+// on every Uninstall Result. Under EditAgents, subtractMergedBoundAgents
+// removes every path planBoundAgents actually merged before this same
+// return, so a caller's post-run "still missing" view and the bound-agent
+// rows it also rendered never disagree.
+//
+// EditAgents (planBoundAgents, bound_agent.go) edits only a bare-name
+// planner or implementer binding's own ScopeProject agentfile.Definition —
+// never a "brief:*" binding, another plugin's, or one under "~/.claude" —
+// deduped by path so two roles bound to the same file produce one merged
+// row. addWorkflowSkill performs the actual "skills:" frontmatter edit,
+// following the shape table doc.go's specification names: a top-level key
+// missing entirely (including one only nested under another key, or only
+// present inside another key's own block scalar) gets a fresh
+// "skills: [brief-workflow]" line; a block or single-line flow list gets
+// the name appended; every other shape is left alone (ActionKept). A
+// non-regular leaf (a symlink) is ActionKept without being read; a regular
+// leaf whose own resolved path escapes the resolved install root is
+// skipped entirely, contributing no row. writeBoundAgent preserves the
+// file's own Lstat'd permission bits, unlike writePluginFile's fixed
+// 0o644, since a bound agent file is the adopter's own.
 package setup

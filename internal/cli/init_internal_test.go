@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/koblas/brief/internal/setup"
@@ -221,6 +222,245 @@ func Test_init_lists_bound_agents_missing_the_workflow_skill(t *testing.T) {
 		require.NoError(t, readErr)
 		assert.Len(t, entries, 1, "--dry-run must write nothing beyond the fixture's own agents directory")
 	})
+
+	t.Run("--edit-agents merges the project agent and leaves the user-level one alone", func(t *testing.T) {
+		wd := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+			"feature-directory: docs/specifications\nroles:\n  planner: planner\n  implementer: developer\n",
+		), 0o600))
+
+		projectDeveloper := filepath.Join(wd, ".claude", "agents", "developer", "Agent.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(projectDeveloper), 0o755))
+		require.NoError(t, os.WriteFile(projectDeveloper, developerBody, 0o600))
+
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+		require.NoError(t, err)
+		assert.Contains(t, stdout.String(), "merged .claude/agents/developer/Agent.md (brief-workflow added to skills)\n")
+
+		wantBlock := missingSkillHeaderLine + "\n" +
+			"  ~/.claude/agents/planner.md (planner; user-level, edit by hand)\n"
+		assert.Equal(t, wantBlock+installedNextActionLine+"\n", stderr.String())
+
+		after, readErr := os.ReadFile(projectDeveloper)
+		require.NoError(t, readErr)
+		assert.Equal(t, "---\nname: developer\nskills: [brief-workflow]\n---\n\nbody\n", string(after))
+
+		homeAfter, readErr := os.ReadFile(homePlanner)
+		require.NoError(t, readErr)
+		assert.Equal(t, plannerBody, homeAfter)
+	})
+}
+
+// nothingToEditLine is --edit-agents' own exit-0 "nothing to edit" stderr
+// line (Surface & Copy), including the "brief init: " prefix.
+const nothingToEditLine = `brief init: --edit-agents: no planner or implementer bound to an agent under .claude/agents; nothing to edit`
+
+// Test_init_edit_agents_says_nothing_to_edit pins the nothing-to-edit line:
+// no bare planner or implementer bound at all, and a bare binding that only
+// resolves at user scope, both trigger it, in text mode only, placed after
+// roles_to_add and before the missing-skill block.
+func Test_init_edit_agents_says_nothing_to_edit(t *testing.T) {
+	t.Run("no bare planner or implementer bound", func(t *testing.T) {
+		wd := t.TempDir()
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+
+		require.NoError(t, err)
+		assert.Contains(t, stderr.String(), nothingToEditLine+"\n")
+	})
+
+	t.Run("only bare binding is user-level: nothing-to-edit precedes the missing-skill block", func(t *testing.T) {
+		wd := t.TempDir()
+		home := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+			"feature-directory: docs/specifications\nroles:\n  implementer: planner\n",
+		), 0o600))
+
+		homePlanner := filepath.Join(home, ".claude", "agents", "planner.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(homePlanner), 0o755))
+		require.NoError(t, os.WriteFile(homePlanner, []byte("---\nname: planner\n---\n\nbody\n"), 0o600))
+
+		seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+		require.NoError(t, err)
+
+		nothingIdx := strings.Index(stderr.String(), nothingToEditLine)
+		missingIdx := strings.Index(stderr.String(), missingSkillHeaderLine)
+		require.NotEqual(t, -1, nothingIdx)
+		require.NotEqual(t, -1, missingIdx)
+		assert.Less(t, nothingIdx, missingIdx)
+	})
+
+	t.Run("absent under --json", func(t *testing.T) {
+		wd := t.TempDir()
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents", "--json"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+
+		require.NoError(t, err)
+		assert.Empty(t, stderr.String())
+		assert.NotContains(t, stdout.String(), "nothing to edit")
+	})
+}
+
+// Test_init_edit_agents_requires_claude_code pins the exit-2 refusal when
+// the resolved host is not claude-code, whether explicit or detected.
+func Test_init_edit_agents_requires_claude_code(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "none", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+
+	require.Error(t, err)
+	assert.Equal(t, 2, ExitCode(err))
+	assert.Equal(t, "brief init: --edit-agents requires --host claude-code; run 'brief init --host claude-code --edit-agents'\n", stderr.String())
+
+	entries, readErr := os.ReadDir(wd)
+	require.NoError(t, readErr)
+	assert.Empty(t, entries)
+}
+
+// Test_init_edit_agents_dry_run_and_print pins --dry-run and --print's own
+// rendering: the same merged row and an unwritten file under --dry-run, the
+// merge header and only the inserted line under --print with no CR
+// surviving from a CRLF fixture, and the merge body under --print --json.
+func Test_init_edit_agents_dry_run_and_print(t *testing.T) {
+	newFixture := func(t *testing.T, crlf bool) (string, runSeam, string) {
+		t.Helper()
+
+		wd := t.TempDir()
+		home := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+			"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
+		), 0o600))
+
+		agentPath := filepath.Join(wd, ".claude", "agents", "developer", "Agent.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
+
+		body := "---\nname: developer\n---\n\nbody\n"
+		if crlf {
+			body = "---\r\nname: developer\r\n---\r\n\r\nbody\r\n"
+		}
+
+		require.NoError(t, os.WriteFile(agentPath, []byte(body), 0o600))
+
+		seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+
+		return wd, seam, agentPath
+	}
+
+	t.Run("--dry-run shows the merged row and leaves the file unchanged", func(t *testing.T) {
+		wd, seam, agentPath := newFixture(t, false)
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents", "--dry-run"}, nil, &stdout, &stderr, noBuildInfo, seam)
+		require.NoError(t, err)
+		assert.Contains(t, stdout.String(), "merged .claude/agents/developer/Agent.md (brief-workflow added to skills)\n")
+
+		after, readErr := os.ReadFile(agentPath)
+		require.NoError(t, readErr)
+		assert.Equal(t, "---\nname: developer\n---\n\nbody\n", string(after))
+	})
+
+	t.Run("--print shows the merge header and only the inserted line, no CR from a CRLF fixture", func(t *testing.T) {
+		wd, seam, agentPath := newFixture(t, true)
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents", "--print"}, nil, &stdout, &stderr, noBuildInfo, seam)
+		require.NoError(t, err)
+
+		assert.Contains(t, stdout.String(), "# .claude/agents/developer/Agent.md (merge)\nskills: [brief-workflow]\n")
+		assert.NotContains(t, stdout.String(), "skills: [brief-workflow]\r")
+
+		after, readErr := os.ReadFile(agentPath)
+		require.NoError(t, readErr)
+		assert.Equal(t, "---\r\nname: developer\r\n---\r\n\r\nbody\r\n", string(after))
+	})
+
+	t.Run("--print --json carries the merge body", func(t *testing.T) {
+		wd, seam, agentPath := newFixture(t, false)
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents", "--print", "--json"}, nil, &stdout, &stderr, noBuildInfo, seam)
+		require.NoError(t, err)
+
+		var doc struct {
+			Artifacts []struct {
+				Path   string `json:"path"`
+				Action string `json:"action"`
+				Body   string `json:"body"`
+			} `json:"artifacts"`
+		}
+		require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+
+		var found bool
+		for _, a := range doc.Artifacts {
+			if a.Path == agentPath {
+				found = true
+				assert.Equal(t, "merge", a.Action)
+				assert.Equal(t, "skills: [brief-workflow]", a.Body)
+			}
+		}
+		assert.True(t, found)
+	})
+}
+
+// Test_init_edit_agents_json pins "--edit-agents --json": a "bound-agent"
+// artifact row action "merged", the path listed in "modified", and the
+// merged path excluded from "agents_missing_skill".
+func Test_init_edit_agents_json(t *testing.T) {
+	wd := t.TempDir()
+	home := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+		"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
+	), 0o600))
+
+	agentPath := filepath.Join(wd, ".claude", "agents", "developer.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
+	require.NoError(t, os.WriteFile(agentPath, []byte("---\nname: developer\n---\n\nbody\n"), 0o600))
+
+	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents", "--json"}, nil, &stdout, &stderr, noBuildInfo, seam)
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	var doc struct {
+		Modified  []string `json:"modified"`
+		Artifacts []struct {
+			Kind   string `json:"kind"`
+			Path   string `json:"path"`
+			Action string `json:"action"`
+		} `json:"artifacts"`
+		AgentsMissingSkill []struct {
+			Path string `json:"path"`
+		} `json:"agents_missing_skill"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
+
+	assert.Contains(t, doc.Modified, agentPath)
+
+	var found bool
+	for _, a := range doc.Artifacts {
+		if a.Path == agentPath {
+			found = true
+			assert.Equal(t, "bound-agent", a.Kind)
+			assert.Equal(t, "merged", a.Action)
+		}
+	}
+	assert.True(t, found)
+
+	for _, m := range doc.AgentsMissingSkill {
+		assert.NotEqual(t, agentPath, m.Path)
+	}
 }
 
 // Test_init_prints_roles_to_add_before_the_missing_skill_block pins R7's

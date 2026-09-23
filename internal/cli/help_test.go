@@ -75,7 +75,7 @@ Usage:
   brief status                     print a FEATURE/DONE/BLOCKED/NEXT table of every feature
   brief check [feature] [--hook <host>]
                                    report faults finish would now refuse to write over
-  brief init [--host <name>] [--no-hook] [--with-agents] [--dry-run | --print] [--force] [--json]
+  brief init [--host <name>] [--no-hook] [--with-agents] [--edit-agents] [--dry-run | --print] [--force] [--json]
                                    install brief's config and agent-host integration
   brief doctor [--json]            check brief's setup: config, feature root, host integration
   brief uninstall [--host <name>] [--dry-run] [--force] [--json]
@@ -963,6 +963,29 @@ func Test_init_help_names_the_brief_workflow_skill(t *testing.T) {
 	assert.Contains(t, normalizeWhitespace(stdout.String()), missingSkillSentence)
 
 	assert.True(t, wholeWordPresent(t, stdout.String(), "agents_missing_skill"))
+}
+
+// Test_init_help_names_edit_agents pins the ruled "--edit-agents" flag help
+// and the initLong sentence Surface & Copy adds for it (S07):
+// whitespace-normalized, since both hand-wrap.
+func Test_init_help_names_edit_agents(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"init", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	normalized := normalizeWhitespace(stdout.String())
+
+	const flagUsage = `add "brief-workflow" to the "skills:" list of the planner and implementer agents bound in .brief.yaml (repository files only)`
+	assert.Contains(t, normalized, flagUsage)
+
+	const sentence = `--edit-agents adds it to those agents' "skills:" lists, for agent files under ".claude/agents/" only; one under "~/.claude" is always left for you to edit.`
+	assert.Contains(t, normalized, sentence)
+
+	assert.Contains(t, stdout.String(), "--edit-agents")
 }
 
 // Test_doctor_help_names_role_resolution_and_the_brief_workflow_skill pins

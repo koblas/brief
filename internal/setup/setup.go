@@ -61,6 +61,12 @@ const (
 	KindSkill Kind = "skill"
 	// KindSnippet is the CLAUDE.md instruction block (R5).
 	KindSnippet Kind = "snippet"
+	// KindBoundAgent is a repository agent file InitRequest.EditAgents
+	// edited, or found already satisfying or unable to satisfy, Rule 4's
+	// own "skills:" edit — a bare-name planner or implementer binding's own
+	// ScopeProject agentfile.Definition, never a "brief:*" binding, another
+	// plugin's, or one under "~/.claude".
+	KindBoundAgent Kind = "bound-agent"
 )
 
 // Action names what Init did, or would do, to one Artifact.
@@ -122,6 +128,12 @@ func NewServer(opts ...Option) *Server {
 // this run also creates the config file, binds every role to them (R7) —
 // like NoHook, false plans no agent row at all, never reading or writing
 // them; it is refused as ErrAgentsNeedHost unless Host is
+// HostClaudeCode. EditAgents plans and, for a real run, applies
+// planBoundAgents (Rule 3, Rule 4): every bare-name planner or implementer
+// binding's own ScopeProject agentfile.Definition gets a KindBoundAgent
+// row and, when its own "skills:" shape allows it, its frontmatter edited
+// to add artifact.WorkflowSkillName — it is refused as
+// ErrEditAgentsNeedHost, checked after ErrAgentsNeedHost, unless Host is
 // HostClaudeCode. DryRun computes the same plan without writing anything,
 // and Force rewrites an existing config from defaults — the bound variant
 // under WithAgents — rather than keeping or refusing it; it never rewrites
@@ -134,6 +146,7 @@ type InitRequest struct {
 	Host       string
 	NoHook     bool
 	WithAgents bool
+	EditAgents bool
 	DryRun     bool
 	Force      bool
 	Print      bool
@@ -292,6 +305,10 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return Result{}, ErrAgentsNeedHost
 	}
 
+	if req.EditAgents && req.Host != HostClaudeCode {
+		return Result{}, ErrEditAgentsNeedHost
+	}
+
 	configArt, cfg, err := planConfig(nearest, root, req.Force, req.WithAgents)
 	if err != nil {
 		return Result{}, err
@@ -308,6 +325,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		pluginArts             []pluginArtifact
 		skillArts              []pluginArtifact
 		agentArts              []pluginArtifact
+		boundAgentArts         []boundAgentArtifact
 		snippetArt             snippetArtifact
 		hasSnippet             bool
 		agentsMissingSkillList = []MissingSkillAgent{}
@@ -345,7 +363,15 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 			home = ""
 		}
 
+		if req.EditAgents {
+			boundAgentArts, err = planBoundAgents(root, home, cfg.Roles)
+			if err != nil {
+				return Result{}, err
+			}
+		}
+
 		agentsMissingSkillList = agentsMissingSkill(root, home, cfg.Roles)
+		agentsMissingSkillList = subtractMergedBoundAgents(agentsMissingSkillList, boundAgentArts)
 	}
 
 	artifacts := make([]Artifact, 0, 3+len(pluginArts)+len(skillArts)+len(agentArts))
@@ -361,6 +387,10 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 
 	for _, a := range agentArts {
 		artifacts = append(artifacts, a.Artifact)
+	}
+
+	for _, ba := range boundAgentArts {
+		artifacts = append(artifacts, ba.Artifact)
 	}
 
 	if hasSnippet {
@@ -388,7 +418,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		RolesToAdd:         rolesToAdd(req.WithAgents, configArt.Action, cfg.Roles),
 		NoHostDetected:     noHostDetected,
 		DetectedBy:         detectedBy,
-		Print:              printArtifacts(artifacts, configBody, writeArts, snippetArt),
+		Print:              printArtifacts(artifacts, configBody, writeArts, boundAgentArts, snippetArt),
 		AgentsMissingSkill: agentsMissingSkillList,
 	}
 
@@ -396,11 +426,11 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return res, nil
 	}
 
-	if err := checkWritable(writableTargets(featureArt, writeArts, snippetArt, hasSnippet, configArt)); err != nil {
+	if err := checkWritable(writableTargets(featureArt, writeArts, boundAgentArts, snippetArt, hasSnippet, configArt)); err != nil {
 		return res, err
 	}
 
-	return apply(res, featureArt, writeArts, snippetArt, hasSnippet, configArt, configBody)
+	return apply(res, featureArt, writeArts, boundAgentArts, snippetArt, hasSnippet, configArt, configBody)
 }
 
 // rolesToAdd renders Result.RolesToAdd (R7): empty unless withAgents and
@@ -442,15 +472,20 @@ func rolesToAdd(withAgents bool, configAction Action, current config.RoleBinding
 // list and its own write order) — an ActionMerged entry (an OriginOlder
 // render Rule 6 upgrades) re-reads its own path immediately before writing
 // (verifyFileUnchanged) and refuses ErrConcurrentEdit rather than
-// overwriting a file changed since planning — then snippetArt (when
-// hasSnippet, and it reports ActionCreated or ActionMerged), then configArt
-// last with configBody as its bytes — the plain ConfigFile() or, under
-// WithAgents, ConfigFileWithRoles() — into res's own Created or Modified
-// list — Created for ActionCreated, Modified for ActionMerged, since a
-// merge rewrites bytes an existing file already held. A write failure is
-// wrapped in ErrPartialWrite iff at least one earlier write already landed
-// in this same call.
-func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippetArt snippetArtifact, hasSnippet bool, configArt Artifact, configBody []byte) (Result, error) {
+// overwriting a file changed since planning — then every boundAgentArts
+// entry reporting ActionMerged (guarded by the same verifyFileUnchanged
+// check, then writeBoundAgent, which preserves the file's own mode), then
+// snippetArt (when hasSnippet, and it reports ActionCreated or
+// ActionMerged), then configArt last with configBody as its bytes — the
+// plain ConfigFile() or, under WithAgents, ConfigFileWithRoles() — into
+// res's own Created or Modified list — Created for ActionCreated, Modified
+// for ActionMerged, since a merge rewrites bytes an existing file already
+// held. A write failure is wrapped in ErrPartialWrite iff at least one
+// earlier write already landed in this same call.
+func apply(
+	res Result, featureArt Artifact, pluginArts []pluginArtifact, boundAgentArts []boundAgentArtifact,
+	snippetArt snippetArtifact, hasSnippet bool, configArt Artifact, configBody []byte,
+) (Result, error) {
 	var wroteSomething bool
 
 	if featureArt.Action == ActionCreated {
@@ -491,6 +526,31 @@ func apply(res Result, featureArt Artifact, pluginArts []pluginArtifact, snippet
 			res.Modified = append(res.Modified, p.Path)
 		}
 
+		wroteSomething = true
+	}
+
+	for _, ba := range boundAgentArts {
+		if ba.Action != ActionMerged {
+			continue
+		}
+
+		if err := verifyFileUnchanged(ba.Path, true, ba.existing, "brief init --edit-agents"); err != nil {
+			if wroteSomething {
+				return res, markPartial(err)
+			}
+
+			return Result{}, err
+		}
+
+		if err := writeBoundAgent(ba.Path, ba.edited, ba.perm); err != nil {
+			if wroteSomething {
+				return res, markPartial(err)
+			}
+
+			return Result{}, err
+		}
+
+		res.Modified = append(res.Modified, ba.Path)
 		wroteSomething = true
 	}
 

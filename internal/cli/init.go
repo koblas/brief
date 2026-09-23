@@ -33,7 +33,9 @@ claude-code install also writes a "brief-workflow" skill under
 ".claude/skills/brief-workflow/", which agents preload by listing it in
 their frontmatter "skills:". init never edits an agent file of yours by
 default; stderr instead lists each planner or implementer bound in
-".brief.yaml" whose agent lacks it. Writes
+".brief.yaml" whose agent lacks it. --edit-agents adds it to those agents'
+"skills:" lists, for agent files under ".claude/agents/" only; one under
+"~/.claude" is always left for you to edit. Writes
 ".brief.yaml" with every key present but commented out, documenting each
 setting in place (live under --with-agents only for "roles:" and its
 three children, when this run creates the file), and creates the
@@ -251,14 +253,32 @@ func unwrittenLine(artifacts []setup.PrintArtifact) string {
 	return "printed only, no files changed; apply the output above by hand, or rerun without --print"
 }
 
+// editAgentsNothingToEditLine is --edit-agents' own exit-0 stderr line
+// (Surface & Copy), minus the "brief init: " prefix, rendered when editAgents
+// is set and res.Artifacts carries no KindBoundAgent row — text mode only,
+// including --dry-run and --print, never --json.
+const editAgentsNothingToEditLine = `--edit-agents: no planner or implementer bound to an agent under .claude/agents; nothing to edit`
+
+// hasBoundAgentArtifact reports whether artifacts carries a
+// setup.KindBoundAgent row.
+func hasBoundAgentArtifact(artifacts []setup.Artifact) bool {
+	for _, a := range artifacts {
+		if a.Kind == setup.KindBoundAgent {
+			return true
+		}
+	}
+
+	return false
+}
+
 // runInit implements "brief init [--host <name>] [--no-hook]
-// [--with-agents] [--dry-run | --print] [--force] [--json]"; rest is its
-// positional arguments, flags already parsed away and must be empty. host
-// is "" when --host was not given, passed through unchanged to
+// [--with-agents] [--edit-agents] [--dry-run | --print] [--force] [--json]";
+// rest is its positional arguments, flags already parsed away and must be
+// empty. host is "" when --host was not given, passed through unchanged to
 // setup.InitRequest.Host — setup.Init treats "" as "detect" (R8) rather
 // than defaulting it here. extraSetupOpts threads a test's own
 // setup.WithHomeDir override (withSetupOpts) to setup.NewServer.
-func runInit(ctx context.Context, wd string, rest []string, host string, noHook, withAgents, dryRun, printOnly, force bool, out reporter, extraSetupOpts ...setup.Option) error {
+func runInit(ctx context.Context, wd string, rest []string, host string, noHook, withAgents, editAgents, dryRun, printOnly, force bool, out reporter, extraSetupOpts ...setup.Option) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief init: too many arguments; run '%s'", initInvocation))
 	}
@@ -269,10 +289,14 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 
 	srv := setup.NewServer(extraSetupOpts...)
 
-	res, err := srv.Init(ctx, wd, setup.InitRequest{Host: host, NoHook: noHook, WithAgents: withAgents, DryRun: dryRun, Force: force, Print: printOnly})
+	res, err := srv.Init(ctx, wd, setup.InitRequest{Host: host, NoHook: noHook, WithAgents: withAgents, EditAgents: editAgents, DryRun: dryRun, Force: force, Print: printOnly})
 	if err != nil {
 		if errors.Is(err, setup.ErrAgentsNeedHost) {
 			return out.usageError(fmt.Sprintf("brief init: --with-agents requires --host claude-code; run '%s --with-agents'", initInvocation))
+		}
+
+		if errors.Is(err, setup.ErrEditAgentsNeedHost) {
+			return out.usageError(fmt.Sprintf("brief init: --edit-agents requires --host claude-code; run '%s --edit-agents'", initInvocation))
 		}
 
 		if errors.Is(err, setup.ErrUnknownHost) {
@@ -314,6 +338,11 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 
 	if printOnly {
 		renderPrint(out.stdout, wd, res.Print)
+
+		if editAgents && !hasBoundAgentArtifact(res.Artifacts) {
+			fmt.Fprintf(out.stderr, "brief init: %s\n", editAgentsNothingToEditLine)
+		}
+
 		fmt.Fprintf(out.stderr, "brief init: %s\n", unwrittenLine(res.Print))
 
 		return nil
@@ -329,6 +358,10 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 		for _, line := range res.RolesToAdd {
 			fmt.Fprintln(out.stderr, line)
 		}
+	}
+
+	if editAgents && !hasBoundAgentArtifact(res.Artifacts) {
+		fmt.Fprintf(out.stderr, "brief init: %s\n", editAgentsNothingToEditLine)
 	}
 
 	if len(res.AgentsMissingSkill) > 0 {

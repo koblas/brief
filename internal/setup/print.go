@@ -37,13 +37,20 @@ type PrintArtifact struct {
 // leave alone, so the adopter still needs the block's own bytes to add by
 // hand. configBody is the variant apply would write (ConfigFile, or under
 // WithAgents ConfigFileWithRoles); writeArts supplies every plugin and
-// agent file's own render body, keyed by path; the snippet's own body
-// always comes from artifact.SnippetBlock(dir), not from writeArts. The
-// result is never nil.
-func printArtifacts(artifacts []Artifact, configBody []byte, writeArts []pluginArtifact, snippetArt snippetArtifact) []PrintArtifact {
+// agent file's own render body, keyed by path; boundAgentArts supplies
+// every KindBoundAgent row's own inserted or rewritten line (the whole
+// file's bytes are never printed for one, only that line); the snippet's
+// own body always comes from artifact.SnippetBlock(dir), not from
+// writeArts. The result is never nil.
+func printArtifacts(artifacts []Artifact, configBody []byte, writeArts []pluginArtifact, boundAgentArts []boundAgentArtifact, snippetArt snippetArtifact) []PrintArtifact {
 	bodies := make(map[string][]byte, len(writeArts))
 	for _, w := range writeArts {
 		bodies[w.Path] = artifact.Render(w.renderKind)
+	}
+
+	boundAgentLines := make(map[string]string, len(boundAgentArts))
+	for _, ba := range boundAgentArts {
+		boundAgentLines[ba.Path] = ba.line
 	}
 
 	out := make([]PrintArtifact, 0, len(artifacts))
@@ -77,6 +84,8 @@ func printArtifacts(artifacts []Artifact, configBody []byte, writeArts []pluginA
 			// Never reached: the feature root is excluded above.
 		case KindPlugin, KindHook, KindSkill, KindAgent:
 			body = bodies[a.Path]
+		case KindBoundAgent:
+			body = []byte(boundAgentLines[a.Path])
 		}
 
 		out = append(out, PrintArtifact{Path: a.Path, Action: action, Body: string(body)})

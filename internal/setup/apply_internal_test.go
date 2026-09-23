@@ -43,7 +43,7 @@ func Test_apply_refuses_when_CLAUDE_md_changed_since_planning(t *testing.T) {
 	}
 	configArt := Artifact{Kind: KindConfig, Path: filepath.Join(wd, ".brief.yaml"), Action: ActionUnchanged}
 
-	_, err := apply(res, featureArt, nil, snippetArt, true, configArt, nil)
+	_, err := apply(res, featureArt, nil, nil, snippetArt, true, configArt, nil)
 
 	require.ErrorIs(t, err, ErrConcurrentEdit)
 
@@ -82,7 +82,7 @@ func Test_apply_wraps_ErrPartialWrite_when_an_earlier_write_already_landed(t *te
 	}
 	configArt := Artifact{Kind: KindConfig, Path: filepath.Join(wd, ".brief.yaml"), Action: ActionUnchanged}
 
-	_, err := apply(res, featureArt, nil, snippetArt, true, configArt, nil)
+	_, err := apply(res, featureArt, nil, nil, snippetArt, true, configArt, nil)
 
 	require.ErrorIs(t, err, ErrConcurrentEdit)
 	require.ErrorIs(t, err, ErrPartialWrite)
@@ -129,7 +129,7 @@ func Test_apply_refuses_an_older_plugin_file_changed_since_planning(t *testing.T
 			existing:   staleBytes,
 		}}
 
-		_, err := apply(res, featureArt, pluginArts, snippetArtifact{}, false, configArt, nil)
+		_, err := apply(res, featureArt, pluginArts, nil, snippetArtifact{}, false, configArt, nil)
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 
@@ -147,7 +147,7 @@ func Test_apply_refuses_an_older_plugin_file_changed_since_planning(t *testing.T
 			existing:   staleBytes,
 		}}
 
-		out, err := apply(res, featureArt, pluginArts, snippetArtifact{}, false, configArt, nil)
+		out, err := apply(res, featureArt, pluginArts, nil, snippetArtifact{}, false, configArt, nil)
 
 		require.NoError(t, err)
 		assert.Contains(t, out.Modified, plannerPath)
@@ -156,6 +156,38 @@ func Test_apply_refuses_an_older_plugin_file_changed_since_planning(t *testing.T
 		require.NoError(t, readErr)
 		assert.Equal(t, artifact.AgentPlanner(), body)
 	})
+}
+
+// Test_apply_refuses_a_bound_agent_changed_since_planning pins the same
+// read-modify-write guard for a boundAgentArts entry (an --edit-agents
+// merge, planning-time bytes carried on boundAgentArtifact.existing): the
+// file on disk now holds something else, so apply refuses, wrapping
+// ErrConcurrentEdit, and the file's own bytes are unchanged afterward,
+// proving apply never reached writeBoundAgent.
+func Test_apply_refuses_a_bound_agent_changed_since_planning(t *testing.T) {
+	wd := t.TempDir()
+	agentPath := filepath.Join(wd, "developer.md")
+	require.NoError(t, os.WriteFile(agentPath, []byte("edited after planning"), 0o600))
+
+	res := Result{Created: []string{}, Modified: []string{}, Removed: []string{}}
+	featureArt := Artifact{Kind: KindFeatureRoot, Path: filepath.Join(wd, "docs", "specifications"), Action: ActionUnchanged}
+	configArt := Artifact{Kind: KindConfig, Path: filepath.Join(wd, ".brief.yaml"), Action: ActionUnchanged}
+
+	boundAgentArts := []boundAgentArtifact{{
+		Kind: KindBoundAgent, Path: agentPath, Action: ActionMerged, Detail: "brief-workflow added to skills",
+		existing: []byte("stale planning-time bytes"),
+		edited:   []byte("stale planning-time bytes\nskills: [brief-workflow]"),
+		line:     "skills: [brief-workflow]",
+		perm:     0o600,
+	}}
+
+	_, err := apply(res, featureArt, nil, boundAgentArts, snippetArtifact{}, false, configArt, nil)
+
+	require.ErrorIs(t, err, ErrConcurrentEdit)
+
+	body, readErr := os.ReadFile(agentPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "edited after planning", string(body))
 }
 
 // Test_applyUninstall_refuses_when_CLAUDE_md_changed_since_planning is

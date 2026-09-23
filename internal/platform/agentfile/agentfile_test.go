@@ -134,8 +134,8 @@ func Test_find_decodes_skills_and_omit_claude_md(t *testing.T) {
 		wantOmitClaudeMd bool
 	}{
 		{
-			name: "block-list skills",
-			body: "---\nname: developer\nskills:\n  - brief-workflow\n  - other-skill\n---\n\nbody\n",
+			name:       "block-list skills",
+			body:       "---\nname: developer\nskills:\n  - brief-workflow\n  - other-skill\n---\n\nbody\n",
 			wantSkills: []string{"brief-workflow", "other-skill"},
 		},
 		{
@@ -198,6 +198,32 @@ func Test_find_still_resolves_an_agent_whose_skills_or_omit_claude_md_is_malform
 			assert.False(t, defs[0].Frontmatter.OmitClaudeMd)
 		})
 	}
+}
+
+// Test_parse_decodes_frontmatter_from_bytes pins Parse's own contract
+// (S07): the bytes-level twin of Load, for a caller (setup's own bound-agent
+// edit path) that already holds an agent file's own content in memory
+// rather than a path — it decodes the same Frontmatter, loose Skills
+// included, that Load returns for the identical bytes on disk, and errors
+// the same way Load does on a missing closing delimiter.
+func Test_parse_decodes_frontmatter_from_bytes(t *testing.T) {
+	body := "---\nname: planner\nskills: [\"brief-workflow\"]\n---\n\nbody\n"
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.md")
+	writeAgentFile(t, path, body)
+
+	want, loadErr := agentfile.Load(path)
+	require.NoError(t, loadErr)
+
+	got, err := agentfile.Parse([]byte(body))
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+
+	t.Run("errors on missing closing delimiter", func(t *testing.T) {
+		_, err := agentfile.Parse([]byte("---\nname: planner\n\nno closing delimiter here\n"))
+		require.Error(t, err)
+	})
 }
 
 // Test_load_decodes_one_agent_files_frontmatter pins Load's own contract

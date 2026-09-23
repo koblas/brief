@@ -82,6 +82,26 @@ func Test_init_reports_bound_agents_missing_the_workflow_skill(t *testing.T) {
 		assert.Equal(t, body, string(after))
 	})
 
+	t.Run("control: the identical fixture with EditAgents changes the file", func(t *testing.T) {
+		wd := t.TempDir()
+		home := t.TempDir()
+		writeConfigWithRoles(t, wd, "", "developer", "")
+
+		path := filepath.Join(wd, ".claude", "agents", "developer.md")
+		body := "---\nname: developer\n---\n\nbody\n"
+		writeMissingSkillAgent(t, path, body)
+
+		srv := newServerWithHome(t, home)
+		res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, EditAgents: true})
+		require.NoError(t, err)
+
+		assert.Empty(t, res.AgentsMissingSkill)
+
+		after, readErr := os.ReadFile(path)
+		require.NoError(t, readErr)
+		assert.NotEqual(t, body, string(after), `EditAgents must actually change the file — proving the base test's own "left untouched" claim is falsifiable`)
+	})
+
 	t.Run("control: the same agent already carrying the skill is not listed", func(t *testing.T) {
 		wd := t.TempDir()
 		home := t.TempDir()

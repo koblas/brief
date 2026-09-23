@@ -121,6 +121,16 @@ func Load(path string) (Frontmatter, error) {
 	return decode(body)
 }
 
+// Parse decodes body's own YAML frontmatter into a Frontmatter — the
+// bytes-level twin of Load, for a caller that already holds an agent file's
+// own content in memory (setup's own bound-agent edit path) rather than a
+// path. It decodes through decode, the same loose Skills/OmitClaudeMd rule
+// Load and findIn apply, and returns the same error Load would for the
+// identical bytes.
+func Parse(body []byte) (Frontmatter, error) {
+	return decode(body)
+}
+
 // Definition is one agent file whose frontmatter "name:" matched Find's
 // own query: Path is absolute, Scope names which root it came from, and
 // Frontmatter carries its decoded fields.
