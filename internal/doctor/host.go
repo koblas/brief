@@ -209,14 +209,15 @@ func relPathsWithOrigin(states []integrationFileState, origin artifact.Origin) [
 // with fix olderFix; OriginEdited is OK "edited locally" + suffix;
 // OriginCurrent (and any other value) is OK "installed", plain. suffix is
 // appended verbatim — a multi-file row (host-plugin, host-agents) passes
-// ": <rel, ...>", a single-subject row (host-hook, host-snippet) passes "".
-// This is the one place every host row's own origin precedence lives, so
-// the four can never drift from each other. The planner and implementer
-// agent renders are the one pair whose own older-digest list is non-empty
-// (Rule 6), so host-agents' own OriginOlder arm is reachable through a real
-// fixture today; host-plugin's, host-hook's and host-snippet's own
-// OriginOlder arms still need host_internal_test.go's direct, synthetic
-// call, since every other Kind's older-digest list still ships empty.
+// ": <rel, ...>", a single-subject row (host-hook, host-skill, host-snippet)
+// passes "". This is the one place every host row's own origin precedence
+// lives, so the five can never drift from each other. The planner and
+// implementer agent renders are the one pair whose own older-digest list
+// is non-empty (Rule 6), so host-agents' own OriginOlder arm is reachable
+// through a real fixture today; host-plugin's, host-hook's, host-skill's
+// and host-snippet's own OriginOlder arms still need
+// host_internal_test.go's direct, synthetic call, since every other Kind's
+// older-digest list still ships empty.
 func originRow(origin artifact.Origin, olderFix, suffix string) (Severity, string, *string) {
 	switch origin {
 	case artifact.OriginOlder:
@@ -232,7 +233,12 @@ func originRow(origin artifact.Origin, olderFix, suffix string) (Severity, strin
 
 // anyIntegrationFilePresent reports whether any file of h.Plugin(true) ∪
 // h.Agents() is present under root, of any file type — the predicate
-// host-plugin's and host-hook's own SKIP rows share (R13).
+// host-plugin's, host-hook's and host-skill's own SKIP rows share (R13).
+// h.Skills() is deliberately excluded: the skill is never an install
+// signal (Rule 1) — uninstall can leave an edited SKILL.md behind after
+// every other file is removed, and counting it here would flip
+// host-plugin back to ERROR "incomplete", host-hook to WARN and env-path
+// to ERROR after a clean uninstall.
 func anyIntegrationFilePresent(root string, h host.Host) bool {
 	return anyPresent(probeIntegrationFiles(root, h.Plugin(true))) || anyPresent(probeIntegrationFiles(root, h.Agents()))
 }
@@ -858,9 +864,67 @@ func (s *Server) rolesCheck(root, nearest string, bindings [3]roleBinding) Check
 	return Check{ID: "roles", Severity: SeverityOK, Path: nearest, Detail: detail}
 }
 
+// hostSkillMissingDetail is host-skill's own WARN detail when the skill
+// file is absent while some other Claude Code integration file
+// (Plugin(true) ∪ Agents()) is present: a bound role names the skill by
+// its bare "brief-workflow" name and can never preload a file that is not
+// there.
+const hostSkillMissingDetail = "not installed; bound agents cannot preload it"
+
+// skillFileOf returns h.Skills()'s own single entry, host-skill's subject
+// file — never hardcoded, so a future second Skills() entry surfaces here
+// rather than being silently ignored by a row that only checks the first.
+func skillFileOf(h host.Host) host.File {
+	files := h.Skills()
+	if len(files) == 0 {
+		return host.File{}
+	}
+
+	return files[0]
+}
+
+// hostSkillRow builds host-skill's own row from state — already probed by
+// probeIntegrationFile against skillFileOf(h) — and installed, whether any
+// Plugin(true) ∪ Agents() file is present: absent while nothing else is
+// installed is SKIP "not installed"; absent while a plugin or agent file
+// is present is WARN (hostSkillMissingDetail); unreadable is WARN; not a
+// regular file is ERROR, the one new ERROR arm Rule 7 grants this row;
+// everything else — present, regular, and classified by origin — goes
+// through originRow, single-subject (no suffix), the same "run 'brief
+// init'" fix host-hook and host-snippet share. A present skill always
+// classifies itself, whatever installed carries: only the absent arm
+// consults it.
+func hostSkillRow(wd, root string, state integrationFileState, installed bool) Check {
+	if !state.present {
+		if !installed {
+			return Check{ID: "host-skill", Severity: SeveritySkip, Path: state.path, Detail: "not installed", Fix: new(runInitClaudeCode)}
+		}
+
+		return Check{ID: "host-skill", Severity: SeverityWarn, Path: state.path, Detail: hostSkillMissingDetail, Fix: new(runInit)}
+	}
+
+	if state.unreadable {
+		return Check{ID: "host-skill", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(wd, root, state.path, state.statFailed))}
+	}
+
+	if !state.regular {
+		return Check{ID: "host-skill", Severity: SeverityError, Path: state.path, Detail: "not a regular file", Fix: new(runInit)}
+	}
+
+	sev, detail, fix := originRow(state.origin, runInit, "")
+
+	return Check{ID: "host-skill", Severity: sev, Path: state.path, Detail: detail, Fix: fix}
+}
+
+// hostSkillCheck probes skillFileOf(h) under root and builds host-skill's
+// own row from the result via hostSkillRow.
+func hostSkillCheck(wd, root string, h host.Host, installed bool) Check {
+	return hostSkillRow(wd, root, probeIntegrationFile(root, skillFileOf(h)), installed)
+}
+
 // runInit is short for "run 'brief init'" — the fix text repeated across
-// host-plugin, host-hook and host-snippet rows whenever a plain re-run
-// would repair the finding.
+// host-plugin, host-hook, host-skill and host-snippet rows whenever a
+// plain re-run would repair the finding.
 const runInit = "run 'brief init'"
 
 // runInitClaudeCode is the SKIP fix every "not installed" host row shares.

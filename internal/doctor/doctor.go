@@ -20,42 +20,45 @@ const (
 	// way that does not itself block "brief check" or "brief start" — an
 	// un-inited repository, an ancestor config shadowed, brief on PATH at
 	// a different version than the one running, a host-plugin/host-hook/
-	// host-snippet/host-agents file installed by an older brief release, a
-	// hook file missing while the rest of the plugin is installed (doctor
-	// cannot tell that apart from --no-hook), a host-agents file missing
-	// or not regular, or a roles position unbound or unresolved (roles are
-	// reported, never enforced).
+	// host-skill/host-snippet/host-agents file installed by an older
+	// brief release, a hook file missing while the rest of the plugin is
+	// installed (doctor cannot tell that apart from --no-hook), a
+	// host-agents file missing or not regular, a host-skill file missing
+	// while some other integration file is installed (a bound role can
+	// never preload a skill that is not there), or a roles position
+	// unbound or unresolved (roles are reported, never enforced).
 	SeverityWarn Severity = "WARN"
 	// SeverityError marks a check whose subject would make another
 	// command refuse or misbehave: an unparseable config, an invalid
 	// value, a feature root that does not exist, is not a directory, or
 	// is not readable or writable; a host-plugin file missing, not a
 	// regular file, or unreadable, or a host-snippet file missing or not a
-	// regular file, while some other integration file is installed; brief
-	// missing from PATH while the integration is installed, since the
-	// hook that runs "brief check" can never find it.
+	// regular file, while some other integration file is installed; a
+	// host-skill file present but not a regular file; brief missing from
+	// PATH while the integration is installed, since the hook that runs
+	// "brief check" can never find it.
 	SeverityError Severity = "ERROR"
 	// SeveritySkip marks a check that could not run because an earlier
 	// check's own subject was missing or invalid — config-values and
 	// root-dir when config-parse itself failed, or the whole config
 	// family when no ".brief.yaml" exists at all — or because its own
 	// subject was never installed at all: host-plugin, host-hook,
-	// host-snippet and host-agents when no file of their own kind is
-	// present anywhere, and roles when no config was found or every
-	// binding is empty.
+	// host-skill, host-snippet and host-agents when no file of their own
+	// kind is present anywhere, and roles when no config was found or
+	// every binding is empty.
 	SeveritySkip Severity = "SKIP"
 )
 
 // Check is one row of a Report: ID is doctor's own stable id (config-file,
 // config-parse, config-values, config-shadow, root-dir, env-git, env-path,
-// host-plugin, host-hook, host-snippet, host-agents, roles), Severity is
-// this row's urgency, Path is the absolute path this row concerns ("" when
-// it names none), Detail is the English explanation, and Fix, when
-// non-nil, names the action that would resolve it. A SKIP row carries a
-// Fix too when its subject was simply never installed (naming the install
-// command); one whose subject could not be determined at all (root-dir or
-// roles behind an unparseable config) carries a nil Fix, the same as every
-// OK row.
+// host-plugin, host-hook, host-skill, host-snippet, host-agents, roles),
+// Severity is this row's urgency, Path is the absolute path this row
+// concerns ("" when it names none), Detail is the English explanation, and
+// Fix, when non-nil, names the action that would resolve it. A SKIP row
+// carries a Fix too when its subject was simply never installed (naming
+// the install command); one whose subject could not be determined at all
+// (root-dir or roles behind an unparseable config) carries a nil Fix, the
+// same as every OK row.
 type Check struct {
 	ID       string
 	Severity Severity
@@ -185,7 +188,8 @@ func NewServer(opts ...Option) *Server {
 
 // Diagnose reports wd's setup health: config-file, config-parse,
 // config-values, config-shadow, root-dir, env-git, env-path, host-plugin,
-// host-hook, host-snippet, host-agents and roles, in that fixed order. No
+// host-hook, host-skill, host-snippet, host-agents and roles, in that
+// fixed order. No
 // ".brief.yaml" anywhere reports config-file as WARN (fix "brief init")
 // and skips the rest of the config family — an un-inited repository is
 // not itself a fault. A found config that fails to decode reports
@@ -196,7 +200,7 @@ func NewServer(opts ...Option) *Server {
 // feature directory. config-shadow is always OK: a shadowed ancestor
 // config is informational, not a fault.
 //
-// The install root the five host rows and roles check against is
+// The install root the six host rows and roles check against is
 // config.LocateInRepo's own directory whenever a config was found —
 // parseable or not — else wd; a config found above the nearest enclosing
 // git repository (walked from wd) is treated as though none existed, the
@@ -267,6 +271,7 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 		s.checkEnvPath(integrationInstalled),
 		hostPluginCheck(absWd, root, h, filesInstalled),
 		hostHookCheck(absWd, root, h, filesInstalled),
+		hostSkillCheck(absWd, root, h, filesInstalled),
 		hostSnippetCheck(absWd, root, snippetStates, dir, dirKnown),
 		hostAgentsCheck(absWd, root, h),
 		rolesCheck,

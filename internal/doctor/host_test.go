@@ -750,6 +750,131 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 	})
 }
 
+// Test_diagnose_classifies_host_skill pins host-skill's own precedence:
+// nothing installed anywhere is SKIP; the skill missing while some other
+// Claude Code integration file is installed is WARN, since a bound role
+// can never preload a skill that is not there; an unreadable skill is
+// WARN; a skill path that is a directory is ERROR — Rule 7's one new
+// ERROR arm; an edited skill is OK "edited locally"; a current one,
+// alongside a full install, is OK "installed"; and the skill alone, with
+// no plugin or agent file present at all, still classifies itself OK
+// "installed" rather than SKIP — only an absent skill defers to whether
+// anything else is installed.
+func Test_diagnose_classifies_host_skill(t *testing.T) {
+	skillPath := host.WorkflowSkillDir + "/SKILL.md"
+
+	runHostCheckCases(t, []hostCheckCase{
+		{
+			name:           "nothing installed anywhere",
+			setup:          func(t *testing.T, _ string, _ host.Host) { t.Helper() },
+			checkID:        "host-skill",
+			wantSeverity:   doctor.SeveritySkip,
+			wantDetail:     "not installed",
+			wantFix:        new(runInitClaudeCode),
+			wantPathSuffix: skillPath,
+		},
+		{
+			name: "plugin files present and skill absent",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				for _, f := range h.Plugin(true) {
+					writeHostArtifact(t, wd, f)
+				}
+			},
+			checkID:        "host-skill",
+			wantSeverity:   doctor.SeverityWarn,
+			wantDetail:     "not installed; bound agents cannot preload it",
+			wantFix:        new(runInit),
+			wantPathSuffix: skillPath,
+		},
+		{
+			name: "skill mode 0o000 beside the plugin",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				for _, f := range h.Plugin(true) {
+					writeHostArtifact(t, wd, f)
+				}
+
+				var skillFile host.File
+
+				for _, f := range h.Skills() {
+					writeHostArtifact(t, wd, f)
+					skillFile = f
+				}
+
+				chmodUnreadable(t, filepath.Join(wd, filepath.FromSlash(skillFile.RelPath)))
+			},
+			checkID:        "host-skill",
+			wantSeverity:   doctor.SeverityWarn,
+			wantDetail:     "not readable (permission denied)",
+			wantFix:        new("chmod +r " + skillPath + ", then " + runInitClaudeCode),
+			wantPathSuffix: skillPath,
+		},
+		{
+			name: "skill path is a directory",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				writeHostDir(t, wd, skillPath)
+			},
+			checkID:        "host-skill",
+			wantSeverity:   doctor.SeverityError,
+			wantDetail:     "not a regular file",
+			wantFix:        new(runInit),
+			wantPathSuffix: skillPath,
+		},
+		{
+			name: "the skill was edited locally",
+			setup: func(t *testing.T, wd string, _ host.Host) {
+				t.Helper()
+
+				writeHostFile(t, wd, skillPath, []byte("custom skill body\n"))
+			},
+			checkID:        "host-skill",
+			wantSeverity:   doctor.SeverityOK,
+			wantDetail:     "edited locally",
+			wantFix:        nil,
+			wantPathSuffix: skillPath,
+		},
+		{
+			name: "the skill is current, alongside a full install",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				for _, f := range h.Plugin(true) {
+					writeHostArtifact(t, wd, f)
+				}
+
+				for _, f := range h.Skills() {
+					writeHostArtifact(t, wd, f)
+				}
+			},
+			checkID:        "host-skill",
+			wantSeverity:   doctor.SeverityOK,
+			wantDetail:     "installed",
+			wantFix:        nil,
+			wantPathSuffix: skillPath,
+		},
+		{
+			name: "the skill alone, with no plugin or agent file",
+			setup: func(t *testing.T, wd string, h host.Host) {
+				t.Helper()
+
+				for _, f := range h.Skills() {
+					writeHostArtifact(t, wd, f)
+				}
+			},
+			checkID:        "host-skill",
+			wantSeverity:   doctor.SeverityOK,
+			wantDetail:     "installed",
+			wantFix:        nil,
+			wantPathSuffix: skillPath,
+		},
+	})
+}
+
 // Test_diagnose_host_plugin_hook_agents_unreadable_fix_is_relative_to_wd
 // pins the same wd-vs-root split fix pass 8 gave host-snippet's own "not
 // readable" fix (Test_diagnose_host_snippet_unreadable_fix_is_relative_to_wd)

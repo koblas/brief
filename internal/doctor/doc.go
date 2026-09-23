@@ -4,12 +4,13 @@
 // directory, is readable and writable), its host environment (a ".git"
 // found by walking up from the working directory, and whether the "brief"
 // binary on PATH matches the one currently running), and its Claude Code
-// integration (the skills-directory plugin, its hook, the CLAUDE.md
-// instruction block, the three role agents, and whether every bound role
-// resolves to an agent file). It never reads a feature's own contents —
-// that is internal/assemble's Check, the backstop for "brief check" —
-// doctor answers only "is brief set up to run here at all", the question
-// "brief doctor" exists to answer before "brief check" ever runs.
+// integration (the skills-directory plugin, its hook, the brief-workflow
+// skill, the CLAUDE.md instruction block, the three role agents, and
+// whether every bound role resolves to an agent file). It never reads a
+// feature's own contents — that is internal/assemble's Check, the
+// backstop for "brief check" — doctor answers only "is brief set up to
+// run here at all", the question "brief doctor" exists to answer before
+// "brief check" ever runs.
 //
 // Diagnose is the one entry point: it returns a Report, one Check per
 // question, in a fixed order, and never refuses — every fault, including
@@ -17,7 +18,7 @@
 // reported as a Check, so a broken setup is diagnosable rather than
 // merely rejected. Only a working directory that does not exist at all
 // keeps doctor from running; a caller resolving one from the real
-// filesystem (os.Getwd) never sees that case. The five host-integration
+// filesystem (os.Getwd) never sees that case. The six host-integration
 // rows and roles check the install root config.Locate resolves — its
 // directory whenever a ".brief.yaml" was found there, parseable or not,
 // else wd — against a Claude Code host with no detection of its own.
