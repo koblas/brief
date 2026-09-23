@@ -1291,14 +1291,19 @@ type rolesCase struct {
 	wantFix      *string
 }
 
-// Test_diagnose_classifies_roles pins roles' own resolution rules (R7):
-// no config, or every binding empty, is SKIP "no roles bound"; an
+// Test_diagnose_classifies_roles pins roles' own resolution rules (R7,
+// Rule 5): no config, or every binding empty, is SKIP "no roles bound"; an
 // unparseable config is SKIP naming why; a bound "brief:<name>" resolves
 // through the plugin agent file or a project ".claude/agents/<name>.md"
-// override; a bound bare "<name>" resolves through the project or an
-// injected home's own ".claude/agents/<name>.md"; any other "<plugin>:<name>"
-// counts as bound but unverified; any unbound or unresolved position is
-// WARN, never ERROR; everything bound and resolved is OK.
+// override; a bound bare "<name>" resolves through a project or injected
+// home agent file under ".claude/agents/" whose frontmatter "name:"
+// matches; any other "<plugin>:<name>" counts as bound but unverified; any
+// unbound or unresolved position is WARN, never ERROR; everything bound
+// and resolved is OK. Test_diagnose_roles_resolves_by_frontmatter_name
+// covers the frontmatter rule's own nested-layout, shadowing, duplicate
+// and user-level cases; this test's own bare-name fixtures stay flat,
+// named after the bound role, with frontmatter added only so they still
+// resolve.
 func Test_diagnose_classifies_roles(t *testing.T) {
 	cases := []rolesCase{
 		{
@@ -1374,7 +1379,7 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 				writePluginAgent(t, wd, "planner")
 				writePluginAgent(t, wd, "implementer")
 				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude", "agents"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "agents", "my-reviewer.md"), []byte("custom reviewer\n"), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "agents", "my-reviewer.md"), []byte("---\nname: my-reviewer\n---\n\ncustom reviewer\n"), 0o600))
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound",
@@ -1392,7 +1397,7 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 				t.Helper()
 				home := t.TempDir()
 				require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "agents"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "agents", "my-reviewer.md"), []byte("custom reviewer\n"), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "agents", "my-reviewer.md"), []byte("---\nname: my-reviewer\n---\n\ncustom reviewer\n"), 0o600))
 				return home
 			},
 			wantSeverity: doctor.SeverityOK,
@@ -1441,6 +1446,159 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 			check := findCheck(t, report, "roles")
 			assert.Equal(t, c.wantSeverity, check.Severity)
 			assert.Contains(t, check.Detail, c.wantDetail)
+			assert.Equal(t, c.wantFix, check.Fix)
+		})
+	}
+}
+
+// rolesFrontmatterCase is one row of
+// Test_diagnose_roles_resolves_by_frontmatter_name: unlike rolesCase,
+// wantDetail is asserted for exact equality, since these cases pin the
+// literal wording of the new duplicate WARN and user-level/not-verified OK
+// suffixes rather than just the presence of a substring.
+type rolesFrontmatterCase struct {
+	name         string
+	setup        func(t *testing.T, wd string)
+	home         func(t *testing.T) string
+	wantSeverity doctor.Severity
+	wantDetail   string
+	wantFix      *string
+}
+
+// writeAgentFrontmatter writes a minimal agent file at wd's relPath
+// declaring frontmatter "name: name".
+func writeAgentFrontmatter(t *testing.T, wd, relPath, name string) {
+	t.Helper()
+
+	path := filepath.Join(wd, filepath.FromSlash(relPath))
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("---\nname: "+name+"\n---\n\nbody\n"), 0o600))
+}
+
+// rolesUnresolvedFix is the WARN fix roles reports whenever any binding is
+// unbound, unresolved or duplicated (host.go's own rolesCheck).
+const rolesUnresolvedFix = "bind each role to an existing agent in .brief.yaml, or " + runInitWithAgents
+
+// Test_diagnose_roles_resolves_by_frontmatter_name pins Rule 5: a bare
+// binding matches frontmatter "name:" anywhere under ".claude/agents/"
+// (nested layout, any filename), a project definition shadows a
+// same-named "~/.claude/agents" one, a name defined twice under the
+// project's own ".claude/agents" WARNs naming both paths, and a
+// user-level-only resolution adds "; user-level: <role>".
+func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
+	cases := []rolesFrontmatterCase{
+		{
+			name: "a nested project agent resolves by frontmatter name, not filename",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "brief:planner", "developer", "brief:reviewer")
+				writePluginAgent(t, wd, "planner")
+				writePluginAgent(t, wd, "reviewer")
+				writeAgentFrontmatter(t, wd, ".claude/agents/developer/Agent.md", "developer")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "a filename match whose frontmatter name differs is not found",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
+				writePluginAgent(t, wd, "planner")
+				writePluginAgent(t, wd, "implementer")
+				writeAgentFrontmatter(t, wd, ".claude/agents/my-reviewer.md", "someone-else")
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "reviewer: my-reviewer not found",
+			wantFix:      new(rolesUnresolvedFix),
+		},
+		{
+			name: "a project definition shadows a same-named user definition, no suffix",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
+				writePluginAgent(t, wd, "planner")
+				writePluginAgent(t, wd, "implementer")
+				writeAgentFrontmatter(t, wd, ".claude/agents/team/y.md", "my-reviewer")
+			},
+			home: func(t *testing.T) string {
+				t.Helper()
+				home := t.TempDir()
+				writeAgentFrontmatter(t, home, ".claude/agents/team/x.md", "my-reviewer")
+				return home
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "control: the same user definition with no project file adds the user-level suffix",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
+				writePluginAgent(t, wd, "planner")
+				writePluginAgent(t, wd, "implementer")
+			},
+			home: func(t *testing.T) string {
+				t.Helper()
+				home := t.TempDir()
+				writeAgentFrontmatter(t, home, ".claude/agents/team/x.md", "my-reviewer")
+				return home
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound; user-level: reviewer",
+			wantFix:      nil,
+		},
+		{
+			name: "two project definitions of the same name WARN naming both paths",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
+				writePluginAgent(t, wd, "planner")
+				writePluginAgent(t, wd, "implementer")
+				writeAgentFrontmatter(t, wd, ".claude/agents/my-reviewer.md", "my-reviewer")
+				writeAgentFrontmatter(t, wd, ".claude/agents/team/r.md", "my-reviewer")
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "reviewer: my-reviewer defined 2 times under .claude/agents (.claude/agents/my-reviewer.md, .claude/agents/team/r.md)",
+			wantFix:      new(rolesUnresolvedFix),
+		},
+		{
+			name: "user-level and not-verified suffixes follow RoleBindings order",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "my-planner", "brief:implementer", "other:reviewer")
+				writePluginAgent(t, wd, "implementer")
+			},
+			home: func(t *testing.T) string {
+				t.Helper()
+				home := t.TempDir()
+				writeAgentFrontmatter(t, home, ".claude/agents/my-planner.md", "my-planner")
+				return home
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound; user-level: planner; not verified: reviewer",
+			wantFix:      nil,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := newHostFixture(t)
+			c.setup(t, wd)
+
+			home := t.TempDir()
+			if c.home != nil {
+				home = c.home(t)
+			}
+
+			srv := doctor.NewServer(doctor.WithHomeDir(func() (string, error) { return home, nil }))
+			report := srv.Diagnose(t.Context(), wd)
+
+			check := findCheck(t, report, "roles")
+			assert.Equal(t, c.wantSeverity, check.Severity)
+			assert.Equal(t, c.wantDetail, check.Detail)
 			assert.Equal(t, c.wantFix, check.Fix)
 		})
 	}

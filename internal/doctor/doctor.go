@@ -152,10 +152,12 @@ func WithVersion(v string) Option {
 
 // WithHomeDir overrides the function the roles check uses to find the
 // current user's home directory while resolving a bare `<name>` role
-// binding (R7) against `<home>/.claude/agents/<name>.md`. It defaults to
-// os.UserHomeDir; a test injects a fixed, empty directory so roles never
-// depends on the developer's own "~/.claude/agents". A home error, or home
-// returning "", means no home agents are ever found — never a refusal.
+// binding (Rule 5) against every "*.md" file under `<home>/.claude/agents/`
+// whose frontmatter `name:` matches, searched only when the repository's
+// own tree has none. It defaults to os.UserHomeDir; a test injects a
+// fixed, empty directory so roles never depends on the developer's own
+// "~/.claude/agents". A home error, or home returning "", means no home
+// agents are ever found — never a refusal.
 func WithHomeDir(fn func() (string, error)) Option {
 	return func(s *Server) { s.homeDir = fn }
 }

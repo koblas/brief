@@ -22,8 +22,8 @@
 // directory whenever a ".brief.yaml" was found there, parseable or not,
 // else wd — against a Claude Code host with no detection of its own.
 //
-// doctor imports internal/platform/{config,host,artifact} and the
-// standard library only, never internal/setup. Its own environment
+// doctor imports internal/platform/{agentfile,config,host,artifact} and
+// the standard library only, never internal/setup. Its own environment
 // seams — WithLookPath, WithExecutable, WithBinaryVersion, WithVersion,
 // WithHomeDir — let a caller substitute the PATH lookup, the running
 // binary's own path, its version, and the home directory a bare role

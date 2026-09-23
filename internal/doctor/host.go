@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/host"
 )
@@ -689,42 +690,67 @@ const (
 	roleUnverified
 )
 
-// resolveRoleBinding classifies value (a config.RoleBindings field) against
-// root and, for a bare name, an injected home (R7): "" is roleUnbound; a
-// "brief:<name>" binding is roleResolved when
-// "<root>/.claude/skills/brief/agents/<name>.md" or, overriding it,
-// "<root>/.claude/agents/<name>.md" is a regular file, roleUnresolved
-// otherwise; any other "<plugin>:<name>" is roleUnverified; a bare "<name>"
-// is roleResolved via "<root>/.claude/agents/<name>.md" or
-// "<home>/.claude/agents/<name>.md" (home errors, or an empty home, are
-// treated as no home directory at all), roleUnresolved otherwise.
-func (s *Server) resolveRoleBinding(root, value string) roleBindingResult {
+// roleResolution is resolveRoleBinding's own result: state classifies the
+// binding, path is the resolved file's own absolute path when state is
+// roleResolved (nil-string otherwise), and defs carries every
+// agentfile.Definition a bare-name binding's own agentfile.Find returned
+// — nil for a "brief:<name>", any other "<plugin>:<name>", or an unbound
+// or unresolved binding. rolesCheck derives the duplicate-definition WARN
+// and the "user-level:" OK suffix from defs; path exists so a later
+// consumer (S05's roles-skill) can read frontmatter from whichever file
+// actually resolved without re-deriving the "brief:*" filename rule.
+type roleResolution struct {
+	state roleBindingResult
+	path  string
+	defs  []agentfile.Definition
+}
+
+// resolveRoleBinding classifies value (a config.RoleBindings field)
+// against root and, for a bare name, an injected home (R7, Rule 5): "" is
+// roleUnbound; a "brief:<name>" binding is roleResolved via
+// "<root>/.claude/agents/<name>.md", overriding
+// "<root>/.claude/skills/brief/agents/<name>.md" when both are regular
+// files, roleUnresolved when neither is; any other "<plugin>:<name>" is
+// roleUnverified; a bare "<name>" is roleResolved when
+// agentfile.Find(root, home, name) returns at least one Definition (home
+// errors, or an empty home, are treated as no home directory at all),
+// roleUnresolved otherwise — path and defs then carry its first and every
+// result respectively, in the scope agentfile.Find chose (project agents
+// shadow a same-named user one entirely, never mixed).
+func (s *Server) resolveRoleBinding(root, value string) roleResolution {
 	if value == "" {
-		return roleUnbound
+		return roleResolution{state: roleUnbound}
 	}
 
 	if plugin, agent, ok := strings.Cut(value, ":"); ok {
 		if plugin != "brief" {
-			return roleUnverified
+			return roleResolution{state: roleUnverified}
 		}
 
-		if fileIsRegular(filepath.Join(root, host.PluginDir, "agents", agent+".md")) ||
-			fileIsRegular(filepath.Join(root, ".claude", "agents", agent+".md")) {
-			return roleResolved
+		overridePath := filepath.Join(root, ".claude", "agents", agent+".md")
+		pluginPath := filepath.Join(root, host.PluginDir, "agents", agent+".md")
+
+		switch {
+		case fileIsRegular(overridePath):
+			return roleResolution{state: roleResolved, path: overridePath}
+		case fileIsRegular(pluginPath):
+			return roleResolution{state: roleResolved, path: pluginPath}
+		default:
+			return roleResolution{state: roleUnresolved}
 		}
-
-		return roleUnresolved
 	}
 
-	if fileIsRegular(filepath.Join(root, ".claude", "agents", value+".md")) {
-		return roleResolved
+	home, err := s.homeDir()
+	if err != nil {
+		home = ""
 	}
 
-	if home, err := s.homeDir(); err == nil && home != "" && fileIsRegular(filepath.Join(home, ".claude", "agents", value+".md")) {
-		return roleResolved
+	defs := agentfile.Find(root, home, value)
+	if len(defs) == 0 {
+		return roleResolution{state: roleUnresolved}
 	}
 
-	return roleUnresolved
+	return roleResolution{state: roleResolved, path: defs[0].Path, defs: defs}
 }
 
 // fileIsRegular reports whether path exists and is a regular file,
@@ -755,30 +781,65 @@ func rolesCheckUnparseable(nearest string) Check {
 	return Check{ID: "roles", Severity: SeveritySkip, Path: nearest, Detail: ".brief.yaml did not parse"}
 }
 
+// duplicateDefinitionProblem returns roles' own duplicate-definition WARN
+// text when defs — a bare-name binding's own agentfile.Find results —
+// names more than one project-scope definition, or "" when there is at
+// most one, or when defs' own scope is ScopeUser: the duplicate WARN is
+// project scope only, matching its own copy's "under .claude/agents".
+// <rel> is root-relative and slash-separated; defs is already in lexical
+// walk order, so the message's own path order follows it unchanged.
+func duplicateDefinitionProblem(root, role, value string, defs []agentfile.Definition) string {
+	if len(defs) < 2 || defs[0].Scope != agentfile.ScopeProject {
+		return ""
+	}
+
+	rels := make([]string, 0, len(defs))
+
+	for _, d := range defs {
+		rel, err := filepath.Rel(root, d.Path)
+		if err != nil {
+			rel = d.Path
+		}
+
+		rels = append(rels, filepath.ToSlash(rel))
+	}
+
+	return fmt.Sprintf("%s: %s defined %d times under .claude/agents (%s)", role, value, len(defs), strings.Join(rels, ", "))
+}
+
 // rolesCheck builds roles' own row for a parsed config: every binding
-// empty is SKIP "no roles bound"; any unbound position or unresolved
-// binding is WARN, detail listing each ("planner unbound; reviewer:
-// brief:reviewer not found"), never ERROR (roles are reported, not
-// enforced); everything bound and resolved is OK "planner, implementer,
-// reviewer bound", with "not verified: <role>" appended for each
-// roleUnverified binding.
+// empty is SKIP "no roles bound"; any unbound position, unresolved
+// binding, or bare-name binding with more than one project-scope
+// definition is WARN, detail listing each problem in RoleBindings' own
+// order ("planner unbound; reviewer: brief:reviewer not found"), never
+// ERROR (roles are reported, not enforced); everything else bound and
+// resolved is OK "planner, implementer, reviewer bound", with one suffix
+// per role, in RoleBindings' own order: "user-level: <role>" for a bare
+// name resolved only through the injected home, "not verified: <role>"
+// for any other "<plugin>:<name>" binding.
 func (s *Server) rolesCheck(root, nearest string, bindings [3]roleBinding) Check {
 	if bindings[0].value == "" && bindings[1].value == "" && bindings[2].value == "" {
 		return Check{ID: "roles", Severity: SeveritySkip, Path: nearest, Detail: "no roles bound", Fix: new(runInitWithAgents)}
 	}
 
-	var problems, notVerified []string
+	var problems, suffixes []string
 
 	for _, b := range bindings {
-		switch s.resolveRoleBinding(root, b.value) {
+		res := s.resolveRoleBinding(root, b.value)
+
+		switch res.state {
 		case roleUnbound:
 			problems = append(problems, b.name+" unbound")
 		case roleUnresolved:
 			problems = append(problems, fmt.Sprintf("%s: %s not found", b.name, b.value))
 		case roleUnverified:
-			notVerified = append(notVerified, b.name)
+			suffixes = append(suffixes, "not verified: "+b.name)
 		case roleResolved:
-			// nothing to report
+			if dup := duplicateDefinitionProblem(root, b.name, b.value, res.defs); dup != "" {
+				problems = append(problems, dup)
+			} else if len(res.defs) > 0 && res.defs[0].Scope == agentfile.ScopeUser {
+				suffixes = append(suffixes, "user-level: "+b.name)
+			}
 		}
 	}
 
@@ -788,12 +849,9 @@ func (s *Server) rolesCheck(root, nearest string, bindings [3]roleBinding) Check
 		return Check{ID: "roles", Severity: SeverityWarn, Path: nearest, Detail: strings.Join(problems, "; "), Fix: &fix}
 	}
 
-	verifiedDetail := make([]string, 0, 1+len(notVerified))
+	verifiedDetail := make([]string, 0, 1+len(suffixes))
 	verifiedDetail = append(verifiedDetail, "planner, implementer, reviewer bound")
-
-	for _, name := range notVerified {
-		verifiedDetail = append(verifiedDetail, "not verified: "+name)
-	}
+	verifiedDetail = append(verifiedDetail, suffixes...)
 
 	detail := strings.Join(verifiedDetail, "; ")
 

@@ -56,6 +56,37 @@ func (fm Frontmatter) Done() bool {
 	return strings.EqualFold(strings.TrimSpace(fm.Status), "done")
 }
 
+// DecodeFrontmatter splits body into its YAML frontmatter and the body
+// that follows it, decoding the frontmatter onto out (a pointer, as
+// yaml.Unmarshal expects). It returns ErrNoFrontmatter when body does not
+// start with a "---" delimiter line, and a wrapped error when the
+// enclosed YAML does not decode onto out. The returned rest is body's
+// bytes after the closing delimiter line, with the delimiter's own
+// trailing newline consumed.
+func DecodeFrontmatter(body []byte, out any) ([]byte, error) {
+	s := string(body)
+
+	openLen := frontmatterOpenLen(s)
+	if openLen == 0 {
+		return nil, ErrNoFrontmatter
+	}
+
+	afterOpen := s[openLen:]
+
+	yamlPart, afterClose, found := strings.Cut(afterOpen, "\n"+frontmatterDelim)
+	if !found {
+		return nil, fmt.Errorf("stepfile: %w: no closing frontmatter delimiter", ErrNoFrontmatter)
+	}
+
+	rest := strings.TrimPrefix(afterClose, "\n")
+
+	if err := yaml.Unmarshal([]byte(yamlPart), out); err != nil {
+		return nil, fmt.Errorf("stepfile: parse frontmatter: %w", err)
+	}
+
+	return []byte(rest), nil
+}
+
 // ParseFrontmatter splits body into its YAML frontmatter and the body that
 // follows it. It returns ErrNoFrontmatter when body does not start with a
 // "---" delimiter line, and a wrapped error when the enclosed YAML does
@@ -63,28 +94,14 @@ func (fm Frontmatter) Done() bool {
 // closing delimiter line, with the delimiter's own trailing newline
 // consumed.
 func ParseFrontmatter(body []byte) (Frontmatter, []byte, error) {
-	s := string(body)
-
-	openLen := frontmatterOpenLen(s)
-	if openLen == 0 {
-		return Frontmatter{}, nil, ErrNoFrontmatter
-	}
-
-	afterOpen := s[openLen:]
-
-	yamlPart, afterClose, found := strings.Cut(afterOpen, "\n"+frontmatterDelim)
-	if !found {
-		return Frontmatter{}, nil, fmt.Errorf("stepfile: %w: no closing frontmatter delimiter", ErrNoFrontmatter)
-	}
-
-	rest := strings.TrimPrefix(afterClose, "\n")
-
 	var fm Frontmatter
-	if err := yaml.Unmarshal([]byte(yamlPart), &fm); err != nil {
-		return Frontmatter{}, nil, fmt.Errorf("stepfile: parse frontmatter: %w", err)
+
+	rest, err := DecodeFrontmatter(body, &fm)
+	if err != nil {
+		return Frontmatter{}, nil, err
 	}
 
-	return fm, []byte(rest), nil
+	return fm, rest, nil
 }
 
 // SetStatus replaces the first "status:" line inside body's YAML
