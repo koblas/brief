@@ -56,4 +56,23 @@
 // imports internal/scaffold or internal/cli: assemble owns reading a
 // feature, scaffold owns writing one, and the two packages never import
 // each other.
+//
+// FeatureFS pairs one feature's own filesystem with the absolute OS
+// directory it is rooted at, and StartFS, CheckFS and StatusFS are Start's,
+// Check's and Status's own content-reading cores: each takes a FeatureFS
+// (CheckFS and StatusFS also take the compiled step-file pattern their
+// caller shares across every feature) and reads through its FS with
+// io/fs — fs.ReadFile, fs.ReadDir — never through an *os.Root directly, so
+// any fs.FS, real or in-memory, drives them. Start, Check and Status stay
+// the os.Root-backed adapters around this seam: each opens one feature's
+// directory as a nested, contained *os.Root — so a step file symlinked
+// outside the feature directory is never reachable — computes
+// FeatureFS{FS: root.FS(), Path: <the feature's own absolute directory>},
+// and delegates. Only a fault genuinely rooted in the OS layer stays
+// theirs alone: Start's and Check's own os.Root.OpenRoot chain (an absent,
+// escaping or unreadable feature argument), and the *os.Root-typed openRoot
+// test-injection seam Check and Status share for simulating a
+// permission-denied open without depending on OS permission bits or
+// effective uid. FeaturesFS is Features' own core, listing fsys directly
+// with no nested open, so it takes a bare fs.FS.
 package assemble

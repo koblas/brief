@@ -99,7 +99,7 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 
 		switch {
 		case e.IsDir():
-			rows = append(rows, s.featureStatus(topRoot, pattern, e.Name(), entryPath))
+			rows = append(rows, s.statusRow(topRoot, pattern, e.Name(), entryPath))
 		case e.Type()&fs.ModeSymlink != 0:
 			// A symlink is marked without being resolved or opened: brief
 			// does not follow symbolic links in the feature directory, so
@@ -124,50 +124,62 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 	return rows, nil
 }
 
-// featureStatus reads one feature directory, name, under topRoot and
-// summarizes it as a FeatureStatus. A failure opening or listing the
-// directory, reading or parsing one of its step files, or either of the two
-// faults assemble.Start itself refuses a feature over — an unreadable or
-// heading-less specification (specFault), or a missing or unreadable state
-// file (readStateFile) — is degraded into the returned row's Problem rather
-// than propagated: the first such failure wins, checked in that order
-// (directory, then specification, then state, then step files — the same
-// spec-then-state order Check applies), and the row's counts stay at their
-// zero values. A row's Problem is therefore a subset of what would make
-// Start refuse, not the whole set: Start also refuses on the briefed step's
-// own missing "id:" or absent checklist heading, which featureStatus never
-// reads far enough to see. displayPath is name's absolute path, used to
-// build Problem.Path.
-func (s *Server) featureStatus(topRoot *os.Root, pattern stepfile.Pattern, name, displayPath string) FeatureStatus {
+// statusRow opens one feature directory, name, under topRoot as its own
+// os.Root — a permission failure here is degraded into the row's Problem
+// rather than propagated, the adapter-level counterpart to StatusFS's own
+// degrade-not-propagate stance on every fault reachable once the directory
+// is open — and delegates to StatusFS.
+func (s *Server) statusRow(topRoot *os.Root, pattern stepfile.Pattern, name, displayPath string) FeatureStatus {
 	root, err := s.openRoot(topRoot, name)
 	if err != nil {
 		return FeatureStatus{Name: name, Path: displayPath, Problem: newProblem(displayPath, err, false)}
 	}
 	defer func() { _ = root.Close() }()
 
-	dirEntries, err := s.readDir(root)
+	return s.StatusFS(FeatureFS{FS: root.FS(), Path: displayPath}, pattern)
+}
+
+// StatusFS is Status's core for one feature: fsys is that feature's own
+// filesystem, already opened and confined the same way StartFS's fsys is,
+// and pattern is the step-file pattern Status compiles once for every
+// feature it walks. A failure listing fsys, reading or parsing one of its
+// step files, or either of the two faults assemble.Start itself refuses a
+// feature over — an unreadable or heading-less specification (specFault),
+// or a missing or unreadable state file (readStateFile) — is degraded into
+// the returned row's Problem rather than propagated: the first such failure
+// wins, checked in that order (listing, then specification, then state,
+// then step files — the same spec-then-state order Check applies), and the
+// row's counts stay at their zero values. A row's Problem is therefore a
+// subset of what would make Start refuse, not the whole set: Start also
+// refuses on the briefed step's own missing "id:" or absent checklist
+// heading, which StatusFS never reads far enough to see. Name is
+// filepath.Base(fsys.Path).
+func (s *Server) StatusFS(fsys FeatureFS, pattern stepfile.Pattern) FeatureStatus {
+	name := filepath.Base(fsys.Path)
+
+	dirEntries, err := fs.ReadDir(fsys.FS, ".")
 	if err != nil {
-		return FeatureStatus{Name: name, Path: displayPath, Problem: newProblem(displayPath, err, false)}
+		return FeatureStatus{Name: name, Path: fsys.Path, Problem: newProblem(fsys.Path, err, false)}
 	}
 
-	if _, refusal := s.specFault(root, displayPath); refusal != nil {
+	if _, refusal := s.specFault(fsys); refusal != nil {
 		problem := refusal.Problem
 
-		return FeatureStatus{Name: name, Path: displayPath, Problem: &problem}
+		return FeatureStatus{Name: name, Path: fsys.Path, Problem: &problem}
 	}
 
-	if _, err := s.readStateFile(root, displayPath); err != nil {
-		problem := stateFaultProblem(displayPath, err)
+	if _, err := s.readStateFile(fsys); err != nil {
+		problem := stateFaultProblem(fsys.Path, err)
 
-		return FeatureStatus{Name: name, Path: displayPath, Problem: &problem}
+		return FeatureStatus{Name: name, Path: fsys.Path, Problem: &problem}
 	}
 
-	steps, err := readSteps(root, pattern, dirEntries)
+	steps, err := readSteps(fsys.FS, pattern, dirEntries)
 	if err != nil {
-		return FeatureStatus{Name: name, Path: displayPath, Problem: newProblem(displayPath, err, true)}
+		return FeatureStatus{Name: name, Path: fsys.Path, Problem: newProblem(fsys.Path, err, true)}
 	}
 
-	row := FeatureStatus{Name: name, Path: displayPath, Total: len(steps)}
+	row := FeatureStatus{Name: name, Path: fsys.Path, Total: len(steps)}
 
 	idx := stepfile.NewDependencyIndex()
 
@@ -189,7 +201,7 @@ func (s *Server) featureStatus(topRoot *os.Root, pattern stepfile.Pattern, name,
 			row.Next = &NextStep{
 				ID:    pattern.ID(e.number),
 				Title: title,
-				Path:  filepath.Join(displayPath, pattern.Name(e.number)),
+				Path:  filepath.Join(fsys.Path, pattern.Name(e.number)),
 			}
 		}
 
@@ -202,7 +214,7 @@ func (s *Server) featureStatus(topRoot *os.Root, pattern stepfile.Pattern, name,
 }
 
 // stateFaultProblem renders err — readStateFile's own error, always a
-// *RefusalError by that function's contract — as the Problem featureStatus
+// *RefusalError by that function's contract — as the Problem StatusFS
 // reports for a missing, unreadable or fence-broken state file. The type
 // assertion falls back to newProblem for any other error shape rather than
 // panicking, so a future readStateFile change that stops honoring its own

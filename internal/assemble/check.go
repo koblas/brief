@@ -211,7 +211,7 @@ func (s *Server) Check(_ context.Context, feature string) ([]Finding, error) {
 				continue
 			}
 
-			all = append(all, s.checkFeatureDir(root, pattern, handoffPattern, featurePath)...)
+			all = append(all, s.CheckFS(FeatureFS{FS: root.FS(), Path: featurePath}, pattern, handoffPattern)...)
 
 			_ = root.Close()
 		}
@@ -276,7 +276,7 @@ func (s *Server) checkNamedFeature(topRoot *os.Root, feature string, pattern ste
 	}
 	defer func() { _ = root.Close() }()
 
-	return s.checkFeatureDir(root, pattern, handoffPattern, featurePath), nil
+	return s.CheckFS(FeatureFS{FS: root.FS(), Path: featurePath}, pattern, handoffPattern), nil
 }
 
 // symlinkFeatureFinding is the Finding Check reports for a symlink where a
@@ -318,20 +318,26 @@ func unreadableFeatureFinding(featurePath string, err error) Finding {
 	}
 }
 
-// checkFeatureDir runs every rule Check owns against one feature directory
-// (root, rooted at featurePath) and assigns the one severity every finding
-// in it shares.
-func (s *Server) checkFeatureDir(root *os.Root, pattern stepfile.Pattern, handoffPattern stepfile.HandoffPattern, featurePath string) []Finding {
+// CheckFS is Check's core for one feature: fsys is that feature's own
+// filesystem, already opened and confined the same way StartFS's fsys is,
+// and pattern/handoffPattern are the step-file and handoff-file patterns
+// Check compiles once for every feature it walks. It runs every rule Check
+// owns (C1-C10) against fsys and assigns the one severity every finding in
+// it shares. Check is CheckFS preceded by feature-name validation, the
+// os.Root containment chain, and the top-level symlink/unreadable-directory
+// findings CheckFS never produces, since those concern the entry that would
+// have named fsys, not fsys itself.
+func (s *Server) CheckFS(fsys FeatureFS, pattern stepfile.Pattern, handoffPattern stepfile.HandoffPattern) []Finding {
 	// Capacity 4 is a rough guess (C1 contributes at most one, C2-C5 at
 	// most one apiece but C2 excludes the rest, so at most three from the
 	// state block), not a hard bound — append still grows it past that for
 	// a feature whose step files contribute more.
 	findings := make([]Finding, 0, 4)
 
-	findings = append(findings, s.checkSpecFindings(root, featurePath)...)
-	findings = append(findings, s.checkStateFindings(root, featurePath)...)
+	findings = append(findings, s.checkSpecFindings(fsys)...)
+	findings = append(findings, s.checkStateFindings(fsys)...)
 
-	stepFindings, inFlight := s.checkStepFindings(root, pattern, handoffPattern, featurePath)
+	stepFindings, inFlight := s.checkStepFindings(fsys, pattern, handoffPattern)
 	findings = append(findings, stepFindings...)
 
 	sev := SeverityWarn
@@ -339,12 +345,12 @@ func (s *Server) checkFeatureDir(root *os.Root, pattern stepfile.Pattern, handof
 		sev = SeverityError
 	}
 
-	name := filepath.Base(featurePath)
+	name := filepath.Base(fsys.Path)
 
 	for i := range findings {
 		findings[i].Severity = sev
 		findings[i].Feature = name
-		findings[i].FeaturePath = featurePath
+		findings[i].FeaturePath = fsys.Path
 		findings[i].InFlight = inFlight
 	}
 
@@ -355,8 +361,8 @@ func (s *Server) checkFeatureDir(root *os.Root, pattern stepfile.Pattern, handof
 // checkSpecification refuses a feature's specification against, and
 // renders its *RefusalError as at most one Finding carrying that
 // classifier's own Rule.
-func (s *Server) checkSpecFindings(root *os.Root, featurePath string) []Finding {
-	rule, refusal := s.specFault(root, featurePath)
+func (s *Server) checkSpecFindings(fsys FeatureFS) []Finding {
+	rule, refusal := s.specFault(fsys)
 	if refusal == nil {
 		return nil
 	}
@@ -368,14 +374,14 @@ func (s *Server) checkSpecFindings(root *os.Root, featurePath string) []Finding 
 // without a readable body there is nothing for conform's predicates to
 // measure. C3, C4 and C5 each run independently of one another — unlike
 // scaffold.Finish's refuse-at-the-first-fault band, Check is a report and
-// stops at none of them. The state body is read directly through root
+// stops at none of them. The state body is read directly through fsys.FS
 // rather than through readStateFile, whose own unterminated-fence refusal
 // copy would be a second definition of the fault conform.UnterminatedFence
 // already owns.
-func (s *Server) checkStateFindings(root *os.Root, featurePath string) []Finding {
-	statePath := filepath.Join(featurePath, s.cfg.StateFile)
+func (s *Server) checkStateFindings(fsys FeatureFS) []Finding {
+	statePath := filepath.Join(fsys.Path, s.cfg.StateFile)
 
-	stateBytes, err := root.ReadFile(s.cfg.StateFile)
+	stateBytes, err := fs.ReadFile(fsys.FS, s.cfg.StateFile)
 	if err != nil {
 		problem := newProblem(statePath, err, false)
 
@@ -430,11 +436,11 @@ type parsedStep struct {
 //
 // A listing failure — the directory opened but could not be read, most
 // often a permission failure on the directory itself rather than on
-// OpenRoot — becomes its own Finding naming featurePath, the same
+// OpenRoot — becomes its own Finding naming fsys.Path, the same
 // "unreadable, so report it rather than drop it" stance Check takes on the
-// feature directory one level up; it is not folded into checkFeatureDir's
-// existing findings silently, since 0 findings here would otherwise read
-// as "conforming".
+// feature directory one level up; it is not folded into CheckFS's existing
+// findings silently, since 0 findings here would otherwise read as
+// "conforming".
 //
 // The dependency index is built once, over every step file in the feature
 // including the one being evaluated, the same way
@@ -444,10 +450,10 @@ type parsedStep struct {
 // with the "is not finished" copy rather than the wrong "names no step
 // file" one, and a self-dependency is reachable the same way it is in
 // Finish.
-func (s *Server) checkStepFindings(root *os.Root, pattern stepfile.Pattern, handoffPattern stepfile.HandoffPattern, featurePath string) ([]Finding, bool) {
-	dirEntries, err := s.readDir(root)
+func (s *Server) checkStepFindings(fsys FeatureFS, pattern stepfile.Pattern, handoffPattern stepfile.HandoffPattern) ([]Finding, bool) {
+	dirEntries, err := fs.ReadDir(fsys.FS, ".")
 	if err != nil {
-		problem := newProblem(featurePath, err, false)
+		problem := newProblem(fsys.Path, err, false)
 
 		return []Finding{{Rule: RuleStepsUnlistable, Path: problem.Path, Detail: problem.Detail}}, true
 	}
@@ -466,7 +472,7 @@ func (s *Server) checkStepFindings(root *os.Root, pattern stepfile.Pattern, hand
 
 		ps := parsedStep{name: e.Name(), number: n}
 
-		body, err := root.ReadFile(e.Name())
+		body, err := fs.ReadFile(fsys.FS, e.Name())
 		if err != nil {
 			ps.readErr = err
 		} else {
@@ -498,7 +504,7 @@ func (s *Server) checkStepFindings(root *os.Root, pattern stepfile.Pattern, hand
 	inFlight := len(parsed) == 0
 
 	for _, ps := range parsed {
-		stepPath := filepath.Join(featurePath, ps.name)
+		stepPath := filepath.Join(fsys.Path, ps.name)
 		stepID := pattern.ID(ps.number)
 
 		switch {
@@ -517,7 +523,7 @@ func (s *Server) checkStepFindings(root *os.Root, pattern stepfile.Pattern, hand
 			findings = append(findings, checkStepDependencyFindings(idx, ps.fm, stepID, stepPath)...)
 		}
 
-		if v := checkHandoffCapFinding(root, handoffPattern, ps.number, s.cfg.HandoffCapLines, featurePath); v != nil {
+		if v := checkHandoffCapFinding(fsys, handoffPattern, ps.number, s.cfg.HandoffCapLines); v != nil {
 			findings = append(findings, *v)
 		}
 	}
@@ -615,10 +621,10 @@ func GroupByFeature(findings []Finding) []FeatureFindings {
 // conform.OverCap. A missing or unreadable handoff file is never a
 // finding — scaffold.Finish's own re-finish exemption (R16) already treats
 // one as nothing to diverge from, and there is no body here to measure.
-func checkHandoffCapFinding(root *os.Root, handoffPattern stepfile.HandoffPattern, number, limit int, featurePath string) *Finding {
+func checkHandoffCapFinding(fsys FeatureFS, handoffPattern stepfile.HandoffPattern, number, limit int) *Finding {
 	name := handoffPattern.Name(number)
 
-	body, err := root.ReadFile(name)
+	body, err := fs.ReadFile(fsys.FS, name)
 	if err != nil {
 		return nil
 	}
@@ -630,5 +636,5 @@ func checkHandoffCapFinding(root *os.Root, handoffPattern stepfile.HandoffPatter
 
 	// conform.OverCap stays line-less; a cap finding's line is limit+1, the
 	// first line over it, set here at the call site instead.
-	return &Finding{Rule: RuleHandoffCap, Path: filepath.Join(featurePath, name), Line: limit + 1, Detail: v.Problem}
+	return &Finding{Rule: RuleHandoffCap, Path: filepath.Join(fsys.Path, name), Line: limit + 1, Detail: v.Problem}
 }

@@ -26,11 +26,6 @@ type Server struct {
 	// inject a directory-open failure that does not depend on OS
 	// permission bits or effective uid.
 	openRoot func(parent *os.Root, name string) (*os.Root, error)
-
-	// readDir lists root's own entries. It defaults to reading root.FS()
-	// with fs.ReadDir; a test overrides it for the same reason as
-	// openRoot.
-	readDir func(root *os.Root) ([]os.DirEntry, error)
 }
 
 // NewServer returns a Server rooted at root, using cfg for every path and
@@ -41,8 +36,19 @@ func NewServer(cfg config.Config, root string) *Server {
 		cfg:      cfg,
 		root:     root,
 		openRoot: (*os.Root).OpenRoot,
-		readDir:  func(root *os.Root) ([]os.DirEntry, error) { return fs.ReadDir(root.FS(), ".") },
 	}
+}
+
+// FeatureFS pairs one feature's own filesystem — rooted so its top-level
+// entries are the feature's own files, never a parent directory — with the
+// absolute OS directory it is rooted at. Path is the prefix every
+// RefusalError, Finding, Problem and Shortfall path StartFS, CheckFS and
+// StatusFS produce is joined onto, so a caller can always reach the same
+// file directly, whether FS is backed by an *os.Root (Start, Check, Status)
+// or an in-memory fstest.MapFS (a test).
+type FeatureFS struct {
+	FS   fs.FS
+	Path string
 }
 
 // stepEntry is one step file found while enumerating a feature directory:
@@ -119,11 +125,24 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 	}
 	defer func() { _ = root.Close() }()
 
-	if err := s.checkSpecification(root, featurePath); err != nil {
+	return s.StartFS(FeatureFS{FS: root.FS(), Path: featurePath})
+}
+
+// StartFS is Start's core: fsys is one feature's own filesystem, already
+// opened and confined — Start builds fsys.FS from an *os.Root nested inside
+// the configured feature directory, so a step file symlinked outside it is
+// never reachable — and fsys.Path is the absolute OS directory Start opened,
+// the prefix every RefusalError and Shortfall path StartFS produces is
+// joined onto. Start is StartFS preceded by validFeatureArgument and the
+// os.Root containment chain that turns an absent feature into
+// ErrNoSuchFeature; StartFS itself assumes fsys already names a real,
+// contained feature directory and never returns that sentinel.
+func (s *Server) StartFS(fsys FeatureFS) (Brief, error) {
+	if err := s.checkSpecification(fsys); err != nil {
 		return Brief{}, err
 	}
 
-	stateBytes, err := s.readStateFile(root, featurePath)
+	stateBytes, err := s.readStateFile(fsys)
 	if err != nil {
 		return Brief{}, err
 	}
@@ -133,14 +152,14 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 		return Brief{}, fmt.Errorf("assemble: %w", err)
 	}
 
-	dirEntries, err := fs.ReadDir(root.FS(), ".")
+	dirEntries, err := fs.ReadDir(fsys.FS, ".")
 	if err != nil {
 		return Brief{}, fmt.Errorf("assemble: %w", err)
 	}
 
-	steps, err := readSteps(root, pattern, dirEntries)
+	steps, err := readSteps(fsys.FS, pattern, dirEntries)
 	if err != nil {
-		return Brief{}, &RefusalError{Problem: *newProblem(featurePath, err, true), Err: err}
+		return Brief{}, &RefusalError{Problem: *newProblem(fsys.Path, err, true), Err: err}
 	}
 
 	brief := Brief{Inherited: stateSections(string(stateBytes), s.cfg)}
@@ -159,7 +178,7 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 		}
 
 		step := stepFromEntry(e, s.cfg)
-		stepPath := filepath.Join(featurePath, pattern.Name(e.number))
+		stepPath := filepath.Join(fsys.Path, pattern.Name(e.number))
 
 		if step.ID == "" {
 			return Brief{}, &RefusalError{
@@ -192,7 +211,7 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 		break
 	}
 
-	statePath := filepath.Join(featurePath, s.cfg.StateFile)
+	statePath := filepath.Join(fsys.Path, s.cfg.StateFile)
 
 	for _, section := range brief.Inherited {
 		if section.Found {
@@ -217,8 +236,8 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 // undetectable rather than nameable once a fence swallows it. Absent gets
 // its own imperative rather than reusing the unreadable case's "make it
 // readable": a file that does not exist cannot be made readable.
-func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
-	_, refusal := s.specFault(root, featurePath)
+func (s *Server) checkSpecification(fsys FeatureFS) error {
+	_, refusal := s.specFault(fsys)
 	if refusal != nil {
 		return refusal
 	}
@@ -227,16 +246,16 @@ func (s *Server) checkSpecification(root *os.Root, featurePath string) error {
 }
 
 // specFault is checkSpecification's classifier: it reads feature's
-// specification through root and returns the Rule and *RefusalError for
+// specification through fsys.FS and returns the Rule and *RefusalError for
 // the first of absent, unreadable, an unclosed fenced code block, or a
 // missing cfg.ProgressHeading section it finds — checkSpecification wraps
 // its *RefusalError unchanged as its own return, and Check's
 // checkSpecFindings reuses the Rule to stamp the Finding it renders from
 // the same refusal. It returns ("", nil) when the specification conforms.
-func (s *Server) specFault(root *os.Root, featurePath string) (Rule, *RefusalError) {
-	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
+func (s *Server) specFault(fsys FeatureFS) (Rule, *RefusalError) {
+	specPath := filepath.Join(fsys.Path, s.cfg.SpecificationFile)
 
-	specBytes, err := root.ReadFile(s.cfg.SpecificationFile)
+	specBytes, err := fs.ReadFile(fsys.FS, s.cfg.SpecificationFile)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return RuleSpecMissing, &RefusalError{
@@ -272,8 +291,8 @@ func (s *Server) specFault(root *os.Root, featurePath string) (Rule, *RefusalErr
 	return "", nil
 }
 
-// readStateFile reads feature's state file through root and refuses with a
-// *RefusalError, wrapping ErrMalformedFeature, when it is absent,
+// readStateFile reads feature's state file through fsys.FS and refuses with
+// a *RefusalError, wrapping ErrMalformedFeature, when it is absent,
 // unreadable, or carries an unclosed fenced code block. stateSections
 // below finds each configured heading's section by scanning forward for a
 // terminator, the same way Section always has; an open fence makes that
@@ -281,10 +300,10 @@ func (s *Server) specFault(root *os.Root, featurePath string) (Rule, *RefusalErr
 // inside it and reads as absent — R10's "the worst this tool could
 // produce": a brief that looks complete while silently omitting every
 // inherited section. Refusing here means Start never returns that shape.
-func (s *Server) readStateFile(root *os.Root, featurePath string) ([]byte, error) {
-	statePath := filepath.Join(featurePath, s.cfg.StateFile)
+func (s *Server) readStateFile(fsys FeatureFS) ([]byte, error) {
+	statePath := filepath.Join(fsys.Path, s.cfg.StateFile)
 
-	stateBytes, err := root.ReadFile(s.cfg.StateFile)
+	stateBytes, err := fs.ReadFile(fsys.FS, s.cfg.StateFile)
 	if err != nil {
 		return nil, &RefusalError{Problem: *newProblem(statePath, err, false), Err: ErrMalformedFeature}
 	}
@@ -305,7 +324,7 @@ func (s *Server) readStateFile(root *os.Root, featurePath string) ([]byte, error
 // readSteps reads and parses the frontmatter of every entry dirEntries
 // recognizes as a step file by pattern, returning them sorted by step
 // number — numeric order, never directory or lexicographic order.
-func readSteps(root *os.Root, pattern stepfile.Pattern, dirEntries []os.DirEntry) ([]stepEntry, error) {
+func readSteps(fsys fs.FS, pattern stepfile.Pattern, dirEntries []os.DirEntry) ([]stepEntry, error) {
 	var steps []stepEntry
 
 	for _, e := range dirEntries {
@@ -318,7 +337,7 @@ func readSteps(root *os.Root, pattern stepfile.Pattern, dirEntries []os.DirEntry
 			continue
 		}
 
-		body, err := root.ReadFile(e.Name())
+		body, err := fs.ReadFile(fsys, e.Name())
 		if err != nil {
 			return nil, fmt.Errorf("assemble: %w", err)
 		}

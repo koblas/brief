@@ -3,6 +3,7 @@ package agentfile
 import (
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -146,47 +147,78 @@ type Definition struct {
 	Frontmatter Frontmatter
 }
 
-// Find matches Claude Code's own agent identification (Rule 5): it
-// returns every "*.md" file anywhere under "<root>/.claude/agents/",
-// recursively, whose frontmatter "name:" equals name — the filename plays
-// no part in the match. It searches "<home>/.claude/agents/" only when
-// root's own tree has no match; an empty home, or one whose tree has no
-// match either, yields no user-scope results at all. A file with no
-// frontmatter, no closing delimiter, or YAML that fails to decode is not
-// a candidate — it is skipped, not reported. Find returns no error:
-// unreadable directories and files are skipped the same way. Results from
-// whichever scope matched are absolute paths in lexical walk order.
+// Tree is one scope's own agent search root: FS holds the tree Find
+// walks, rooted so that ".claude/agents" names the agents directory, and
+// Dir is the absolute OS path FS is rooted at — the prefix every returned
+// Definition.Path is joined onto, so a Path always names a real file a
+// caller can Lstat, read or rewrite. The zero Tree is "no tree": Find
+// searches nothing in it.
+type Tree struct {
+	FS  fs.FS
+	Dir string
+}
+
+// DirTree returns the Tree for an OS directory: FS is os.DirFS of dir's own
+// absolute form and Dir is that absolute path. An empty dir — an unknown
+// home directory — returns the zero Tree, so that scope is never searched.
+func DirTree(dir string) Tree {
+	if dir == "" {
+		return Tree{}
+	}
+
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		abs = dir
+	}
+
+	return Tree{FS: os.DirFS(abs), Dir: abs}
+}
+
+// Find matches Claude Code's own agent identification (Rule 5) for OS
+// directories: FindIn over DirTree(root) and DirTree(home). An empty home
+// yields no user-scope results at all.
 func Find(root, home, name string) []Definition {
-	if defs := findIn(root, name, ScopeProject); len(defs) > 0 {
+	return FindIn(DirTree(root), DirTree(home), name)
+}
+
+// FindIn returns every "*.md" file anywhere under project's own
+// ".claude/agents/", recursively, whose frontmatter "name:" equals name —
+// the filename plays no part in the match. It searches user's own tree
+// only when project's has no match; a zero Tree is never searched. A file
+// with no frontmatter, no closing delimiter, or YAML that fails to decode
+// is not a candidate — it is skipped, not reported. FindIn returns no
+// error: unreadable directories and files are skipped the same way.
+// Results from whichever scope matched are sorted by Path, each Path being
+// the Tree's own Dir joined with the file's path inside FS.
+func FindIn(project, user Tree, name string) []Definition {
+	if defs := findIn(project, name, ScopeProject); len(defs) > 0 {
 		return defs
 	}
 
-	if home == "" {
+	return findIn(user, name, ScopeUser)
+}
+
+// findIn walks tree's own ".claude/agents" recursively and returns every
+// "*.md" file whose frontmatter "name:" equals name, tagged with scope and
+// sorted by Path. A zero Tree yields nothing.
+func findIn(tree Tree, name string, scope Scope) []Definition {
+	if tree.FS == nil {
 		return nil
 	}
 
-	return findIn(home, name, ScopeUser)
-}
-
-// findIn walks "<base>/.claude/agents/" recursively and returns every
-// "*.md" file, in lexical walk order, whose frontmatter "name:" equals
-// name, tagged with scope.
-func findIn(base, name string, scope Scope) []Definition {
-	agentsDir := filepath.Join(base, ".claude", "agents")
-
 	var defs []Definition
 
-	_ = filepath.WalkDir(agentsDir, func(path string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(tree.FS, ".claude/agents", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			// Unreadable entry: skip it, not the rest of the walk.
 			return nil //nolint:nilerr
 		}
 
-		if d.IsDir() || !strings.EqualFold(filepath.Ext(path), ".md") {
+		if d.IsDir() || !strings.EqualFold(path.Ext(p), ".md") {
 			return nil
 		}
 
-		body, readErr := os.ReadFile(path)
+		body, readErr := fs.ReadFile(tree.FS, p)
 		if readErr != nil {
 			return nil
 		}
@@ -200,12 +232,11 @@ func findIn(base, name string, scope Scope) []Definition {
 			return nil
 		}
 
-		abs, absErr := filepath.Abs(path)
-		if absErr != nil {
-			abs = path
-		}
-
-		defs = append(defs, Definition{Path: abs, Scope: scope, Frontmatter: fm})
+		defs = append(defs, Definition{
+			Path:        filepath.Join(tree.Dir, filepath.FromSlash(p)),
+			Scope:       scope,
+			Frontmatter: fm,
+		})
 
 		return nil
 	})

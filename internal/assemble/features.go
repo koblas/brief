@@ -28,7 +28,16 @@ func (s *Server) Features(_ context.Context) ([]string, error) {
 	}
 	defer func() { _ = topRoot.Close() }()
 
-	entries, err := fs.ReadDir(topRoot.FS(), ".")
+	return FeaturesFS(topRoot.FS())
+}
+
+// FeaturesFS is Features' core: fsys lists a feature directory's own
+// top-level entries directly, with no nested open, so any fs.FS — real or
+// in-memory — suffices. It returns the name of every real directory
+// entry, in fsys's own ReadDir order; a regular file or a symlink is
+// excluded, matching Features' own contract.
+func FeaturesFS(fsys fs.FS) ([]string, error) {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return nil, fmt.Errorf("assemble: %w", err)
 	}

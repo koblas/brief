@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +12,7 @@ import (
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/conform"
 	"github.com/koblas/brief/internal/platform/markdown"
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/platform/stepfile"
 )
 
@@ -158,14 +158,27 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		}
 	}
 
-	topRoot, root, err := openFeatureDir(featureDirPath, featurePath, feature)
+	top, root, err := openFeatureDir(featureDirPath, featurePath, feature)
 	if err != nil {
 		return FinishResult{}, err
 	}
-	defer func() { _ = topRoot.Close() }()
+	defer func() { _ = top.Close() }()
 	defer func() { _ = root.Close() }()
 
-	stepFileName, stepNumber, entries, err := findStepFile(root, pattern, step)
+	return s.FinishFS(root, featurePath, feature, step, handoff, state, pattern, handoffPattern)
+}
+
+// FinishFS is Finish's core: fsys is an rwfs.FS already opened and
+// confined to feature's own directory, featurePath is that directory's
+// absolute OS path, and pattern/handoffPattern are the step-file and
+// handoff-file patterns Finish compiles once before opening anything.
+// FinishFS assumes fsys already names a real, contained feature directory;
+// Finish is FinishFS preceded by stepfile.Compile, stepfile.CompileHandoff
+// and the os.Root-equivalent containment chain that turns an absent
+// feature into ErrNoSuchFeature. See Finish's own doc comment for the full
+// validation order and write sequence, both unchanged here.
+func (s *Server) FinishFS(fsys rwfs.FS, featurePath, feature, step string, handoff, state []byte, pattern stepfile.Pattern, handoffPattern stepfile.HandoffPattern) (FinishResult, error) {
+	stepFileName, stepNumber, entries, err := findStepFile(fsys, pattern, step)
 	if err != nil {
 		if !errors.Is(err, ErrNoSuchStep) {
 			return FinishResult{}, err
@@ -182,9 +195,9 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	stepPath := filepath.Join(featurePath, stepFileName)
 	handoffName := handoffPattern.Name(stepNumber)
 
-	stepBody, err := root.ReadFile(stepFileName)
+	stepBody, err := fsys.ReadFile(stepFileName)
 	if err != nil {
-		return FinishResult{}, fmt.Errorf("scaffold: %w", err)
+		return FinishResult{}, fmt.Errorf("scaffold: %w", peelReadErr(err))
 	}
 
 	fm, _, err := stepfile.ParseFrontmatter(stepBody)
@@ -217,13 +230,13 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		return FinishResult{}, refusal
 	}
 
-	if err := checkStepDependencies(root, pattern, fm, step, stepPath); err != nil {
+	if err := checkStepDependencies(fsys, pattern, fm, step, stepPath); err != nil {
 		return FinishResult{}, err
 	}
 
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
 
-	specBytes, err := root.ReadFile(s.cfg.SpecificationFile)
+	specBytes, err := fsys.ReadFile(s.cfg.SpecificationFile)
 	if err != nil {
 		return FinishResult{}, &RefusalError{
 			Path:    specPath,
@@ -240,7 +253,7 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 
 	statePath := filepath.Join(featurePath, s.cfg.StateFile)
 
-	stateInfo, err := root.Lstat(s.cfg.StateFile)
+	stateInfo, err := fsys.Lstat(s.cfg.StateFile)
 	if err != nil || !stateInfo.Mode().IsRegular() {
 		return FinishResult{}, &RefusalError{
 			Path:    statePath,
@@ -250,9 +263,9 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		}
 	}
 
-	stateBytes, err := root.ReadFile(s.cfg.StateFile)
+	stateBytes, err := fsys.ReadFile(s.cfg.StateFile)
 	if err != nil {
-		return FinishResult{}, fmt.Errorf("scaffold: %w", err)
+		return FinishResult{}, fmt.Errorf("scaffold: %w", peelReadErr(err))
 	}
 
 	// An unreadable handoff file — including one that does not exist —
@@ -262,7 +275,7 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	// (R10), so refusing here would be a dead end for a crash-then-hand-
 	// edit tree or a tree migrated before handoff files existed.
 	handoffPath := filepath.Join(featurePath, handoffName)
-	existingHandoff, handoffReadErr := root.ReadFile(handoffName)
+	existingHandoff, handoffReadErr := fsys.ReadFile(handoffName)
 	handoffMatches := handoffReadErr == nil && string(existingHandoff) == string(handoff)
 
 	r := refinish{
@@ -286,7 +299,7 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 	// next is computed here, in the validation phase and before any write,
 	// so a caller learns brief start's post-finish next step even on R11's
 	// no-op, and so no error path exists for it after the writes land.
-	next := nextOpenStep(root, pattern, entries, stepNumber, featurePath)
+	next := nextOpenStep(fsys, pattern, entries, stepNumber, featurePath)
 
 	switch r.verdict() {
 	case refinishNoop:
@@ -303,7 +316,7 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		// Falls through to the four writes below.
 	}
 
-	if err := applyFinishWrites(root, s.cfg, feature, step, handoffName, handoff, stepFileName, newStepBody, newSpec, state); err != nil {
+	if err := applyFinishWrites(fsys, s.cfg, feature, step, handoffName, handoff, stepFileName, newStepBody, newSpec, state); err != nil {
 		return FinishResult{}, err
 	}
 
@@ -336,24 +349,24 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 // write — the first of the four — and true for every write after it, since
 // by then the handoff file has already landed: cli's files_changed (R3)
 // reads that distinction through errors.Is(err, ErrPartialWrite).
-func applyFinishWrites(root *os.Root, cfg config.Config, feature, step, handoffName string, handoff []byte, stepFileName string, newStepBody []byte, newSpec string, state []byte) error {
+func applyFinishWrites(fsys rwfs.FS, cfg config.Config, feature, step, handoffName string, handoff []byte, stepFileName string, newStepBody []byte, newSpec string, state []byte) error {
 	landed := false
 
-	if err := replaceBytes(root, handoffName, handoff); err != nil {
+	if err := replaceBytes(fsys, handoffName, handoff); err != nil {
 		return writeFailure(err, feature, step, landed)
 	}
 
 	landed = true
 
-	if err := replaceBytes(root, cfg.StateFile, state); err != nil {
+	if err := replaceBytes(fsys, cfg.StateFile, state); err != nil {
 		return writeFailure(err, feature, step, landed)
 	}
 
-	if err := replaceBytes(root, stepFileName, newStepBody); err != nil {
+	if err := replaceBytes(fsys, stepFileName, newStepBody); err != nil {
 		return writeFailure(err, feature, step, landed)
 	}
 
-	if err := replaceString(root, cfg.SpecificationFile, newSpec); err != nil {
+	if err := replaceString(fsys, cfg.SpecificationFile, newSpec); err != nil {
 		return writeFailure(err, feature, step, landed)
 	}
 
@@ -449,14 +462,14 @@ func refusalFromViolation(path string, v *conform.Violation) *RefusalError {
 // non-refusal fault from any individual sibling's read or parse failure;
 // callers recover the refusal with errors.As, the same way every other
 // *RefusalError in this package is recovered.
-func checkStepDependencies(root *os.Root, pattern stepfile.Pattern, fm stepfile.Frontmatter, stepID, stepPath string) error {
+func checkStepDependencies(fsys rwfs.FS, pattern stepfile.Pattern, fm stepfile.Frontmatter, stepID, stepPath string) error {
 	if len(fm.DependsOn) == 0 {
 		return nil
 	}
 
-	entries, err := fs.ReadDir(root.FS(), ".")
+	entries, err := fsys.ReadDir(".")
 	if err != nil {
-		return fmt.Errorf("scaffold: %w", err)
+		return fmt.Errorf("scaffold: %w", peelReadErr(err))
 	}
 
 	idx := stepfile.NewDependencyIndex()
@@ -471,7 +484,7 @@ func checkStepDependencies(root *os.Root, pattern stepfile.Pattern, fm stepfile.
 			continue
 		}
 
-		idx.Record(pattern.ID(n), siblingFrontmatter(root, e.Name()))
+		idx.Record(pattern.ID(n), siblingFrontmatter(fsys, e.Name()))
 	}
 
 	dep, unmet := idx.FirstUnmet(fm)
@@ -502,8 +515,8 @@ func checkStepDependencies(root *os.Root, pattern stepfile.Pattern, fm stepfile.
 // rather than propagating the error: that sibling is recorded as a known,
 // not-done step so it blocks a dependant rather than being silently
 // skipped.
-func siblingFrontmatter(root *os.Root, name string) stepfile.Frontmatter {
-	body, err := root.ReadFile(name)
+func siblingFrontmatter(fsys rwfs.FS, name string) stepfile.Frontmatter {
+	body, err := fsys.ReadFile(name)
 	if err != nil {
 		return stepfile.Frontmatter{}
 	}
@@ -541,10 +554,10 @@ func writeFailure(err error, feature, step string, partial bool) error {
 // failure returns that error wrapped instead, so a caller can tell "the
 // step does not exist" from "the directory could not be read" with
 // errors.Is rather than treating every failure as the former.
-func findStepFile(root *os.Root, pattern stepfile.Pattern, step string) (string, int, []os.DirEntry, error) {
-	entries, err := fs.ReadDir(root.FS(), ".")
+func findStepFile(fsys rwfs.FS, pattern stepfile.Pattern, step string) (string, int, []os.DirEntry, error) {
+	entries, err := fsys.ReadDir(".")
 	if err != nil {
-		return "", 0, nil, fmt.Errorf("scaffold: %w", err)
+		return "", 0, nil, fmt.Errorf("scaffold: %w", peelReadErr(err))
 	}
 
 	for _, e := range entries {
@@ -624,7 +637,7 @@ func knownStepsFix(known []string, feature string) string {
 // can be named here. featurePath, the feature's own absolute directory, is
 // joined onto the winning step's filename to build FinishNext.Path. It
 // returns the zero FinishNext when no step is open.
-func nextOpenStep(root *os.Root, pattern stepfile.Pattern, entries []os.DirEntry, finishedNumber int, featurePath string) FinishNext {
+func nextOpenStep(fsys rwfs.FS, pattern stepfile.Pattern, entries []os.DirEntry, finishedNumber int, featurePath string) FinishNext {
 	best := -1
 	bestName := ""
 
@@ -642,7 +655,7 @@ func nextOpenStep(root *os.Root, pattern stepfile.Pattern, entries []os.DirEntry
 			continue
 		}
 
-		if siblingFrontmatter(root, e.Name()).Done() {
+		if siblingFrontmatter(fsys, e.Name()).Done() {
 			continue
 		}
 
@@ -654,10 +667,10 @@ func nextOpenStep(root *os.Root, pattern stepfile.Pattern, entries []os.DirEntry
 		return FinishNext{}
 	}
 
-	return FinishNext{ID: pattern.ID(best), Title: stepTitleFromFile(root, bestName), Path: filepath.Join(featurePath, bestName)}
+	return FinishNext{ID: pattern.ID(best), Title: stepTitleFromFile(fsys, bestName), Path: filepath.Join(featurePath, bestName)}
 }
 
-// stepTitleFromFile reads name's body through root and returns
+// stepTitleFromFile reads name's body through fsys and returns
 // markdown.Title of its frontmatter remainder — the body after
 // stepfile.ParseFrontmatter, matching assemble's own stepFromEntry, so a
 // "#" inside YAML frontmatter is never read as a heading. It returns ""
@@ -666,8 +679,8 @@ func nextOpenStep(root *os.Root, pattern stepfile.Pattern, entries []os.DirEntry
 // siblingFrontmatter's own read, that this step is open, so a second read
 // failing here degrades FinishNext.Title to empty rather than losing the
 // id/path a caller still needs.
-func stepTitleFromFile(root *os.Root, name string) string {
-	body, err := root.ReadFile(name)
+func stepTitleFromFile(fsys rwfs.FS, name string) string {
+	body, err := fsys.ReadFile(name)
 	if err != nil {
 		return ""
 	}

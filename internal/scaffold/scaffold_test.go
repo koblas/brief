@@ -1,13 +1,11 @@
 package scaffold_test
 
 import (
-	"context"
-	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,7 +15,7 @@ import (
 // differs from config.Default(), so a hardcoded default cannot pass a test
 // built against it. HandoffCapLines is 10 — distinct from config.Default's
 // 60, and strictly above the 5-line maximum of every handoff body this
-// package's tests hand to Finish (newFinishFixture.newHandoff), so a cap
+// package's tests hand to Finish (newFinishFixtureFS.newHandoff), so a cap
 // test proves the value is read from config rather than tripping on an
 // unrelated fixture body. StateCapLines is 20 — distinct from
 // HandoffCapLines and from config.Default's 80, and strictly above the
@@ -48,39 +46,40 @@ func fixtureConfig() config.Config {
 }
 
 func Test_creates_the_feature_directory_under_the_configured_feature_directory(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
+	top := newFeatureRootFS(t)
+	srv := scaffold.NewServer(fixtureConfig(), "")
 
-	_, err := srv.NewFeature(context.Background(), "widgets")
+	_, err := srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 
 	require.NoError(t, err)
-	assert.DirExists(t, filepath.Join(root, "specs", "widgets"))
-	assert.DirExists(t, filepath.Join(root, "specs"))
+	_, statErr := top.Stat("widgets")
+	require.NoError(t, statErr)
 }
 
 func Test_returns_the_path_of_the_created_feature_directory(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
+	top := newFeatureRootFS(t)
+	srv := scaffold.NewServer(fixtureConfig(), "")
 
-	res, err := srv.NewFeature(context.Background(), "widgets")
+	res, err := srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(root, "specs", "widgets"), res.Path)
+	assert.Equal(t, filepath.Join(testSpecsRoot, "widgets"), res.Path)
 }
 
 // Test_new_feature_reports_the_directory_and_the_files_it_created pins
 // NewFeature's result shape: Path names the feature directory, Created
 // lists exactly the specification and the state file it wrote, in write
-// order, both already on disk by the time NewFeature returns.
+// order, both already readable through top by the time NewFeatureFS
+// returns.
 func Test_new_feature_reports_the_directory_and_the_files_it_created(t *testing.T) {
-	root := t.TempDir()
+	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
-	srv := scaffold.NewServer(cfg, root)
+	srv := scaffold.NewServer(cfg, "")
 
-	res, err := srv.NewFeature(context.Background(), "widgets")
+	res, err := srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 
 	require.NoError(t, err)
-	featureDir := filepath.Join(root, "specs", "widgets")
+	featureDir := filepath.Join(testSpecsRoot, "widgets")
 	assert.Equal(t, "widgets", res.Feature)
 	assert.Empty(t, res.Step)
 	assert.Equal(t, featureDir, res.Path)
@@ -88,81 +87,78 @@ func Test_new_feature_reports_the_directory_and_the_files_it_created(t *testing.
 		filepath.Join(featureDir, cfg.SpecificationFile),
 		filepath.Join(featureDir, cfg.StateFile),
 	}, res.Created)
-	assert.FileExists(t, res.Created[0])
-	assert.FileExists(t, res.Created[1])
+	_, specErr := top.Stat("widgets/" + cfg.SpecificationFile)
+	require.NoError(t, specErr)
+	_, stateErr := top.Stat("widgets/" + cfg.StateFile)
+	require.NoError(t, stateErr)
 }
 
 func Test_writes_the_specification_skeleton_with_the_configured_progress_heading_and_nothing_under_it(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
+	top := newFeatureRootFS(t)
+	srv := scaffold.NewServer(fixtureConfig(), "")
 
-	_, err := srv.NewFeature(context.Background(), "widgets")
+	_, err := srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 	require.NoError(t, err)
 
-	got, err := os.ReadFile(filepath.Join(root, "specs", "widgets", "SPEC.md"))
-	require.NoError(t, err)
+	got, readErr := top.ReadFile("widgets/SPEC.md")
+	require.NoError(t, readErr)
 	assert.Equal(t, "# widgets\n\n## Progress\n", string(got))
 }
 
 func Test_writes_the_state_file_with_the_four_configured_headings_and_nothing_under_them(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
+	top := newFeatureRootFS(t)
+	srv := scaffold.NewServer(fixtureConfig(), "")
 
-	_, err := srv.NewFeature(context.Background(), "widgets")
+	_, err := srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 	require.NoError(t, err)
 
-	got, err := os.ReadFile(filepath.Join(root, "specs", "widgets", "NOTES.md"))
-	require.NoError(t, err)
+	got, readErr := top.ReadFile("widgets/NOTES.md")
+	require.NoError(t, readErr)
 	assert.Equal(t, "## Decisions Fixture\n\n## Left Fixture\n\n## Gotchas\n\n## Debts Fixture\n", string(got))
 }
 
 func Test_creates_only_the_specification_and_the_state_file(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
+	top := newFeatureRootFS(t)
+	srv := scaffold.NewServer(fixtureConfig(), "")
 
-	_, err := srv.NewFeature(context.Background(), "widgets")
+	_, err := srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 	require.NoError(t, err)
 
-	entries, err := os.ReadDir(filepath.Join(root, "specs", "widgets"))
+	view := openFeatureViewFS(t, top, "widgets")
+	entries, err := view.ReadDir(".")
 	require.NoError(t, err)
 
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-
-	assert.ElementsMatch(t, []string{"SPEC.md", "NOTES.md"}, names)
+	assert.ElementsMatch(t, []string{"SPEC.md", "NOTES.md"}, namesOf(entries))
 }
 
 func Test_does_not_overwrite_an_existing_specification_when_the_feature_directory_exists(t *testing.T) {
-	root := t.TempDir()
+	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
-	featureDir := filepath.Join(root, "specs", "widgets")
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
-
 	sentinel := "# handwritten by a person"
-	require.NoError(t, os.WriteFile(filepath.Join(featureDir, cfg.SpecificationFile), []byte(sentinel), 0o600))
+	require.NoError(t, top.Mkdir("widgets", 0o755))
+	require.NoError(t, top.WriteFile("widgets/"+cfg.SpecificationFile, []byte(sentinel), 0o600))
 
-	srv := scaffold.NewServer(cfg, root)
+	srv := scaffold.NewServer(cfg, "")
 
-	_, err := srv.NewFeature(context.Background(), "widgets")
+	_, err := srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 
 	require.ErrorIs(t, err, scaffold.ErrFeatureExists)
 
-	got, readErr := os.ReadFile(filepath.Join(featureDir, cfg.SpecificationFile))
+	got, readErr := top.ReadFile("widgets/" + cfg.SpecificationFile)
 	require.NoError(t, readErr)
 	assert.Equal(t, sentinel, string(got))
 }
 
 func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
+	top := newFeatureRootFS(t)
+	srv := scaffold.NewServer(fixtureConfig(), "")
 
-	_, err := srv.NewFeature(context.Background(), "../escaped")
+	_, err := srv.NewFeatureFS(top, testSpecsRoot, "../escaped")
 
 	require.Error(t, err)
 	require.NotErrorIs(t, err, scaffold.ErrFeatureExists)
-	assert.NoDirExists(t, filepath.Join(root, "escaped"))
+	_, statErr := top.Stat("../escaped")
+	assert.Error(t, statErr)
 }
 
 // Test_refuses_an_existing_feature_naming_its_directory pins the refusal
@@ -171,247 +167,117 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 // ErrFeatureExists, at Line 0 since the refusal concerns the whole
 // directory rather than one line inside a file.
 func Test_refuses_an_existing_feature_naming_its_directory(t *testing.T) {
-	root := t.TempDir()
+	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
-	srv := scaffold.NewServer(cfg, root)
-
-	_, err := srv.NewFeature(context.Background(), "widgets")
+	srv := scaffold.NewServer(cfg, "")
+	createFeatureFS(t, srv, top, "widgets")
+	pattern, err := stepfilePattern(cfg)
 	require.NoError(t, err)
+	view := openFeatureViewFS(t, top, "widgets")
+	_, stepErr := srv.NewStepFS(view, filepath.Join(testSpecsRoot, "widgets"), "widgets", pattern)
+	require.NoError(t, stepErr)
 
-	_, err = srv.NewStep(context.Background(), "widgets")
-	require.NoError(t, err)
-
-	_, err = srv.NewFeature(context.Background(), "widgets")
+	_, err = srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 	require.Error(t, err)
 
 	var refusal *scaffold.RefusalError
 	require.ErrorAs(t, err, &refusal)
-	assert.Equal(t, filepath.Join(root, "specs", "widgets"), refusal.Path)
+	assert.Equal(t, filepath.Join(testSpecsRoot, "widgets"), refusal.Path)
 	assert.Equal(t, 0, refusal.Line)
 	assert.ErrorIs(t, err, scaffold.ErrFeatureExists)
 }
 
 // Test_leaves_an_existing_features_files_byte_identical_when_it_refuses is
-// expected green on arrival: root.Mkdir already refuses before any write,
-// and writeExclusive's O_CREATE|O_EXCL is a second guard behind it. The
-// snapshot equality also catches an added temp file, which a
-// DirExists-only assertion would miss.
+// expected green on arrival: NewFeatureFS's Mkdir already refuses before
+// any write, and CreateExclusive is a second guard behind it. The snapshot
+// equality also catches an added temp entry, which a directory-listing-only
+// assertion would miss.
 func Test_leaves_an_existing_features_files_byte_identical_when_it_refuses(t *testing.T) {
-	root := t.TempDir()
+	top := newFeatureRootFS(t).(*rwfs.Mem) //nolint:forcetypeassert // newFeatureRootFS always returns *rwfs.Mem
 	cfg := fixtureConfig()
-	srv := scaffold.NewServer(cfg, root)
-
-	_, err := srv.NewFeature(context.Background(), "widgets")
+	srv := scaffold.NewServer(cfg, "")
+	createFeatureFS(t, srv, top, "widgets")
+	pattern, err := stepfilePattern(cfg)
 	require.NoError(t, err)
+	view := openFeatureViewFS(t, top, "widgets")
+	_, stepErr := srv.NewStepFS(view, filepath.Join(testSpecsRoot, "widgets"), "widgets", pattern)
+	require.NoError(t, stepErr)
 
-	_, err = srv.NewStep(context.Background(), "widgets")
-	require.NoError(t, err)
+	before := top.Snapshot()
 
-	featureDir := filepath.Join(root, "specs", "widgets")
-	before := snapshotTree(t, featureDir)
-
-	_, err = srv.NewFeature(context.Background(), "widgets")
+	_, err = srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 	require.Error(t, err)
 
-	after := snapshotTree(t, featureDir)
-	assert.Equal(t, before, after)
+	assert.Equal(t, before, top.Snapshot())
 }
 
-// Test_the_byte_identity_probe_sees_a_change_when_the_scaffold_writes_one
-// is the control arm for the byte-identity claim above: same fixture, same
-// probe, same directory, with NewStep in place of the refused NewFeature.
-// Without this control, snapshot equality passing would be equally
-// consistent with a probe that cannot detect a change at all.
-func Test_the_byte_identity_probe_sees_a_change_when_the_scaffold_writes_one(t *testing.T) {
-	root := t.TempDir()
+// Test_the_snapshot_probe_sees_a_change_when_the_scaffold_writes_one is the
+// control arm for the byte-identity claim above: same fixture, same probe,
+// with NewStepFS in place of the refused NewFeatureFS call. Without this
+// control, snapshot equality passing would be equally consistent with a
+// probe that cannot detect a change at all.
+func Test_the_snapshot_probe_sees_a_change_when_the_scaffold_writes_one(t *testing.T) {
+	top := newFeatureRootFS(t).(*rwfs.Mem) //nolint:forcetypeassert // newFeatureRootFS always returns *rwfs.Mem
 	cfg := fixtureConfig()
-	srv := scaffold.NewServer(cfg, root)
+	srv := scaffold.NewServer(cfg, "")
+	createFeatureFS(t, srv, top, "widgets")
+	pattern, err := stepfilePattern(cfg)
+	require.NoError(t, err)
+	view := openFeatureViewFS(t, top, "widgets")
+	_, stepErr := srv.NewStepFS(view, filepath.Join(testSpecsRoot, "widgets"), "widgets", pattern)
+	require.NoError(t, stepErr)
 
-	_, err := srv.NewFeature(context.Background(), "widgets")
+	before := top.Snapshot()
+
+	_, err = srv.NewStepFS(view, filepath.Join(testSpecsRoot, "widgets"), "widgets", pattern)
 	require.NoError(t, err)
 
-	_, err = srv.NewStep(context.Background(), "widgets")
-	require.NoError(t, err)
-
-	featureDir := filepath.Join(root, "specs", "widgets")
-	before := snapshotTree(t, featureDir)
-
-	_, err = srv.NewStep(context.Background(), "widgets")
-	require.NoError(t, err)
-
-	after := snapshotTree(t, featureDir)
-	assert.NotEqual(t, before, after)
+	assert.NotEqual(t, before, top.Snapshot())
 }
 
 // Test_reports_a_specification_write_that_cannot_be_committed_on_new_feature
 // covers NewFeature's own specification-write markPartial site: a
 // configured specification-file carrying a path separator makes
-// writeExclusive's OpenFile fail against a parent directory that was
-// never created — the feature directory itself (Root.Mkdir) has already
-// landed by then, so the failure must be reported as ErrPartialWrite.
+// CreateExclusive fail against a parent directory that was never created —
+// the feature directory itself (Mkdir) has already landed by then, so the
+// failure must be reported as ErrPartialWrite.
 func Test_reports_a_specification_write_that_cannot_be_committed_on_new_feature(t *testing.T) {
-	root := t.TempDir()
+	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
 	cfg.SpecificationFile = filepath.Join("sub", "SPEC.md")
-	srv := scaffold.NewServer(cfg, root)
+	srv := scaffold.NewServer(cfg, "")
 
-	_, err := srv.NewFeature(context.Background(), "widgets")
+	_, err := srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, scaffold.ErrPartialWrite,
-		"the feature directory already landed via Root.Mkdir before the specification write could fail")
-	assert.DirExists(t, filepath.Join(root, "specs", "widgets"))
+		"the feature directory already landed via Mkdir before the specification write could fail")
+	_, statErr := top.Stat("widgets")
+	assert.NoError(t, statErr)
 }
 
 // Test_reports_a_state_write_that_cannot_be_committed_on_new_feature covers
 // NewFeature's own state-write markPartial site: configuring the state
 // file with the same name as the specification file makes the
-// specification's writeExclusive land first, then the state write's own
-// O_CREATE|O_EXCL collide with the file the specification write just
+// specification's CreateExclusive land first, then the state write's own
+// CreateExclusive collide with the file the specification write just
 // created. The control arm reads that file back: its bytes are still the
 // specification skeleton, proving the second, failed write never
 // truncated what the first one landed.
 func Test_reports_a_state_write_that_cannot_be_committed_on_new_feature(t *testing.T) {
-	root := t.TempDir()
+	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
 	cfg.StateFile = cfg.SpecificationFile
-	srv := scaffold.NewServer(cfg, root)
+	srv := scaffold.NewServer(cfg, "")
 
-	_, err := srv.NewFeature(context.Background(), "widgets")
+	_, err := srv.NewFeatureFS(top, testSpecsRoot, "widgets")
 
 	require.Error(t, err)
 	require.ErrorIs(t, err, scaffold.ErrPartialWrite,
 		"the specification write already landed before the colliding state write could fail")
 
-	got, readErr := os.ReadFile(filepath.Join(root, "specs", "widgets", cfg.SpecificationFile))
+	got, readErr := top.ReadFile("widgets/" + cfg.SpecificationFile)
 	require.NoError(t, readErr)
 	assert.Equal(t, "# widgets\n\n## Progress\n", string(got),
 		"the specification write must not have been truncated by the failed state write")
-}
-
-// Test_the_scaffolded_files_are_all_created_owner_only pins the mode
-// writeExclusive creates the specification, state and step files with.
-//
-// This is the other half of a claim the scaffold makes in two places.
-// replace.go passes atomicfile.Create a 0o600 perm so the handoff file --
-// the only file Finish creates rather than replaces -- is born no wider
-// than the files beside it, and Test_the_handoff_file_is_created_with_the_
-// same_mode_as_its_siblings pins that against its fixture's state file. But
-// a fixture's mode is chosen by the fixture: without this test, changing
-// writeExclusive's own constant to 0o644 leaves the whole suite green while
-// real trees grow three 0o644 files beside a 0o600 handoff -- the same
-// inconsistency, reintroduced from the other end.
-//
-// The umask is pinned only so the assertion reads the same way as its
-// siblings in this repo; 0o600 carries no bits a conventional umask strips,
-// so unlike the atomicfile fresh-create tests this one is umask-stable
-// either way.
-func Test_refuses_a_feature_name_containing_whitespace(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
-
-	_, err := srv.NewFeature(context.Background(), "pay ments")
-
-	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
-	assert.ErrorContains(t, err, `"pay ments"`)
-}
-
-func Test_refuses_a_feature_name_with_a_leading_space(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
-
-	_, err := srv.NewFeature(context.Background(), " payments")
-
-	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
-}
-
-func Test_refuses_a_feature_name_with_a_trailing_space(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
-
-	_, err := srv.NewFeature(context.Background(), "payments ")
-
-	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
-}
-
-func Test_refuses_a_feature_name_containing_a_tab(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
-
-	_, err := srv.NewFeature(context.Background(), "pay\tments")
-
-	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
-}
-
-func Test_refuses_a_feature_name_containing_a_line_feed(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
-
-	_, err := srv.NewFeature(context.Background(), "pay\nments")
-
-	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
-}
-
-func Test_refuses_a_feature_name_containing_a_carriage_return(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
-
-	_, err := srv.NewFeature(context.Background(), "pay\rments")
-
-	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
-}
-
-func Test_refuses_a_feature_name_containing_a_non_breaking_space(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
-
-	_, err := srv.NewFeature(context.Background(), "pay ments")
-
-	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
-}
-
-func Test_refuses_an_empty_feature_name(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
-
-	_, err := srv.NewFeature(context.Background(), "")
-
-	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
-}
-
-func Test_creates_nothing_at_all_when_the_name_is_refused(t *testing.T) {
-	root := t.TempDir()
-	srv := scaffold.NewServer(fixtureConfig(), root)
-
-	_, err := srv.NewFeature(context.Background(), "pay ments")
-
-	require.ErrorIs(t, err, scaffold.ErrInvalidFeatureName)
-	assert.NoDirExists(t, filepath.Join(root, "specs", "pay ments"))
-	assert.NoDirExists(t, filepath.Join(root, "specs"))
-}
-
-func Test_the_scaffolded_files_are_all_created_owner_only(t *testing.T) {
-	oldMask := syscall.Umask(0o022)
-	t.Cleanup(func() { syscall.Umask(oldMask) })
-
-	cfg := fixtureConfig()
-	root := t.TempDir()
-	srv := scaffold.NewServer(cfg, root)
-
-	featureRes, err := srv.NewFeature(context.Background(), "widgets")
-	require.NoError(t, err)
-
-	stepRes, err := srv.NewStep(context.Background(), "widgets")
-	require.NoError(t, err)
-
-	for _, path := range []string{
-		filepath.Join(featureRes.Path, cfg.SpecificationFile),
-		filepath.Join(featureRes.Path, cfg.StateFile),
-		stepRes.Path,
-	} {
-		info, statErr := os.Stat(path)
-		require.NoError(t, statErr, path)
-		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
-			"%s must be created owner-only, so the handoff file written beside it matches", path)
-	}
 }

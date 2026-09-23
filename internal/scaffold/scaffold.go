@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"unicode"
 
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/platform/stepfile"
 )
 
@@ -59,18 +61,12 @@ type Result struct {
 // directory — not even the configured feature directory itself — is
 // created.
 //
-// Every write goes through an *os.Root rooted at the feature directory.
-// Root.Mkdir refuses a name that escapes the root (a "../x" name cannot
-// traverse out); when it fails because the feature directory already
-// exists, that failure is reported as a *RefusalError wrapping
-// ErrFeatureExists naming the existing directory — the guard that stops an
-// existing specification from being truncated: brief new feature brief run
-// inside this repository would otherwise overwrite this project's own
-// approved specification.md. Every other Mkdir failure, including the
-// traversal case above, keeps its plain wrapped-error shape. Each file is
-// additionally opened O_CREATE|O_EXCL, a second guard behind Mkdir's that
-// cannot fire while Mkdir guarantees a brand-new leaf, and which holds the
-// line if that guarantee is ever relaxed.
+// NewFeature builds the one rwfs.FS this call uses — an OS adapter rooted
+// at the configured feature directory, via rwfs.OpenOS — after
+// os.MkdirAll has ensured that directory exists; MkdirAll itself stays a
+// plain os call rather than going through rwfs, so a symlinked feature
+// directory is created through exactly as many hops as it always was,
+// never more. NewFeatureFS carries every check and write that follows.
 func (s *Server) NewFeature(_ context.Context, name string) (Result, error) {
 	if err := validateFeatureName(name); err != nil {
 		return Result{}, err
@@ -81,13 +77,37 @@ func (s *Server) NewFeature(_ context.Context, name string) (Result, error) {
 		return Result{}, fmt.Errorf("scaffold: %w", err)
 	}
 
-	root, err := os.OpenRoot(featureRoot)
+	fsys, err := rwfs.OpenOS(featureRoot)
 	if err != nil {
-		return Result{}, fmt.Errorf("scaffold: %w", err)
+		return Result{}, fmt.Errorf("scaffold: %w", peelReadErr(err))
 	}
-	defer func() { _ = root.Close() }()
+	defer func() { _ = fsys.Close() }()
 
-	if err := root.Mkdir(name, 0o755); err != nil {
+	return s.NewFeatureFS(fsys, featureRoot, name)
+}
+
+// NewFeatureFS is NewFeature's core: fsys is an rwfs.FS already rooted at
+// the configured feature directory (featureRoot, its absolute OS path —
+// the prefix every path in the returned Result and every *RefusalError
+// this call produces is joined onto). name has already passed
+// validateFeatureName.
+//
+// fsys.Mkdir refuses a name that would escape fsys's own root the same way
+// os.Root always has — a "../x" name cannot traverse out; on the OS
+// adapter this holds via the underlying *os.Root, and fsys.Mkdir's own
+// fs.ValidPath check refuses "../x" before that even runs. When Mkdir
+// fails because the feature directory already exists, that failure is
+// reported as a *RefusalError wrapping ErrFeatureExists naming the
+// existing directory — the guard that stops an existing specification
+// from being truncated: brief new feature brief run inside this
+// repository would otherwise overwrite this project's own approved
+// specification.md. Every other Mkdir failure, including the traversal
+// case above, keeps its plain wrapped-error shape. Each file is
+// additionally written with fsys.CreateExclusive, a second guard behind
+// Mkdir's that cannot fire while Mkdir guarantees a brand-new leaf, and
+// which holds the line if that guarantee is ever relaxed.
+func (s *Server) NewFeatureFS(fsys rwfs.FS, featureRoot, name string) (Result, error) {
+	if err := fsys.Mkdir(name, 0o755); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			featurePath := filepath.Join(featureRoot, name)
 
@@ -106,14 +126,14 @@ func (s *Server) NewFeature(_ context.Context, name string) (Result, error) {
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
 	statePath := filepath.Join(featurePath, s.cfg.StateFile)
 
-	// Both failures below are marked ErrPartialWrite: root.Mkdir above has
+	// Both failures below are marked ErrPartialWrite: fsys.Mkdir above has
 	// already landed the feature directory itself by the time either can
 	// fail, so cli's files_changed (R3) must report true, not false.
-	if err := writeExclusive(root, filepath.Join(name, s.cfg.SpecificationFile), specificationSkeleton(s.cfg, name)); err != nil {
+	if err := writeExclusive(fsys, path.Join(name, s.cfg.SpecificationFile), specificationSkeleton(s.cfg, name)); err != nil {
 		return Result{}, markPartial(err)
 	}
 
-	if err := writeExclusive(root, filepath.Join(name, s.cfg.StateFile), stateSkeleton(s.cfg)); err != nil {
+	if err := writeExclusive(fsys, path.Join(name, s.cfg.StateFile), stateSkeleton(s.cfg)); err != nil {
 		return Result{}, markPartial(err)
 	}
 
@@ -139,10 +159,10 @@ func (s *Server) NewFeature(_ context.Context, name string) (Result, error) {
 // Nothing is created until all five pass; only then is the next step
 // number computed and written.
 //
-// The step file is written before the specification: if the specification
-// write then fails, the result is an orphan step file with no progress
-// entry — visible and repairable — rather than a progress entry pointing
-// at a step file that was never created.
+// NewStep builds the one rwfs.FS this call uses through openFeatureDir —
+// an OS adapter nested two levels deep, first at the configured feature
+// directory, then at feature's own subdirectory — and delegates every
+// check and write past that point to NewStepFS.
 func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
 	featurePath := filepath.Join(featureDirPath, feature)
@@ -157,16 +177,33 @@ func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 		}
 	}
 
-	topRoot, root, err := openFeatureDir(featureDirPath, featurePath, feature)
+	top, root, err := openFeatureDir(featureDirPath, featurePath, feature)
 	if err != nil {
 		return Result{}, err
 	}
-	defer func() { _ = topRoot.Close() }()
+	defer func() { _ = top.Close() }()
 	defer func() { _ = root.Close() }()
 
+	return s.NewStepFS(root, featurePath, feature, pattern)
+}
+
+// NewStepFS is NewStep's core: fsys is an rwfs.FS already opened and
+// confined to feature's own directory, and featurePath is that
+// directory's absolute OS path — the prefix every path in the returned
+// Result and every *RefusalError this call produces is joined onto.
+// NewStepFS assumes fsys already names a real, contained feature
+// directory; NewStep is NewStepFS preceded by stepfile.Compile and the
+// os.Root-equivalent containment chain that turns an absent feature into
+// ErrNoSuchFeature.
+//
+// The step file is written before the specification: if the specification
+// write then fails, the result is an orphan step file with no progress
+// entry — visible and repairable — rather than a progress entry pointing
+// at a step file that was never created.
+func (s *Server) NewStepFS(fsys rwfs.FS, featurePath, feature string, pattern stepfile.Pattern) (Result, error) {
 	specPath := filepath.Join(featurePath, s.cfg.SpecificationFile)
 
-	specBytes, err := root.ReadFile(s.cfg.SpecificationFile)
+	specBytes, err := fsys.ReadFile(s.cfg.SpecificationFile)
 	if err != nil {
 		return Result{}, &RefusalError{
 			Path:    specPath,
@@ -187,9 +224,9 @@ func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 		}
 	}
 
-	entries, err := fs.ReadDir(root.FS(), ".")
+	entries, err := fsys.ReadDir(".")
 	if err != nil {
-		return Result{}, fmt.Errorf("scaffold: %w", err)
+		return Result{}, fmt.Errorf("scaffold: %w", peelReadErr(err))
 	}
 
 	next := 1
@@ -207,7 +244,7 @@ func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 	id := pattern.ID(next)
 	stepName := pattern.Name(next)
 
-	if err := writeExclusive(root, stepName, stepSkeleton(s.cfg, id)); err != nil {
+	if err := writeExclusive(fsys, stepName, stepSkeleton(s.cfg, id)); err != nil {
 		return Result{}, err
 	}
 
@@ -218,7 +255,7 @@ func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 
 	// Marked ErrPartialWrite: the step file above has already landed by the
 	// time this can fail, so cli's files_changed (R3) must report true.
-	if err := replaceString(root, s.cfg.SpecificationFile, newSpec); err != nil {
+	if err := replaceString(fsys, s.cfg.SpecificationFile, newSpec); err != nil {
 		return Result{}, markPartial(fmt.Errorf("scaffold: %w", err))
 	}
 
@@ -245,23 +282,40 @@ func noSuchFeatureRefusal(path, feature string) error {
 }
 
 // openFeatureDir opens feature's own directory under featureDirPath,
-// returning both *os.Root the caller must close (topRoot, the configured
-// feature directory, then root, feature's own subdirectory). It refuses as
+// returning both the rwfs.FS the caller must close (top, an OS adapter
+// rooted at the configured feature directory, then root, feature's own
+// subdirectory, nested inside it via top.OpenRoot). It refuses as
 // noSuchFeatureRefusal(featurePath, feature) when feature fails
-// validFeatureArgument, checked before either os.Root.OpenRoot call so a
-// traversal attempt never depends on OpenRoot's own error shape, or when
-// either open fails with errors.Is(err, fs.ErrNotExist) — a genuinely
-// absent directory. Any other open failure — permission denied, or a
-// regular file where a directory belongs — is returned wrapped instead,
-// never misreported as "no such feature". NewStep and Finish share this
-// rather than duplicating the two-level open each carries.
-func openFeatureDir(featureDirPath, featurePath, feature string) (*os.Root, *os.Root, error) {
+// validFeatureArgument, checked before either open, so a traversal attempt
+// never depends on the open's own error shape, or when either open fails
+// with errors.Is(err, fs.ErrNotExist) — a genuinely absent directory. Any
+// other open failure — permission denied, or a regular file where a
+// directory belongs — is returned wrapped instead, never misreported as
+// "no such feature". NewStep and Finish share this rather than duplicating
+// the two-level open each carries.
+func openFeatureDir(featureDirPath, featurePath, feature string) (rwfs.FS, rwfs.FS, error) {
 	if !validFeatureArgument(feature) {
 		return nil, nil, noSuchFeatureRefusal(featurePath, feature)
 	}
 
-	topRoot, err := os.OpenRoot(featureDirPath)
+	top, err := rwfs.OpenOS(featureDirPath)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, noSuchFeatureRefusal(featurePath, feature)
+		}
+
+		return nil, nil, fmt.Errorf("scaffold: open feature %s: %w", feature, peelReadErr(err))
+	}
+
+	// top.OpenRoot's own failure keeps rwfs's *fs.PathError wrapping rather
+	// than being peeled: unlike rwfs.OpenOS above, the raw cause it wraps
+	// for "feature exists but is not a directory" is syscall.ENOTDIR alone,
+	// with no path in it — peeling here would discard the one thing this
+	// message still needs to name (see peelWriteErr's own doc comment).
+	root, err := top.OpenRoot(feature)
+	if err != nil {
+		_ = top.Close()
+
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, noSuchFeatureRefusal(featurePath, feature)
 		}
@@ -269,31 +323,19 @@ func openFeatureDir(featureDirPath, featurePath, feature string) (*os.Root, *os.
 		return nil, nil, fmt.Errorf("scaffold: open feature %s: %w", feature, err)
 	}
 
-	root, err := topRoot.OpenRoot(feature)
-	if err != nil {
-		_ = topRoot.Close()
-
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil, noSuchFeatureRefusal(featurePath, feature)
-		}
-
-		return nil, nil, fmt.Errorf("scaffold: open feature %s: %w", feature, err)
-	}
-
-	return topRoot, root, nil
+	return top, root, nil
 }
 
 // validFeatureArgument reports whether feature is a well-formed single path
 // component: not empty, not "." or "..", and free of any
 // os.IsPathSeparator character. NewStep and Finish check it before either
-// of their two os.Root.OpenRoot calls, so a traversal attempt ("../x"), a
+// of their two rwfs.FS.OpenRoot calls, so a traversal attempt ("../x"), a
 // path-separator name, or an empty string refuses as noSuchFeatureRefusal
 // without depending on OpenRoot's own error shape to distinguish those from
 // a genuinely missing directory — an empty string otherwise reaches
-// topRoot.OpenRoot("") and surfaces its own opaque "empty path" failure.
-// Mirrors assemble's own validFeatureArgument (internal/assemble/check.go),
-// duplicated rather than shared because scaffold and assemble must not
-// import each other.
+// top.OpenRoot("") and surfaces its own opaque failure. Mirrors assemble's
+// own validFeatureArgument (internal/assemble/check.go), duplicated rather
+// than shared because scaffold and assemble must not import each other.
 func validFeatureArgument(feature string) bool {
 	if feature == "" || feature == "." || feature == ".." {
 		return false
@@ -328,22 +370,11 @@ func validateFeatureName(name string) error {
 	return nil
 }
 
-// writeExclusive creates name under root and writes contents to it,
+// writeExclusive creates name under fsys and writes contents to it,
 // refusing rather than truncating if the file already exists.
-func writeExclusive(root *os.Root, name, contents string) error {
-	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return fmt.Errorf("write %s: %w", name, err)
-	}
-
-	if _, err := f.WriteString(contents); err != nil {
-		_ = f.Close()
-
-		return fmt.Errorf("write %s: %w", name, err)
-	}
-
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("write %s: %w", name, err)
+func writeExclusive(fsys rwfs.FS, name, contents string) error {
+	if err := fsys.CreateExclusive(name, []byte(contents), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", name, peelWriteErr(err))
 	}
 
 	return nil
