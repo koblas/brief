@@ -123,18 +123,12 @@ var agentPlannerDigests = [][32]byte{
 	sha256.Sum256(AgentPlanner()),
 }
 
-// olderAgentPlannerBytes is an earlier release's own AgentPlanner render, a
-// fixed byte literal — never a live render call, which would make this list
-// duplicate agentPlannerDigests and the OriginOlder arm unreachable.
-const olderAgentPlannerBytes = "---\nname: planner\ndescription: Turn a feature's specification into ordered scenario " +
-	"plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's " +
-	"specification into ordered scenario plans: run `brief new step <feature>` for the next " +
-	"scenario, then fill its plan file. Never write production or test code.\n"
-
 // olderAgentPlannerDigests holds the sha256 digest of every earlier
-// release's own AgentPlanner render, one fixed literal per release.
+// release's own AgentPlanner render, one fixed file under files/older per
+// release — never a live render, which would duplicate agentPlannerDigests
+// and make the OriginOlder arm unreachable.
 var olderAgentPlannerDigests = [][32]byte{
-	sha256.Sum256([]byte(olderAgentPlannerBytes)),
+	sha256.Sum256(mustReadFile("older/agents/planner.md")),
 }
 
 // agentImplementerDigests holds the sha256 digest of this release's own
@@ -143,20 +137,12 @@ var agentImplementerDigests = [][32]byte{
 	sha256.Sum256(AgentImplementer()),
 }
 
-// olderAgentImplementerBytes is an earlier release's own AgentImplementer
-// render, a fixed byte literal — never a live render call, which would make
-// this list duplicate agentImplementerDigests and the OriginOlder arm
-// unreachable.
-const olderAgentImplementerBytes = "---\nname: implementer\ndescription: Implement a feature's next open step, from brief " +
-	"start through brief finish.\n---\n\nRun `brief start <feature>` and implement its next " +
-	"open step, working from its output rather than reading the specification or earlier steps " +
-	"whole. Close the step with `brief finish <feature> <step> --handoff <path> --state " +
-	"<path>`.\n"
-
 // olderAgentImplementerDigests holds the sha256 digest of every earlier
-// release's own AgentImplementer render, one fixed literal per release.
+// release's own AgentImplementer render, one fixed file under files/older
+// per release — never a live render, which would duplicate
+// agentImplementerDigests and make the OriginOlder arm unreachable.
 var olderAgentImplementerDigests = [][32]byte{
-	sha256.Sum256([]byte(olderAgentImplementerBytes)),
+	sha256.Sum256(mustReadFile("older/agents/implementer.md")),
 }
 
 // agentReviewerDigests holds the sha256 digest of this release's own

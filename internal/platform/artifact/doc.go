@@ -4,7 +4,10 @@
 // package produced — today's, or an earlier release's — is "brief-written
 // and unedited"; any other bytes are "edited locally" (R6). Every render is
 // deterministic: no version, no date, no map order, so a digest actually
-// proves something.
+// proves something. The fixed renders — plugin manifest, hooks, skills and
+// role agents, plus earlier releases' renders under older/ — are embedded
+// verbatim from the files/ directory; only the config and the CLAUDE.md
+// snippet are generated in Go.
 //
 // internal/setup consumes this package to decide whether an existing file
 // — the config, a Claude Code plugin file (PluginManifest, SkillStart,
