@@ -124,12 +124,11 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 	return rows, nil
 }
 
-// statusRow opens one feature directory, name, under topRoot and delegates
-// to StatusFS. Opening name as its own os.Root is the one part of
-// featureStatus's original job StatusFS cannot take over: a failure here —
-// most often a permission failure — is degraded into the row's Problem
-// rather than propagated, matching StatusFS's own degrade-not-propagate
-// stance on every fault reachable once the directory is open.
+// statusRow opens one feature directory, name, under topRoot as its own
+// os.Root — a permission failure here is degraded into the row's Problem
+// rather than propagated, the adapter-level counterpart to StatusFS's own
+// degrade-not-propagate stance on every fault reachable once the directory
+// is open — and delegates to StatusFS.
 func (s *Server) statusRow(topRoot *os.Root, pattern stepfile.Pattern, name, displayPath string) FeatureStatus {
 	root, err := s.openRoot(topRoot, name)
 	if err != nil {

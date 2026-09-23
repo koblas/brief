@@ -256,10 +256,8 @@ func Test_status_marks_a_feature_whose_specification_has_no_progress_heading(t *
 // Test_status_marks_a_feature_whose_state_file_is_missing pins
 // readStateFile's own refusal shape: a conforming specification and a
 // well-formed step, but no state file. "file does not exist" is
-// fs.ErrNotExist's own fixed, cross-platform Error() text — the MapFS
-// equivalent of Test_status_marks_a_feature_whose_state_file_is_missing's
-// original os.Open probe, which existed only to dodge the OS-native message
-// varying by platform; fstest.MapFS carries no such variance.
+// fs.ErrNotExist's own fixed, cross-platform Error() text, unlike a real
+// OS's own "no such file or directory" wording, which varies by platform.
 func Test_status_marks_a_feature_whose_state_file_is_missing(t *testing.T) {
 	cfg := fixtureConfig()
 	files := map[string]string{
@@ -398,9 +396,8 @@ func Test_status_leaves_line_at_zero_for_a_whole_file_fault(t *testing.T) {
 // opens fine but its step files cannot be listed (the branch a
 // stricter-than-darwin permission model, such as Linux's, takes at a
 // directory readable to enter but not to list). The injected failure goes
-// through failFS rather than a Server test seam, now that StatusFS lists
-// fsys.FS directly, so it reddens only when StatusFS's own listing call —
-// not statusRow's open call — fails.
+// through failFS, StatusFS's own fsys.FS, so it reddens only when
+// StatusFS's own listing call — not statusRow's open call — fails.
 func Test_status_marks_a_feature_directory_that_cannot_be_listed(t *testing.T) {
 	cfg := fixtureConfig()
 	fsys := featureFS(nil)

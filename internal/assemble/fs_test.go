@@ -31,11 +31,10 @@ func featureFS(files map[string]string) assemble.FeatureFS {
 }
 
 // failFS wraps an in-memory filesystem, replacing the result of reading
-// failReadFile or listing failReadDir with err — the in-memory substitute
-// for injecting a permission-denied read or directory listing without
-// depending on OS permission bits or effective uid, now that CheckFS and
-// StatusFS read through an fs.FS directly rather than through a Server
-// test-injection seam. Either field left empty never fails that operation.
+// failReadFile or listing failReadDir with err: the in-memory substitute
+// for injecting a permission-denied read or directory listing into
+// CheckFS or StatusFS, without depending on OS permission bits or
+// effective uid. Either field left empty never fails that operation.
 type failFS struct {
 	fs.FS
 

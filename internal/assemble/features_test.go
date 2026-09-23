@@ -15,9 +15,9 @@ import (
 // Test_features_lists_directory_entries_only pins FeaturesFS's population: a
 // regular file and a symlink beside two real feature directories must not
 // appear in the result, and the result carries fs.ReadDir's own order.
-// fstest.MapFS represents a symlink entry the same way os.DirFS does — a
-// Mode carrying fs.ModeSymlink — so this reaches the same branch Features'
-// own os.Root-backed FS would.
+// fstest.MapFS represents a symlink entry a DirEntry's Type() can report,
+// the same fs.ModeSymlink bit os.Root.FS() (Features' own backing FS)
+// reports for one, so this reaches the same branch either way.
 func Test_features_lists_directory_entries_only(t *testing.T) {
 	fsys := fstest.MapFS{
 		"alpha/STEP-01.md": &fstest.MapFile{Data: []byte("x")},
