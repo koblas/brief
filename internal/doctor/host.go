@@ -810,9 +810,8 @@ func skillFileOf(h host.Host) host.File {
 }
 
 // hostSkillNotRegularFix is host-skill's own "not a regular file" ERROR
-// fix: unlike host-hook's own identical arm (an untracked defect — see
-// STATE.md), a plain "run 'brief init'" cannot clear this state by
-// itself. Init's own render step never overwrites an existing path of the
+// fix: a plain "run 'brief init'" cannot clear this state by itself,
+// since Init's own render step never overwrites an existing path of the
 // wrong kind (a directory or symlink standing where the skill file
 // belongs), so the fix names removing it first.
 const hostSkillNotRegularFix = "remove " + host.WorkflowSkillDir + "/SKILL.md, then " + runInit

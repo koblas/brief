@@ -229,19 +229,22 @@ Missing-skill report — stderr, exit 0, with or without the flag, listing agent
 the skill after this run (after the planned run under `--dry-run`). Header suffix
 `, or rerun with --edit-agents:` appears only when `--edit-agents` was **not** given on this run
 **and** at least one listed agent is one the flag could still reach (a bare-name project
-binding, not escaping the repository); otherwise the header ends plain
-`"skills:" list in each:` — a run that already carries the flag, or one where every remaining
-agent is already annotated "edit by hand", never suggests it. Rows, in scope order: every
-fixable project row first, then a project binding whose own resolved path escapes the
-repository (`; outside the repository, edit by hand` — `--edit-agents` cannot reach it either),
-then every user-level row (`; user-level, edit by hand`):
+binding, not escaping the repository); otherwise the header ends plain, exactly:
+`brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each:`
+— a run that already carries the flag, or one where every remaining agent is already annotated
+"edit by hand", never suggests it. Rows, in scope order: every fixable project row first, then
+a project binding whose own resolved path escapes the repository, then every user-level row:
 
 ```
 brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each, or rerun with --edit-agents:
   .claude/agents/developer/Agent.md (implementer)
-  .claude/agents/legacy/outside.md (planner; outside the repository, edit by hand)
   ~/.claude/agents/planner.md (planner; user-level, edit by hand)
 ```
+
+A project binding whose own resolved path escapes the repository (a `.claude` symlinked
+elsewhere) renders `  <rel> (<role>; outside the repository, edit by hand)` — `--edit-agents`
+cannot reach it either, so it groups with the user-level rows for header-suggestion purposes
+even though it is `Scope` `"project"`.
 
 `--json`: new field `agents_missing_skill`, after `roles_to_add`, always present, never null;
 items `{"role", "agent", "path" (absolute), "scope" ("project"|"user")}` — an escaping-repository
@@ -279,10 +282,15 @@ New rows are additive in `checks[]`; `counts` keeps its shape.
 | no claude-code install at all | SKIP | `not installed` | `run 'brief init --host claude-code'` |
 | missing while plugin installed | WARN | `not installed; bound agents cannot preload it` | `run 'brief init'` |
 | unreadable | WARN | `not readable (<reason>)` | existing `notReadableFix` |
-| not a regular file | ERROR | `not a regular file` | `remove .claude/skills/brief-workflow/SKILL.md, then run 'brief init'` (a plain re-run cannot clear it; host-hook has the same defect, left unfixed — see STATE.md) |
+| not a regular file | ERROR | `not a regular file` | `remove .claude/skills/brief-workflow/SKILL.md, then run 'brief init'` |
 | older release | WARN | `installed by an older brief release` | `run 'brief init'` |
 | edited | OK | `edited locally` | — |
 | current | OK | `installed` | — |
+
+The "not a regular file" fix names removing the file first, since a plain re-run cannot clear
+that state by itself (Init never overwrites an existing path of the wrong kind). host-hook's
+own identical arm keeps the old, plain `run 'brief init'` fix — left unfixed here on the
+review finding's own instruction (STATE.md tracks it as an unowned debt).
 
 `roles` resolution (Rule 5), plus:
 - new WARN problem: `<role>: <name> defined <n> times under .claude/agents (<rel>, <rel>)`

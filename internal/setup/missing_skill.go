@@ -2,7 +2,6 @@ package setup
 
 import (
 	"path/filepath"
-	"strings"
 
 	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/platform/artifact"
@@ -65,11 +64,10 @@ func agentsMissingSkill(root, home string, roles config.RoleBindings) []MissingS
 }
 
 // pathEscapesRoot reports whether path, symlinks resolved, lands outside
-// resolvedRoot — the same escape check planBoundAgent's own resolvedRoot
-// pair applies, mirrored here for report-only use: rootErr non-nil (root
-// itself unresolvable) or path's own resolution failing is never treated
-// as an escape, since neither proves anything about path's relation to
-// root.
+// resolvedRoot, via relWithinRoot — bound_agent.go's own escape test,
+// shared here for report-only use: rootErr non-nil (root itself
+// unresolvable) or path's own resolution failing is never treated as an
+// escape, since neither proves anything about path's relation to root.
 func pathEscapesRoot(resolvedRoot string, rootErr error, path string) bool {
 	if rootErr != nil {
 		return false
@@ -80,9 +78,9 @@ func pathEscapesRoot(resolvedRoot string, rootErr error, path string) bool {
 		return false
 	}
 
-	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	_, ok := relWithinRoot(resolvedRoot, resolvedPath)
 
-	return err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return !ok
 }
 
 // scopeRelPath renders d's own path relative to home, slash-separated, for

@@ -18,40 +18,39 @@ const initInvocation = "brief init --host claude-code"
 
 // initLong is "brief init"'s help prose.
 var initLong = `Installs brief's own config, feature root and, for --host claude-code, a
-Claude Code skills-directory plugin under ".claude/skills/brief/": a
-plugin manifest, "/brief:start" and "/brief:finish" skills, and a
-PostToolUse hook running "brief check --hook claude-code" — omit it with
---no-hook. With no --host, the host is detected: claude-code when the
-repository already has ".claude/" or "CLAUDE.md", or the user's own
-"~/.claude" exists; otherwise only the config and feature root install,
-and stderr says no host was detected. --with-agents additionally installs
-three role agents (planner, implementer, reviewer) under the plugin's own
-"agents/" directory; it requires the resolved host to be claude-code, and
-binds every role to them in ".brief.yaml" only when this same run creates
-that file — an existing config is never edited, and stderr instead lists
-the "roles:" lines to add by hand for any role still unbound. Every
-claude-code install also writes a "brief-workflow" skill under
-".claude/skills/brief-workflow/", which agents preload by listing it in
-their frontmatter "skills:". init never edits an agent file of yours by
-default; stderr instead lists each planner or implementer bound in
-".brief.yaml" whose agent lacks it. --edit-agents adds it to those agents'
-"skills:" lists, for agent files under ".claude/agents/" only; one under
-"~/.claude" is always left for you to edit. Writes ".brief.yaml" with
-every key present but commented out, documenting each setting in place
-(live under --with-agents only for "roles:" and its three children, when
-this run creates the file), and creates the configured feature directory.
-Re-running converges: a valid existing
-config, and any plugin or agent file whose bytes are unedited, is kept
-as-is, and every artifact already installed reports "unchanged". An
-unparseable or invalid existing config refuses, naming the fix; --force
-rewrites it from defaults — the bound variant under --with-agents — and
-never rewrites an edited plugin or agent file. --dry-run prints the same
-report and writes nothing. --print writes nothing either and instead
-prints each pending artifact's own path and bytes to stdout, prefixed
-"# <path> (create|merge)", for wiring the integration by hand; it cannot
-be combined with --dry-run. Every target is checked for writability before
-anything is written: an unwritable target refuses, naming it, with the
---print output on stdout so it can still be applied by hand.
+Claude Code skills-directory plugin under ".claude/skills/brief/": a plugin
+manifest, "/brief:start" and "/brief:finish" skills, and a PostToolUse hook
+running "brief check --hook claude-code" — omit it with --no-hook. With no
+--host, the host is detected: claude-code when the repository already has
+".claude/" or "CLAUDE.md", or the user's own "~/.claude" exists; otherwise
+only the config and feature root install, and stderr says no host was
+detected. --with-agents additionally installs three role agents (planner,
+implementer, reviewer) under the plugin's own "agents/" directory; it
+requires the resolved host to be claude-code, and binds every role to them
+in ".brief.yaml" only when this same run creates that file — an existing
+config is never edited, and stderr instead lists the "roles:" lines to add
+by hand for any role still unbound. Every claude-code install also writes a
+"brief-workflow" skill under ".claude/skills/brief-workflow/", which agents
+preload by listing it in their frontmatter "skills:". init never edits an
+agent file of yours by default; stderr instead lists each planner or
+implementer bound in ".brief.yaml" whose agent lacks it. --edit-agents adds
+it to those agents' "skills:" lists, for agent files under ".claude/agents/"
+only; one under "~/.claude" is always left for you to edit. Writes
+".brief.yaml" with every key present but commented out, documenting each
+setting in place (live under --with-agents only for "roles:" and its three
+children, when this run creates the file), and creates the configured
+feature directory. Re-running converges: a valid existing config, and any
+plugin or agent file whose bytes are unedited, is kept as-is, and every
+artifact already installed reports "unchanged". An unparseable or invalid
+existing config refuses, naming the fix; --force rewrites it from defaults —
+the bound variant under --with-agents — and never rewrites an edited plugin
+or agent file. --dry-run prints the same report and writes nothing. --print
+writes nothing either and instead prints each pending artifact's own path
+and bytes to stdout, prefixed "# <path> (create|merge)", for wiring the
+integration by hand; it cannot be combined with --dry-run. Every target is
+checked for writability before anything is written: an unwritable target
+refuses, naming it, with the --print output on stdout so it can still be
+applied by hand.
 
 ` + jsonFieldsParagraph("host", "detected_by", "dry_run", "created", "modified", "artifacts", "roles_to_add", "agents_missing_skill") + "\n" +
 	wrapWords("With --print --json, the document carries only `artifacts`, each "+

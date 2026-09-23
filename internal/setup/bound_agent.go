@@ -638,6 +638,22 @@ func planBoundAgentRemovals(root, home string, roles config.RoleBindings) ([]bou
 // it never attempted.
 const boundAgentUneditableDetail = "skills: is not a list brief can edit; add brief-workflow by hand"
 
+// relWithinRoot reports whether resolvedPath — already symlink-resolved —
+// lies within resolvedRoot, itself already symlink-resolved: rel is its
+// resolvedRoot-relative path when it does; ok is false, rel "", when
+// filepath.Rel fails or the relative path itself escapes (a leading ".."
+// component) — the one escape test every resolved-path-against-
+// resolved-root check in this package, and setup's own missing-skill
+// report, applies.
+func relWithinRoot(resolvedRoot, resolvedPath string) (rel string, ok bool) {
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+
+	return rel, true
+}
+
 // planBoundAgent plans one bound-agent target at path: a non-regular leaf
 // (Lstat) is ActionKept, detail "not a regular file", never read; a
 // regular leaf whose own resolved path escapes resolvedRoot (a ".claude"
@@ -671,8 +687,8 @@ func planBoundAgent(path, resolvedRoot string) (boundAgentArtifact, bool, error)
 		return boundAgentArtifact{}, false, fmt.Errorf("setup: resolve %s: %w", path, err)
 	}
 
-	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, ok := relWithinRoot(resolvedRoot, resolvedPath)
+	if !ok {
 		return boundAgentArtifact{}, false, nil
 	}
 
@@ -772,8 +788,8 @@ func planBoundAgentRemoval(path, resolvedRoot string) (boundAgentArtifact, bool,
 		return boundAgentArtifact{}, false, fmt.Errorf("setup: resolve %s: %w", path, err)
 	}
 
-	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, ok := relWithinRoot(resolvedRoot, resolvedPath)
+	if !ok {
 		return boundAgentArtifact{}, false, nil
 	}
 
