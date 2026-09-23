@@ -89,6 +89,9 @@ Rules:
   the file parses, nothing more. Make the mutation surgical and still-valid.
 - Say which mutation you ran and which test it reddened. "Mutation-verified" alone is not a
   claim anyone can check.
+- **Reviewers never mutate the worktree.** Reviewers run in parallel; a mutation in the
+  shared tree poisons every concurrent run. Mutate a `git archive <sha>` export under
+  `$TMPDIR`. Only the developer (who runs alone) mutates in place.
 
 ## Reviewing: scope and completeness
 
