@@ -109,6 +109,7 @@ func Test_resolve_binding_in_classifies_by_prefix(t *testing.T) {
 		assert.Equal(t, agentfile.BindingResolved, b.State)
 		assert.Equal(t, at(projectDir, ".claude/agents/developer.md"), b.Path)
 		require.Len(t, b.Defs, 1)
+		assert.Equal(t, at(projectDir, ".claude/agents/developer.md"), b.Defs[0].Path)
 	})
 
 	t.Run("bare name unresolved carries neither", func(t *testing.T) {
@@ -123,11 +124,15 @@ func Test_resolve_binding_in_classifies_by_prefix(t *testing.T) {
 		assert.Empty(t, b.Defs)
 	})
 
-	// Test_resolve_binding_in_bare_name_project_over_user re-confirms, at
-	// ResolveBindingIn's own level, the project-over-user precedence
-	// FindIn already owns and mutation-proves (find_test.go's own
-	// Test_find_in_prefers_project_definitions_over_user_level): a bare
-	// name found in both trees resolves to the project one.
+	// This subtest re-confirms, at ResolveBindingIn's own level, the
+	// project-over-user precedence FindIn already owns
+	// (find_test.go's own Test_find_in_prefers_project_definitions_over_user_level):
+	// a bare name found in both trees resolves to the project one.
+	// Mutation-verified together with that test: swapping FindIn's own
+	// search order (project first, then user) reddens both this subtest
+	// and the FindIn one on the same change, since ResolveBindingIn holds
+	// no separate precedence logic of its own — it delegates to FindIn
+	// directly.
 	t.Run("bare name project shadows a same-named user definition", func(t *testing.T) {
 		project := memTree(projectDir, map[string]string{".claude/agents/developer.md": developerAgent})
 		user := memTree(userDir, map[string]string{".claude/agents/developer.md": developerAgent})

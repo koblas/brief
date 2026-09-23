@@ -99,6 +99,15 @@ func Test_locate_within_fs_stops_at_boundary(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, nearest)
 		assert.Empty(t, shadowed)
+
+		// Control: the identical fixture with no boundary does find it —
+		// proving the boundary itself, not some quirk of the fixture, is
+		// what kept it from being found above.
+		nearest, shadowed, err = config.LocateWithinFS(fsys, fsAbs("repo", "sub"), "")
+
+		require.NoError(t, err)
+		assert.Equal(t, fsAbs(".brief.yaml"), nearest)
+		assert.Empty(t, shadowed)
 	})
 
 	t.Run("a config at the boundary is found", func(t *testing.T) {

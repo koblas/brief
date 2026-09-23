@@ -73,7 +73,7 @@ func Locate(startDir string) (string, []string, error) {
 // (errors.Is(err, ErrInvalidConfig) holds too — cli/refusal.go and
 // doctor/checks.go both type-assert the concrete type to reach Path and
 // Err), a startDir that does not exist, the same guard Locate's own doc
-// describes — LocateWithin is where that check actually runs. boundary is
+// describes — LocateWithinFS is where that check actually runs. boundary is
 // expected to name an ancestor of startDir, or startDir itself: that is the only shape
 // where the walk ever reaches a directory equal to it. A boundary outside
 // startDir's own ancestor chain is silently inert rather than an error, and

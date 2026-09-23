@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/stretchr/testify/assert"
@@ -14,17 +15,27 @@ import (
 // (S07): the bytes-level twin of Load, for a caller (setup's own bound-agent
 // edit path) that already holds an agent file's own content in memory
 // rather than a path — it decodes the same Frontmatter, loose Skills
-// included, that Load and LoadFS return for identical bytes, and errors
-// the same way they do on a missing closing delimiter.
+// included, that LoadFS returns for identical bytes, and errors the same
+// way LoadFS does on a missing closing delimiter.
 func Test_parse_decodes_frontmatter_from_bytes(t *testing.T) {
 	body := "---\nname: planner\nskills: [\"brief-workflow\"]\n---\n\nbody\n"
+	fsys := fstest.MapFS{"agent.md": &fstest.MapFile{Data: []byte(body)}}
+
+	want, loadErr := agentfile.LoadFS(fsys, "agent.md")
+	require.NoError(t, loadErr)
 
 	got, err := agentfile.Parse([]byte(body))
 	require.NoError(t, err)
-	assert.Equal(t, agentfile.Frontmatter{Name: "planner", Skills: []string{"brief-workflow"}}, got)
+	assert.Equal(t, want, got)
 
 	t.Run("errors on missing closing delimiter", func(t *testing.T) {
-		_, err := agentfile.Parse([]byte("---\nname: planner\n\nno closing delimiter here\n"))
+		badBody := "---\nname: planner\n\nno closing delimiter here\n"
+		badFS := fstest.MapFS{"agent.md": &fstest.MapFile{Data: []byte(badBody)}}
+
+		_, wantErr := agentfile.LoadFS(badFS, "agent.md")
+		require.Error(t, wantErr)
+
+		_, err := agentfile.Parse([]byte(badBody))
 		require.Error(t, err)
 	})
 }
