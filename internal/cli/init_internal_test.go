@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/setup"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -350,8 +351,11 @@ func Test_init_missing_skill_header_omits_edit_agents_suggestion_when_it_cannot_
 		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, seam)
 
 		require.NoError(t, err)
-		assert.Contains(t, stderr.String(), missingSkillHeaderLinePlain+"\n")
-		assert.NotContains(t, stderr.String(), "rerun with --edit-agents")
+		assert.Equal(t,
+			missingSkillHeaderLinePlain+"\n"+
+				"  ~/.claude/agents/planner.md (planner; user-level, edit by hand)\n"+
+				installedNextActionLine+"\n",
+			stderr.String())
 	})
 
 	t.Run("--edit-agents given, already kept its one bound agent as uneditable", func(t *testing.T) {
@@ -370,8 +374,11 @@ func Test_init_missing_skill_header_omits_edit_agents_suggestion_when_it_cannot_
 
 		require.NoError(t, err)
 		assert.Contains(t, stdout.String(), "kept .claude/agents/developer.md (skills: is not a list brief can edit; add brief-workflow by hand)\n")
-		assert.Contains(t, stderr.String(), missingSkillHeaderLinePlain+"\n")
-		assert.NotContains(t, stderr.String(), "rerun with --edit-agents")
+		assert.Equal(t,
+			missingSkillHeaderLinePlain+"\n"+
+				"  .claude/agents/developer.md (implementer; skills: is not a list brief can edit, edit by hand)\n"+
+				installedNextActionLine+"\n",
+			stderr.String())
 	})
 }
 
@@ -407,9 +414,176 @@ func Test_init_missing_skill_lists_an_escaping_bound_agent_separately(t *testing
 	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--dry-run"}, nil, &stdout, &stderr, noBuildInfo, seam)
 
 	require.NoError(t, err)
-	assert.Contains(t, stderr.String(), missingSkillHeaderLinePlain+"\n")
-	assert.NotContains(t, stderr.String(), "rerun with --edit-agents")
-	assert.Contains(t, stderr.String(), "  .claude/agents/developer.md (implementer; outside the repository, edit by hand)\n")
+	assert.Equal(t,
+		missingSkillHeaderLinePlain+"\n"+
+			"  .claude/agents/developer.md (implementer; outside the repository, edit by hand)\n"+
+			"brief init: dry run, no files changed; rerun without --dry-run to apply\n",
+		stderr.String())
+}
+
+// Test_init_missing_skill_lists_a_not_regular_leaf_separately pins the
+// fourth missing-skill row shape (REVIEW fix round, MAJOR 1): a bound
+// implementer resolved to a symlinked leaf whose own target still resolves
+// inside the repository does not escape it (Rule 3's own escape test never
+// fires — the leaf's own resolved path stays under root) but is still
+// unreachable by "--edit-agents": planBoundAgent Lstats the leaf itself and
+// never reads through a non-regular file. Alone, it is listed "; not a
+// regular file, edit by hand" and keeps the header plain, since
+// "--edit-agents" cannot reach it either. The control proves the symlink
+// itself is what disqualifies the row, not its bytes: the identical
+// frontmatter written as a plain regular file instead resolves fixable,
+// plain row format, header suffixed.
+func Test_init_missing_skill_lists_a_not_regular_leaf_separately(t *testing.T) {
+	body := []byte("---\nname: developer\n---\n\nbody\n")
+
+	t.Run("symlinked leaf, target inside the repository", func(t *testing.T) {
+		wd := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+			"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
+		), 0o600))
+
+		agentsDir := filepath.Join(wd, ".claude", "agents")
+		require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "developer-body.txt"), body, 0o600))
+		require.NoError(t, os.Symlink("developer-body.txt", filepath.Join(agentsDir, "developer.md")))
+
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+
+		require.NoError(t, err)
+		assert.Equal(t,
+			missingSkillHeaderLinePlain+"\n"+
+				"  .claude/agents/developer.md (implementer; not a regular file, edit by hand)\n"+
+				installedNextActionLine+"\n",
+			stderr.String())
+	})
+
+	t.Run("control: identical bytes as a regular file resolve fixable", func(t *testing.T) {
+		wd := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+			"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
+		), 0o600))
+
+		agentPath := filepath.Join(wd, ".claude", "agents", "developer.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
+		require.NoError(t, os.WriteFile(agentPath, body, 0o600))
+
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+
+		require.NoError(t, err)
+		assert.Equal(t,
+			missingSkillHeaderLine+"\n"+
+				"  .claude/agents/developer.md (implementer)\n"+
+				installedNextActionLine+"\n",
+			stderr.String())
+	})
+}
+
+// Test_init_missing_skill_lists_an_uneditable_shape_without_edit_agents pins
+// the fifth missing-skill row shape (REVIEW fix round, MAJOR 1): a bound
+// implementer whose own "skills:" frontmatter is a scalar addWorkflowSkill
+// cannot edit is listed "; skills: is not a list brief can edit, edit by
+// hand" even when "--edit-agents" was never given on this run — a row's own
+// reach is decided by its shape (setup.planBoundAgent's own verdict), never
+// by whether an edit was attempted, so the header never dangles a flag that
+// could not help it either way.
+func Test_init_missing_skill_lists_an_uneditable_shape_without_edit_agents(t *testing.T) {
+	wd := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
+		"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
+	), 0o600))
+
+	agentPath := filepath.Join(wd, ".claude", "agents", "developer.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
+	require.NoError(t, os.WriteFile(agentPath, []byte("---\nname: developer\nskills: tdd\n---\n\nbody\n"), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+
+	require.NoError(t, err)
+	assert.Equal(t,
+		missingSkillHeaderLinePlain+"\n"+
+			"  .claude/agents/developer.md (implementer; skills: is not a list brief can edit, edit by hand)\n"+
+			installedNextActionLine+"\n",
+		stderr.String())
+}
+
+// Test_missing_skill_lines_group_order pins missingSkillHeader and
+// missingSkillLines' own combined rendering across the four-group order
+// (Surface & Copy) every pairwise Reach combination must sort by: fixable,
+// then a project row setup.planBoundAgent itself cannot reach — not
+// regular, an uneditable "skills:" shape — combined, then an escaping
+// project row, then every user-level row. wd is a fixed string;
+// missingSkillHeader and missingSkillLines never touch the filesystem, so
+// every Reach combination can be pinned directly without constructing real
+// agent files.
+func Test_missing_skill_lines_group_order(t *testing.T) {
+	const wd = "/repo"
+
+	// missingSkillHeader renders without the "brief init: " prefix runInit
+	// itself prepends — headerSuffixed/headerPlain are missingSkillHeaderLine
+	// and missingSkillHeaderLinePlain's own unprefixed counterparts, so a
+	// direct call to missingSkillHeader can be compared against them as-is.
+	headerSuffixed := strings.TrimPrefix(missingSkillHeaderLine, "brief init: ")
+	headerPlain := strings.TrimPrefix(missingSkillHeaderLinePlain, "brief init: ")
+
+	renderBlock := func(editAgents bool, agents []setup.MissingSkillAgent) string {
+		lines := append([]string{missingSkillHeader(editAgents, agents)}, missingSkillLines(wd, agents)...)
+
+		return strings.Join(lines, "\n") + "\n"
+	}
+
+	t.Run("fixable implementer, escaping planner: fixable first, header suffixed", func(t *testing.T) {
+		agents := []setup.MissingSkillAgent{
+			{Role: "planner", Agent: "planner", Path: filepath.Join(wd, ".claude", "agents", "planner.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachEscaped},
+			{Role: "implementer", Agent: "developer", Path: filepath.Join(wd, ".claude", "agents", "developer.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachFixable},
+		}
+
+		want := headerSuffixed + "\n" +
+			"  .claude/agents/developer.md (implementer)\n" +
+			"  .claude/agents/planner.md (planner; outside the repository, edit by hand)\n"
+		assert.Equal(t, want, renderBlock(false, agents))
+	})
+
+	t.Run("escaping implementer, user-level planner: escaping before user, header plain", func(t *testing.T) {
+		agents := []setup.MissingSkillAgent{
+			{Role: "planner", Agent: "planner", Scope: agentfile.ScopeUser, ScopeRelPath: ".claude/agents/planner.md", Reach: setup.ReachNone},
+			{Role: "implementer", Agent: "developer", Path: filepath.Join(wd, ".claude", "agents", "developer.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachEscaped},
+		}
+
+		want := headerPlain + "\n" +
+			"  .claude/agents/developer.md (implementer; outside the repository, edit by hand)\n" +
+			"  ~/.claude/agents/planner.md (planner; user-level, edit by hand)\n"
+		assert.Equal(t, want, renderBlock(false, agents))
+	})
+
+	t.Run("in-repo unfixable planner, fixable implementer: fixable first, unfixable second, header suffixed", func(t *testing.T) {
+		agents := []setup.MissingSkillAgent{
+			{Role: "planner", Agent: "planner", Path: filepath.Join(wd, ".claude", "agents", "planner.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachUneditable},
+			{Role: "implementer", Agent: "developer", Path: filepath.Join(wd, ".claude", "agents", "developer.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachFixable},
+		}
+
+		want := headerSuffixed + "\n" +
+			"  .claude/agents/developer.md (implementer)\n" +
+			"  .claude/agents/planner.md (planner; skills: is not a list brief can edit, edit by hand)\n"
+		assert.Equal(t, want, renderBlock(false, agents))
+	})
+
+	t.Run("in-repo unfixable planner, escaping implementer: unfixable before escaping, header plain", func(t *testing.T) {
+		agents := []setup.MissingSkillAgent{
+			{Role: "planner", Agent: "planner", Path: filepath.Join(wd, ".claude", "agents", "planner.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachNotRegular},
+			{Role: "implementer", Agent: "developer", Path: filepath.Join(wd, ".claude", "agents", "developer.md"), Scope: agentfile.ScopeProject, Reach: setup.ReachEscaped},
+		}
+
+		want := headerPlain + "\n" +
+			"  .claude/agents/planner.md (planner; not a regular file, edit by hand)\n" +
+			"  .claude/agents/developer.md (implementer; outside the repository, edit by hand)\n"
+		assert.Equal(t, want, renderBlock(false, agents))
+	})
 }
 
 // Test_init_edit_agents_requires_claude_code pins the exit-2 refusal when

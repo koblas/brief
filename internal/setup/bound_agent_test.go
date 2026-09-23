@@ -393,7 +393,7 @@ func Test_init_edit_agents_leaves_non_targets_alone(t *testing.T) {
 
 		require.Len(t, res.AgentsMissingSkill, 1)
 		assert.Equal(t, filepath.Join(wd, ".claude", "agents", "developer.md"), res.AgentsMissingSkill[0].Path)
-		assert.True(t, res.AgentsMissingSkill[0].Escaped, "a binding resolved only through a symlinked .claude must be reported as escaping the repository")
+		assert.Equal(t, setup.ReachEscaped, res.AgentsMissingSkill[0].Reach, "a binding resolved only through a symlinked .claude must be reported as escaping the repository")
 
 		wd2 := t.TempDir()
 		writeConfigWithRoles(t, wd2, "", "developer", "")

@@ -375,7 +375,11 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 			}
 		}
 
-		agentsMissingSkillList = agentsMissingSkill(root, home, cfg.Roles)
+		agentsMissingSkillList, err = agentsMissingSkill(root, home, cfg.Roles)
+		if err != nil {
+			return Result{}, err
+		}
+
 		agentsMissingSkillList = subtractMergedBoundAgents(agentsMissingSkillList, boundAgentArts)
 	}
 

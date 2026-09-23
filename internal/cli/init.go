@@ -214,23 +214,22 @@ func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, ro
 // stderr line in this file shares.
 const missingSkillHeaderBase = `bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each`
 
-// missingSkillFixableByEditAgents reports whether a is a row "--edit-agents"
-// could still reach: a ScopeProject binding whose own resolved path does
-// not escape the repository. A ScopeUser binding, or a ScopeProject one
-// that does (a ".claude" symlinked elsewhere), is always left to edit by
-// hand — missingSkillLines' own annotation says so on every such row.
-func missingSkillFixableByEditAgents(a setup.MissingSkillAgent) bool {
-	return a.Scope == agentfile.ScopeProject && !a.Escaped
+// missingSkillFixable reports whether a is a row "--edit-agents" could
+// still reach — setup's own planBoundAgent verdict (setup.ReachFixable),
+// never re-derived here: cli only maps setup.MissingSkillAgent.Reach to
+// display text and grouping.
+func missingSkillFixable(a setup.MissingSkillAgent) bool {
+	return a.Reach == setup.ReachFixable
 }
 
 // missingSkillHeader renders init's own missing-skill stderr block header
 // (Surface & Copy): the suffix ", or rerun with --edit-agents:" is
 // appended only when editAgents was not given on this run and at least one
-// listed agent is one it could still reach (missingSkillFixableByEditAgents)
-// — otherwise the header ends plain ":", since suggesting a flag that
-// either already ran, or cannot help any row left, would be a dead end.
+// listed agent is one it could still reach (missingSkillFixable) —
+// otherwise the header ends plain ":", since suggesting a flag that either
+// already ran, or cannot help any row left, would be a dead end.
 func missingSkillHeader(editAgents bool, agents []setup.MissingSkillAgent) string {
-	if !editAgents && slices.ContainsFunc(agents, missingSkillFixableByEditAgents) {
+	if !editAgents && slices.ContainsFunc(agents, missingSkillFixable) {
 		return missingSkillHeaderBase + `, or rerun with --edit-agents:`
 	}
 
@@ -238,28 +237,44 @@ func missingSkillHeader(editAgents bool, agents []setup.MissingSkillAgent) strin
 }
 
 // missingSkillLines renders one line per agents entry (Surface & Copy), in
-// three groups — every row "--edit-agents" could still reach first, then
-// a ScopeProject row whose own resolved path escapes the repository, then
-// every ScopeUser row — each group in agents' own relative order, so the
-// rows an adopter can fix by rerunning init with --edit-agents come before
-// the ones always left for them to edit by hand: a fixable row is
-// "  <displayPath(wd, path)> (<role>)", an escaping row is
-// "  <displayPath(wd, path)> (<role>; outside the repository, edit by
-// hand)", a user row is "  ~/<home-relative slash path> (<role>;
-// user-level, edit by hand)". This grouping is a display concern only —
-// setup.Result.AgentsMissingSkill itself stays in role-major order
+// four groups, each in agents' own relative order, so the rows an adopter
+// can fix by rerunning init with --edit-agents come before the ones always
+// left for them to edit by hand: (1) every row "--edit-agents" could still
+// reach (setup.ReachFixable), "  <displayPath(wd, path)> (<role>)"; (2) a
+// ScopeProject row setup.planBoundAgent itself cannot reach — not a
+// regular file (setup.ReachNotRegular), "  <displayPath(wd, path)>
+// (<role>; not a regular file, edit by hand)", and an unrecognized
+// "skills:" shape (setup.ReachUneditable), "  <displayPath(wd, path)>
+// (<role>; skills: is not a list brief can edit, edit by hand)" — rendered
+// together, in that combined relative order; (3) a ScopeProject row whose
+// own resolved path escapes the repository (setup.ReachEscaped), "
+// <displayPath(wd, path)> (<role>; outside the repository, edit by
+// hand)"; (4) every ScopeUser row, "  ~/<home-relative slash path>
+// (<role>; user-level, edit by hand)". This grouping is a display concern
+// only — setup.Result.AgentsMissingSkill itself stays in role-major order
 // (setup's own missing_skill.go).
 func missingSkillLines(wd string, agents []setup.MissingSkillAgent) []string {
 	lines := make([]string, 0, len(agents))
 
 	for _, a := range agents {
-		if missingSkillFixableByEditAgents(a) {
+		if missingSkillFixable(a) {
 			lines = append(lines, fmt.Sprintf("  %s (%s)", displayPath(wd, a.Path), a.Role))
 		}
 	}
 
 	for _, a := range agents {
-		if a.Scope == agentfile.ScopeProject && a.Escaped {
+		switch a.Reach {
+		case setup.ReachNotRegular:
+			lines = append(lines, fmt.Sprintf("  %s (%s; not a regular file, edit by hand)", displayPath(wd, a.Path), a.Role))
+		case setup.ReachUneditable:
+			lines = append(lines, fmt.Sprintf("  %s (%s; skills: is not a list brief can edit, edit by hand)", displayPath(wd, a.Path), a.Role))
+		case setup.ReachFixable, setup.ReachEscaped, setup.ReachNone:
+			// Rendered in a different group; nothing to do here.
+		}
+	}
+
+	for _, a := range agents {
+		if a.Reach == setup.ReachEscaped {
 			lines = append(lines, fmt.Sprintf("  %s (%s; outside the repository, edit by hand)", displayPath(wd, a.Path), a.Role))
 		}
 	}

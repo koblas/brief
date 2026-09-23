@@ -638,6 +638,14 @@ func planBoundAgentRemovals(root, home string, roles config.RoleBindings) ([]bou
 // it never attempted.
 const boundAgentUneditableDetail = "skills: is not a list brief can edit; add brief-workflow by hand"
 
+// boundAgentNotRegularDetail is ActionKept's own detail (Surface & Copy) for
+// a bound-agent leaf that is not a regular file — never read, so distinct
+// from boundAgentUneditableDetail, which names a regular file whose
+// contents planBoundAgent could not edit. setup's own missing-skill report
+// (missingSkillReach) compares against this same constant rather than a
+// second copy of the text.
+const boundAgentNotRegularDetail = "not a regular file"
+
 // relWithinRoot reports whether resolvedPath — already symlink-resolved —
 // lies within resolvedRoot, itself already symlink-resolved: rel is its
 // resolvedRoot-relative path when it does; ok is false, rel "", when
@@ -678,7 +686,7 @@ func planBoundAgent(path, resolvedRoot string) (boundAgentArtifact, bool, error)
 
 	if !info.Mode().IsRegular() {
 		return boundAgentArtifact{
-			Artifact: Artifact{Kind: KindBoundAgent, Path: path, Action: ActionKept, Detail: "not a regular file"},
+			Artifact: Artifact{Kind: KindBoundAgent, Path: path, Action: ActionKept, Detail: boundAgentNotRegularDetail},
 		}, true, nil
 	}
 

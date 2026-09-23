@@ -1010,10 +1010,7 @@ func Test_uninstall_help_names_the_bound_agent_skill_removal(t *testing.T) {
 // product-vision fix round's own correction: uninstallLong's opening
 // sentence must say the "brief-workflow" skill directory is removed
 // alongside the plugin — the original wording named only the plugin,
-// never disclosing that the skill itself goes too — and its closing
-// "left in place" clause must speak of brief's own directories generally,
-// not just "the plugin's own directory", since the skill is a sibling
-// directory the same sentence now names.
+// never disclosing that the skill itself goes too.
 func Test_uninstall_help_names_the_workflow_skill_directory(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -1023,10 +1020,26 @@ func Test_uninstall_help_names_the_workflow_skill_directory(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stderr.String())
 
-	normalized := normalizeWhitespace(stdout.String())
-
 	const pluginAndSkillSentence = `the Claude Code plugin under ".claude/skills/brief/" and the "brief-workflow" skill under ".claude/skills/brief-workflow/"`
-	assert.Contains(t, normalized, pluginAndSkillSentence)
+	assert.Contains(t, normalizeWhitespace(stdout.String()), pluginAndSkillSentence)
+}
+
+// Test_uninstall_help_left_in_place_clause_names_briefs_own_directories
+// pins the product-vision fix round's own correction to uninstallLong's
+// closing "left in place" clause: it must speak of brief's own directories
+// generally, not just "the plugin's own directory", since the
+// "brief-workflow" skill directory is a sibling the opening sentence now
+// names too (Test_uninstall_help_names_the_workflow_skill_directory).
+func Test_uninstall_help_left_in_place_clause_names_briefs_own_directories(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"uninstall", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	normalized := normalizeWhitespace(stdout.String())
 
 	const leftInPlaceClause = `nor is ".claude/" or ".claude/skills/" above brief's own directories.`
 	assert.Contains(t, normalized, leftInPlaceClause)

@@ -226,14 +226,21 @@ Edit per agent file — frontmatter only, surgical line edit:
   `brief init: --edit-agents requires --host claude-code; run 'brief init --host claude-code --edit-agents'`
 
 Missing-skill report — stderr, exit 0, with or without the flag, listing agents still missing
-the skill after this run (after the planned run under `--dry-run`). Header suffix
+the skill after this run (after the planned run under `--dry-run`). Classification is a single
+decision point, `setup.planBoundAgent`'s own verdict against each `ScopeProject` row
+(`setup.MissingSkillAgent.Reach`, one of `ReachFixable`, `ReachNotRegular`, `ReachUneditable`,
+`ReachEscaped` — `ReachNone` for a `ScopeUser` row, which `--edit-agents` never targets); cli
+only maps `Reach` to display text and grouping, never re-derives it. Header suffix
 `, or rerun with --edit-agents:` appears only when `--edit-agents` was **not** given on this run
-**and** at least one listed agent is one the flag could still reach (a bare-name project
-binding, not escaping the repository); otherwise the header ends plain, exactly:
+**and** at least one listed row has no "edit by hand" annotation — a row whose `Reach` is
+`ReachFixable`; otherwise the header ends plain, exactly:
 `brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each:`
 — a run that already carries the flag, or one where every remaining agent is already annotated
-"edit by hand", never suggests it. Rows, in scope order: every fixable project row first, then
-a project binding whose own resolved path escapes the repository, then every user-level row:
+"edit by hand", never suggests it. Rows, in four groups, each in the report's own relative
+order: (1) every fixable project row; (2) a project row `planBoundAgent` itself cannot reach —
+not a regular file, and an unrecognized `skills:` shape (or unparseable frontmatter) — together,
+in that combined relative order; (3) a project row whose own resolved path escapes the
+repository; (4) every user-level row:
 
 ```
 brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each, or rerun with --edit-agents:
@@ -241,15 +248,20 @@ brief init: bound agents do not preload the brief-workflow skill; add "brief-wor
   ~/.claude/agents/planner.md (planner; user-level, edit by hand)
 ```
 
-A project binding whose own resolved path escapes the repository (a `.claude` symlinked
-elsewhere) renders `  <rel> (<role>; outside the repository, edit by hand)` — `--edit-agents`
-cannot reach it either, so it groups with the user-level rows for header-suggestion purposes
-even though it is `Scope` `"project"`.
+A project row whose own leaf is not a regular file (a symlink whose own target still resolves
+inside the repository) renders `  <rel> (<role>; not a regular file, edit by hand)`; one whose
+`skills:` shape `planBoundAgent` cannot edit renders `  <rel> (<role>; skills: is not a list
+brief can edit, edit by hand)`; one whose own resolved path escapes the repository (a `.claude`
+symlinked elsewhere) renders `  <rel> (<role>; outside the repository, edit by hand)` —
+`--edit-agents` cannot reach any of the three, so each groups with the user-level rows for
+header-suggestion purposes even though the first two are still `Scope` `"project"`. `<rel>` is
+the path as found under `.claude/agents` (the symlink's own location for a not-regular row,
+never its resolved target).
 
 `--json`: new field `agents_missing_skill`, after `roles_to_add`, always present, never null;
-items `{"role", "agent", "path" (absolute), "scope" ("project"|"user")}` — an escaping-repository
-row keeps `"scope": "project"` (JSON carries no escaped flag; the "outside the repository"
-annotation is a text-mode display concern only). Omitted from the
+items `{"role", "agent", "path" (absolute), "scope" ("project"|"user")}` — every unreachable
+project row keeps `"scope": "project"` regardless of why (JSON carries no `reach` or escaped
+field; the "edit by hand" annotations are a text-mode display concern only). Omitted from the
 `--print --json` document. `jsonFieldsParagraph(...)` appends `"agents_missing_skill"`.
 
 `initLong` addition, after the `--with-agents` sentence:

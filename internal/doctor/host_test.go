@@ -1891,6 +1891,23 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 			wantDetail:   "implementer: brief:implementer does not preload brief-workflow",
 			wantFix:      new(rolesSkillMissingFix),
 		},
+	}
+
+	runRolesSkillCases(t, cases)
+}
+
+// Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases
+// continues Test_diagnose_classifies_roles_skill's own table — split into a
+// second function only to keep golangci-lint's maintidx metric, driven by
+// the table literal's own size, under threshold; the two functions pin one
+// rule set (roles-skill's own resolution rules, S05) and share
+// runRolesSkillCases. This half covers the "not verified" suffix (both role
+// names — a hardcoded role literal in rolesSkillOKText must fail here even
+// if it passes the sibling "planner" case), the omitClaudeMd suffix, the
+// reviewer exclusion, user-level resolution, the loose-decode and
+// duplicate-definition guards, and a lone unbound role.
+func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testing.T) {
+	cases := []rolesSkillCase{
 		{
 			name: "planner resolved with the skill, implementer is an other-plugin binding",
 			setup: func(t *testing.T, wd string) {
@@ -1900,6 +1917,22 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner preloads brief-workflow; not verified: implementer",
+			wantFix:      nil,
+		},
+		{
+			// Mirrors the "planner preloads…; not verified: implementer"
+			// case above with the roles swapped, so the singular branch of
+			// rolesSkillOKText is pinned against both role names, not just
+			// "planner" — a hardcoded "planner" literal would still pass
+			// the sibling case above but fail here.
+			name: "implementer resolved with the skill, planner is an other-plugin binding",
+			setup: func(t *testing.T, wd string) {
+				t.Helper()
+				writeRolesConfig(t, wd, "acme:planner", "brief:implementer", "")
+				writePluginAgent(t, wd, "implementer")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "implementer preloads brief-workflow; not verified: planner",
 			wantFix:      nil,
 		},
 		{
@@ -2001,6 +2034,18 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 			wantFix:      nil,
 		},
 	}
+
+	runRolesSkillCases(t, cases)
+}
+
+// runRolesSkillCases runs each rolesSkillCase in cases as its own subtest,
+// diagnosing a fresh fixture and asserting roles-skill's own row (and,
+// where wantRolesDetail is set, the sibling roles row) against it — the
+// execution loop Test_diagnose_classifies_roles_skill and
+// Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases both
+// share.
+func runRolesSkillCases(t *testing.T, cases []rolesSkillCase) {
+	t.Helper()
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

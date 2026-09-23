@@ -1,11 +1,47 @@
 package setup
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/config"
+)
+
+// MissingSkillReach classifies whether "--edit-agents" could still reach a
+// MissingSkillAgent's own file — setup's own planBoundAgent verdict,
+// computed once here so a caller (cli's own missing-skill report) need only
+// map it to display text rather than re-derive it: ReachFixable when
+// planBoundAgent would still merge the skill in; ReachNotRegular and
+// ReachUneditable each name a reason planBoundAgent itself would leave a
+// row it read ActionKept — a non-regular leaf, or a "skills:" shape (or
+// unparseable frontmatter) it cannot edit; ReachEscaped when the resolved
+// path lands outside the repository, the one case planBoundAgent
+// contributes no row for at all. ReachNone is the zero value, carried only
+// by a ScopeUser row — "--edit-agents" never targets user-scope agents in
+// the first place (Rule 3), so none of the other four ever apply to one.
+type MissingSkillReach string
+
+const (
+	// ReachNone is the zero value, carried only by a ScopeUser row —
+	// "--edit-agents" never targets user-scope agents (Rule 3), so no
+	// other MissingSkillReach value ever applies to one.
+	ReachNone MissingSkillReach = ""
+	// ReachFixable marks a ScopeProject row "--edit-agents" can still
+	// merge the skill into.
+	ReachFixable MissingSkillReach = "fixable"
+	// ReachNotRegular marks a ScopeProject row whose own leaf is not a
+	// regular file (a symlink whose own target still resolves inside the
+	// repository).
+	ReachNotRegular MissingSkillReach = "not-regular"
+	// ReachUneditable marks a ScopeProject row whose "skills:" frontmatter
+	// shape planBoundAgent cannot edit, or whose frontmatter does not
+	// parse at all.
+	ReachUneditable MissingSkillReach = "uneditable"
+	// ReachEscaped marks a ScopeProject row whose own resolved path lands
+	// outside the repository (a ".claude" symlinked elsewhere).
+	ReachEscaped MissingSkillReach = "escaped"
 )
 
 // MissingSkillAgent is one bare-name planner or implementer binding whose
@@ -16,17 +52,16 @@ import (
 // (agentfile.Scope), ScopeRelPath carries a ScopeUser Definition's own
 // path relative to home, slash-separated ("" for a ScopeProject
 // Definition — the project row renders relative to wd instead, a caller's
-// own concern), and Escaped is true for a ScopeProject Definition whose
-// own resolved path, symlinks followed, lands outside root (a ".claude"
-// symlinked elsewhere) — always false for ScopeUser, which is already
-// outside the repository by definition and carries its own annotation.
+// own concern), and Reach classifies a ScopeProject Definition's own
+// setup.planBoundAgent verdict (MissingSkillReach) — ReachNone for a
+// ScopeUser Definition, which "--edit-agents" never targets.
 type MissingSkillAgent struct {
 	Role         string
 	Agent        string
 	Path         string
 	Scope        agentfile.Scope
 	ScopeRelPath string
-	Escaped      bool
+	Reach        MissingSkillReach
 }
 
 // agentsMissingSkill walks planner then implementer in roles, keeping only
@@ -34,10 +69,16 @@ type MissingSkillAgent struct {
 // "brief:*" or other-plugin binding — Rule 3, Rule 4's own target set),
 // and emits one MissingSkillAgent per Definition its own
 // LackingSkill(artifact.WorkflowSkillName) returns, in that same order.
-// The result is never nil.
-func agentsMissingSkill(root, home string, roles config.RoleBindings) []MissingSkillAgent {
+// root's own symlink resolution failing is returned as an error, the same
+// treatment boundAgentTargets gives it — nothing meaningful can be
+// classified against an unresolvable root. The result is never nil.
+func agentsMissingSkill(root, home string, roles config.RoleBindings) ([]MissingSkillAgent, error) {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, fmt.Errorf("setup: resolve %s: %w", root, err)
+	}
+
 	out := []MissingSkillAgent{}
-	resolvedRoot, rootErr := filepath.EvalSymlinks(root)
 
 	for _, r := range []struct{ role, value string }{
 		{"planner", roles.Planner},
@@ -49,38 +90,61 @@ func agentsMissingSkill(root, home string, roles config.RoleBindings) []MissingS
 		}
 
 		for _, d := range b.LackingSkill(artifact.WorkflowSkillName) {
+			reach, reachErr := missingSkillReach(d, resolvedRoot)
+			if reachErr != nil {
+				return nil, reachErr
+			}
+
 			out = append(out, MissingSkillAgent{
 				Role:         r.role,
 				Agent:        r.value,
 				Path:         d.Path,
 				Scope:        d.Scope,
 				ScopeRelPath: scopeRelPath(home, d),
-				Escaped:      d.Scope == agentfile.ScopeProject && pathEscapesRoot(resolvedRoot, rootErr, d.Path),
+				Reach:        reach,
 			})
 		}
 	}
 
-	return out
+	return out, nil
 }
 
-// pathEscapesRoot reports whether path, symlinks resolved, lands outside
-// resolvedRoot, via relWithinRoot — bound_agent.go's own escape test,
-// shared here for report-only use: rootErr non-nil (root itself
-// unresolvable) or path's own resolution failing is never treated as an
-// escape, since neither proves anything about path's relation to root.
-func pathEscapesRoot(resolvedRoot string, rootErr error, path string) bool {
-	if rootErr != nil {
-		return false
+// missingSkillReach classifies d — one MissingSkillAgent's own source
+// Definition — via planBoundAgent, the same verdict "--edit-agents" would
+// itself reach, called here in the same plan-only shape planBoundAgents
+// itself calls it in (no write ever happens from this path): ReachNone for
+// a ScopeUser Definition, which planBoundAgent never targets; ReachEscaped
+// when planBoundAgent contributes no row at all (ok false — the resolved
+// path escapes resolvedRoot); ReachFixable when it returns a row with
+// Action other than ActionKept — the same "still reachable" condition
+// planBoundAgents' own apply step relies on; otherwise ReachNotRegular or
+// ReachUneditable, read off the row's own Detail. A planBoundAgent error
+// propagates unchanged — d.Path having already been read once to build the
+// report in the first place, a fresh Lstat/EvalSymlinks/ReadFile failure
+// here means it changed underneath this run.
+func missingSkillReach(d agentfile.Definition, resolvedRoot string) (MissingSkillReach, error) {
+	if d.Scope != agentfile.ScopeProject {
+		return ReachNone, nil
 	}
 
-	resolvedPath, err := filepath.EvalSymlinks(path)
+	art, ok, err := planBoundAgent(d.Path, resolvedRoot)
 	if err != nil {
-		return false
+		return "", err
 	}
 
-	_, ok := relWithinRoot(resolvedRoot, resolvedPath)
+	if !ok {
+		return ReachEscaped, nil
+	}
 
-	return !ok
+	if art.Action != ActionKept {
+		return ReachFixable, nil
+	}
+
+	if art.Detail == boundAgentNotRegularDetail {
+		return ReachNotRegular, nil
+	}
+
+	return ReachUneditable, nil
 }
 
 // scopeRelPath renders d's own path relative to home, slash-separated, for
