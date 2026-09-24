@@ -17,7 +17,12 @@
 // sharing the parent's underlying map, mutex and fake clock rather than a
 // copy, so a write through either is visible from the other and Close is a
 // no-op. Both adapters pass the same contract test, defined once in
-// rwfs_test.go and run against each.
+// internal/platform/rwfs/rwfstest (Contract) and run against each with no
+// declared exception; a third adapter built outside this package — such as
+// internal/setup's diskFS or internal/assemble's osRoot/memDirFS pair —
+// runs the same contract against itself, declaring through rwfstest's own
+// Option mechanism whatever part of it that adapter cannot satisfy, rather
+// than silently narrowing the contract or leaving the adapter unproven.
 //
 // A handful of guarantees are inherent to a real filesystem and are not,
 // and cannot economically be, reproduced by Mem:
@@ -33,8 +38,18 @@
 //     symlink anywhere in a path, not only its final segment. Mem's own
 //     ancestor check (notDirAncestor) only Lstats each segment, so a
 //     symlink standing in for a directory partway through name reports
-//     syscall.ENOTDIR on Mem where OS would follow it — this divergence has
-//     no test of its own; brief's only call site resolves a single segment.
+//     syscall.ENOTDIR on Mem where OS would follow it. Mem.OpenRoot is
+//     called with both single-segment names (a feature's own directory
+//     name, e.g. internal/assemble's checkNamedFeature) and multi-segment
+//     ones — internal/assemble's and internal/scaffold's own
+//     openFeatureDir each map an absolute OS directory through their own
+//     fsName before calling OpenRoot on it, so every WithFS-backed
+//     internal/cli test exercises a multi-segment call. This divergence
+//     still has no test of its own: production never opens Mem at all
+//     (WithFS is test-only), and every WithFS fixture in this repository
+//     builds its ancestor directories as explicit directory entries, never
+//     a symlink standing in for one — see internal/cli's own memTree,
+//     whose only entry constructors are dir and file.
 //   - Permission enforcement: the OS adapter's operations fail with a
 //     permission error when the underlying file or directory forbids them.
 //     Mem records the permission bits given to Mkdir/MkdirAll/WriteFile

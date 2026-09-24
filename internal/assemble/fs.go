@@ -46,6 +46,21 @@ type dirFS interface {
 // own openRoot field instead of calling (*os.Root).OpenRoot directly, so a
 // test-injected open failure (export_test.go's SetOpenRootForTest) still
 // applies at every depth, exactly as it did before dirFS existed.
+//
+// osRoot and memDirFS share one read contract, proven by
+// read_contract_internal_test.go against rwfs/rwfstest, both built through
+// the real (*Server).openFeatureDir. One divergence is declared there
+// rather than fixed: unlike rwfs.OS's own OpenRoot, osRoot's does not run
+// its raw *os.Root.OpenRoot failure through a classifyOpenRootErr-style
+// normalization, so when name exists as a file it reports a bare,
+// unwrapped "not a directory" string rather than syscall.ENOTDIR
+// (confirmed on go1.27.1/darwin) — memDirFS, backed by rwfs.Mem, reports
+// the classified sentinel for the identical case. This is reachable in
+// production only through Start, whose topRoot.OpenRoot(feature) runs
+// with no prior Lstat; Check and Status both Lstat and check IsDir() first
+// (check.go, status.go), so neither ever reaches it. Classifying it would
+// change Start's own wrapped error text, so it stays documented rather
+// than fixed.
 type osRoot struct {
 	r        *os.Root
 	openRoot func(parent *os.Root, name string) (*os.Root, error)

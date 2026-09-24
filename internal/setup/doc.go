@@ -148,7 +148,17 @@
 // refuse (init_disk_test.go pins this with a mutation). A test substitutes
 // an rwfs.Mem via WithFSRoot — internal/cli's own run seam (withSetupOpts)
 // is the one other production caller, so a command-level test can do the
-// same without setup ever knowing the difference. detectHost's own three
+// same without setup ever knowing the difference.
+//
+// fs_contract_internal_test.go proves diskFS itself satisfies rwfs.FS
+// beyond the package's own var _ rwfs.FS assertion, by running rwfs' own
+// shared contract (internal/platform/rwfs/rwfstest) against it; every row
+// diskFS cannot satisfy — invalid-name validation, *fs.PathError.Path
+// shape, OpenRoot, and two ENOTDIR-vs-other-sentinel cases — is declared
+// through that contract's own Option mechanism and cited in fs.go's own
+// diskFS doc comment, not silently narrowed.
+//
+// detectHost's own three
 // checks — root ".claude", root "CLAUDE.md", and home's own "~/.claude" —
 // all read through this same fsys, so a detection test never touches real
 // disk either.

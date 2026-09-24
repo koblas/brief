@@ -59,6 +59,41 @@ func fsName(path string) string {
 // can substitute an rwfs.Mem for it (WithFSRoot); production behavior is
 // unchanged by construction, since every method below is the same os.*
 // call the code it replaces already made.
+//
+// fs_contract_internal_test.go runs rwfs' own shared read/write contract
+// (internal/platform/rwfs/rwfstest) against diskFS, declaring five
+// divergences from it rather than silently narrowing the contract or
+// changing diskFS to close them — the latter would change output text at
+// least one consumer (below) already depends on:
+//
+//   - Invalid names: abs never checks fs.ValidPath, so, for example,
+//     Mkdir("") maps to os.Mkdir("/"), reporting EEXIST rather than
+//     fs.ErrInvalid. Deliberately not added: doing so would import
+//     fs.ValidPath's non-UTF-8, non-NUL name restriction into setup, which
+//     routes every name through raw os.* calls precisely so it never has
+//     one (see the doc comment above).
+//   - Path shape: every *fs.PathError below carries abs(name), the
+//     absolute OS path, as Path — never name unchanged, the way rwfs.FS's
+//     own contract (rwfs' fs.go) promises every other adapter keeps.
+//     setup.go's writeThrough rebuilds its "setup: open/write %s: %w" text
+//     from Op and Err alone, never Path, so it is unaffected either way;
+//     uninstall.go's two fsys.Remove call sites wrap the returned error
+//     verbatim (fmt.Errorf("setup: %w", err)), so Path is the only path
+//     that error text carries — narrowing it to name would silently
+//     truncate what a real removal failure prints.
+//   - OpenRoot is unimplemented (see its own doc comment below): no
+//     Init or Uninstall call site ever calls it.
+//   - MkdirAll's leaf-exists-as-a-file sentinel: WriteFile goes through
+//     os.MkdirAll directly rather than os.Root.MkdirAll, so a name that
+//     already exists as a file reports syscall.ENOTDIR, not fs.ErrExist
+//     the way rwfs.OS and rwfs.Mem both do (confirmed on go1.27.1/darwin).
+//   - WriteFile's ancestor-is-a-file sentinel: the parent open below
+//     (os.OpenRoot(dir)) reports a bare, unwrapped "not a directory"
+//     string when dir exists as a file, rather than syscall.ENOTDIR
+//     (confirmed on go1.27.1/darwin) — no errors.Is check can classify it
+//     at all, unlike every other ancestor-is-a-file case in this package,
+//     which goes through a raw os.Open/os.Stat/os.Mkdir call and gets the
+//     real, classifiable errno instead.
 type diskFS struct{}
 
 var _ rwfs.FS = diskFS{}
