@@ -678,18 +678,6 @@ func Test_status_json_document_golden_mem(t *testing.T) {
 	assert.Equal(t, want, stdout.String())
 }
 
-// memJSONString marshals s the same way testify's assert.Equal would
-// compare it — mirroring json_refusal_test.go's own jsonString, duplicated
-// since that is a package cli_test symbol.
-func memJSONString(t *testing.T, s string) string {
-	t.Helper()
-
-	b, err := json.Marshal(s)
-	require.NoError(t, err)
-
-	return string(b)
-}
-
 // Test_status_json_with_no_features_mem covers R9's empty discriminator in
 // JSON form for both zero-row causes: the feature root missing entirely and
 // the feature root present but empty — both render "features":[], never
