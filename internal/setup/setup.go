@@ -101,20 +101,20 @@ const (
 // Server plans and applies brief's own install write path. homeDir backs
 // detectHost's own home-directory check (WithHomeDir); fsRoot backs every
 // read and write Init and Uninstall perform under the repository root, and
-// the config-location walk above it (WithFSRoot, export_test.go);
-// resolveRoot backs boundAgentTargets' and agentsMissingSkill's own
-// EvalSymlinks(root) call (WithResolveRoot, export_test.go) — never the
-// bound-agent file reads and writes themselves, which stay on real disk
-// through bound_agent.go's own confinedAgentFile regardless of fsRoot or
-// resolveRoot. writableCheck backs R10's own pre-write call in Init
-// (WithWritableCheck, export_test.go): its default, checkWritable
-// (writable.go), is never itself routed through fsRoot — it walks real
-// disk via os.Lstat and internal/platform/writable.Probe regardless, since
-// production always uses the default and a *_disk_test.go file pins it
-// directly — this seam exists only so a Mem-backed test can record which
-// targets a real run would have checked, or skip the real-disk call
-// entirely, without a hybrid fixture asserting a refusal (or its absence)
-// production could never actually produce against a real, unconverted R10.
+// the config-location walk above it (WithFSRoot); resolveRoot backs
+// boundAgentTargets' and agentsMissingSkill's own EvalSymlinks(root) call
+// (WithResolveRoot) — never the bound-agent file reads and writes
+// themselves, which stay on real disk through bound_agent.go's own
+// confinedAgentFile regardless of fsRoot or resolveRoot. writableCheck
+// backs R10's own pre-write call in Init (WithWritableCheck): its default,
+// checkWritable (writable.go), is never itself routed through fsRoot — it
+// walks real disk via os.Lstat and internal/platform/writable.Probe
+// regardless, since production always uses the default and a
+// *_disk_test.go file pins it directly — this seam exists only so a
+// Mem-backed test can record which targets a real run would have checked,
+// or skip the real-disk call entirely, without a hybrid fixture asserting
+// a refusal (or its absence) production could never actually produce
+// against a real, unconverted R10.
 type Server struct {
 	homeDir       func() (string, error)
 	fsRoot        func() rwfs.FS
@@ -124,6 +124,41 @@ type Server struct {
 
 // Option configures a Server built by NewServer.
 type Option func(*Server)
+
+// WithFSRoot overrides the production fsRoot (diskFS, the real, unconfined
+// "/"-rooted filesystem) that every read and write Init and Uninstall
+// perform under a repository root, and the config-location walk above it,
+// go through. internal/cli's own run seam (withSetupOpts) is the one
+// production caller that ever supplies a non-default fsys, so a
+// command-level test can substitute an rwfs.Mem without setup ever knowing
+// the difference. It never affects bound_agent.go's own confinedAgentFile,
+// which always reads and writes through real disk regardless (see fs.go's
+// own diskFS doc comment).
+func WithFSRoot(fsys rwfs.FS) Option {
+	return func(s *Server) { s.fsRoot = func() rwfs.FS { return fsys } }
+}
+
+// WithResolveRoot overrides the production resolveRoot
+// (filepath.EvalSymlinks) that boundAgentTargets and agentsMissingSkill
+// call on root before either walks agentfile bindings. A WithFSRoot-backed
+// command-level test injects an identity function here too, since root
+// names no real directory for EvalSymlinks to resolve against an
+// rwfs.Mem. Never affects bound_agent.go's own confinedAgentFile.
+func WithResolveRoot(fn func(string) (string, error)) Option {
+	return func(s *Server) { s.resolveRoot = fn }
+}
+
+// WithWritableCheck overrides the production writableCheck (checkWritable,
+// real os.Lstat plus internal/platform/writable.Probe) that Init runs
+// before applying. A WithFSRoot-backed command-level test not itself
+// exercising R10 overrides this too, so real disk is never consulted about
+// a target that only exists on the injected rwfs.Mem — checkWritable
+// itself (writable.go) is never changed by this seam; every
+// writable_disk_test.go and init_disk_test.go R10 case still builds its
+// Server with plain NewServer(), never this option.
+func WithWritableCheck(fn func([]string) error) Option {
+	return func(s *Server) { s.writableCheck = fn }
+}
 
 // NewServer returns a Server ready to call Init on, homeDir defaulted to
 // os.UserHomeDir, fsRoot to diskFS (the real, unconfined "/"-rooted

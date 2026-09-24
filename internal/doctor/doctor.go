@@ -132,8 +132,8 @@ func rootFS() fs.FS {
 // seams default to the real PATH lookup, the real running binary's own
 // path, a debug/buildinfo.ReadFile adapter, os.UserHomeDir, and the
 // production root FS (rootFS); a test overrides them with WithLookPath,
-// WithExecutable, WithBinaryVersion, WithHomeDir, and the package-private
-// seams export_test.go exposes for its own fs.FS-backed tests.
+// WithExecutable, WithBinaryVersion, WithHomeDir, WithRootFS and
+// WithHomeTree.
 type Server struct {
 	lookPath      func(string) (string, error)
 	executable    func() (string, error)
@@ -186,6 +186,26 @@ func WithHomeDir(fn func() (string, error)) Option {
 	return func(s *Server) { s.homeDir = fn }
 }
 
+// WithRootFS overrides the production root FS (os.DirFS("/")) that
+// (*Server).locateInRepo, (*Server).inspect, (*Server).projectTree,
+// checkEnvGit and host.go's own probes (probeIntegrationFile,
+// scanSnippetCandidateStates, blockingDir) read through — internal/cli's
+// own run seam (withDoctorOpts) is the one production caller that ever
+// supplies a non-default fsys, so a command-level test can substitute an
+// rwfs.Mem without doctor ever knowing the difference.
+func WithRootFS(fsys fs.FS) Option {
+	return func(s *Server) { s.rootFS = func() fs.FS { return fsys } }
+}
+
+// WithHomeTree overrides the agentfile.Tree a bare-name role binding's own
+// Rule 5 search runs against for the user scope, bypassing WithHomeDir and
+// agentfile.DirTree entirely. Same production scope as WithRootFS: a
+// command-level test injects an in-memory Tree instead of a real
+// "~/.claude/agents" directory.
+func WithHomeTree(fn func() agentfile.Tree) Option {
+	return func(s *Server) { s.homeTree = fn }
+}
+
 // NewServer builds a Server with opts applied over its production
 // defaults: exec.LookPath, os.Executable, an adapter over
 // debug/buildinfo.ReadFile, devVersion for the running version (a caller
@@ -210,7 +230,7 @@ func NewServer(opts ...Option) *Server {
 
 // userTree returns the agentfile.Tree a bare-name role binding's own Rule 5
 // search runs against for the user scope: s.homeTree() when a test
-// injected one (export_test.go's WithHomeTree), else agentfile.DirTree
+// injected one (WithHomeTree), else agentfile.DirTree
 // over s.homeDir() — a home lookup error or an empty result yields the
 // zero Tree, so that scope is never searched (WithHomeDir's own contract).
 func (s *Server) userTree() agentfile.Tree {

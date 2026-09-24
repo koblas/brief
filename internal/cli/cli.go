@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -340,6 +341,7 @@ const uninstallDryRunFlagUsage = "print the plan without removing anything"
 type runSeams struct {
 	doctorOpts []doctor.Option
 	setupOpts  []setup.Option
+	rootFS     fs.FS
 }
 
 // runSeam configures one field of a runSeams collector. withDoctorOpts and
@@ -360,6 +362,17 @@ func withDoctorOpts(opts ...doctor.Option) runSeam {
 // os.UserHomeDir.
 func withSetupOpts(opts ...setup.Option) runSeam {
 	return func(s *runSeams) { s.setupOpts = append(s.setupOpts, opts...) }
+}
+
+// withRootFS sets a runSeams' own rootFS, read by runDoctor's own
+// config-location pre-check (locateInRepoFS) in place of
+// config.LocateInRepo(wd) — a test injects the same rwfs.Mem it also
+// passed to withDoctorOpts(doctor.WithRootFS(...)), so both the pre-check
+// and Diagnose itself read one fixture. nil (the zero value, production's
+// own default) means "read real disk", identical to before this seam
+// existed.
+func withRootFS(fsys fs.FS) runSeam {
+	return func(s *runSeams) { s.rootFS = fsys }
 }
 
 // resolveRunSeams folds seams into one runSeams value, applied in order.
@@ -391,10 +404,12 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // the same signature as debug.ReadBuildInfo: production passes that
 // function itself. seams is a trailing seam letting a test override
 // doctor's own environment seams (WithLookPath, WithExecutable,
-// WithBinaryVersion, WithVersion, via withDoctorOpts) or setup's own
-// (WithHomeDir, via withSetupOpts) without a new run overload — every
-// existing call site compiles unchanged, since a trailing variadic is
-// optional.
+// WithBinaryVersion, WithVersion, WithRootFS, WithHomeTree, via
+// withDoctorOpts), setup's own (WithHomeDir, WithFSRoot, WithResolveRoot,
+// WithWritableCheck, via withSetupOpts), or the root FS runDoctor's own
+// config-location pre-check reads in place of real disk (withRootFS) —
+// without a new run overload — every existing call site compiles
+// unchanged, since a trailing variadic is optional.
 //
 // R5's --json detection runs here, ahead of cobra entirely: scanJSONFlag
 // scans args for an exact "--json" token before the first "--", strips
@@ -468,11 +483,13 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // carries listedInHelpAnnotation instead, so it still gets a root-help
 // row and remains a valid "brief help" topic.
 //
-// seams is resolved once (resolveRunSeams) into doctorOpts and setupOpts:
-// doctorOpts threads through unchanged to the "doctor" leaf's own RunE,
-// appended after runDoctor's own doctor.WithVersion; setupOpts threads
-// through to "init"'s own RunE, passed to runInit's own extraSetupOpts —
-// see run's own doc comment.
+// seams is resolved once (resolveRunSeams) into doctorOpts, setupOpts and
+// rootFS: doctorOpts threads through unchanged to the "doctor" leaf's own
+// RunE, appended after runDoctor's own doctor.WithVersion; setupOpts
+// threads through to "init"'s own RunE, passed to runInit's own
+// extraSetupOpts; rootFS threads to the "doctor" leaf's own RunE alongside
+// doctorOpts, read by runDoctor's own config-location pre-check
+// (locateInRepoFS) in place of real disk — see run's own doc comment.
 //
 // One root.SetHelpFunc wrapper backs every help document: root --help, the
 // help stub, runNew's sole-help arm and every leaf's own --help all reach
@@ -613,7 +630,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		initCmd,
 		leafCommand("doctor [--json]", "check brief's setup: config, feature root, host integration", doctorInvocation, doctorLong, addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
-				return runDoctor(cmd.Context(), wd, args, readBuildInfo, out.forCommand(cmd), rs.doctorOpts...)
+				return runDoctor(cmd.Context(), wd, args, readBuildInfo, out.forCommand(cmd), rs.rootFS, rs.doctorOpts...)
 			}),
 		uninstallCmd,
 	)

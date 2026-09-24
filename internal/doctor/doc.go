@@ -66,7 +66,7 @@
 // (fs.Sub of rootFS(), Dir set to root) for the project side,
 // (*Server).userTree() (DirTree(homeDir()) by default) for the user side —
 // so a test can substitute an in-memory Tree, or the whole root fs.FS,
-// without touching disk. Both seams are exposed to this package's own
-// tests only, via export_test.go (WithRootFS, WithHomeTree); production
-// always builds the OS adapter.
+// without touching disk. Both seams (WithRootFS, WithHomeTree) are real
+// Options: internal/cli's own run seam (withDoctorOpts) supplies them for
+// a command-level test; a caller that never does gets the OS adapter.
 package doctor

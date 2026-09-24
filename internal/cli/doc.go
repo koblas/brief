@@ -70,4 +70,19 @@
 // it, so a script can rely on that suffix to know a refusal changed
 // nothing on disk. Every other error flattens to one line without that
 // guarantee.
+//
+// run (cli.go), unlike the exported Run, takes a trailing ...runSeam: a
+// test builds one with withDoctorOpts, withSetupOpts or withRootFS to
+// substitute doctor's, setup's or runDoctor's own config-location
+// pre-check (locateInRepoFS) fs.FS/rwfs.FS seams — doctor.WithRootFS,
+// doctor.WithHomeTree, setup.WithFSRoot, setup.WithResolveRoot and
+// setup.WithWritableCheck — for an rwfs.Mem, so a command-level test can
+// exercise doctor's, init's and uninstall's own logic without touching
+// real disk. Run always calls run with no seams, so production is
+// unaffected: every seam's default reproduces exactly the OS adapter it
+// replaces. A handful of checks stay OS-subject regardless of any seam —
+// doctor's own root-dir and env-path rows, and setup's R10 writability
+// pre-check unless a test also overrides WithWritableCheck — since they
+// probe real permission bits or compare real binaries; a command-level
+// test covering one of those stays on real disk (a *_disk_test.go file).
 package cli

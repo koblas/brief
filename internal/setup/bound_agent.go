@@ -541,7 +541,7 @@ func (ba boundAgentArtifact) agentFile() confinedAgentFile {
 // boundAgentTargets selects --edit-agents' and Uninstall's own shared
 // target set (Rule 3, Rule 4): resolvedRoot is resolveRoot(root) — real
 // disk (filepath.EvalSymlinks) in production, a test-injected identity
-// function (WithResolveRoot, export_test.go) against a Server built over an
+// function (WithResolveRoot) against a Server built over an
 // rwfs.Mem, where root names no real directory to resolve — for
 // planBoundAgent's and planBoundAgentRemoval's own escape check; paths is
 // every bare-name planner or implementer binding's own ScopeProject
