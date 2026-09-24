@@ -8,6 +8,7 @@ package cli
 
 import (
 	"encoding/json"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -675,7 +676,7 @@ func Test_start_json_still_reports_usage_errors_mem(t *testing.T) {
 		assert.Equal(t, 2, ExitCode(err))
 		assert.Empty(t, stderr)
 
-		message, _ := memDecodeUsageErrorDocument(t, []byte(stdout), "start", nil)
+		message := memDecodeUsageErrorDocument(t, []byte(stdout), "start", nil)
 		assert.Equal(t, "brief start: no feature given; run 'brief start <feature>'", message)
 	})
 
@@ -686,7 +687,7 @@ func Test_start_json_still_reports_usage_errors_mem(t *testing.T) {
 		assert.Equal(t, 2, ExitCode(err))
 		assert.Empty(t, stderr)
 
-		message, _ := memDecodeUsageErrorDocument(t, []byte(stdout), "start", nil)
+		message := memDecodeUsageErrorDocument(t, []byte(stdout), "start", nil)
 		assert.Equal(t, "brief start: unknown flag: --bogus; run 'brief start <feature>'", message)
 	})
 }
@@ -745,9 +746,14 @@ func Test_json_mode_renders_a_refusal_as_one_document_mem(t *testing.T) {
 	statePath := filepath.Join(featureDir, "STATE.md")
 	delete(tree.entries, memKey(statePath))
 
-	// fstest.MapFS's own missing-file wording — see status_internal_test.go's
-	// own note on the same substitution.
-	wantProblem := "file does not exist"
+	// wantProblem is captured from the same fixture's own rwfs.Mem adapter
+	// (fstest.MapFS's own missing-file wording), rather than hardcoded —
+	// see status_internal_test.go's own missingFileDetail for the same
+	// capture.
+	_, missingErr := tree.mem().ReadFile(memKey(statePath))
+	var missingPathErr *fs.PathError
+	require.ErrorAs(t, missingErr, &missingPathErr)
+	wantProblem := missingPathErr.Err.Error()
 
 	_, textStderr, textErr := runStartMem(t, tree, []string{"start", "demo"})
 	assert.Equal(t, 1, ExitCode(textErr))

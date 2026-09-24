@@ -206,14 +206,10 @@ func memDecodeErrorDocument(t *testing.T, stdout []byte, wantCommand string) mem
 // exit_code 2, error.kind "usage", error.path/line/problem null, the
 // exact key set of both the document and its error object, and
 // error.files_changed matching wantFilesChanged) for wantCommand, and
-// returns the document's own error.message and error.fix — mirroring
-// json_usage_test.go's own decodeUsageErrorDocument. The fix return is
-// unused by every current caller in this file, kept for parity with the
-// function it mirrors and for a later command's own fix-specific
-// assertion.
-//
-//nolint:unparam // see the doc comment above
-func memDecodeUsageErrorDocument(t *testing.T, stdout []byte, wantCommand string, wantFilesChanged *bool) (string, string) {
+// returns the document's own error.message — mirroring
+// json_usage_test.go's own decodeUsageErrorDocument, minus its unused
+// error.fix return.
+func memDecodeUsageErrorDocument(t *testing.T, stdout []byte, wantCommand string, wantFilesChanged *bool) string {
 	t.Helper()
 
 	var doc map[string]json.RawMessage
@@ -256,9 +252,8 @@ func memDecodeUsageErrorDocument(t *testing.T, stdout []byte, wantCommand string
 	}
 	assert.JSONEq(t, wantFilesChangedJSON, string(errObj["files_changed"]))
 
-	var message, fix string
+	var message string
 	require.NoError(t, json.Unmarshal(errObj["message"], &message))
-	require.NoError(t, json.Unmarshal(errObj["fix"], &fix))
 
-	return message, fix
+	return message
 }

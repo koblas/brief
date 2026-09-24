@@ -987,17 +987,24 @@ func Test_finish_next_agrees_with_start_mem(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal([]byte(statusStdout), &statusDoc))
 
-			var statusNextPath string
+			var statusFeature *struct {
+				Name string `json:"name"`
+				Next *struct {
+					Path string `json:"path"`
+				} `json:"next"`
+			}
 
-			for _, f := range statusDoc.Features {
+			for i, f := range statusDoc.Features {
 				if f.Name == tc.finishFeature {
-					require.NotNil(t, f.Next, "the fixture always leaves another step open")
-					statusNextPath = f.Next.Path
+					statusFeature = &statusDoc.Features[i]
+
+					break
 				}
 			}
 
-			require.NotEmpty(t, statusNextPath, "status must report the same feature finish just closed a step in")
-			assert.Equal(t, statusNextPath, finishDoc.Next.Path)
+			require.NotNil(t, statusFeature, "status must report the same feature finish just closed a step in")
+			require.NotNil(t, statusFeature.Next, "the fixture always leaves another step open")
+			assert.Equal(t, statusFeature.Next.Path, finishDoc.Next.Path)
 		})
 	}
 }

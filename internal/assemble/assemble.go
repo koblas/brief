@@ -29,7 +29,9 @@ type Server struct {
 	// (os.Root-backed) path only — a WithFS-backed dirFS never reads this
 	// field. It defaults to (*os.Root).OpenRoot; a test overrides it,
 	// through export_test.go, to inject a directory-open failure that does
-	// not depend on OS permission bits or effective uid.
+	// not depend on OS permission bits or effective uid. osRoot.OpenRoot
+	// (fs.go) reads this field at every depth, so it applies to Start's own
+	// per-feature open as well as Check's and Status's.
 	openRoot func(parent *os.Root, name string) (*os.Root, error)
 }
 

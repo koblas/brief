@@ -15,6 +15,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -477,12 +478,16 @@ func Test_status_text_marks_a_feature_missing_its_state_file_mem(t *testing.T) {
 }
 
 func Test_status_json_marks_a_feature_for_each_of_major_1s_three_conditions_mem(t *testing.T) {
-	// missingFileDetail is fstest.MapFS's own missing-file wording — "file
-	// does not exist", fs.ErrNotExist's own Error() text — reached through
-	// rwfs.Mem's ReadFile wrap and newProblem's own *fs.PathError unwrap;
-	// deliberately not the real OS's "no such file or directory", since
-	// this fixture never touches real disk.
-	missingFileDetail := "file does not exist"
+	// missingFileDetail is captured from the same rwfs.Mem adapter the
+	// fixture below reads through, rather than hardcoded: it is
+	// fstest.MapFS's own missing-file wording, reached through rwfs.Mem's
+	// own ReadFile wrap and newProblem's own *fs.PathError unwrap, not the
+	// real OS's "no such file or directory" — this fixture never touches
+	// real disk.
+	_, missingErr := newMemTree(memRoot).mem().ReadFile("does-not-exist")
+	var missingPathErr *fs.PathError
+	require.ErrorAs(t, missingErr, &missingPathErr)
+	missingFileDetail := missingPathErr.Err.Error()
 
 	cases := []struct {
 		name         string

@@ -71,10 +71,10 @@
 // FeatureFS{FS: root.FS(), Path: <the feature's own absolute directory>},
 // and delegates. openFeatureDir returns a dirFS (fs.go): production wraps a
 // real, nested *os.Root in osRoot, reproducing every error byte-for-byte,
-// including the *os.Root-typed openRoot test-injection seam Check and
-// Status share (export_test.go's SetOpenRootForTest) for simulating a
-// permission-denied open without depending on OS permission bits or
-// effective uid; NewServer's own WithFS Option substitutes a memDirFS
+// including the *os.Root-typed openRoot test-injection seam Start, Check
+// and Status all share (export_test.go's SetOpenRootForTest) for
+// simulating a permission-denied open without depending on OS permission
+// bits or effective uid; NewServer's own WithFS Option substitutes a memDirFS
 // wrapping an rwfs.Mem fixture instead, read by a command-level test
 // (internal/cli) exactly as scaffold's own WithFS is — the symlink guard
 // and the openRoot seam apply only to the production, os.Root-backed

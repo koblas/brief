@@ -83,11 +83,16 @@
 // config-location pre-check (locateInRepoFS, in place of
 // config.LocateInRepo) and finish's own readSource (in place of
 // os.ReadFile, for a non-"-" --handoff/--state argument, mapped through
-// fsName) — every run* function except runCheckHook passes it straight
-// through to resolveRoot and its own scaffold.WithFS/assemble.WithFS/
-// readSource calls. Run always calls run with no seams, so production is
-// unaffected: every seam's default reproduces exactly the OS adapter it
-// replaces. A handful of checks stay OS-subject regardless of any seam —
+// fsName). runNewFeature, runNewStep, runFinish, runStart, runCheck and
+// runStatus — the six that call resolveRoot — pass it straight through to
+// that call and to their own scaffold.WithFS/assemble.WithFS/readSource
+// calls; runDoctor, runInit and runUninstall never call resolveRoot at
+// all, reading configuration through their own seams instead (doctor's
+// locateInRepoFS, setup's WithFSRoot); runCheckHook receives it through
+// neither path (see below). Run always calls run with no seams, so
+// production is unaffected: every seam's default reproduces exactly the
+// OS adapter it replaces. A handful of checks stay OS-subject regardless
+// of any seam —
 // doctor's own root-dir and env-path rows, setup's R10 writability
 // pre-check unless a test also overrides WithWritableCheck, and check
 // --hook's own FeatureContaining resolution (real os.Lstat/
