@@ -1,13 +1,10 @@
 # Standing brief for pipeline agents
 
-Everything here used to be retyped into each `architect`/`developer`/reviewer prompt, at
-60–100 lines per invocation. It lives here so a prompt carries only what is specific to
-that scenario. Read this once; do not ask for it to be repeated.
+All here used to get retyped into each `architect`/`developer`/reviewer prompt, 60–100 lines per invocation. Live here so prompt carry only what specific to that scenario. Read once; no ask for repeat.
 
 ## Verification
 
-`brief` is one Go module at the repo root. There is no build-graph tool, no codegen step
-and no second workspace. Run, from the repo root:
+`brief` is one Go module at repo root. No build-graph tool, no codegen step, no second workspace. Run from repo root:
 
 ```bash
 go build ./...
@@ -18,51 +15,26 @@ golangci-lint run ./...
 .claude/scripts/test-stats.py --base <start> --changed                     # counts and deltas
 ```
 
-`<start>` is the commit your scenario or fix pass started from.
+`<start>` = commit your scenario or fix pass started from.
 
-**Narrow loop while working, full run once.** During a scenario's Red and Green phases run
-only the packages and tests in play — `go test ./internal/setup/ -run 'Skill|Init'`. Run the
-block above once, in the Verify phase (and at the end of every fix pass). A full suite after
-every edit is the most expensive habit a scenario can have and proves nothing the final run
-does not. The one `go test` line is both the full suite and the coverage data — do not run
-the suite a second time for the gate.
+**Narrow loop while working, full run once.** During scenario `### Red` and `### Green` phases run only packages and tests in play — `go test ./internal/setup/ -run 'Skill|Init'`. Run block above once, in `### Verify` phase (and at end of every fix pass). Full suite after every edit = most expensive habit, proves nothing final run does not. That one `go test` line is both full suite and coverage data — do not run suite second time for gate.
 
-**Coverage gate before handing off.** Every production line you added must be executed by a
-test. `uncovered-diff.py` lists each added non-test line no test executes, grouped into runs
-with the enclosing function, and exits 1 if any is left. Reach zero, or mark a genuinely
-unreachable defensive branch in the code with `// unreachable: <reason>` on the line (or the
-line above it) — it then moves to a "declared unreachable" section the reviewer judges, and
-stops failing the gate on every later pass. On one feature, untested branches added by the
-previous pass were the bulk of test-reviewer's MAJORs and cost six fix passes.
+**Coverage gate before handing off.** Every production line you added must be executed by test. `uncovered-diff.py` lists each added non-test line no test executes, grouped into runs with enclosing function, exits 1 if any left. Reach zero, or mark genuinely unreachable defensive branch in code with `// unreachable: <reason>` on the line (or the line above it) — then it move to "declared unreachable" section reviewer judge, and stop failing gate every later pass. On one feature, untested branches added by previous pass were bulk of test-reviewer MAJORs, cost six fix passes.
 
-**Counts come from `test-stats.py --base <start> --changed`**: every package whose tests
-changed, with `now (±delta)` for top-level tests, `t.TempDir()` sites and disk-touching
-tests, read from git at `<start>` — never from an archive or checkout you build yourself.
+**Counts come from `test-stats.py --base <start> --changed`**: every package whose tests changed, with `now (±delta)` for top-level tests, `t.TempDir()` sites and disk-touching tests, read from git at `<start>` — never from archive or checkout you build yourself.
 
 Rules:
 
-- **Never pipe a verification command through `head`/`tail`.** It hides failures below the
-  cut, and `$?` becomes the pipe's status — `go build ./nonexistent 2>&1 | tail -2` reports
-  **exit 0** for a failed build. If you must pipe, prefix with `set -o pipefail`.
-- **Report the exact test count and the delta, from `.claude/scripts/test-stats.py`** —
-  "green" is not a result, and hand-rolled counts drifted by up to nine tests between agents
-  on the same commit. Quote its rows as printed. Never write a counting script of your own.
-  A count that moved without explanation is a finding, not a rounding error.
-- A green summary does not mean everything ran. `test-stats.py --run <pkgdir>` counts leaf
-  pass/fail/skip in one parallel `go test -json`; check skips before leaning on a package.
-- Write scratch files only under `$TMPDIR` or the session scratchpad — never `/tmp`, never a
-  path outside the worktree you were given.
-- A Bash call failing with `operation not permitted` means the shell was **sandboxed**.
-  Re-run with `dangerouslyDisableSandbox: true`.
-- Before declaring a scenario done, run `go test ./...` from the repo root once, unpiped.
-  The exit code of an unpiped command is the evidence.
+- **Never pipe verification command through `head`/`tail`.** Hides failures below cut, and `$?` become pipe status — `go build ./nonexistent 2>&1 | tail -2` reports **exit 0** for failed build. If must pipe, prefix `set -o pipefail`.
+- **Report exact test count and delta, from `.claude/scripts/test-stats.py`** — "green" not result, and hand-rolled counts drifted up to nine tests between agents on same commit. Quote its rows as printed. Never write own counting script. Count that moved without explanation = finding, not rounding error.
+- Green summary not mean everything ran. `test-stats.py --run <pkgdir>` counts leaf pass/fail/skip in one parallel `go test -json`; check skips before leaning on package.
+- Write scratch files only under `$TMPDIR` or session scratchpad — never `/tmp`, never path outside worktree you got.
+- Bash call failing with `operation not permitted` mean shell was **sandboxed**. Re-run with `dangerouslyDisableSandbox: true`.
+- Before declaring scenario done, run `go test ./...` from repo root once, unpiped. Exit code of unpiped command = evidence.
 
 ## Scenario plan files are brief step files
 
-`docs/specifications/<feature>/SCENARIO-XX.md` is read by `brief` itself (`brief status`,
-`brief check`). The architect writes it starting with frontmatter, then the heading, with the
-checklist under `## Implementation Plan`, grouped under `### Red`, `### Green`, `### Sweep`
-and `### Verify` subheadings (see the architect's plan format):
+`docs/specifications/<feature>/SCENARIO-XX.md` read by `brief` itself (`brief status`, `brief check`). Architect writes it starting with frontmatter, then heading, checklist under `## Implementation Plan`, grouped under `### Red`, `### Green`, `### Sweep`, `### Verify` subheadings (see architect plan format):
 
 ```markdown
 ---
@@ -73,24 +45,17 @@ status: open
 # SCENARIO-XX: <title>
 ```
 
-The developer sets `status: done` when the scenario is complete, alongside ticking it in
-`specification.md`. Every `- [ ]` under `## Implementation Plan` must be ticked by then —
-`brief check` reports an unticked item on a done step.
+Developer sets `status: done` when scenario complete, plus tick in `specification.md`. Every `- [ ]` under `## Implementation Plan` must be ticked by then — `brief check` reports unticked item on done step.
 
 ## IDE diagnostics are advisory
 
-The IDE indexes mid-edit, and during mutation windows. It routinely reports compile errors
-that `go build` does not, and it indexes files that were deleted. Across one 20-scenario
-feature it was wrong every single time.
+IDE indexes mid-edit, and during mutation windows. Routinely reports compile errors `go build` does not, and indexes deleted files. Across one 20-scenario feature it wrong every single time.
 
-Do not chase them. Do not re-verify on their account. The authority is `go build`. The one
-exception: a diagnostic that **contradicts a claim you just made** is worth a single
-targeted check — that is how a live mutation left by a crashed run was caught.
+No chase them. No re-verify on their account. Authority is `go build`. One exception: diagnostic that **contradicts claim you just made** worth single targeted check — that how live mutation left by crashed run got caught.
 
 ## Mutation verification
 
-A guard, a test, or an "absence" claim is proven by breaking the thing and seeing the
-specific test go red — not by the suite being green.
+Guard, test, or "absence" claim proven by breaking thing and seeing specific test go red — not by suite being green.
 
 **Copy the file aside so a crash cannot leave the mutation behind:**
 
@@ -101,78 +66,44 @@ cp "$TMPDIR/<name>.orig" <file>      # restore
 diff "$TMPDIR/<name>.orig" <file>    # prove byte-identical
 ```
 
-An interrupted run once died holding a gutted security guard, and the tree looked merely
-"failing" rather than "deliberately broken". The copy makes that recoverable.
+Interrupted run once died holding gutted security guard, tree looked merely "failing" not "deliberately broken". Copy make that recoverable.
 
-**Never use `git stash` for this.** Pipeline work runs in git worktrees, and every worktree
-shares one stash stack with the main checkout and any other session: a bare `git stash pop`
-can apply someone else's entry. Never reuse an old `$TMPDIR` copy either — a stale copy once
-silently reverted a file to a previous commit's contents.
+**Never use `git stash` for this.** Pipeline work runs in git worktrees, and every worktree shares one stash stack with main checkout and any other session: bare `git stash pop` can apply someone else entry. Never reuse old `$TMPDIR` copy either — stale copy once silently reverted file to previous commit contents.
 
 Rules:
 
-- **Mutate only the guards the plan names.** The architect picks which guards matter; the
-  developer does not add mutation checks of its own. A mutation per step is how a scenario
-  doubles its tool calls without proving anything the named ones do not.
-- **Verify guards INDIVIDUALLY.** Two guards that only go red when BOTH are disabled means
-  either can be deleted silently. Disable one at a time.
-- A mutation that breaks compilation is **not** evidence. If every test fails, you proved
-  the file parses, nothing more. Make the mutation surgical and still-valid.
-- Say which mutation you ran and which test it reddened. "Mutation-verified" alone is not a
-  claim anyone can check.
-- **Reviewers never mutate the worktree.** Reviewers run in parallel; a mutation in the
-  shared tree poisons every concurrent run. Mutate a `git archive <sha>` export under
-  `$TMPDIR`. Only the developer (who runs alone) mutates in place.
+- **Mutate only guards plan names.** Architect picks which guards matter; developer add no mutation checks of own. Mutation per step = how scenario double its tool calls without proving anything named ones do not.
+- **Verify guards INDIVIDUALLY.** Two guards that only go red when BOTH disabled mean either can be deleted silently. Disable one at a time.
+- Mutation that breaks compilation **not** evidence. If every test fails, you proved file parses, nothing more. Make mutation surgical and still-valid.
+- Say which mutation you ran and which test it reddened. "Mutation-verified" alone not claim anyone can check.
+- **Reviewers never mutate worktree.** Reviewers run parallel; mutation in shared tree poisons every concurrent run. Mutate `git archive <sha>` export under `$TMPDIR`. Only developer (runs alone) mutates in place.
 
 ## Reviewing: scope and completeness
 
-A review gate is not free. One 10-scenario feature spent roughly 550k tokens on reviewers and
-another 780k on the developer passes answering them, and the largest single cause was
-reviewers re-reading whole packages they had already read in an earlier round.
+Review gate not free. One 10-scenario feature spent roughly 550k tokens on reviewers, another 780k on developer passes answering them, and largest single cause was reviewers re-reading whole packages they already read in earlier round.
 
-**Read the delta, not the tree.** Your prompt names a commit range or a file list. Start from
-`git diff <range>` and read only what the diff touches. Every reviewer has `Bash` for exactly
-this; a reviewer that cannot run it says so rather than quietly reading whole packages. Widen to a whole file when the diff
-alone cannot settle a question — and say in the finding why you had to. A package you already
-reviewed in an earlier round, on a surface this fix did not touch, has nothing new in it.
+**Read the delta, not the tree.** Your prompt names commit range or file list. Start from `git diff <range>`, read only what diff touches. Every reviewer has `Bash` for exactly this; reviewer that cannot run it say so rather than quietly reading whole packages. Widen to whole file when diff alone cannot settle question — and say in finding why you had to. Package you already reviewed in earlier round, on surface this fix did not touch, has nothing new in it.
 
-**Report every finding in the round you find it.** Do not hold a MINOR back "for the next
-pass", do not open with a finding you then withdraw, and do not re-raise a finding the
-previous round already recorded as deferred. A finding that arrives one round late costs a
-whole extra gate: the developer pass, the re-gate, and every reviewer that re-reads the
-result.
+**Report every finding in the round you find it.** No hold MINOR back "for next pass", no open with finding you then withdraw, no re-raise finding previous round already recorded as deferred. Finding that arrives one round late costs whole extra gate: developer pass, re-gate, and every reviewer that re-reads result.
 
-**Say what you could not check.** A path you had no way to exercise — an environment you
-cannot change, a host you cannot detect — is reported as unchecked, not silently passed and
-not guessed at. Unchecked is a fact the caller can act on; a guess is one they cannot.
+**Say what you could not check.** Path you had no way to exercise — environment you cannot change, host you cannot detect — reported as unchecked, not silently passed, not guessed at. Unchecked = fact caller can act on; guess = one they cannot.
 
 ## Assertions that prove nothing
 
-One feature produced **fourteen** assertions that looked like proof and were not. The
-recurring shapes:
+One feature produced **fourteen** assertions that looked like proof and were not. Recurring shapes:
 
-- Asserting against a constant the fixture set, or a value copied out of the production
-  code being tested. A pin derived by reading the code pins nothing.
-- Negative assertions satisfied by nothing happening at all — the dominant shape. An
-  absence claim needs a **control arm** that shows the thing DOES happen when the guard is
-  removed, and the control must differ from the claim in exactly one variable.
-- Observables that cannot fire on the path under test.
-- Asserting a store is empty without first proving it was non-empty and that the same probe
-  would have seen it.
-- Comments overclaiming what the test below them covers.
+- Asserting against constant fixture set, or value copied out of production code being tested. Pin derived by reading code pins nothing.
+- Negative assertions satisfied by nothing happening at all — dominant shape. Absence claim needs **control arm** showing thing DOES happen when guard removed, and control must differ from claim in exactly one variable.
+- Observables that cannot fire on path under test.
+- Asserting store empty without first proving it non-empty and same probe would have seen it.
+- Comments overclaiming what test below them covers.
 
-When a refactor removes a call site, **every existing "was never called" assertion on that
-fake becomes unfalsifiable.** Repoint them at the new reachable observable, or they pass
-with the guard deleted.
+When refactor removes call site, **every existing "was never called" assertion on that fake become unfalsifiable.** Repoint them at new reachable observable, or they pass with guard deleted.
 
 ## Reporting
 
-- If a step comes out **green on arrival**, say so and say why. Do not manufacture a red.
-- If you disagree with an instruction or a finding, say so **with evidence** rather than
-  skipping it silently.
-- If a control arm does not behave as its plan predicts, **stop and report** — do not
-  proceed to green on a claim whose control proved nothing.
-- Deferred items stay deferred. Do not opportunistically fix things outside the brief; list
-  them instead.
-- Never write a `/nix/store/...` path into a plan, prompt, or command. They go stale on
-  every rebuild.
+- Step comes out **green on arrival** → say so and say why. No manufacture red.
+- Disagree with instruction or finding → say so **with evidence**, no silent skip.
+- Control arm not behave as its plan predicts → **stop and report** — no proceed to green on claim whose control proved nothing.
+- Deferred items stay deferred. No opportunistic fix outside brief; list them instead.
+- Never write `/nix/store/...` path into plan, prompt, or command. They go stale every rebuild.
