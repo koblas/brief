@@ -42,11 +42,13 @@ func pluginFilePaths(root string) pluginPaths {
 // ActionCreated with KindPlugin (KindHook for hooks.json, KindSnippet for
 // CLAUDE.md), the bytes written equal their own artifact.Render (or
 // artifact.SnippetBlock for CLAUDE.md), Created lists files only in write
-// order, and Result.Root is the install root. The package's own
-// index-by-index full-row-order pin is agents_test.go's --with-agents Init
-// (Test_init_with_agents_writes_three_agents_and_a_config_binding_them);
-// this test still pins the same order for the plain, no-agents case, but
-// as one whole-slice equality rather than per-index assertions.
+// order (asserted as an ordered equality — R4/R11's actual write-order
+// contract), and Result.Root is the install root. Artifacts itself is
+// compared unordered (ElementsMatch): the package's own row-order pins are
+// agents_test.go's --with-agents Init
+// (Test_init_with_agents_writes_three_agents_and_a_config_binding_them)
+// and uninstall_test.go's own Uninstall pin — one each, since Init's and
+// Uninstall's own orders are two distinct contracts.
 func Test_init_for_claude_code_writes_the_plugin_after_the_feature_root_and_before_the_config(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -61,7 +63,7 @@ func Test_init_for_claude_code_writes_the_plugin_after_the_feature_root_and_befo
 	featureRoot := filepath.Join(wd, "docs", "specifications")
 	paths := pluginFilePaths(wd)
 
-	assert.Equal(t, []setup.Artifact{
+	assert.ElementsMatch(t, []setup.Artifact{
 		{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated},
 		{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated},
 		{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionCreated},
@@ -121,15 +123,22 @@ func Test_init_with_no_hook_installs_everything_but_the_hook(t *testing.T) {
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, NoHook: true})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 7)
 
-	kinds := make([]setup.Kind, len(res.Artifacts))
-	for i, a := range res.Artifacts {
-		kinds[i] = a.Kind
-	}
-	assert.Equal(t, []setup.Kind{setup.KindConfig, setup.KindFeatureRoot, setup.KindPlugin, setup.KindPlugin, setup.KindPlugin, setup.KindSkill, setup.KindSnippet}, kinds)
+	configPath := filepath.Join(wd, ".brief.yaml")
+	featureRoot := filepath.Join(wd, "docs", "specifications")
+	paths := pluginFilePaths(wd)
 
-	hooks := pluginFilePaths(wd).Hooks
+	assert.ElementsMatch(t, []setup.Artifact{
+		{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated},
+		{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionCreated},
+		{Kind: setup.KindSkill, Path: paths.Skill, Action: setup.ActionCreated},
+		{Kind: setup.KindSnippet, Path: paths.ClaudeMD, Action: setup.ActionCreated},
+	}, res.Artifacts)
+
+	hooks := paths.Hooks
 	assert.NotContains(t, mem.Snapshot(), memKey(hooks))
 	assert.NotContains(t, res.Created, hooks)
 }
@@ -149,10 +158,26 @@ func Test_rerunning_init_for_claude_code_reports_every_plugin_file_unchanged(t *
 
 	require.NoError(t, err)
 	assert.Empty(t, res.Created)
-	require.Len(t, res.Artifacts, 8)
-	for _, a := range res.Artifacts {
-		assert.Equal(t, setup.ActionUnchanged, a.Action, "artifact %s must report unchanged", a.Path)
+
+	configPath := filepath.Join(wd, ".brief.yaml")
+	featureRoot := filepath.Join(wd, "docs", "specifications")
+	paths := pluginFilePaths(wd)
+	wantActions := map[string]setup.Action{
+		configPath:     setup.ActionUnchanged,
+		featureRoot:    setup.ActionUnchanged,
+		paths.Manifest: setup.ActionUnchanged,
+		paths.Start:    setup.ActionUnchanged,
+		paths.Finish:   setup.ActionUnchanged,
+		paths.Hooks:    setup.ActionUnchanged,
+		paths.Skill:    setup.ActionUnchanged,
+		paths.ClaudeMD: setup.ActionUnchanged,
 	}
+
+	gotActions := make(map[string]setup.Action, len(res.Artifacts))
+	for _, a := range res.Artifacts {
+		gotActions[a.Path] = a.Action
+	}
+	assert.Equal(t, wantActions, gotActions)
 }
 
 // Test_init_keeps_an_edited_plugin_file_even_under_force pins R3's
@@ -178,7 +203,6 @@ func Test_init_keeps_an_edited_plugin_file_even_under_force(t *testing.T) {
 
 	require.NoError(t, err)
 
-	require.Len(t, res.Artifacts, 8)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated, Detail: "rewritten from defaults"}, findArtifactByPath(t, res, configPath))
 	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: start, Action: setup.ActionKept, Detail: "edited locally"}, findArtifactByPath(t, res, start))
 
@@ -210,7 +234,6 @@ func Test_init_keeps_a_plugin_path_that_is_not_a_regular_file(t *testing.T) {
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 8)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: manifest, Action: setup.ActionKept, Detail: "not a regular file"}, findArtifactByPath(t, res, manifest))
 	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: finish, Action: setup.ActionKept, Detail: "not a regular file"}, findArtifactByPath(t, res, finish))
 
@@ -232,7 +255,20 @@ func Test_init_dry_run_for_claude_code_writes_nothing(t *testing.T) {
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, DryRun: true})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 8)
+
+	configPath := filepath.Join(wd, ".brief.yaml")
+	featureRoot := filepath.Join(wd, "docs", "specifications")
+	paths := pluginFilePaths(wd)
+	assert.ElementsMatch(t, []setup.Artifact{
+		{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated},
+		{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionCreated},
+		{Kind: setup.KindHook, Path: paths.Hooks, Action: setup.ActionCreated},
+		{Kind: setup.KindSkill, Path: paths.Skill, Action: setup.ActionCreated},
+		{Kind: setup.KindSnippet, Path: paths.ClaudeMD, Action: setup.ActionCreated},
+	}, res.Artifacts)
 	assert.Empty(t, res.Created)
 	assert.Equal(t, before, mem.Snapshot())
 	assert.Empty(t, rec.calls, "DryRun must never reach R10's own writability pre-check")

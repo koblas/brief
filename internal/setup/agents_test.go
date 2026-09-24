@@ -93,10 +93,30 @@ func Test_rerunning_init_with_agents_reports_every_agent_unchanged(t *testing.T)
 
 	require.NoError(t, err)
 	assert.Empty(t, res.Created)
-	require.Len(t, res.Artifacts, 11)
-	for _, a := range res.Artifacts {
-		assert.Equalf(t, setup.ActionUnchanged, a.Action, "artifact %s must report unchanged", a.Path)
+
+	configPath := filepath.Join(wd, ".brief.yaml")
+	featureRoot := filepath.Join(wd, "docs", "specifications")
+	pluginPaths := pluginFilePaths(wd)
+	agentPaths := agentFilePaths(wd)
+	wantActions := map[string]setup.Action{
+		configPath:             setup.ActionUnchanged,
+		featureRoot:            setup.ActionUnchanged,
+		pluginPaths.Manifest:   setup.ActionUnchanged,
+		pluginPaths.Start:      setup.ActionUnchanged,
+		pluginPaths.Finish:     setup.ActionUnchanged,
+		pluginPaths.Hooks:      setup.ActionUnchanged,
+		pluginPaths.Skill:      setup.ActionUnchanged,
+		pluginPaths.ClaudeMD:   setup.ActionUnchanged,
+		agentPaths.Planner:     setup.ActionUnchanged,
+		agentPaths.Implementer: setup.ActionUnchanged,
+		agentPaths.Reviewer:    setup.ActionUnchanged,
 	}
+
+	gotActions := make(map[string]setup.Action, len(res.Artifacts))
+	for _, a := range res.Artifacts {
+		gotActions[a.Path] = a.Action
+	}
+	assert.Equal(t, wantActions, gotActions)
 	assert.Equal(t, []string{}, res.RolesToAdd)
 }
 
@@ -499,7 +519,24 @@ func Test_init_with_agents_dry_run_writes_nothing_but_reports_roles_to_add(t *te
 
 	require.NoError(t, err)
 	assert.True(t, res.DryRun)
-	require.Len(t, res.Artifacts, 11)
+
+	featureRoot := filepath.Join(wd, "docs", "specifications")
+	pluginPaths := pluginFilePaths(wd)
+	agentPaths := agentFilePaths(wd)
+	assert.ElementsMatch(t, []setup.Artifact{
+		{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionUnchanged},
+		{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: pluginPaths.Manifest, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: pluginPaths.Start, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: pluginPaths.Finish, Action: setup.ActionCreated},
+		{Kind: setup.KindHook, Path: pluginPaths.Hooks, Action: setup.ActionCreated},
+		{Kind: setup.KindSkill, Path: pluginPaths.Skill, Action: setup.ActionCreated},
+		{Kind: setup.KindAgent, Path: agentPaths.Planner, Action: setup.ActionCreated},
+		{Kind: setup.KindAgent, Path: agentPaths.Implementer, Action: setup.ActionCreated},
+		{Kind: setup.KindAgent, Path: agentPaths.Reviewer, Action: setup.ActionCreated},
+		{Kind: setup.KindSnippet, Path: pluginPaths.ClaudeMD, Action: setup.ActionCreated},
+	}, res.Artifacts)
+
 	assert.Empty(t, res.Created)
 	assert.Equal(t, []string{
 		"roles:",

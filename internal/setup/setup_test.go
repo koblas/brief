@@ -46,9 +46,10 @@ func Test_init_creates_the_config_and_feature_root_in_a_fresh_repo(t *testing.T)
 	configPath := filepath.Join(wd, ".brief.yaml")
 	featureRoot := filepath.Join(wd, "docs", "specifications")
 
-	require.Len(t, res.Artifacts, 2)
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated}, findArtifact(t, res, setup.KindConfig))
-	assert.Equal(t, setup.Artifact{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated}, findArtifact(t, res, setup.KindFeatureRoot))
+	assert.ElementsMatch(t, []setup.Artifact{
+		{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated},
+		{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated},
+	}, res.Artifacts)
 	assert.ElementsMatch(t, []string{featureRoot, configPath}, res.Created)
 	assert.Empty(t, res.Modified)
 

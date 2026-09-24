@@ -147,6 +147,9 @@
 // unconfined) does not gate every write a broader confinement would newly
 // refuse (init_disk_test.go pins this with a mutation). A test substitutes
 // an rwfs.Mem via the package-private WithFSRoot (export_test.go).
+// detectHost's own three checks — root ".claude", root "CLAUDE.md", and
+// home's own "~/.claude" — all read through this same fsys, so a detection
+// test never touches real disk either.
 // boundAgentTargets' and agentsMissingSkill's own root-resolution
 // (filepath.EvalSymlinks(root), before either walks agentfile bindings) is
 // a separate seam, (*Server).resolveRoot (WithResolveRoot,

@@ -392,11 +392,17 @@ func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directo
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
 
 	require.NoError(t, err)
-	require.Len(t, res.Artifacts, 6)
-	for _, a := range res.Artifacts {
-		assert.NotEqual(t, setup.KindHook, a.Kind)
-		assert.Equal(t, setup.ActionRemoved, a.Action)
-	}
+
+	configPath := filepath.Join(wd, ".brief.yaml")
+	paths := pluginFilePaths(wd)
+	assert.ElementsMatch(t, []setup.Artifact{
+		{Kind: setup.KindSnippet, Path: paths.ClaudeMD, Action: setup.ActionRemoved},
+		{Kind: setup.KindSkill, Path: paths.Skill, Action: setup.ActionRemoved},
+		{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionRemoved},
+		{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionRemoved},
+		{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionRemoved},
+		{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved},
+	}, res.Artifacts)
 
 	assert.NotContains(t, mem.Snapshot(), memKey(filepath.Join(wd, ".claude", "skills", "brief")))
 }
