@@ -435,17 +435,19 @@ func withSetupOpts(opts ...setup.Option) runSeam {
 	return func(s *runSeams) { s.setupOpts = append(s.setupOpts, opts...) }
 }
 
-// withRootFS sets a runSeams' own rootFS, read by resolveRoot (every
-// run* function below) in place of config.Resolve(wd), and by runDoctor's
-// own config-location pre-check (locateInRepoFS) in place of
-// config.LocateInRepo(wd) — a test injects the same rwfs.Mem it also
-// passed to withDoctorOpts(doctor.WithRootFS(...)), scaffold.WithFS and
-// assemble.WithFS, so every seamed package reads one fixture. nil (the
-// zero value, production's own default) means "read real disk", identical
-// to before this seam existed. rwfs.FS's read side is exactly fs.FS plus
-// four more interfaces (rwfs/fs.go), so the same value satisfies every
-// fs.FS-typed parameter this seam feeds (resolveRoot, runDoctor) as well
-// as scaffold's and assemble's own rwfs.FS-typed WithFS.
+// withRootFS sets a runSeams' own rootFS, read by resolveRoot (runNewFeature,
+// runNewStep, runFinish, runStart, runCheck and runStatus — the six that
+// call it) in place of config.Resolve(wd), by runDoctor's own
+// config-location pre-check (locateInRepoFS) in place of
+// config.LocateInRepo(wd), and by finish's own readSource in place of
+// os.ReadFile for a non-"-" --handoff/--state argument — a test injects
+// the same rwfs.Mem it also passed to withDoctorOpts(doctor.WithRootFS(...)),
+// scaffold.WithFS and assemble.WithFS, so every seamed package reads one
+// fixture. nil (the zero value, production's own default) means "read
+// real disk", identical to before this seam existed. rwfs.FS's read side
+// is exactly fs.FS plus four more interfaces (rwfs/fs.go), so the same
+// value satisfies every fs.FS-typed parameter this seam feeds (resolveRoot,
+// runDoctor) as well as scaffold's and assemble's own rwfs.FS-typed WithFS.
 func withRootFS(fsys rwfs.FS) runSeam {
 	return func(s *runSeams) { s.rootFS = fsys }
 }
@@ -481,10 +483,12 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // doctor's own environment seams (WithLookPath, WithExecutable,
 // WithBinaryVersion, WithVersion, WithRootFS, WithHomeTree, via
 // withDoctorOpts), setup's own (WithHomeDir, WithFSRoot, WithResolveRoot,
-// WithWritableCheck, via withSetupOpts), or the root FS runDoctor's own
-// config-location pre-check reads in place of real disk (withRootFS) —
-// without a new run overload — every existing call site compiles
-// unchanged, since a trailing variadic is optional.
+// WithWritableCheck, via withSetupOpts), or the root FS resolveRoot,
+// runDoctor's own config-location pre-check and finish's own readSource
+// each read in place of real disk (withRootFS; see its own doc comment
+// for the full list of what it feeds) — without a new run overload —
+// every existing call site compiles unchanged, since a trailing variadic
+// is optional.
 //
 // R5's --json detection runs here, ahead of cobra entirely: scanJSONFlag
 // scans args for an exact "--json" token before the first "--", strips
@@ -562,14 +566,17 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // rootFS: doctorOpts threads through unchanged to the "doctor" leaf's own
 // RunE, appended after runDoctor's own doctor.WithVersion; setupOpts
 // threads through to "init"'s and "uninstall"'s own RunE, passed to
-// runInit's and runUninstall's own extraSetupOpts; rootFS threads to every
-// leaf's own RunE — "doctor" alongside doctorOpts, read by runDoctor's own
-// config-location pre-check (locateInRepoFS) in place of real disk, and
-// "new feature"/"new step"/"finish"/"start"/"status"/"check" (never "check
-// --hook", which stays real-disk-only regardless — see runCheckHook's own
-// doc comment), each passing it to resolveRoot in place of config.Resolve
-// and to scaffold.WithFS/assemble.WithFS when constructing their own
-// Server — see run's own doc comment.
+// runInit's and runUninstall's own extraSetupOpts; rootFS threads to seven
+// of the eleven leaves' own RunE — "doctor" alongside doctorOpts, read by
+// runDoctor's own config-location pre-check (locateInRepoFS) in place of
+// real disk, and "new feature"/"new step"/"finish"/"start"/"status"/"check"
+// (never "check --hook", which stays real-disk-only regardless — see
+// runCheckHook's own doc comment; "init", "uninstall" and "completion"
+// never receive it either, reading their own seams or none at all), each
+// passing it to resolveRoot in place of config.Resolve and to its own
+// scaffold.WithFS/assemble.WithFS when constructing their own Server —
+// "finish" alone also passes it to readSource in place of os.ReadFile —
+// see run's own doc comment.
 //
 // One root.SetHelpFunc wrapper backs every help document: root --help, the
 // help stub, runNew's sole-help arm and every leaf's own --help all reach

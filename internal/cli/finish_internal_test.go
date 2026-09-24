@@ -6,7 +6,7 @@
 // non-"-" --handoff/--state argument through rootFS, mapped through
 // fsName the same way scaffold's and assemble's own writes and reads are,
 // so a finish test's flag arguments live in the same Mem fixture as its
-// feature tree — no t.TempDir() needed anywhere in this file.
+// feature tree — this file never touches real disk.
 // finish_test.go keeps only newFinishCLIFixture and writeInput, and
 // finish_json_disk_test.go only its two os.Mkdir cases: flag_error_test.go,
 // help_test.go, json_refusal_test.go and invalid_config_test.go still call
