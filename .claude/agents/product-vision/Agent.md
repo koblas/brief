@@ -195,7 +195,12 @@ So the scoping pass does not stop at "the shape is right". Write out, literally:
   placeholder, which has bitten this repo);
 - the success line, each refusal line, and each fix line;
 - the exit code for each outcome;
-- the `--json` field names, and where the document differs between modes of the same command.
+- the `--json` field names, and where the document differs between modes of the same command;
+- an **edge-case row table** for every output block, row kind, hint and suffix: each input
+  class that reaches it (present, missing, edited, older release, not a regular file,
+  symlinked, outside the repository, user-level, unparseable, already done, flag given vs
+  not) with the exact text it gets — or that it gets no row, and why. A hint is only ruled
+  once you have said which rows it is true for.
 
 These land in the specification's `## Surface & Copy` section and the developer implements
 them verbatim. Anything you leave unwritten gets invented at the keyboard and comes back to

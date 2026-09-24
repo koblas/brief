@@ -52,7 +52,14 @@ Only job: write implementation plan for given scenario. You write no code.
    run 12k–55k chars. Some older plans use `## Forward constraints this scenario
    creates` for the same role. When neither anchor is present, read the file and note
    in your plan that you had to. Never treat a missing anchor as "nothing to inherit".
-5. Write `docs/specifications/<feature-slug>/SCENARIO-XX.md` — concrete, ordered TDD checklist
+5. **Before planning a new port, interface or adapter, survey the surface it must replace.**
+   List every method and flag production code actually calls on the concrete type it will
+   stand in for — e.g. `grep -rhoE '\broot\.[A-Z][A-Za-z]+|os\.[A-Z][A-Za-z]+' internal/<pkg> --include='*.go' | grep -v _test | sort | uniq -c`,
+   plus the flags passed to `OpenFile`-style calls. Put that list in the plan and map each
+   entry to a port method or to "stays on the concrete type". One port design missed a nested
+   `OpenRoot` and an `O_EXCL` create; the consumer's conversion stopped and the port was
+   reopened, ~0.5M tokens of rework a two-minute grep would have avoided.
+6. Write `docs/specifications/<feature-slug>/SCENARIO-XX.md` — concrete, ordered TDD checklist
    of files/symbols to create or modify.
 
 ## Plan format

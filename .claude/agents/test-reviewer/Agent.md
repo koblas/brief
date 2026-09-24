@@ -17,6 +17,14 @@ Strict test quality reviewer for project following Clean Architecture and TDD.
 
 ## Review procedure
 
+**Start from the coverage report, not from reading.** Run
+`.claude/scripts/uncovered-diff.sh <base of the range you were given>` first. Every line it
+lists is an added production line no test executes — each is a finding (MAJOR by the shared
+contract, "untested change") unless the developer's report already names it as unreachable
+with a reason you accept. That mechanical pass replaces hunting for untested branches by eye;
+spend the reading budget on what coverage cannot see: assertions that prove nothing, missing
+control arms, corner cases a covered line still gets wrong.
+
 For each test file under review:
 
 1. **Read the file.**

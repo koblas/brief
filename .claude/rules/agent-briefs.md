@@ -21,15 +21,33 @@ only the packages and tests in play — `go test ./internal/setup/ -run 'Skill|I
 four commands above once, in the Verify phase. A full suite after every edit is the most
 expensive habit a scenario can have and proves nothing the final run does not.
 
+**Coverage gate before handing off.** Every production line you added must be executed by a
+test. Run, once, in the Verify phase (and at the end of every fix pass):
+
+```bash
+.claude/scripts/uncovered-diff.sh <base>   # base = the commit your scenario / fix pass started from
+```
+
+It lists each added non-test line no test executes and exits 1 if there is any. Reach zero,
+or name each remaining line in your report with the reason it cannot be reached (an
+impossible defensive branch). On one feature, untested branches added by the previous pass
+were the bulk of test-reviewer's MAJORs and cost six fix passes; this script finds them in
+nine seconds.
+
 Rules:
 
 - **Never pipe a verification command through `head`/`tail`.** It hides failures below the
   cut, and `$?` becomes the pipe's status — `go build ./nonexistent 2>&1 | tail -2` reports
   **exit 0** for a failed build. If you must pipe, prefix with `set -o pipefail`.
-- **Report the exact test count and the delta** — "green" is not a result. A count that
-  moved without explanation is a finding, not a rounding error.
-- A green summary does not mean everything ran. Count skips before leaning on a package:
-  `go test -v ./<pkg>/... 2>&1 | grep -c -- "--- SKIP"`.
+- **Report the exact test count and the delta, from `.claude/scripts/test-stats.sh`** —
+  "green" is not a result, and hand-rolled counts drifted by up to nine tests between agents
+  on the same commit. Quote `tests` (top-level), and `pass`/`skip` from `--run` when leaves
+  matter. Never write a counting script of your own. A count that moved without explanation
+  is a finding, not a rounding error.
+- A green summary does not mean everything ran. `test-stats.sh --run <pkgdir>` reports skips;
+  check them before leaning on a package.
+- Write scratch files only under `$TMPDIR` or the session scratchpad — never `/tmp`, never a
+  path outside the worktree you were given.
 - A Bash call failing with `operation not permitted` means the shell was **sandboxed**.
   Re-run with `dangerouslyDisableSandbox: true`.
 - Before declaring a scenario done, run `go test ./...` from the repo root once, unpiped.

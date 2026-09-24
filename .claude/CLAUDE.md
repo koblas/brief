@@ -123,6 +123,27 @@ bug — fix it rather than working around it.
   - Scenario-approval gate is load-bearing precisely because pipeline now starts
     implicitly. Never write spec file from offhand request without it.
 
+## Delegating work to agents (pipeline or not)
+
+- **Size each agent task to finish without context compaction.** One agent per package is the
+  default, but split a package past ~100 top-level tests (or one you expect to run past ~90
+  minutes) by command or file group. Agents that ran ~2 hours over 150–350 tests compacted,
+  lost track of their own test counts, and dropped commit trailers.
+- **Brief the whole target, and name what may stay behind.** A brief that lets the agent
+  "descope for budget" produced three passes on one package where one would do. Say which
+  tests must move and which stay (and why) up front; ask for a green, committed checkpoint
+  only as the fallback.
+- **Parallel agents only through the Agent tool's `isolation: "worktree"`.** Never create a
+  worktree yourself and hand its path to an agent: the session can only write to its own
+  worktree, and an agent told to work elsewhere was blocked by a harness hook and routed
+  around it. Independent packages (no shared seam) can run in parallel this way; merge after.
+- **Model per call.** `architect` defaults to Opus; for a scenario whose plan will be small
+  (one package, roughly ≤15 steps) pass `model: "sonnet"` on the Agent call. Keep Opus for
+  multi-package or design-heavy scenarios.
+- **Measure with the repo's scripts, not ad hoc.** Counts come from
+  `.claude/scripts/test-stats.sh`; untested additions from
+  `.claude/scripts/uncovered-diff.sh` (see `.claude/rules/agent-briefs.md`).
+
 ## Agent roster
 
 | Agent                  | Stage               | Owns                                                                  |
