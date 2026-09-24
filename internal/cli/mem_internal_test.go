@@ -1,7 +1,9 @@
 // Shared rwfs.Mem test plumbing for every command-level test that seams
 // setup through newMemSetupSeam — init_internal_test.go and
-// uninstall_internal_test.go both use it. White-box package: newMemSetupSeam
-// builds a runSeam via the unexported withSetupOpts.
+// uninstall_internal_test.go both use it — or that builds a bare feature
+// tree through memTree for new/finish/start/check/status's own
+// withRootFS seam. White-box package: newMemSetupSeam builds a runSeam via
+// the unexported withSetupOpts.
 
 package cli
 
@@ -14,6 +16,11 @@ import (
 	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/setup"
 )
+
+// memRoot is the virtual working directory every new/finish/start/check/
+// status Mem test resolves against — fabricated, never a real disk path,
+// the same convention doctor_internal_test.go's own "/repo" fixtures use.
+const memRoot = "/repo"
 
 // fsAbs joins slash-separated segments under "/", the way every
 // newMemSetupSeam-backed test names an absolute path its rwfs.Mem fixture
@@ -69,4 +76,49 @@ func newMemSetupSeam(mem *rwfs.Mem, extra ...setup.Option) runSeam {
 	}, extra...)
 
 	return withSetupOpts(opts...)
+}
+
+// memTree accumulates directory and file entries for an rwfs.Mem fixture,
+// keyed by absolute, fsAbs-fabricated path — a small builder so a
+// new/finish/start/check/status Mem test can lay out a feature tree the
+// same declarative way its disk-based sibling built one with
+// os.MkdirAll/os.WriteFile, without repeating fstest.MapFS's own map
+// literal shape at every call site. dir and file both return t so calls
+// chain; mem builds the rwfs.Mem once every entry is added.
+type memTree struct {
+	entries fstest.MapFS
+}
+
+// newMemTree returns a memTree seeded with every path in dirs as an
+// explicit directory entry — root itself always belongs in that list, the
+// same "confirm wd exists" requirement newVirtualMem documents, since a
+// zero-file fixture would otherwise have no entry for config.LocateWithinFS's
+// own first check to find.
+func newMemTree(dirs ...string) *memTree {
+	t := &memTree{entries: fstest.MapFS{}}
+
+	for _, d := range dirs {
+		t.dir(d)
+	}
+
+	return t
+}
+
+// dir adds path as an explicit directory entry.
+func (t *memTree) dir(path string) *memTree {
+	t.entries[memKey(path)] = &fstest.MapFile{Mode: fs.ModeDir | 0o755}
+
+	return t
+}
+
+// file adds path as a regular file entry holding body.
+func (t *memTree) file(path, body string) *memTree {
+	t.entries[memKey(path)] = &fstest.MapFile{Data: []byte(body), Mode: 0o600}
+
+	return t
+}
+
+// mem builds the rwfs.Mem every entry added so far backs.
+func (t *memTree) mem() *rwfs.Mem {
+	return rwfs.NewMem(t.entries)
 }
