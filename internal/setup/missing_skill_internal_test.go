@@ -30,7 +30,7 @@ import (
 func Test_agents_missing_skill_root_resolution_error(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "does-not-exist")
 
-	list, err := agentsMissingSkill(root, "", config.RoleBindings{Implementer: "developer"})
+	list, err := agentsMissingSkill(filepath.EvalSymlinks, root, "", config.RoleBindings{Implementer: "developer"})
 
 	require.ErrorIs(t, err, fs.ErrNotExist)
 	assert.Nil(t, list)

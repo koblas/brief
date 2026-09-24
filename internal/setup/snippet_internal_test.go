@@ -156,7 +156,7 @@ func Test_verifyFileUnchanged(t *testing.T) {
 		path := filepath.Join(dir, "CLAUDE.md")
 		require.NoError(t, os.WriteFile(path, []byte("stable"), 0o600))
 
-		err := verifyFileUnchanged(path, true, []byte("stable"), "brief init")
+		err := verifyFileUnchanged(diskFS{}, path, true, []byte("stable"), "brief init")
 
 		assert.NoError(t, err)
 	})
@@ -165,7 +165,7 @@ func Test_verifyFileUnchanged(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "CLAUDE.md")
 
-		err := verifyFileUnchanged(path, false, nil, "brief init")
+		err := verifyFileUnchanged(diskFS{}, path, false, nil, "brief init")
 
 		assert.NoError(t, err)
 	})
@@ -175,7 +175,7 @@ func Test_verifyFileUnchanged(t *testing.T) {
 		path := filepath.Join(dir, "CLAUDE.md")
 		require.NoError(t, os.WriteFile(path, []byte("edited by someone else"), 0o600))
 
-		err := verifyFileUnchanged(path, true, []byte("stable"), "brief init")
+		err := verifyFileUnchanged(diskFS{}, path, true, []byte("stable"), "brief init")
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 
@@ -190,7 +190,7 @@ func Test_verifyFileUnchanged(t *testing.T) {
 		path := filepath.Join(dir, "CLAUDE.md")
 		require.NoError(t, os.WriteFile(path, []byte("raced into existence"), 0o600))
 
-		err := verifyFileUnchanged(path, false, nil, "brief uninstall")
+		err := verifyFileUnchanged(diskFS{}, path, false, nil, "brief uninstall")
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 	})
@@ -199,7 +199,7 @@ func Test_verifyFileUnchanged(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "CLAUDE.md")
 
-		err := verifyFileUnchanged(path, true, []byte("stable"), "brief uninstall")
+		err := verifyFileUnchanged(diskFS{}, path, true, []byte("stable"), "brief uninstall")
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 	})
@@ -209,7 +209,7 @@ func Test_verifyFileUnchanged(t *testing.T) {
 		path := filepath.Join(dir, "sub", "CLAUDE.md")
 		require.NoError(t, os.MkdirAll(path, 0o755))
 
-		err := verifyFileUnchanged(path, true, []byte("stable"), "brief init")
+		err := verifyFileUnchanged(diskFS{}, path, true, []byte("stable"), "brief init")
 
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, ErrConcurrentEdit)

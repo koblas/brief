@@ -43,7 +43,7 @@ func Test_apply_refuses_when_CLAUDE_md_changed_since_planning(t *testing.T) {
 	}
 	configArt := Artifact{Kind: KindConfig, Path: filepath.Join(wd, ".brief.yaml"), Action: ActionUnchanged}
 
-	_, err := apply(res, featureArt, nil, nil, snippetArt, true, configArt, nil)
+	_, err := apply(diskFS{}, res, featureArt, nil, nil, snippetArt, true, configArt, nil)
 
 	require.ErrorIs(t, err, ErrConcurrentEdit)
 
@@ -82,7 +82,7 @@ func Test_apply_wraps_ErrPartialWrite_when_an_earlier_write_already_landed(t *te
 	}
 	configArt := Artifact{Kind: KindConfig, Path: filepath.Join(wd, ".brief.yaml"), Action: ActionUnchanged}
 
-	_, err := apply(res, featureArt, nil, nil, snippetArt, true, configArt, nil)
+	_, err := apply(diskFS{}, res, featureArt, nil, nil, snippetArt, true, configArt, nil)
 
 	require.ErrorIs(t, err, ErrConcurrentEdit)
 	require.ErrorIs(t, err, ErrPartialWrite)
@@ -129,7 +129,7 @@ func Test_apply_refuses_an_older_plugin_file_changed_since_planning(t *testing.T
 			existing:   staleBytes,
 		}}
 
-		_, err := apply(res, featureArt, pluginArts, nil, snippetArtifact{}, false, configArt, nil)
+		_, err := apply(diskFS{}, res, featureArt, pluginArts, nil, snippetArtifact{}, false, configArt, nil)
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 
@@ -147,7 +147,7 @@ func Test_apply_refuses_an_older_plugin_file_changed_since_planning(t *testing.T
 			existing:   staleBytes,
 		}}
 
-		out, err := apply(res, featureArt, pluginArts, nil, snippetArtifact{}, false, configArt, nil)
+		out, err := apply(diskFS{}, res, featureArt, pluginArts, nil, snippetArtifact{}, false, configArt, nil)
 
 		require.NoError(t, err)
 		assert.Contains(t, out.Modified, plannerPath)
@@ -181,7 +181,7 @@ func Test_apply_refuses_a_bound_agent_changed_since_planning(t *testing.T) {
 		perm:     0o600,
 	}}
 
-	_, err := apply(res, featureArt, nil, boundAgentArts, snippetArtifact{}, false, configArt, nil)
+	_, err := apply(diskFS{}, res, featureArt, nil, boundAgentArts, snippetArtifact{}, false, configArt, nil)
 
 	require.ErrorIs(t, err, ErrConcurrentEdit)
 
@@ -208,7 +208,7 @@ func Test_applyUninstall_refuses_when_CLAUDE_md_changed_since_planning(t *testin
 		remains:  []byte("stale planning-time bytes"),
 	}
 
-	_, err := applyUninstall(res, wd, HostNone, snippetArt, true, nil)
+	_, err := applyUninstall(diskFS{}, res, wd, HostNone, snippetArt, true, nil)
 
 	require.ErrorIs(t, err, ErrConcurrentEdit)
 
@@ -246,7 +246,7 @@ func Test_apply_uninstall_refuses_a_bound_agent_edited_after_planning(t *testing
 
 		res := Result{Created: []string{}, Modified: []string{}, Removed: []string{}}
 
-		_, err := applyUninstall(res, wd, HostNone, snippetArtifact{}, false, boundAgentArts)
+		_, err := applyUninstall(diskFS{}, res, wd, HostNone, snippetArtifact{}, false, boundAgentArts)
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 
@@ -260,7 +260,7 @@ func Test_apply_uninstall_refuses_a_bound_agent_edited_after_planning(t *testing
 
 		res := Result{Created: []string{}, Modified: []string{}, Removed: []string{}}
 
-		out, err := applyUninstall(res, wd, HostNone, snippetArtifact{}, false, boundAgentArts)
+		out, err := applyUninstall(diskFS{}, res, wd, HostNone, snippetArtifact{}, false, boundAgentArts)
 
 		require.NoError(t, err)
 		assert.Contains(t, out.Modified, agentPath)

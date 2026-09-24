@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,9 +13,10 @@ import (
 	"syscall"
 
 	"github.com/koblas/brief/internal/platform/artifact"
-	"github.com/koblas/brief/internal/platform/atomicfile"
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/host"
+	"github.com/koblas/brief/internal/platform/repo"
+	"github.com/koblas/brief/internal/platform/rwfs"
 )
 
 // configFileName is the config file Init writes and looks for — the same
@@ -97,25 +99,104 @@ const (
 )
 
 // Server plans and applies brief's own install write path. homeDir backs
-// detectHost's own home-directory check (WithHomeDir); every other
-// dependency is read from the real filesystem directly.
+// detectHost's own home-directory check (WithHomeDir); fsRoot backs every
+// read and write Init and Uninstall perform under the repository root, and
+// the config-location walk above it (WithFSRoot, export_test.go);
+// resolveRoot backs boundAgentTargets' and agentsMissingSkill's own
+// EvalSymlinks(root) call (WithResolveRoot, export_test.go) — never the
+// bound-agent file reads and writes themselves, which stay on real disk
+// through bound_agent.go's own confinedAgentFile regardless of fsRoot or
+// resolveRoot.
 type Server struct {
-	homeDir func() (string, error)
+	homeDir     func() (string, error)
+	fsRoot      func() rwfs.FS
+	resolveRoot func(string) (string, error)
 }
 
 // Option configures a Server built by NewServer.
 type Option func(*Server)
 
 // NewServer returns a Server ready to call Init on, homeDir defaulted to
-// os.UserHomeDir.
+// os.UserHomeDir, fsRoot to diskFS (the real, unconfined "/"-rooted
+// filesystem), and resolveRoot to filepath.EvalSymlinks.
 func NewServer(opts ...Option) *Server {
-	s := &Server{homeDir: os.UserHomeDir}
+	s := &Server{
+		homeDir:     os.UserHomeDir,
+		fsRoot:      func() rwfs.FS { return diskFS{} },
+		resolveRoot: filepath.EvalSymlinks,
+	}
 
 	for _, o := range opts {
 		o(s)
 	}
 
 	return s
+}
+
+// locateInRepo is config.LocateInRepo's own fsys-backed twin, mirroring
+// internal/doctor's own (*Server).locateInRepo: the walk and the
+// git-repository boundary both run against fsys rather than
+// config.LocateInRepo's and repo.Root's own hardcoded "/"-rooted namespace,
+// so a test can substitute an rwfs.Mem for both. It reproduces
+// config.LocateWithin's own "resolve config:" wrap verbatim.
+func locateInRepo(fsys fs.FS, wd string) (string, error) {
+	abs, err := filepath.Abs(wd)
+	if err != nil {
+		return "", fmt.Errorf("resolve config: %w", err)
+	}
+
+	boundary := ""
+	if root, ok := repo.RootFS(fsys, abs); ok {
+		boundary = root
+	}
+
+	nearest, _, err := config.LocateWithinFS(fsys, abs, boundary)
+	if err != nil {
+		return "", fmt.Errorf("resolve config: %w", err)
+	}
+
+	return nearest, nil
+}
+
+// inspectConfig is config.Inspect's own fsys-backed twin, mirroring
+// internal/doctor's own (*Server).inspect: abs is already absolute, so
+// unlike config.Inspect this never calls filepath.Abs itself. It reproduces
+// config.Inspect's own error wrap verbatim.
+func inspectConfig(fsys fs.FS, abs string) (config.Config, []*config.ValueError, error) {
+	cfg, violations, err := config.InspectFS(fsys, abs)
+	if err != nil {
+		if invalidCfg, ok := errors.AsType[*config.InvalidConfigError](err); ok {
+			return config.Config{}, nil, fmt.Errorf("resolve config: %w", invalidCfg)
+		}
+
+		return config.Config{}, nil, fmt.Errorf("resolve config: %s: %w", abs, err)
+	}
+
+	return cfg, violations, nil
+}
+
+// writeThrough replaces name's bytes under fsys, rebuilding the exact
+// "setup: open %s: %w" (an os.OpenRoot(dir) failure, diskFS.WriteFile's own
+// Op "open") or "setup: write %s: %w" (anything else) text planning and
+// apply produced before this seam existed, from the returned error's own
+// *fs.PathError.Op and .Err — never from its own .Path, which is
+// fsys-relative rather than the absolute display path the caller already
+// has.
+func writeThrough(fsys rwfs.FS, name, path string, body []byte) error {
+	err := fsys.WriteFile(name, body, 0o644)
+	if err == nil {
+		return nil
+	}
+
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
+		if pe.Op == "open" {
+			return fmt.Errorf("setup: open %s: %w", filepath.Dir(path), pe.Err)
+		}
+
+		return fmt.Errorf("setup: write %s: %w", path, pe.Err)
+	}
+
+	return fmt.Errorf("setup: write %s: %w", path, err)
 }
 
 // InitRequest is Init's own input: Host selects the agent-host integration
@@ -284,7 +365,9 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
 	}
 
-	nearest, _, err := config.LocateInRepo(wd)
+	fsys := s.fsRoot()
+
+	nearest, err := locateInRepo(fsys, wd)
 	if err != nil {
 		return Result{}, err
 	}
@@ -302,7 +385,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 	if req.Host == "" {
 		var detected bool
 
-		req.Host, detected, detectedBy = detectHost(root, s.homeDir)
+		req.Host, detected, detectedBy = detectHost(fsys, root, s.homeDir)
 		noHostDetected = !detected
 	}
 
@@ -314,14 +397,14 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return Result{}, ErrEditAgentsNeedHost
 	}
 
-	configArt, cfg, err := planConfig(nearest, root, req.Force, req.WithAgents)
+	configArt, cfg, err := planConfig(fsys, nearest, root, req.Force, req.WithAgents)
 	if err != nil {
 		return Result{}, err
 	}
 
 	featureRoot := filepath.Join(root, cfg.FeatureDirectory)
 
-	featureArt, err := planFeatureRoot(featureRoot)
+	featureArt, err := planFeatureRoot(fsys, featureRoot)
 	if err != nil {
 		return Result{}, err
 	}
@@ -339,24 +422,24 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 	if req.Host == HostClaudeCode {
 		h, _ := host.Lookup(host.ClaudeCode)
 
-		pluginArts, err = planPluginFiles(root, h, !req.NoHook)
+		pluginArts, err = planPluginFiles(fsys, root, h, !req.NoHook)
 		if err != nil {
 			return Result{}, err
 		}
 
-		skillArts, err = planSkillFiles(root, h)
+		skillArts, err = planSkillFiles(fsys, root, h)
 		if err != nil {
 			return Result{}, err
 		}
 
 		if req.WithAgents {
-			agentArts, err = planAgentFiles(root, h)
+			agentArts, err = planAgentFiles(fsys, root, h)
 			if err != nil {
 				return Result{}, err
 			}
 		}
 
-		snippetArt, err = planSnippet(root, h, cfg.FeatureDirectory)
+		snippetArt, err = planSnippet(fsys, root, h, cfg.FeatureDirectory)
 		if err != nil {
 			return Result{}, err
 		}
@@ -369,13 +452,13 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		}
 
 		if req.EditAgents {
-			boundAgentArts, err = planBoundAgents(root, home, cfg.Roles)
+			boundAgentArts, err = planBoundAgents(s.resolveRoot, root, home, cfg.Roles)
 			if err != nil {
 				return Result{}, err
 			}
 		}
 
-		agentsMissingSkillList, err = agentsMissingSkill(root, home, cfg.Roles)
+		agentsMissingSkillList, err = agentsMissingSkill(s.resolveRoot, root, home, cfg.Roles)
 		if err != nil {
 			return Result{}, err
 		}
@@ -439,7 +522,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return res, err
 	}
 
-	return apply(res, featureArt, writeArts, boundAgentArts, snippetArt, hasSnippet, configArt, configBody)
+	return apply(fsys, res, featureArt, writeArts, boundAgentArts, snippetArt, hasSnippet, configArt, configBody)
 }
 
 // rolesToAdd renders Result.RolesToAdd (R7): empty unless withAgents and
@@ -492,13 +575,13 @@ func rolesToAdd(withAgents bool, configAction Action, current config.RoleBinding
 // held. A write failure is wrapped in ErrPartialWrite iff at least one
 // earlier write already landed in this same call.
 func apply(
-	res Result, featureArt Artifact, pluginArts []pluginArtifact, boundAgentArts []boundAgentArtifact,
+	fsys rwfs.FS, res Result, featureArt Artifact, pluginArts []pluginArtifact, boundAgentArts []boundAgentArtifact,
 	snippetArt snippetArtifact, hasSnippet bool, configArt Artifact, configBody []byte,
 ) (Result, error) {
 	var wroteSomething bool
 
 	if featureArt.Action == ActionCreated {
-		if err := os.MkdirAll(featureArt.Path, 0o755); err != nil {
+		if err := fsys.MkdirAll(fsName(featureArt.Path), 0o755); err != nil {
 			return Result{}, fmt.Errorf("setup: create %s: %w", featureArt.Path, err)
 		}
 
@@ -512,7 +595,7 @@ func apply(
 		}
 
 		if p.Action == ActionMerged {
-			if err := verifyFileUnchanged(p.Path, true, p.existing, "brief init"); err != nil {
+			if err := verifyFileUnchanged(fsys, p.Path, true, p.existing, "brief init"); err != nil {
 				if wroteSomething {
 					return res, markPartial(err)
 				}
@@ -521,7 +604,7 @@ func apply(
 			}
 		}
 
-		if err := writePluginFile(p.Path, artifact.Render(p.renderKind)); err != nil {
+		if err := writePluginFile(fsys, p.Path, artifact.Render(p.renderKind)); err != nil {
 			if wroteSomething {
 				return res, markPartial(err)
 			}
@@ -566,7 +649,7 @@ func apply(
 	if hasSnippet && (snippetArt.Action == ActionCreated || snippetArt.Action == ActionMerged) {
 		existedBefore := snippetArt.Action == ActionMerged
 
-		if err := verifyFileUnchanged(snippetArt.Path, existedBefore, snippetArt.existing, "brief init"); err != nil {
+		if err := verifyFileUnchanged(fsys, snippetArt.Path, existedBefore, snippetArt.existing, "brief init"); err != nil {
 			if wroteSomething {
 				return res, markPartial(err)
 			}
@@ -576,7 +659,7 @@ func apply(
 
 		body := mergeSnippet(snippetArt.existing, snippetArt.span, artifact.SnippetBlock(snippetArt.dir))
 
-		if err := writeSnippetFile(snippetArt.Path, body); err != nil {
+		if err := writeSnippetFile(fsys, snippetArt.Path, body); err != nil {
 			if wroteSomething {
 				return res, markPartial(err)
 			}
@@ -594,7 +677,7 @@ func apply(
 	}
 
 	if configArt.Action == ActionCreated {
-		if err := writeConfigFile(configArt.Path, configBody); err != nil {
+		if err := writeConfigFile(fsys, configArt.Path, configBody); err != nil {
 			if wroteSomething {
 				return res, markPartial(err)
 			}
@@ -628,7 +711,7 @@ type pluginArtifact struct {
 
 // planPluginFiles plans every file h.Plugin(withHook) lists, each joined
 // under root, in that same order.
-func planPluginFiles(root string, h host.Host, withHook bool) ([]pluginArtifact, error) {
+func planPluginFiles(fsys rwfs.FS, root string, h host.Host, withHook bool) ([]pluginArtifact, error) {
 	files := h.Plugin(withHook)
 	out := make([]pluginArtifact, 0, len(files))
 
@@ -640,7 +723,7 @@ func planPluginFiles(root string, h host.Host, withHook bool) ([]pluginArtifact,
 
 		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
-		art, existing, err := planPluginFile(path, kind, f.Kind)
+		art, existing, err := planPluginFile(fsys, path, kind, f.Kind)
 		if err != nil {
 			return nil, err
 		}
@@ -655,14 +738,14 @@ func planPluginFiles(root string, h host.Host, withHook bool) ([]pluginArtifact,
 // root, in that same order (planner, implementer, reviewer) — mirroring
 // planPluginFiles, but every entry is tagged KindAgent rather than
 // KindPlugin or KindHook: Agents carries no hook file of its own.
-func planAgentFiles(root string, h host.Host) ([]pluginArtifact, error) {
+func planAgentFiles(fsys rwfs.FS, root string, h host.Host) ([]pluginArtifact, error) {
 	files := h.Agents()
 	out := make([]pluginArtifact, 0, len(files))
 
 	for _, f := range files {
 		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
-		art, existing, err := planPluginFile(path, KindAgent, f.Kind)
+		art, existing, err := planPluginFile(fsys, path, KindAgent, f.Kind)
 		if err != nil {
 			return nil, err
 		}
@@ -677,14 +760,14 @@ func planAgentFiles(root string, h host.Host) ([]pluginArtifact, error) {
 // root, in that same order — mirroring planPluginFiles and planAgentFiles,
 // but every entry is tagged KindSkill: unlike Agents, Skills is planned on
 // every claude-code install, with or without WithAgents.
-func planSkillFiles(root string, h host.Host) ([]pluginArtifact, error) {
+func planSkillFiles(fsys rwfs.FS, root string, h host.Host) ([]pluginArtifact, error) {
 	files := h.Skills()
 	out := make([]pluginArtifact, 0, len(files))
 
 	for _, f := range files {
 		path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
-		art, existing, err := planPluginFile(path, KindSkill, f.Kind)
+		art, existing, err := planPluginFile(fsys, path, KindSkill, f.Kind)
 		if err != nil {
 			return nil, err
 		}
@@ -712,11 +795,11 @@ func planSkillFiles(root string, h host.Host) ([]pluginArtifact, error) {
 // "does not exist yet": os.IsNotExist never matches it, but the path still
 // is not there, and the pre-write check (checkWritable) is what refuses on
 // that blocking ancestor, not planning.
-func planPluginFile(path string, kind Kind, renderKind artifact.Kind) (Artifact, []byte, error) {
-	info, err := os.Lstat(path)
+func planPluginFile(fsys rwfs.FS, path string, kind Kind, renderKind artifact.Kind) (Artifact, []byte, error) {
+	info, err := fsys.Lstat(fsName(path))
 
 	switch {
-	case os.IsNotExist(err), errors.Is(err, syscall.ENOTDIR):
+	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
 		return Artifact{Kind: kind, Path: path, Action: ActionCreated}, nil, nil
 	case err != nil:
 		return Artifact{}, nil, fmt.Errorf("setup: lstat %s: %w", path, err)
@@ -724,7 +807,7 @@ func planPluginFile(path string, kind Kind, renderKind artifact.Kind) (Artifact,
 		return Artifact{Kind: kind, Path: path, Action: ActionKept, Detail: "not a regular file"}, nil, nil
 	}
 
-	body, err := os.ReadFile(path)
+	body, err := fsys.ReadFile(fsName(path))
 	if err != nil {
 		return Artifact{}, nil, fmt.Errorf("setup: read %s: %w", path, err)
 	}
@@ -742,38 +825,18 @@ func planPluginFile(path string, kind Kind, renderKind artifact.Kind) (Artifact,
 }
 
 // writePluginFile creates path's parent directories (0o755) and then
-// atomically writes body to path (0o644), through
-// internal/platform/atomicfile so a reader never observes a truncated or
-// half-renamed plugin file.
-func writePluginFile(path string, body []byte) error {
+// atomically writes body to path (0o644), through fsys's own WriteFile
+// (diskFS's own body: internal/platform/atomicfile, confined only to
+// path's immediate parent directory — see fs.go — so a reader never
+// observes a truncated or half-renamed plugin file).
+func writePluginFile(fsys rwfs.FS, path string, body []byte) error {
 	dir := filepath.Dir(path)
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := fsys.MkdirAll(fsName(dir), 0o755); err != nil {
 		return fmt.Errorf("setup: create %s: %w", dir, err)
 	}
 
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return fmt.Errorf("setup: open %s: %w", dir, err)
-	}
-	defer func() { _ = root.Close() }()
-
-	w, err := atomicfile.Create(root, filepath.Base(path), 0o644)
-	if err != nil {
-		return fmt.Errorf("setup: write %s: %w", path, err)
-	}
-
-	if _, err := w.Write(body); err != nil {
-		_ = w.Close()
-
-		return fmt.Errorf("setup: write %s: %w", path, err)
-	}
-
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("setup: write %s: %w", path, err)
-	}
-
-	return nil
+	return writeThrough(fsys, fsName(path), path, body)
 }
 
 // planConfig decides the config file's own Artifact and, when it can be
@@ -800,7 +863,7 @@ func writePluginFile(path string, body []byte) error {
 // and RolesToAdd with its own decoded values. --with-agents never edits an
 // existing config either way (R7): only the nearest == "" branch above,
 // and --force's own rewrite, ever report ActionCreated.
-func planConfig(nearest, root string, force, withAgents bool) (Artifact, config.Config, error) {
+func planConfig(fsys rwfs.FS, nearest, root string, force, withAgents bool) (Artifact, config.Config, error) {
 	if nearest == "" {
 		path := filepath.Join(root, configFileName)
 
@@ -818,8 +881,8 @@ func planConfig(nearest, root string, force, withAgents bool) (Artifact, config.
 	}
 
 	if force {
-		if configFileCurrent(nearest, desired) {
-			cfg, err := decodeCurrentConfig(nearest)
+		if configFileCurrent(fsys, nearest, desired) {
+			cfg, err := decodeCurrentConfig(fsys, nearest)
 			if err != nil {
 				return Artifact{}, config.Config{}, err
 			}
@@ -835,13 +898,13 @@ func planConfig(nearest, root string, force, withAgents bool) (Artifact, config.
 		return Artifact{Kind: KindConfig, Path: nearest, Action: ActionCreated, Detail: "rewritten from defaults"}, cfg, nil
 	}
 
-	existing, err := os.ReadFile(nearest)
+	existing, err := fsys.ReadFile(fsName(nearest))
 	if err != nil {
 		return Artifact{}, config.Config{}, fmt.Errorf("setup: read %s: %w", nearest, err)
 	}
 
 	if artifact.Recognize(artifact.KindConfig, existing) == artifact.OriginCurrent {
-		cfg, decodeErr := decodeCurrentConfig(nearest)
+		cfg, decodeErr := decodeCurrentConfig(fsys, nearest)
 		if decodeErr != nil {
 			return Artifact{}, config.Config{}, decodeErr
 		}
@@ -849,7 +912,7 @@ func planConfig(nearest, root string, force, withAgents bool) (Artifact, config.
 		return Artifact{Kind: KindConfig, Path: nearest, Action: ActionUnchanged}, cfg, nil
 	}
 
-	cfg, violations, inspectErr := config.Inspect(nearest)
+	cfg, violations, inspectErr := inspectConfig(fsys, nearest)
 	if inspectErr != nil {
 		return Artifact{}, config.Config{}, configRefusal(nearest, inspectErr)
 	}
@@ -869,8 +932,8 @@ func planConfig(nearest, root string, force, withAgents bool) (Artifact, config.
 // never "any known current render": under --force --with-agents a config
 // holding the plain render is not current — it must be rewritten to the
 // bound one — even though artifact.Recognize would call it OriginCurrent.
-func configFileCurrent(path string, desired []byte) bool {
-	existing, err := os.ReadFile(path)
+func configFileCurrent(fsys rwfs.FS, path string, desired []byte) bool {
+	existing, err := fsys.ReadFile(fsName(path))
 	if err != nil {
 		return false
 	}
@@ -885,8 +948,8 @@ func configFileCurrent(path string, desired []byte) bool {
 // condition a caller can fix; it is still reported as a *RefusalError
 // (configRefusal) rather than panicking, so a defect here fails loudly
 // instead of silently reporting every role unbound.
-func decodeCurrentConfig(nearest string) (config.Config, error) {
-	cfg, violations, err := config.Inspect(nearest)
+func decodeCurrentConfig(fsys rwfs.FS, nearest string) (config.Config, error) {
+	cfg, violations, err := inspectConfig(fsys, nearest)
 	if err != nil {
 		return config.Config{}, configRefusal(nearest, err)
 	}
@@ -922,8 +985,8 @@ func configRefusal(path string, err error) error {
 // when path already exists as a directory, ActionCreated when nothing
 // exists there yet, or a *RefusalError wrapping ErrNotADirectory when path
 // exists as something else.
-func planFeatureRoot(path string) (Artifact, error) {
-	info, err := os.Stat(path)
+func planFeatureRoot(fsys rwfs.FS, path string) (Artifact, error) {
+	info, err := fsys.Stat(fsName(path))
 
 	switch {
 	case err == nil && info.IsDir():
@@ -935,7 +998,7 @@ func planFeatureRoot(path string) (Artifact, error) {
 			Fix:     "remove it, or set feature-directory in .brief.yaml to a different path",
 			Err:     ErrNotADirectory,
 		}
-	case os.IsNotExist(err):
+	case errors.Is(err, fs.ErrNotExist):
 		return Artifact{Kind: KindFeatureRoot, Path: path, Action: ActionCreated}, nil
 	default:
 		return Artifact{}, fmt.Errorf("setup: stat %s: %w", path, err)
@@ -943,33 +1006,11 @@ func planFeatureRoot(path string) (Artifact, error) {
 }
 
 // writeConfigFile atomically replaces name — an absolute path — with body,
-// through internal/platform/atomicfile so a reader never observes a
-// truncated or half-renamed config file.
-func writeConfigFile(name string, body []byte) error {
-	dir := filepath.Dir(name)
-
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return fmt.Errorf("setup: open %s: %w", dir, err)
-	}
-	defer func() { _ = root.Close() }()
-
-	w, err := atomicfile.Create(root, filepath.Base(name), 0o644)
-	if err != nil {
-		return fmt.Errorf("setup: write %s: %w", name, err)
-	}
-
-	if _, err := w.Write(body); err != nil {
-		_ = w.Close()
-
-		return fmt.Errorf("setup: write %s: %w", name, err)
-	}
-
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("setup: write %s: %w", name, err)
-	}
-
-	return nil
+// through fsys's own WriteFile (diskFS's own body: internal/platform/
+// atomicfile, so a reader never observes a truncated or half-renamed
+// config file).
+func writeConfigFile(fsys rwfs.FS, name string, body []byte) error {
+	return writeThrough(fsys, fsName(name), name, body)
 }
 
 // validHost reports whether host appears in Hosts().

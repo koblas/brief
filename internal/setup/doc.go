@@ -127,10 +127,32 @@
 // skill file's parent directories, os.Remove for Uninstall's own file and
 // now-empty-directory removals (never RemoveAll) — imports only
 // internal/platform/agentfile, internal/platform/config,
-// internal/platform/artifact, internal/platform/atomicfile and
-// internal/platform/host alongside the standard library, and never
-// internal/scaffold or internal/doctor: those own the write and read paths
-// over a feature's own content, a question setup never asks.
+// internal/platform/artifact, internal/platform/atomicfile,
+// internal/platform/host and internal/platform/rwfs alongside the standard
+// library, and never internal/scaffold or internal/doctor: those own the
+// write and read paths over a feature's own content, a question setup
+// never asks.
+//
+// Every read and write Init and Uninstall perform under a repository
+// root, and the config-location walk above it (locateInRepo,
+// inspectConfig, mirroring internal/doctor's own locateInRepo/inspect),
+// go through (*Server).fsRoot — production diskFS (fs.go), a stateless
+// rwfs.FS reproducing exactly the os.* calls this package always made,
+// deliberately unconfined rather than rwfs.OS's own os.Root confinement:
+// planPluginFile's DryRun planning has a passing test that depends on
+// today's symlink-following read behavior through a ".claude" pointed
+// outside the repository (bound_agent_test.go), and R10's own writability
+// pre-check (checkWritable, still real os.Lstat/writable.Probe,
+// unconfined) does not gate every write a broader confinement would newly
+// refuse (init_disk_test.go pins this with a mutation). A test substitutes
+// an rwfs.Mem via the package-private WithFSRoot (export_test.go).
+// boundAgentTargets' and agentsMissingSkill's own root-resolution
+// (filepath.EvalSymlinks(root), before either walks agentfile bindings) is
+// a separate seam, (*Server).resolveRoot (WithResolveRoot,
+// export_test.go) — planBoundAgent, planBoundAgentRemoval,
+// confinedAgentFile and agentfile.ResolveBinding's own file search all
+// still read and write through real disk regardless of fsRoot or
+// resolveRoot: bound-agent confinement is never routed through this seam.
 //
 // Result.AgentsMissingSkill (agentsMissingSkill) is Init's own report of
 // every bare-name planner or implementer binding — never a "brief:*" or

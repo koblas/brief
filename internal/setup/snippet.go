@@ -2,14 +2,15 @@ package setup
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"strings"
 
 	"github.com/koblas/brief/internal/platform/artifact"
-	"github.com/koblas/brief/internal/platform/atomicfile"
 	"github.com/koblas/brief/internal/platform/host"
+	"github.com/koblas/brief/internal/platform/rwfs"
 )
 
 // snippetSpan locates one recognized marker block inside a candidate
@@ -134,17 +135,17 @@ type candidateSnippetFile struct {
 // clean, two of them each holding a valid block is refused too, citing
 // ".claude/CLAUDE.md" (root is the preferred location) and its own begin
 // line.
-func scanSnippetCandidates(root string, h host.Host) ([]candidateSnippetFile, error) {
+func scanSnippetCandidates(fsys rwfs.FS, root string, h host.Host) ([]candidateSnippetFile, error) {
 	rel := h.InstructionFiles()
 	out := make([]candidateSnippetFile, 0, len(rel))
 
 	for _, r := range rel {
 		path := filepath.Join(root, filepath.FromSlash(r))
 
-		info, err := os.Lstat(path)
+		info, err := fsys.Lstat(fsName(path))
 
 		switch {
-		case os.IsNotExist(err):
+		case errors.Is(err, fs.ErrNotExist):
 			out = append(out, candidateSnippetFile{path: path})
 
 			continue
@@ -156,7 +157,7 @@ func scanSnippetCandidates(root string, h host.Host) ([]candidateSnippetFile, er
 			continue
 		}
 
-		body, err := os.ReadFile(path)
+		body, err := fsys.ReadFile(fsName(path))
 		if err != nil {
 			return nil, fmt.Errorf("setup: read %s: %w", path, err)
 		}
@@ -254,8 +255,8 @@ type snippetArtifact struct {
 // OriginCurrent for dir (its own trailing "/" trimmed, matching
 // SnippetBlock's own rule) is unchanged; OriginCurrent for any other
 // directory is merged, "block updated".
-func planSnippet(root string, h host.Host, dir string) (snippetArtifact, error) {
-	candidates, err := scanSnippetCandidates(root, h)
+func planSnippet(fsys rwfs.FS, root string, h host.Host, dir string) (snippetArtifact, error) {
+	candidates, err := scanSnippetCandidates(fsys, root, h)
 	if err != nil {
 		return snippetArtifact{}, err
 	}
@@ -328,8 +329,8 @@ func planSnippet(root string, h host.Host, dir string) (snippetArtifact, error) 
 // removeSnippet strips the span, and Detail is "brief block" when remains
 // is non-empty (apply rewrites the file) or empty when remains is empty
 // (apply deletes it).
-func planSnippetRemoval(root string, h host.Host, force bool) (snippetArtifact, bool, error) {
-	candidates, err := scanSnippetCandidates(root, h)
+func planSnippetRemoval(fsys rwfs.FS, root string, h host.Host, force bool) (snippetArtifact, bool, error) {
+	candidates, err := scanSnippetCandidates(fsys, root, h)
 	if err != nil {
 		return snippetArtifact{}, false, err
 	}
@@ -378,38 +379,15 @@ func planSnippetRemoval(root string, h host.Host, force bool) (snippetArtifact, 
 }
 
 // writeSnippetFile atomically replaces path's bytes with body, through
-// internal/platform/atomicfile so a reader never observes a truncated or
-// half-written CLAUDE.md, preserving the file's own mode across a replace.
-// Unlike writePluginFile it never creates path's parent directory: a
-// chosen CLAUDE.md candidate's own directory already exists by
-// construction — root always does, and ".claude/CLAUDE.md" is only ever
-// chosen when it already exists — so brief never creates ".claude/" itself
-// just to hold this file.
-func writeSnippetFile(path string, body []byte) error {
-	dir := filepath.Dir(path)
-
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return fmt.Errorf("setup: open %s: %w", dir, err)
-	}
-	defer func() { _ = root.Close() }()
-
-	w, err := atomicfile.Create(root, filepath.Base(path), 0o644)
-	if err != nil {
-		return fmt.Errorf("setup: write %s: %w", path, err)
-	}
-
-	if _, err := w.Write(body); err != nil {
-		_ = w.Close()
-
-		return fmt.Errorf("setup: write %s: %w", path, err)
-	}
-
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("setup: write %s: %w", path, err)
-	}
-
-	return nil
+// fsys's own WriteFile (diskFS's own body: internal/platform/atomicfile),
+// so a reader never observes a truncated or half-written CLAUDE.md,
+// preserving the file's own mode across a replace. Unlike writePluginFile
+// it never creates path's parent directory: a chosen CLAUDE.md candidate's
+// own directory already exists by construction — root always does, and
+// ".claude/CLAUDE.md" is only ever chosen when it already exists — so
+// brief never creates ".claude/" itself just to hold this file.
+func writeSnippetFile(fsys rwfs.FS, path string, body []byte) error {
+	return writeThrough(fsys, fsName(path), path, body)
 }
 
 // verifyFileUnchanged re-reads path immediately before Init or Uninstall
@@ -424,8 +402,8 @@ func writeSnippetFile(path string, body []byte) error {
 // file (an OriginOlder render Rule 6 upgrades) alike: planning and applying
 // are not atomic with respect to a concurrent brief invocation, or a person
 // editing the file by hand, in between.
-func verifyFileUnchanged(path string, existedBefore bool, existing []byte, rerunCommand string) error {
-	current, err := os.ReadFile(path)
+func verifyFileUnchanged(fsys rwfs.FS, path string, existedBefore bool, existing []byte, rerunCommand string) error {
+	current, err := fsys.ReadFile(fsName(path))
 
 	return verifyReadUnchanged(path, existedBefore, existing, current, err, rerunCommand)
 }
@@ -443,7 +421,7 @@ func verifyReadUnchanged(displayPath string, existedBefore bool, existing, curre
 		if existedBefore && bytes.Equal(current, existing) {
 			return nil
 		}
-	case os.IsNotExist(readErr):
+	case errors.Is(readErr, fs.ErrNotExist):
 		if !existedBefore {
 			return nil
 		}
