@@ -8,13 +8,17 @@
 package cli
 
 import (
+	"encoding/json"
 	"io/fs"
 	"path/filepath"
 	"strings"
+	"testing"
 	"testing/fstest"
 
 	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/setup"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // memRoot is the virtual working directory every new/finish/start/check/
@@ -121,4 +125,140 @@ func (t *memTree) file(path, body string) *memTree {
 // mem builds the rwfs.Mem every entry added so far backs.
 func (t *memTree) mem() *rwfs.Mem {
 	return rwfs.NewMem(t.entries)
+}
+
+// memJSONString marshals s the same way testify's assert.Equal would
+// compare it, for building a golden literal around a dynamically computed
+// value without hand-escaping it — mirroring json_refusal_test.go's own
+// jsonString, duplicated since that is a package cli_test symbol.
+func memJSONString(t *testing.T, s string) string {
+	t.Helper()
+
+	b, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	return string(b)
+}
+
+// memJSONKeys returns doc's own keys, for an exact-key-set assertion via
+// assert.ElementsMatch — mirroring json_usage_test.go's own jsonKeys.
+func memJSONKeys(doc map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(doc))
+	for k := range doc {
+		keys = append(keys, k)
+	}
+
+	return keys
+}
+
+// memDecodedError is the JSON shape of a --json error document's "error"
+// member — mirroring json_refusal_test.go's own decodedError.
+type memDecodedError struct {
+	Kind         string  `json:"kind"`
+	Message      string  `json:"message"`
+	Path         *string `json:"path"`
+	Line         *int    `json:"line"`
+	Problem      *string `json:"problem"`
+	Fix          string  `json:"fix"`
+	FilesChanged *bool   `json:"files_changed"`
+}
+
+// memDecodeErrorDocument asserts stdout holds exactly one --json error
+// document matching R1/R3's shape (schema 1, ok false, exit_code 1, the
+// exact key set of both the document and its error object) for
+// wantCommand, and returns the document's own error object — mirroring
+// json_refusal_test.go's own decodeErrorDocument.
+func memDecodeErrorDocument(t *testing.T, stdout []byte, wantCommand string) memDecodedError {
+	t.Helper()
+
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stdout, &doc))
+	assert.ElementsMatch(t, []string{"schema", "command", "ok", "exit_code", "error"}, memJSONKeys(doc))
+
+	var schema int
+	require.NoError(t, json.Unmarshal(doc["schema"], &schema))
+	assert.Equal(t, 1, schema)
+
+	var command string
+	require.NoError(t, json.Unmarshal(doc["command"], &command))
+	assert.Equal(t, wantCommand, command)
+
+	var ok bool
+	require.NoError(t, json.Unmarshal(doc["ok"], &ok))
+	assert.False(t, ok)
+
+	var exitCode int
+	require.NoError(t, json.Unmarshal(doc["exit_code"], &exitCode))
+	assert.Equal(t, 1, exitCode)
+
+	var errObj map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(doc["error"], &errObj))
+	assert.ElementsMatch(t, []string{"kind", "message", "path", "line", "problem", "fix", "files_changed"}, memJSONKeys(errObj))
+
+	var decoded memDecodedError
+	require.NoError(t, json.Unmarshal(doc["error"], &decoded))
+
+	return decoded
+}
+
+// memDecodeUsageErrorDocument asserts stdout holds exactly one --json
+// usage-error document matching R1/R2/R3's shape (schema 1, ok false,
+// exit_code 2, error.kind "usage", error.path/line/problem null, the
+// exact key set of both the document and its error object, and
+// error.files_changed matching wantFilesChanged) for wantCommand, and
+// returns the document's own error.message and error.fix — mirroring
+// json_usage_test.go's own decodeUsageErrorDocument. The fix return is
+// unused by every current caller in this file, kept for parity with the
+// function it mirrors and for a later command's own fix-specific
+// assertion.
+//
+//nolint:unparam // see the doc comment above
+func memDecodeUsageErrorDocument(t *testing.T, stdout []byte, wantCommand string, wantFilesChanged *bool) (string, string) {
+	t.Helper()
+
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stdout, &doc))
+	assert.ElementsMatch(t, []string{"schema", "command", "ok", "exit_code", "error"}, memJSONKeys(doc))
+
+	var schema int
+	require.NoError(t, json.Unmarshal(doc["schema"], &schema))
+	assert.Equal(t, 1, schema)
+
+	var command string
+	require.NoError(t, json.Unmarshal(doc["command"], &command))
+	assert.Equal(t, wantCommand, command)
+
+	var ok bool
+	require.NoError(t, json.Unmarshal(doc["ok"], &ok))
+	assert.False(t, ok)
+
+	var exitCode int
+	require.NoError(t, json.Unmarshal(doc["exit_code"], &exitCode))
+	assert.Equal(t, 2, exitCode)
+
+	var errObj map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(doc["error"], &errObj))
+	assert.ElementsMatch(t, []string{"kind", "message", "path", "line", "problem", "fix", "files_changed"}, memJSONKeys(errObj))
+
+	var kind string
+	require.NoError(t, json.Unmarshal(errObj["kind"], &kind))
+	assert.Equal(t, "usage", kind)
+
+	assert.JSONEq(t, "null", string(errObj["path"]))
+	assert.JSONEq(t, "null", string(errObj["line"]))
+	assert.JSONEq(t, "null", string(errObj["problem"]))
+
+	wantFilesChangedJSON := "null"
+	if wantFilesChanged != nil {
+		want, err := json.Marshal(*wantFilesChanged)
+		require.NoError(t, err)
+		wantFilesChangedJSON = string(want)
+	}
+	assert.JSONEq(t, wantFilesChangedJSON, string(errObj["files_changed"]))
+
+	var message, fix string
+	require.NoError(t, json.Unmarshal(errObj["message"], &message))
+	require.NoError(t, json.Unmarshal(errObj["fix"], &fix))
+
+	return message, fix
 }
