@@ -106,11 +106,20 @@ const (
 // EvalSymlinks(root) call (WithResolveRoot, export_test.go) — never the
 // bound-agent file reads and writes themselves, which stay on real disk
 // through bound_agent.go's own confinedAgentFile regardless of fsRoot or
-// resolveRoot.
+// resolveRoot. writableCheck backs R10's own pre-write call in Init
+// (WithWritableCheck, export_test.go): its default, checkWritable
+// (writable.go), is never itself routed through fsRoot — it walks real
+// disk via os.Lstat and internal/platform/writable.Probe regardless, since
+// production always uses the default and a *_disk_test.go file pins it
+// directly — this seam exists only so a Mem-backed test can record which
+// targets a real run would have checked, or skip the real-disk call
+// entirely, without a hybrid fixture asserting a refusal (or its absence)
+// production could never actually produce against a real, unconverted R10.
 type Server struct {
-	homeDir     func() (string, error)
-	fsRoot      func() rwfs.FS
-	resolveRoot func(string) (string, error)
+	homeDir       func() (string, error)
+	fsRoot        func() rwfs.FS
+	resolveRoot   func(string) (string, error)
+	writableCheck func([]string) error
 }
 
 // Option configures a Server built by NewServer.
@@ -118,12 +127,14 @@ type Option func(*Server)
 
 // NewServer returns a Server ready to call Init on, homeDir defaulted to
 // os.UserHomeDir, fsRoot to diskFS (the real, unconfined "/"-rooted
-// filesystem), and resolveRoot to filepath.EvalSymlinks.
+// filesystem), resolveRoot to filepath.EvalSymlinks, and writableCheck to
+// checkWritable.
 func NewServer(opts ...Option) *Server {
 	s := &Server{
-		homeDir:     os.UserHomeDir,
-		fsRoot:      func() rwfs.FS { return diskFS{} },
-		resolveRoot: filepath.EvalSymlinks,
+		homeDir:       os.UserHomeDir,
+		fsRoot:        func() rwfs.FS { return diskFS{} },
+		resolveRoot:   filepath.EvalSymlinks,
+		writableCheck: checkWritable,
 	}
 
 	for _, o := range opts {
@@ -518,7 +529,7 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 		return res, nil
 	}
 
-	if err := checkWritable(writableTargets(featureArt, writeArts, boundAgentArts, snippetArt, hasSnippet, configArt)); err != nil {
+	if err := s.writableCheck(writableTargets(featureArt, writeArts, boundAgentArts, snippetArt, hasSnippet, configArt)); err != nil {
 		return res, err
 	}
 

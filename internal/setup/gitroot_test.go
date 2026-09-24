@@ -18,11 +18,11 @@ import (
 // byte-identical afterward, which is vacuous unless the same run also
 // proves it wrote *something* — the fresh config and plugin at wd. The
 // ancestor walk (repo.RootFS, config.LocateWithinFS) only ever stats a
-// ".git" or ".brief.yaml" candidate, so this is Mem-backed; proj alone
-// stays a real t.TempDir() for checkWritable (R10, unconverted).
+// ".git" or ".brief.yaml" candidate, so this is Mem-backed, fully virtual.
 func Test_Init_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
-	proj, mem := newRealRootMem(t)
-	home := filepath.Dir(proj)
+	home := fsAbs("home")
+	proj := fsAbs("home", "proj")
+	mem := newVirtualMem(proj)
 
 	claudeBefore := []byte("# Home notes\n")
 	require.NoError(t, mem.WriteFile(memKey(home)+"/.brief.yaml", []byte("feature-directory: home-specs\n"), 0o600))
@@ -66,7 +66,8 @@ func Test_Init_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t
 // though wd is a subdirectory holding neither a config nor a ".git" of its
 // own.
 func Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root(t *testing.T) {
-	root, mem := newRealRootMem(t)
+	root := fsAbs("repo")
+	mem := newVirtualMem(root)
 	require.NoError(t, mem.Mkdir(memKey(root)+"/.git", 0o755))
 	require.NoError(t, mem.WriteFile(memKey(root)+"/.brief.yaml", []byte("feature-directory: specs\n"), 0o600))
 	require.NoError(t, mem.Mkdir(memKey(root)+"/sub", 0o755))
@@ -91,7 +92,8 @@ func Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root(t *tes
 // enclosing git repository root is still adopted and removed, even though
 // wd is a subdirectory holding neither a config nor a ".git" of its own.
 func Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root(t *testing.T) {
-	root, mem := newRealRootMem(t)
+	root := fsAbs("repo")
+	mem := newVirtualMem(root)
 	require.NoError(t, mem.Mkdir(memKey(root)+"/.git", 0o755))
 
 	srv := newMemServer(mem)
@@ -121,8 +123,9 @@ func Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root(t
 // repository is never removed, and Uninstall reports nothing installed
 // rather than reaching outside the repository.
 func Test_Uninstall_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
-	proj, mem := newRealRootMem(t)
-	home := filepath.Dir(proj)
+	home := fsAbs("home")
+	proj := fsAbs("home", "proj")
+	mem := newVirtualMem(proj)
 	homeConfig := filepath.Join(home, ".brief.yaml")
 	require.NoError(t, mem.WriteFile(memKey(homeConfig), []byte("feature-directory: home-specs\n"), 0o600))
 	require.NoError(t, mem.Mkdir(memKey(proj)+"/.git", 0o755))

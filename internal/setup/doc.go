@@ -153,6 +153,15 @@
 // confinedAgentFile and agentfile.ResolveBinding's own file search all
 // still read and write through real disk regardless of fsRoot or
 // resolveRoot: bound-agent confinement is never routed through this seam.
+// R10's own pre-write call (checkWritable, before apply) is a third,
+// narrower seam, (*Server).writableCheck (WithWritableCheck,
+// export_test.go): checkWritable itself (writable.go) is never changed or
+// routed through fsRoot — every writable_disk_test.go case still builds
+// its Server with plain NewServer() — the seam exists only so an
+// rwfs.Mem-backed test can record which targets a real run would have
+// checked, or skip the real-disk call entirely, rather than asserting a
+// refusal (or its absence) real disk at a fabricated root could never
+// actually produce.
 //
 // Result.AgentsMissingSkill (agentsMissingSkill) is Init's own report of
 // every bare-name planner or implementer binding — never a "brief:*" or

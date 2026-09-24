@@ -25,3 +25,16 @@ func WithFSRoot(fsys rwfs.FS) Option {
 func WithResolveRoot(fn func(string) (string, error)) Option {
 	return func(s *Server) { s.resolveRoot = fn }
 }
+
+// WithWritableCheck overrides the production writableCheck (checkWritable,
+// real os.Lstat plus internal/platform/writable.Probe) that Init runs
+// before applying — exported only so this package's own external tests can
+// record the targets a real run would have checked, or skip the call
+// entirely, without a Mem-backed fixture asserting a refusal (or its
+// absence) production could never actually produce against a real,
+// unconverted R10. checkWritable itself (writable.go) is never changed by
+// this seam; every writable_disk_test.go case still builds its Server with
+// plain NewServer(), never this option.
+func WithWritableCheck(fn func([]string) error) Option {
+	return func(s *Server) { s.writableCheck = fn }
+}

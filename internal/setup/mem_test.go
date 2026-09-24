@@ -52,26 +52,23 @@ func identityResolveRoot(root string) (string, error) { return root, nil }
 // inverse (fs.go, package-private, so this test package cannot call it
 // directly), duplicated for the same reason fsAbs above is.
 func memKey(abs string) string {
-	return strings.TrimPrefix(filepath.ToSlash(abs), "/")
+	trimmed := strings.TrimPrefix(filepath.ToSlash(abs), "/")
+	if trimmed == "" {
+		return "."
+	}
+
+	return trimmed
 }
 
-// newRealRootMem returns a real, empty, writable t.TempDir() as wd
-// alongside a Mem already seeded with that same directory as an explicit
-// entry — the one seam this package deliberately leaves unconverted
-// (checkWritable, R10) still walks real disk from wd upward regardless of
-// fsRoot, so any test exercising a real (non-DryRun, non-Print) apply needs
-// wd to genuinely exist and be writable; every read and write Init or
-// Uninstall itself performs still goes through mem, never touching a file
-// under wd. A DryRun- or Print-only test skips checkWritable entirely and
-// can use a fully virtual fsAbs(...) wd instead, with no real directory at
-// all.
-func newRealRootMem(t *testing.T) (string, *rwfs.Mem) {
-	t.Helper()
-
-	wd := t.TempDir()
-	mem := rwfs.NewMem(fstest.MapFS{memKey(wd): &fstest.MapFile{Mode: fs.ModeDir | 0o755}})
-
-	return wd, mem
+// newVirtualMem returns a Mem seeded with root as an explicit directory
+// entry — every fsys read Init or Uninstall performs starts by confirming
+// wd itself exists (config.LocateWithinFS's own first check), so any
+// fixture needs at least this much regardless of what else it seeds. root
+// is virtual, fabricated with fsAbs — never a real disk path — since
+// newMemServer's own default writableCheck (WithWritableCheck) never
+// reaches real disk to ask.
+func newVirtualMem(root string) *rwfs.Mem {
+	return rwfs.NewMem(fstest.MapFS{memKey(root): &fstest.MapFile{Mode: fs.ModeDir | 0o755}})
 }
 
 // emptyHomeDir is a setup.Option pinning WithHomeDir to a function that
@@ -84,22 +81,57 @@ func emptyHomeDir() setup.Option {
 	return setup.WithHomeDir(func() (string, error) { return "", nil })
 }
 
+// writableRecorder stands in for R10's own real-disk writableCheck
+// (checkWritable, writable.go, pinned directly by writable_disk_test.go):
+// every call reports nil rather than walking real disk, so a Mem-backed
+// apply always proceeds regardless of what real disk at wd would have
+// reported, and calls records exactly which target lists a real run would
+// have checked, in call order — writableTargets' own planning logic,
+// assertable without disk. It never re-implements, approximates or skips
+// around checkWritable's own decision; it simply is not asked to make one.
+type writableRecorder struct {
+	calls [][]string
+}
+
+func (r *writableRecorder) check(targets []string) error {
+	r.calls = append(r.calls, append([]string{}, targets...))
+
+	return nil
+}
+
 // newMemServer builds a Server whose every read and write under a
 // repository root, and whose boundAgentTargets/agentsMissingSkill own
 // root-resolution, run against mem rather than real disk (WithFSRoot,
-// WithResolveRoot), homeDir defaulted to emptyHomeDir — opts are appended
-// last, so a test can still override any of the three without repeating
-// the others. No Mem fixture in this package may bind a bare-name planner
-// or implementer role: agentfile.ResolveBinding and planBoundAgent always
+// WithResolveRoot), homeDir defaulted to emptyHomeDir, and writableCheck
+// defaulted to a no-op recorder (WithWritableCheck) — opts are appended
+// last, so a test can still override any of these without repeating the
+// others. No Mem fixture in this package may bind a bare-name planner or
+// implementer role: agentfile.ResolveBinding and planBoundAgent always
 // search and read real disk regardless of fsRoot, so such a binding would
 // silently resolve against nothing rather than the fixture's own content —
-// a test that needs one stays on disk (bound_agent_test.go,
-// bound_agent_internal_test.go, uninstall_bound_agent_test.go,
-// missing_skill_test.go, missing_skill_internal_test.go).
+// a test that needs one stays on disk (bound_agent_disk_test.go,
+// bound_agent_internal_test.go, uninstall_bound_agent_disk_test.go,
+// missing_skill_disk_test.go, missing_skill_internal_test.go).
 func newMemServer(mem *rwfs.Mem, opts ...setup.Option) *setup.Server {
-	all := make([]setup.Option, 0, len(opts)+3)
-	all = append(all, setup.WithFSRoot(mem), setup.WithResolveRoot(identityResolveRoot), emptyHomeDir())
+	srv, _ := newMemServerRecording(mem, opts...)
+
+	return srv
+}
+
+// newMemServerRecording is newMemServer's own twin for a test that needs
+// the writableRecorder itself — asserting writableTargets' own contents or
+// order, or that a DryRun/Print call never invokes it at all.
+func newMemServerRecording(mem *rwfs.Mem, opts ...setup.Option) (*setup.Server, *writableRecorder) {
+	rec := &writableRecorder{}
+
+	all := make([]setup.Option, 0, len(opts)+4)
+	all = append(all,
+		setup.WithFSRoot(mem),
+		setup.WithResolveRoot(identityResolveRoot),
+		emptyHomeDir(),
+		setup.WithWritableCheck(rec.check),
+	)
 	all = append(all, opts...)
 
-	return setup.NewServer(all...)
+	return setup.NewServer(all...), rec
 }

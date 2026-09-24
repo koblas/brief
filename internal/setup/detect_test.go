@@ -112,7 +112,8 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd, mem := newRealRootMem(t)
+			wd := fsAbs("repo")
+			mem := newVirtualMem(wd)
 			require.NoError(t, mem.Mkdir(memKey(homeWithClaude), 0o755))
 			require.NoError(t, mem.Mkdir(memKey(homeWithClaude)+"/.claude", 0o755))
 			c.seedRoot(t, mem, memKey(wd))
@@ -133,11 +134,10 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 // called with: a ".claude" directory sitting only beside the working
 // directory itself — never above the located root — must not be found,
 // while one beside the located config wins even when wd is a subdirectory
-// of it. root stays a real t.TempDir() (checkWritable, R10, unconverted);
-// child needs only exist within mem's own view, the one
-// locateInRepo/detectHost read.
+// of it.
 func Test_init_detection_uses_the_locate_root_not_wd(t *testing.T) {
-	root, mem := newRealRootMem(t)
+	root := fsAbs("repo")
+	mem := newVirtualMem(root)
 	rootKey := memKey(root)
 	require.NoError(t, mem.WriteFile(rootKey+"/.brief.yaml", []byte("feature-directory: specs\n"), 0o600))
 	require.NoError(t, mem.Mkdir(rootKey+"/.claude", 0o755))
