@@ -1,5 +1,5 @@
 // Test_new_feature_json_is_one_exact_document and
-// Test_new_step_json_names_the_step_and_its_file moved onto rwfs.Mem in
+// Test_new_step_json_names_the_step_and_its_file run against rwfs.Mem in
 // new_internal_test.go. This file keeps only the ENAMETOOLONG case: a
 // real filesystem name-length limit rwfs.Mem does not model.
 

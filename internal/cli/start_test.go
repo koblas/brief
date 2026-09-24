@@ -1,7 +1,6 @@
-// Every start scenario moved onto rwfs.Mem in start_internal_test.go.
+// Every start scenario runs against rwfs.Mem in start_internal_test.go.
 // newStartFixture stays here rather than moving with them: flag_error_test.go,
-// help_test.go and json_refusal_test.go, all out of this pass's scope,
-// still call it.
+// help_test.go and json_refusal_test.go still call it.
 
 package cli_test
 

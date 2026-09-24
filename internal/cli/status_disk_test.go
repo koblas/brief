@@ -2,11 +2,11 @@
 // the feature root must be detected without being followed, real
 // containment behavior rwfs.Mem does not model the same way (see
 // internal/platform/rwfs/doc.go). Every plain status scenario — content a
-// fixture controls, no symlink or permission behavior — moved onto
+// fixture controls, no symlink or permission behavior — runs against
 // rwfs.Mem in status_internal_test.go. The helpers below stay here rather
-// than moving with them: json_refusal_test.go and help_test.go, both out
-// of this pass's scope, still call writeMalformedStatusFeature and
-// newStatusJSONFixture (status_json_test.go), which in turn call these.
+// than moving with them: json_refusal_test.go and help_test.go still call
+// writeMalformedStatusFeature and newStatusJSONFixture
+// (status_json_test.go), which in turn call these.
 
 package cli_test
 

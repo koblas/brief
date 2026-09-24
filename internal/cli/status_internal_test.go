@@ -1,14 +1,14 @@
 // status's plain scenarios — every one that only reads feature content a
 // fixture controls, no real containment or permission behavior — run
 // against an rwfs.Mem through withRootFS, reaching run() directly since
-// that seam is unexported. status_test.go's own symlink case (real
+// that seam is unexported. status_disk_test.go's own symlink case (real
 // containment: a symlink entry in the feature root, never followed) stays
 // on disk; its own helpers (writeConformingFeatureFiles, stepTitle,
 // writeStatusStep, writeMalformedStatusFeature) and status_json_test.go's
 // own newStatusJSONFixture stay defined there too — json_refusal_test.go
-// and help_test.go, both out of this pass's scope, still call them. This
-// file builds its own mem* equivalents rather than reusing those: a
-// package cli_test symbol is not visible from this package cli file.
+// and help_test.go still call them. This file builds its own mem*
+// equivalents rather than reusing those: a package cli_test symbol is not
+// visible from this package cli file.
 
 package cli
 
@@ -242,16 +242,11 @@ func Test_status_reports_the_other_features_unchanged_when_one_is_malformed_mem(
 		stdoutWith)
 }
 
-// Test_status_names_the_reason_for_a_malformed_feature_on_stderr_mem is
-// the representative mutation-guard case for this command's own WithFS and
-// resolveRoot seams — see the mutation notes in this package's mem_internal_test.go
-// commit history for how each was verified.
 func Test_status_names_the_reason_for_a_malformed_feature_on_stderr_mem(t *testing.T) {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
 	memMalformedStatusFeature(tree, memRoot, "delta")
 
-	stdout, stderr, err := runStatusMem(t, tree, []string{"status"})
-	_ = stdout
+	_, stderr, err := runStatusMem(t, tree, []string{"status"})
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, ExitCode(err))

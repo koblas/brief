@@ -118,6 +118,23 @@ func resolveRootFS(fsys fs.FS, wd string) (config.Config, string, error) {
 	return cfg, nearest, nil
 }
 
+// fsName maps abs, an absolute OS path, onto the name a withRootFS fixture
+// expects: the leading path separator stripped, forward-slash separated,
+// "." for the root itself. Duplicated from internal/scaffold's,
+// internal/assemble's, internal/setup's, internal/platform/config's and
+// internal/doctor's own identical helper, following this codebase's own
+// precedent of copying an eight-line mapping rather than sharing it across
+// packages with no other reason to depend on one another. finish.go's own
+// readSource is the one call site in this package.
+func fsName(abs string) string {
+	trimmed := strings.TrimPrefix(filepath.ToSlash(abs), string(filepath.Separator))
+	if trimmed == "" {
+		return "."
+	}
+
+	return trimmed
+}
+
 // expectedCommandList names cmd's root's available top-level commands, in
 // registration order, for an "expected one of:" usage message. Cobra adds
 // "help" as a hidden child of root during Execute; IsAvailableCommand

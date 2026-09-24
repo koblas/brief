@@ -1,9 +1,8 @@
-// start's scenarios — every one, none of them OS-subject — moved onto
+// start's scenarios — every one, none of them OS-subject — run against
 // rwfs.Mem here, reaching run() directly since withRootFS is unexported.
 // start_test.go keeps only newStartFixture: flag_error_test.go,
-// help_test.go and json_refusal_test.go, all out of this pass's scope,
-// still call it, so it cannot move with the tests that used to be its only
-// callers.
+// help_test.go and json_refusal_test.go still call it, so it cannot move
+// with the tests that used to be its only callers.
 
 package cli
 
@@ -430,6 +429,24 @@ func Test_returns_an_error_for_an_unknown_feature_on_start_mem(t *testing.T) {
 	assert.Equal(t, 1, ExitCode(err))
 	assert.Empty(t, stdout)
 	assert.NotEmpty(t, stderr)
+}
+
+// Test_returns_an_error_naming_the_known_feature_on_start_mem is
+// enrichUnknownFeature's own control arm: the assemble.Server it builds to
+// list known features (assemble.WithFS(rootFS)) must read the same Mem
+// fixture as srv.Start itself, not real disk — every other unknown-feature
+// _mem test above has zero other features on its own tree, so "known:
+// none" there is identical to what a real, empty root would also produce
+// and proves nothing about this seam specifically.
+func Test_returns_an_error_naming_the_known_feature_on_start_mem(t *testing.T) {
+	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
+	memConformingFeatureFiles(tree, filepath.Join(memRoot, "docs", "specifications", "alpha"))
+
+	stdout, stderr, err := runStartMem(t, tree, []string{"start", "ghost"})
+
+	assert.Equal(t, 1, ExitCode(err))
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "known: alpha")
 }
 
 // memWriteStartMalformedFixture adds a conforming specification and empty

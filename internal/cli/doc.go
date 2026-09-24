@@ -79,19 +79,21 @@
 // assemble.WithFS — for one shared rwfs.Mem, so a command-level test can
 // exercise doctor's, init's, uninstall's, new's, finish's, start's,
 // check's and status's own logic without touching real disk. withRootFS
-// also drives resolveRoot (in place of config.Resolve) and runDoctor's own
+// also drives resolveRoot (in place of config.Resolve), runDoctor's own
 // config-location pre-check (locateInRepoFS, in place of
-// config.LocateInRepo) — every run* function except runCheckHook passes it
-// straight through to both resolveRoot and its own scaffold.WithFS/
-// assemble.WithFS call. Run always calls run with no seams, so production
-// is unaffected: every seam's default reproduces exactly the OS adapter it
+// config.LocateInRepo) and finish's own readSource (in place of
+// os.ReadFile, for a non-"-" --handoff/--state argument, mapped through
+// fsName) — every run* function except runCheckHook passes it straight
+// through to resolveRoot and its own scaffold.WithFS/assemble.WithFS/
+// readSource calls. Run always calls run with no seams, so production is
+// unaffected: every seam's default reproduces exactly the OS adapter it
 // replaces. A handful of checks stay OS-subject regardless of any seam —
 // doctor's own root-dir and env-path rows, setup's R10 writability
-// pre-check unless a test also overrides WithWritableCheck, finish's own
-// --handoff/--state flag reads (readSource, no seam), and check --hook's
-// own FeatureContaining resolution (real os.Lstat/filepath.EvalSymlinks,
-// no seam) — since they probe real permission bits, compare real binaries,
-// or resolve a caller-given path outside any configuration this package
-// controls; a command-level test covering one of those stays on real disk
-// (a *_test.go file in package cli_test, not *_internal_test.go).
+// pre-check unless a test also overrides WithWritableCheck, and check
+// --hook's own FeatureContaining resolution (real os.Lstat/
+// filepath.EvalSymlinks, no seam) — since they probe real permission bits,
+// compare real binaries, or resolve a caller-given path outside any
+// configuration this package controls; a command-level test covering one
+// of those stays on real disk (a *_disk_test.go file, per this package's
+// own naming convention for a test that cannot move off it).
 package cli

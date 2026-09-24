@@ -1,6 +1,6 @@
-// Every check --json scenario moved onto rwfs.Mem in check_internal_test.go.
-// newCheckJSONFixture stays here rather than moving with them: help_test.go,
-// out of this pass's scope, still calls it.
+// Every check --json scenario runs against rwfs.Mem in check_internal_test.go.
+// newCheckJSONFixture stays here rather than moving with them: help_test.go
+// still calls it.
 
 package cli_test
 
