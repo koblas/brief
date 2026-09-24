@@ -69,7 +69,7 @@ All Go commands run from the repo root.
      non-TDD items: doc comments, exact-count assertion bumps. Sweep items get no red/green
      cycle of their own.
    - **Verify** — the full suite once, per `.claude/rules/agent-briefs.md` *Verification*,
-     including its coverage gate (`uncovered-diff.py` against the scenario's starting commit).
+     one covered full-suite run feeding its coverage gate and `test-stats.py --base` counts.
    - Tick each phase's items `- [x]` in one edit when that phase ends, not one edit per item.
    - Mutation-verify **only the guards the plan names**. Do not add mutation checks of your own.
 4. All phases ticked and Verify green → continue.
@@ -202,12 +202,14 @@ Findings arrive ranked `[BLOCKER|MAJOR|MINOR|NIT] <file>:<line>` with `Failure:`
     pass that adds a guard, an error return or a fallback without a test that reaches it hands
     the reviewer its next MAJOR — on one feature that loop ran six fix passes. Before
     reporting:
-    - Run `.claude/scripts/uncovered-diff.py <commit this fix pass started from>`. Zero
-      uncovered added lines, or each one named with why it is unreachable.
+    - Run the Verification block in `.claude/rules/agent-briefs.md` with `<start>` = the
+      commit this fix pass started from: one covered full-suite run, then
+      `uncovered-diff.py --profile` on it. Zero uncovered added lines, or a genuinely
+      unreachable branch marked `// unreachable: <reason>` in the code.
     - Mutate each guard you added, one at a time, per *Mutation verification* in
       `.claude/rules/agent-briefs.md`, and record which test went red. A guard no mutation can
       redden is either dead (delete it) or untested (test it).
-12. Run test suite. All tests stay green.
+12. All tests stay green (the covered full-suite run above is the evidence).
 13. Don't touch checkboxes in plan or specification files — progress recorded in implementation
    mode.
 

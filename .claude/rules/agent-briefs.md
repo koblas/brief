@@ -11,28 +11,33 @@ and no second workspace. Run, from the repo root:
 
 ```bash
 go build ./...
-go test ./...
+go test -count=1 -coverpkg=./... -coverprofile="$TMPDIR/cover.out" ./...   # the full suite, once
 go test -race ./<touched package>/...
 golangci-lint run ./...
+.claude/scripts/uncovered-diff.py --profile "$TMPDIR/cover.out" <start>    # coverage gate, no re-run
+.claude/scripts/test-stats.py --base <start> --changed                     # counts and deltas
 ```
+
+`<start>` is the commit your scenario or fix pass started from.
 
 **Narrow loop while working, full run once.** During a scenario's Red and Green phases run
 only the packages and tests in play — `go test ./internal/setup/ -run 'Skill|Init'`. Run the
-four commands above once, in the Verify phase. A full suite after every edit is the most
-expensive habit a scenario can have and proves nothing the final run does not.
+block above once, in the Verify phase (and at the end of every fix pass). A full suite after
+every edit is the most expensive habit a scenario can have and proves nothing the final run
+does not. The one `go test` line is both the full suite and the coverage data — do not run
+the suite a second time for the gate.
 
 **Coverage gate before handing off.** Every production line you added must be executed by a
-test. Run, once, in the Verify phase (and at the end of every fix pass):
+test. `uncovered-diff.py` lists each added non-test line no test executes, grouped into runs
+with the enclosing function, and exits 1 if any is left. Reach zero, or mark a genuinely
+unreachable defensive branch in the code with `// unreachable: <reason>` on the line (or the
+line above it) — it then moves to a "declared unreachable" section the reviewer judges, and
+stops failing the gate on every later pass. On one feature, untested branches added by the
+previous pass were the bulk of test-reviewer's MAJORs and cost six fix passes.
 
-```bash
-.claude/scripts/uncovered-diff.py <base>   # base = the commit your scenario / fix pass started from
-```
-
-It lists each added non-test line no test executes and exits 1 if there is any. Reach zero,
-or name each remaining line in your report with the reason it cannot be reached (an
-impossible defensive branch). On one feature, untested branches added by the previous pass
-were the bulk of test-reviewer's MAJORs and cost six fix passes; this script finds them in
-nine seconds.
+**Counts come from `test-stats.py --base <start> --changed`**: every package whose tests
+changed, with `now (±delta)` for top-level tests, `t.TempDir()` sites and disk-touching
+tests, read from git at `<start>` — never from an archive or checkout you build yourself.
 
 Rules:
 
@@ -41,11 +46,10 @@ Rules:
   **exit 0** for a failed build. If you must pipe, prefix with `set -o pipefail`.
 - **Report the exact test count and the delta, from `.claude/scripts/test-stats.py`** —
   "green" is not a result, and hand-rolled counts drifted by up to nine tests between agents
-  on the same commit. Quote `tests` (top-level), and `pass`/`skip` from `--run` when leaves
-  matter. Never write a counting script of your own. A count that moved without explanation
-  is a finding, not a rounding error.
-- A green summary does not mean everything ran. `test-stats.py --run <pkgdir>` reports skips;
-  check them before leaning on a package.
+  on the same commit. Quote its rows as printed. Never write a counting script of your own.
+  A count that moved without explanation is a finding, not a rounding error.
+- A green summary does not mean everything ran. `test-stats.py --run <pkgdir>` counts leaf
+  pass/fail/skip in one parallel `go test -json`; check skips before leaning on a package.
 - Write scratch files only under `$TMPDIR` or the session scratchpad — never `/tmp`, never a
   path outside the worktree you were given.
 - A Bash call failing with `operation not permitted` means the shell was **sandboxed**.
