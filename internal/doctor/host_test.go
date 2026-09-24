@@ -383,9 +383,9 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 			// mechanically (%q dump) before agents.go changed — the one
 			// fixture that actually reaches host-agents' own OriginOlder
 			// arm today (every other Kind's older…Digests list still ships
-			// empty). Mutation-verify by emptying olderAgentPlannerDigests:
-			// this case alone reddens (falls through to "edited locally"),
-			// the others above and below stay green.
+			// empty). See Test_diagnose_classifies_host_agents's own doc
+			// comment for the mutation this case is verified against (forcing
+			// hostAgentsCheck's own `len(older) > 0` branch to false).
 			name: "an older planner render",
 			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Agents() {

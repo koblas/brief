@@ -247,13 +247,25 @@ func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 		},
 		{
 			// Control: "every subject file is current" above is the
-			// identical install, readable, OK. Mutation-verified:
-			// dropping integrationFileRowDetail's own
-			// call ahead of missingRelPaths turns this case OK
-			// "installed" — every file is unreadable, so missingRelPaths
-			// itself finds nothing left to call missing — reddening this
-			// case and every other case or test that depends on
-			// host-plugin's own unreadable arm, restored after.
+			// identical install, readable, OK. Mutation-verified,
+			// package-wide with no -run filter: dropping
+			// integrationFileRowDetail's own call ahead of
+			// missingRelPaths (forcing its own `ok` result to false) turns
+			// this case OK "installed" — every file is unreadable, so
+			// missingRelPaths itself finds nothing left to call missing —
+			// reddening every case and test in the package whose own
+			// subject includes an unreadable host-plugin file: this case,
+			// "the blocking dir is .claude/skills, .claude itself stays
+			// 0755" and "a subject file itself is unreadable, its
+			// directory is searchable" and "the install root itself is
+			// unsearchable" below,
+			// Test_diagnose_host_plugin_hook_agents_unreadable_fix_is_relative_to_wd,
+			// Test_diagnose_host_plugin_detail_names_unreadable_and_missing_together,
+			// and internal/cli's own
+			// Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable
+			// and
+			// Test_doctor_reports_host_plugin_error_when_the_plugin_directory_is_unreadable.
+			// Restored after.
 			name: "a subject file is unreadable, not missing",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
@@ -330,11 +342,15 @@ func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 			// mirrors host-hook's own "the hook file itself is unreadable,
 			// its directory is searchable" case. Control: "every subject
 			// file is current" above is the identical install, readable,
-			// OK. Mutation-verified: hardcoding first.statFailed to true
-			// in integrationFileRowDetail's own notReadableFix call
-			// reddens this case alone (the fix reverts to "chmod u+rwx
-			// .claude/skills/brief/.claude-plugin, then …"), restored
-			// after.
+			// OK. Mutation-verified, package-wide with no -run filter:
+			// hardcoding integrationFileRowDetail's own notReadableFix call
+			// to pass true for statFailed (rather than first.statFailed)
+			// reddens this case together with
+			// Test_diagnose_classifies_host_agents_unreadable's own "an
+			// agent file itself is unreadable, its directory is searchable"
+			// — the two rows sharing integrationFileRowDetail — both fixes
+			// reverting to their own "chmod u+rwx <dir>, then …" form,
+			// restored after.
 			name: "a subject file itself is unreadable, its directory is searchable",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
@@ -426,11 +442,17 @@ func Test_diagnose_classifies_host_hook_unreadable(t *testing.T) {
 			// itself (statFailed); this one leaves every directory
 			// searchable and chmods the hook file directly, so the failure
 			// is in the ReadFile call instead — the fix must target the
-			// file (chmod +r), not its parent directory.
-			// Mutation-verified: dropping probeIntegrationFile's own
-			// `state.unreadable = true` in its ReadFile-failure arm reddens
-			// this case alone (the row falls to ERROR "not a regular
-			// file"), restored after.
+			// file (chmod +r), not its parent directory. Mutation-verified,
+			// package-wide with no -run filter: dropping probeIntegrationFile's
+			// own `state.unreadable = true` in its ReadFile-failure arm
+			// reddens this case together with every other row that probes
+			// a single subject file's own 0o000 bytes through the same
+			// function: Test_diagnose_classifies_host_plugin_unreadable's
+			// own "a subject file itself is unreadable, its directory is
+			// searchable", Test_diagnose_classifies_host_agents_unreadable's
+			// own "an agent file itself is unreadable, its directory is
+			// searchable", and Test_diagnose_classifies_host_skill_unreadable's
+			// own "skill mode 0o000 beside the plugin" — restored after.
 			name: "the hook file itself is unreadable, its directory is searchable",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
@@ -490,11 +512,11 @@ func Test_diagnose_classifies_host_agents_unreadable(t *testing.T) {
 			// Every directory stays searchable; only the planner agent
 			// file itself is chmodded 0o000, so the failure is in the
 			// ReadFile call rather than the Lstat call (statFailed is
-			// false) — mirrors host-plugin's own equivalent case.
-			// Mutation-verified: hardcoding first.statFailed to true in
-			// integrationFileRowDetail's own notReadableFix call reddens
-			// this case alone (the fix reverts to "chmod u+rwx
-			// .claude/skills/brief/agents, then …"), restored after.
+			// false) — mirrors host-plugin's own equivalent case. See
+			// Test_diagnose_classifies_host_plugin_unreadable's own "a
+			// subject file itself is unreadable, its directory is
+			// searchable" for the shared integrationFileRowDetail
+			// mutation both cases redden together.
 			name: "an agent file itself is unreadable, its directory is searchable",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
@@ -532,6 +554,10 @@ func Test_diagnose_classifies_host_skill_unreadable(t *testing.T) {
 
 	runHostCheckCases(t, []hostCheckCase{
 		{
+			// See Test_diagnose_classifies_host_hook_unreadable's own "the
+			// hook file itself is unreadable, its directory is searchable"
+			// for the probeIntegrationFile mutation this case reddens
+			// alongside.
 			name: "skill mode 0o000 beside the plugin",
 			setup: func(t *testing.T, wd string, h host.Host) {
 				t.Helper()
@@ -740,12 +766,12 @@ func Test_diagnose_classifies_host_snippet_unreadable(t *testing.T) {
 // the pre-fix code always rendered: run from that subdirectory, the bare
 // form either fails outright (no CLAUDE.md there) or — the second case
 // here — silently chmods an unrelated file the caller happens to have,
-// leaving the WARN in place. Mutation-verified: reverting
-// notReadableFix's own caller to firstPresent.relPath (the pre-fix
-// root-relative field) reddens both cases here — the fix text stops
-// changing between them — while leaving every case in host_test.go's own
-// Test_diagnose_classifies_host_snippet (wd == root there, so the two
-// relativizations coincide) green.
+// leaving the WARN in place. Mutation-verified, package-wide with no -run
+// filter: passing root instead of absWd as hostSnippetCheck's own wd
+// argument in doctor.go's own Diagnose reddens both cases here — the fix
+// text stops changing between wd == root and wd != root — while leaving
+// every case in host_test.go's own Test_diagnose_classifies_host_snippet
+// (wd == root there, so the two relativizations coincide) green.
 func Test_diagnose_host_snippet_unreadable_fix_is_relative_to_wd(t *testing.T) {
 	cases := []struct {
 		name  string
