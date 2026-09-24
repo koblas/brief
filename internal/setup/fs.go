@@ -1,6 +1,8 @@
 package setup
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,14 +12,28 @@ import (
 	"github.com/koblas/brief/internal/platform/rwfs"
 )
 
-// fsName maps abs, an absolute OS path, onto the name diskFS (or a test's
-// own fstest.MapFS-backed rwfs.Mem standing in for it) expects: the leading
+// fsName maps path onto the name diskFS (or a test's own
+// fstest.MapFS-backed rwfs.Mem standing in for it) expects: path
+// absolutized first when it is not already (filepath.Abs, the process's
+// own current directory — the same resolution every raw os.* call this
+// seam replaced always applied to a relative root or wd), then the leading
 // path separator stripped, forward-slash separated, "." for the root
-// itself. Duplicated from the identical helper in internal/platform/config,
-// internal/platform/repo and internal/doctor rather than shared, following
-// those packages' own precedent — a shared package would invert the
-// dependency those own for an eight-line mapping.
-func fsName(abs string) string {
+// itself. Absolutizing is local to this mapping: it never changes what a
+// caller sees in Result.Root or an Artifact's own Path, both of which stay
+// exactly the root or wd string planning was given. A Mem-backed test
+// always passes an already-absolute fsAbs(...) path, so filepath.Abs is a
+// no-op there. Duplicated from the identical helper in
+// internal/platform/config, internal/platform/repo and internal/doctor
+// rather than shared, following those packages' own precedent — a shared
+// package would invert the dependency those own for an eight-line mapping.
+func fsName(path string) string {
+	abs := path
+	if !filepath.IsAbs(abs) {
+		if a, err := filepath.Abs(abs); err == nil {
+			abs = a
+		}
+	}
+
 	trimmed := strings.TrimPrefix(filepath.ToSlash(abs), string(filepath.Separator))
 	if trimmed == "" {
 		return "."
@@ -152,13 +168,18 @@ func (d diskFS) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	return nil
 }
 
-// OpenRoot returns d itself: diskFS is already unconfined and stateless, so
-// narrowing it to name's own subtree changes nothing about how it resolves
-// a later name — every diskFS view is identical. Not exercised by Init or
-// Uninstall today (bound_agent.go's own confinedAgentFile opens its own
-// os.Root directly, never through this seam); implemented so diskFS
-// satisfies rwfs.FS in full.
-func (d diskFS) OpenRoot(_ string) (rwfs.FS, error) { return d, nil }
+// OpenRoot is unimplemented: rwfs.FS's own contract confines the returned
+// view to name's own subtree, refusing a name that escapes it or does not
+// resolve to a directory — a real guarantee diskFS's own stateless,
+// unconfined "/"-rooted abs mapping cannot honor without becoming a second,
+// narrower adapter in its own right. It is never called by Init or
+// Uninstall (bound_agent.go's own confinedAgentFile opens its own os.Root
+// directly, never through this seam); implemented to satisfy rwfs.FS's
+// interface rather than silently returning a view that ignores name
+// entirely.
+func (diskFS) OpenRoot(name string) (rwfs.FS, error) {
+	return nil, fmt.Errorf("setup: diskFS.OpenRoot(%s): %w", name, errors.ErrUnsupported)
+}
 
 // Close is a no-op: diskFS holds no resource of its own beyond the os.*
 // calls each method already opens and closes around itself.

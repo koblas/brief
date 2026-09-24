@@ -1,5 +1,12 @@
 package setup_test
 
+// OS-subject: checkWritable (writable.go) is R10's own pre-write check —
+// os.Lstat plus internal/platform/writable.Probe against real disk,
+// deliberately never routed through the fsRoot seam (see fs.go's own doc
+// comment: a broader adapter would newly gate or refuse writes today's
+// checkWritable does not). Every case here needs a real, unwritable or
+// non-directory ancestor.
+
 import (
 	"errors"
 	"os"

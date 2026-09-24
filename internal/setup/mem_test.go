@@ -11,6 +11,24 @@ import (
 	"github.com/koblas/brief/internal/setup"
 )
 
+// findArtifact returns res's own first Artifact of kind, failing the test
+// if there is none — the by-kind lookup a Mem-backed test uses in place of
+// an index into Result.Artifacts, so it never depends on that list's own
+// row order except in the one test that deliberately pins it.
+func findArtifact(t *testing.T, res setup.Result, kind setup.Kind) setup.Artifact {
+	t.Helper()
+
+	for _, a := range res.Artifacts {
+		if a.Kind == kind {
+			return a
+		}
+	}
+
+	t.Fatalf("no %s row in %v", kind, res.Artifacts)
+
+	return setup.Artifact{}
+}
+
 // fsAbs joins slash-separated segments under "/", the way every
 // WithFSRoot-backed test names an absolute path its fstest.MapFS fixture
 // is keyed against — setup's own fsName (fs.go) strips the leading "/"
@@ -56,14 +74,31 @@ func newRealRootMem(t *testing.T) (string, *rwfs.Mem) {
 	return wd, mem
 }
 
+// emptyHomeDir is a setup.Option pinning WithHomeDir to a function that
+// always reports "", nil — newMemServer's own default, mirroring doctor's
+// own emptyHomeDir: a Mem-backed fixture holds no real "~/.claude/agents"
+// for agentfile.ResolveBinding to search, so without this every
+// HostClaudeCode Mem test would silently depend on whatever role agents
+// happen to exist under the developer's own real home directory.
+func emptyHomeDir() setup.Option {
+	return setup.WithHomeDir(func() (string, error) { return "", nil })
+}
+
 // newMemServer builds a Server whose every read and write under a
 // repository root, and whose boundAgentTargets/agentsMissingSkill own
 // root-resolution, run against mem rather than real disk (WithFSRoot,
-// WithResolveRoot) — opts are appended after both, so a test can still
-// layer WithHomeDir or another option without repeating either seam.
+// WithResolveRoot), homeDir defaulted to emptyHomeDir — opts are appended
+// last, so a test can still override any of the three without repeating
+// the others. No Mem fixture in this package may bind a bare-name planner
+// or implementer role: agentfile.ResolveBinding and planBoundAgent always
+// search and read real disk regardless of fsRoot, so such a binding would
+// silently resolve against nothing rather than the fixture's own content —
+// a test that needs one stays on disk (bound_agent_test.go,
+// bound_agent_internal_test.go, uninstall_bound_agent_test.go,
+// missing_skill_test.go, missing_skill_internal_test.go).
 func newMemServer(mem *rwfs.Mem, opts ...setup.Option) *setup.Server {
-	all := make([]setup.Option, 0, len(opts)+2)
-	all = append(all, setup.WithFSRoot(mem), setup.WithResolveRoot(identityResolveRoot))
+	all := make([]setup.Option, 0, len(opts)+3)
+	all = append(all, setup.WithFSRoot(mem), setup.WithResolveRoot(identityResolveRoot), emptyHomeDir())
 	all = append(all, opts...)
 
 	return setup.NewServer(all...)

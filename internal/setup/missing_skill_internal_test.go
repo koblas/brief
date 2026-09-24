@@ -1,5 +1,10 @@
 package setup
 
+// OS-subject: agentsMissingSkill's own missingSkillReach call goes through
+// planBoundAgent, real os.Lstat/os.ReadFile regardless of the fsRoot seam
+// (fs.go, doc.go); Test_agents_missing_skill_root_resolution_error needs a
+// path filepath.EvalSymlinks genuinely fails to resolve.
+//
 // White-box package: agentsMissingSkill's own root-resolution error
 // (filepath.EvalSymlinks(root)) and missingSkillReach's own
 // planBoundAgent-prologue error propagation are both reachable through

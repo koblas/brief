@@ -25,7 +25,10 @@ func newServer(t *testing.T) *setup.Server {
 // the config file's bytes are exactly artifact.ConfigFile(), and the
 // feature root exists as a directory afterward. Init's own planning and
 // apply here never touch a bound-agent path or a symlink, so this is
-// Mem-backed rather than disk.
+// Mem-backed rather than disk. This is the one test in the package that
+// pins Result.Artifacts' own full row order (config first, then the
+// feature root, R11) by index — every other rewritten test looks a row up
+// by Kind instead (findArtifact).
 func Test_init_creates_the_config_and_feature_root_in_a_fresh_repo(t *testing.T) {
 	wd, mem := newRealRootMem(t)
 	srv := newMemServer(mem)

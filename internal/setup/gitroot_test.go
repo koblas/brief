@@ -80,8 +80,9 @@ func Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root(t *tes
 	assert.Equal(t, root, res.Root)
 
 	featureRoot := filepath.Join(root, "specs")
-	assert.Equal(t, setup.ActionCreated, res.Artifacts[1].Action)
-	assert.Equal(t, featureRoot, res.Artifacts[1].Path)
+	row := findArtifact(t, res, setup.KindFeatureRoot)
+	assert.Equal(t, setup.ActionCreated, row.Action)
+	assert.Equal(t, featureRoot, row.Path)
 }
 
 // Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root
