@@ -18,7 +18,8 @@ import (
 const configFileName = ".brief.yaml"
 
 // rootFS returns the production root FS: the whole namespace LocateWithinFS
-// walks, rooted at "/". This assumes a single-rooted, forward-slash
+// walks and InspectFS reads a file from, rooted at "/". This assumes a
+// single-rooted, forward-slash
 // namespace — true for brief's darwin/linux target (no Windows evidence
 // anywhere in the tree: no CI workflow, devenv.nix names only a linux
 // Buildkite agent) — and is not evaluated on a Windows volume path
@@ -40,10 +41,10 @@ func fsName(abs string) string {
 }
 
 // rewritePathError swaps a *fs.PathError's own Path back to abs when it
-// came from a rootFS call through fsName's relative mapping, so a stat
-// failure's error text — embedded verbatim in InvalidConfigError.Error —
-// reads exactly as os.Stat(abs) itself would have produced. Any other
-// error shape passes through unchanged.
+// came from a rootFS call through fsName's relative mapping, so a stat or
+// open failure's error text — embedded verbatim in a command's own refusal
+// line — reads exactly as os.Stat(abs) or os.Open(abs) itself would have
+// produced. Any other error shape passes through unchanged.
 func rewritePathError(err error, abs string) error {
 	if pe, ok := errors.AsType[*fs.PathError](err); ok {
 		return &fs.PathError{Op: pe.Op, Path: abs, Err: pe.Err}
@@ -207,19 +208,30 @@ func Resolve(startDir string) (Config, string, error) {
 	return cfg, nearest, nil
 }
 
-// Inspect reads path and decodes it onto Default(), so a key the file
-// omits keeps its shipped value, then reports every decoded value that
-// fails an R1 rule (violations), in Config's own field-declaration order,
-// alongside the decoded Config — doctor's config-values check renders one
-// row per element, where Resolve reports only the first. A decode failure
-// (malformed YAML, an unknown key) is reported as *InvalidConfigError,
-// "resolve config:" prefixed, the zero Config and nil violations; a
-// zero-byte file decodes as io.EOF, which Inspect treats as an empty file
-// rather than a failure — Default() stands, with no violations.
-func Inspect(path string) (Config, []*ValueError, error) {
-	f, err := os.Open(path)
+// InspectFS is Inspect's own core: fsys is the whole filesystem namespace
+// the file at abs is read from — production passes rootFS(), a test a
+// fstest.MapFS holding just that one file — and abs is the file's own
+// already-absolute, slash-separated OS path; Inspect owns filepath.Abs's
+// own cwd-dependent resolution, never seen here. It opens fsName(abs)
+// within fsys and decodes it onto Default(), so a key the file omits keeps
+// its shipped value, then reports every decoded value that fails an R1
+// rule (violations), in Config's own field-declaration order, alongside
+// the decoded Config — doctor's config-values check renders one row per
+// element, where Resolve reports only the first. A decode failure
+// (malformed YAML, an unknown key, or a directory sitting where the file
+// is expected — opening it succeeds, decoding it does not) is reported as
+// *InvalidConfigError, Path set to abs, neither "resolve config:" prefixed
+// nor otherwise wrapped — that prefix is Inspect's own. A zero-byte file
+// decodes as io.EOF, which InspectFS treats as an empty file rather than a
+// failure — Default() stands, with no violations. A file fsys cannot open
+// (missing, or permission denied) reports fsys's own open error, Path
+// rewritten to abs, unwrapped — never *InvalidConfigError, matching
+// Inspect's own long-standing contract that an unreadable file is a plain
+// failure, not an invalid one.
+func InspectFS(fsys fs.FS, abs string) (Config, []*ValueError, error) {
+	f, err := fsys.Open(fsName(abs))
 	if err != nil {
-		return Config{}, nil, fmt.Errorf("resolve config: %s: %w", path, err)
+		return Config{}, nil, rewritePathError(err, abs)
 	}
 	defer f.Close()
 
@@ -233,8 +245,33 @@ func Inspect(path string) (Config, []*ValueError, error) {
 			return cfg, nil, nil
 		}
 
-		return Config{}, nil, fmt.Errorf("resolve config: %w", &InvalidConfigError{Path: path, Err: err})
+		return Config{}, nil, &InvalidConfigError{Path: abs, Err: err}
 	}
 
 	return cfg, violations(cfg), nil
+}
+
+// Inspect is InspectFS's own thin OS adapter: path is resolved to an
+// absolute path the same way LocateWithin resolves startDir, then read
+// through rootFS(). Every error InspectFS returns is wrapped, once, in
+// Inspect's own "resolve config:" prefix — an *InvalidConfigError as
+// *InvalidConfigError still (errors.Is(err, ErrInvalidConfig) and
+// errors.As both still reach it), anything else as plain text ahead of it,
+// path.Abs's own failure the same way.
+func Inspect(path string) (Config, []*ValueError, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return Config{}, nil, fmt.Errorf("resolve config: %s: %w", path, err)
+	}
+
+	cfg, viol, err := InspectFS(rootFS(), abs)
+	if err != nil {
+		if invalidCfg, ok := errors.AsType[*InvalidConfigError](err); ok {
+			return Config{}, nil, fmt.Errorf("resolve config: %w", invalidCfg)
+		}
+
+		return Config{}, nil, fmt.Errorf("resolve config: %s: %w", abs, err)
+	}
+
+	return cfg, viol, nil
 }

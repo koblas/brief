@@ -17,10 +17,9 @@
 // than silently ignored, and reports every decoded value that fails its own
 // rule (a cap is at least 1, a heading is non-empty and distinct from the
 // others, a file name carries no path separator, and so on) alongside the
-// decoded Config; Inspect reads its own single, already-located path
-// through os.Open directly rather than the root FS — it is not part of the
-// walk, and has no other caller that would benefit from an fs.FS-backed
-// twin. Resolve is Locate plus Inspect's first violation: the one rule set
+// decoded Config; it too has an fs.FS-backed core, InspectFS, with Inspect
+// as the thin OS adapter over the same root FS LocateWithinFS reads.
+// Resolve is Locate plus Inspect's first violation: the one rule set
 // and the one walk-up every caller shares, so a command refusing an invalid
 // value and a tool reporting every value that fails (doctor) can never
 // drift onto two different checks.
