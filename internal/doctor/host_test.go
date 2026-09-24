@@ -1,8 +1,13 @@
 package doctor_test
 
-// Host-integration classification tests: every case here mutates an
-// in-memory fstest.MapFS (newHostFixtureFS) and never touches real disk.
-// Cases whose own subject is an OS error shape — a chmod'd file or
+// Host-integration classification tests: every case here builds its
+// subject file tree in an in-memory fstest.MapFS (newHostFixtureFS) rather
+// than on disk. Diagnose's own root-dir and env-path rows still consult
+// the real OS (root-dir os.Stats the fabricated "repo/docs/specifications"
+// that does not exist there; env-path calls exec.LookPath and reads the
+// running binary's build info) — neither row is asserted against by any
+// case here, so those incidental reads never affect a result this file
+// checks. Cases whose own subject is an OS error shape — a chmod'd file or
 // directory (classifyProbeError's own unreadable arm), or an ancestor path
 // component that is a regular file (ENOTDIR) — live in host_disk_test.go
 // instead, where the OS itself, not a fabricated fs.FS, produces the error
@@ -44,12 +49,11 @@ func claudeCodeHost(t *testing.T) host.Host {
 	return h
 }
 
-// newHostFixtureFS returns an in-memory fstest.MapFS, rooted at fsAbs("repo"),
-// holding a valid ".brief.yaml" (unbound roles) and its default feature
-// root — the MapFS-backed twin of host_disk_test.go's own newHostFixture —
-// with no Claude Code integration installed. Each case adds exactly the
-// files its own scenario needs, via setHostArtifact/setHostFile/setHostDir/
-// setHostSymlink.
+// newHostFixtureFS returns an in-memory fstest.MapFS, rooted at
+// fsAbs("repo"), holding a valid ".brief.yaml" (unbound roles, the default
+// feature directory) with no Claude Code integration installed. Each case
+// adds exactly the files its own scenario needs, via
+// setHostArtifact/setHostFile/setHostDir/setHostSymlink.
 func newHostFixtureFS() fstest.MapFS {
 	return fstest.MapFS{
 		"repo/.brief.yaml": &fstest.MapFile{Data: []byte("progress-heading: \"## Progress\"\n")},
@@ -134,14 +138,16 @@ func runHostFSCheckCases(t *testing.T, cases []hostFSCheckCase) {
 // (Plugin(true) ∪ Agents()), a missing or non-regular subject file
 // (Plugin(false)) is ERROR "incomplete", naming it; an edited one is OK
 // "edited locally"; every subject file current is OK "installed". The
-// ENOTDIR "ancestor is a regular file" arm lives in host_disk_test.go: on
-// fstest.MapFS the same fixture reports plain fs.ErrNotExist rather than
-// ENOTDIR (confirmed by direct probe against the stdlib), so it cannot
-// exercise classifyProbeError's own ENOTDIR arm here. Mutation-verified:
-// disabling hostPluginCheck's own missing-file precedence branch reddens
-// exactly the two "missing" cases here — never "edited locally" or "every
-// subject file is current" — proving this table actually discriminates on
-// it rather than passing regardless.
+// ENOTDIR "ancestor is a regular file" arm lives in host_disk_test.go: a
+// direct probe against the stdlib shows the same fixture over
+// fstest.MapFS reports plain fs.ErrNotExist rather than ENOTDIR, so it
+// cannot exercise classifyProbeError's own ENOTDIR arm here.
+// Mutation-verified, package-wide with no -run filter: forcing
+// hostPluginCheck's own missing-file precedence branch to `false` reddens
+// exactly the three ERROR "incomplete" cases here ("manifest missing …",
+// "a skill file is a directory", "only the hook is installed") — never
+// "edited locally" or "every subject file is current" — proving this
+// table actually discriminates on it rather than passing regardless.
 func Test_diagnose_classifies_host_plugin(t *testing.T) {
 	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
@@ -254,6 +260,11 @@ func writeHostPluginWithoutHookFS(fsys fstest.MapFS, h host.Host) {
 // OK "edited locally"; a current hook is OK "installed". The ENOTDIR and
 // unreadable arms live in host_disk_test.go — see
 // Test_diagnose_classifies_host_plugin's own doc comment for why.
+// Mutation-verified, package-wide with no -run filter: inverting
+// hostHookCheck's own absent-branch condition (`if !installed` to `if
+// installed`) reddens both "nothing installed anywhere" (SKIP flips to
+// WARN) and "the rest of the plugin is installed but the hook file is
+// missing" (WARN flips to SKIP) — no other case here — restored after.
 func Test_diagnose_classifies_host_hook(t *testing.T) {
 	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
@@ -332,10 +343,13 @@ func Test_diagnose_classifies_host_hook(t *testing.T) {
 // current is OK "installed". Every fix here names --with-agents, since a
 // plain "brief init" never touches agent files. The ENOTDIR and unreadable
 // arms live in host_disk_test.go — see Test_diagnose_classifies_host_plugin's
-// own doc comment for why. Mutation-verified: disabling hostAgentsCheck's
-// own missing-file precedence branch reddens exactly "one of the three
-// agent files is missing" here — never "edited locally" or "all three
-// agent files are current".
+// own doc comment for why. Mutation-verified, package-wide with no -run
+// filter, one precedence branch at a time: forcing hostAgentsCheck's own
+// missing branch (`len(missing) > 0`) to false reddens exactly "one of the
+// three agent files is missing"; forcing the older branch
+// (`len(older) > 0`) to false reddens exactly "an older planner render";
+// forcing the edited branch (`len(edited) > 0`) to false reddens exactly
+// "an agent file was edited locally" — each restored before the next.
 func Test_diagnose_classifies_host_agents(t *testing.T) {
 	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
@@ -435,6 +449,18 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 // at all, still classifies itself OK "installed" rather than SKIP — only
 // an absent skill defers to whether anything else is installed. The
 // unreadable arm (skill mode 0o000) lives in host_disk_test.go.
+// Mutation-verified, package-wide with no -run filter, one arm at a time:
+// inverting hostSkillRow's own absent-branch condition (`if !installed` to
+// `if installed`) reddens both "nothing installed anywhere" and "plugin
+// files present and skill absent"; changing the ERROR not-a-regular-file
+// arm's own Severity to WARN reddens "skill path is a directory" alone;
+// changing that same arm's own Fix to runInit (dropping
+// hostSkillNotRegularFix) reddens "skill path is a directory" alone too;
+// replacing the final originRow-derived return with a hardcoded ERROR row
+// reddens "the skill was edited locally", "the skill is current, alongside
+// a full install" and "the skill alone, with no plugin or agent file" —
+// every case that actually reaches it — together. Each restored before the
+// next.
 func Test_diagnose_classifies_host_skill(t *testing.T) {
 	skillPath := host.WorkflowSkillDir + "/SKILL.md"
 
@@ -524,10 +550,14 @@ func Test_diagnose_classifies_host_skill(t *testing.T) {
 // though the skill file itself is genuinely present and OK (pinned
 // separately by "the skill alone, with no plugin or agent file" above).
 // Control: "nothing installed anywhere" in Test_diagnose_classifies_host_plugin
-// is the same SKIP row with nothing at all present. Mutation-verified:
-// adding h.Skills() to anyIntegrationFilePresent's own OR reddens this case
-// alone (host-plugin flips to ERROR "incomplete: missing …"), restored
-// after.
+// is the same SKIP row with nothing at all present. Mutation-verified,
+// package-wide with no -run filter: adding h.Skills() to
+// anyIntegrationFilePresent's own OR reddens this case (host-plugin flips
+// to ERROR "incomplete: missing …") and, since the same result also feeds
+// (*Server).Diagnose's own integrationInstalled for env-path, doctor_test.go's
+// own Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed/
+// "not on PATH, only the brief-workflow skill is installed" — no other
+// case in the package, restored after.
 func Test_diagnose_host_plugin_stays_skip_when_only_the_skill_is_installed(t *testing.T) {
 	fsys := newHostFixtureFS()
 	h := claudeCodeHost(t)
@@ -557,7 +587,11 @@ func Test_diagnose_host_plugin_stays_skip_when_only_the_skill_is_installed(t *te
 // "not installed"; a candidate that exists but is not a regular file — a
 // directory or a symlink — is WARN, naming which. The unreadable-vs-absent
 // split lives in host_disk_test.go's own
-// Test_diagnose_classifies_host_snippet_unreadable.
+// Test_diagnose_classifies_host_snippet_unreadable. Mutation-verified,
+// package-wide with no -run filter: short-circuiting hostSnippetCheck's
+// own marker-defect loop (`for _, s := range states { if s.prob != nil
+// {…} }`) to never fire reddens "a lone begin marker" alone — the only
+// case here whose subject is a marker defect.
 func Test_diagnose_classifies_host_snippet(t *testing.T) {
 	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
@@ -655,6 +689,15 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantRel:      "CLAUDE.md",
 		},
 		{
+			// This is this table's own discriminator between fs.Lstat and
+			// fs.Stat: a dangling symlink target ("elsewhere.md" is never
+			// created in this fixture) still resolves under Lstat, since
+			// Lstat never follows it, but resolves as absent under Stat.
+			// Mutation-verified, package-wide with no -run filter: changing
+			// scanSnippetCandidateStates's own fs.Lstat call to fs.Stat
+			// reddens this case alone — Stat follows the dangling symlink,
+			// finds nothing, and the row falls to SKIP "not installed" —
+			// restored after.
 			name: "CLAUDE.md is a symlink",
 			setup: func(fsys fstest.MapFS, _ host.Host) {
 				setHostSymlink(fsys, "CLAUDE.md", "elsewhere.md")
@@ -680,10 +723,21 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantRel:      ".claude/CLAUDE.md",
 		},
 		{
-			// Mutation-verified: hardcoding states[0] instead of looping
-			// (`if states[0].notRegular` in place of the `for` loop) turns
-			// this WARN into the fallback SKIP "not installed" — reddened
-			// by this case alone, restored after.
+			// Mutation-verified, package-wide with no -run filter: replacing
+			// the firstPresent-finding loop with an unconditional
+			// "firstPresent = &states[0] if states[0] is present, else nil"
+			// (dropping the search past states[0]) reddens this case — root
+			// CLAUDE.md is absent here, so firstPresent never reaches
+			// ".claude/CLAUDE.md" and the row falls to the fallback SKIP "not
+			// installed" — together with every other case whose own
+			// first-present candidate is not states[0]: "no root CLAUDE.md
+			// but .claude/CLAUDE.md is a regular file with no block" below,
+			// host_disk_test.go's own
+			// Test_diagnose_classifies_host_snippet_unreadable/"no root
+			// CLAUDE.md, .claude itself cannot be Lstat'd", and doctor_test.go's
+			// own
+			// Test_diagnose_treats_an_unreadable_host_snippet_directory_as_present_not_absent.
+			// Restored after.
 			name: "no root CLAUDE.md but .claude/CLAUDE.md is a directory",
 			setup: func(fsys fstest.MapFS, _ host.Host) {
 				setHostDir(fsys, ".claude/CLAUDE.md")
@@ -715,12 +769,13 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantRel:      "CLAUDE.md",
 		},
 		{
-			// Mutation-verified: hardcoding states[0].path as the SKIP row's
-			// own Path (rather than the first-present candidate found by the
-			// loop above) reddens this case alone — it would name root's own
-			// missing "CLAUDE.md" instead of the regular, blockless
-			// ".claude/CLAUDE.md" that chooseSnippetLocation, and so planSnippet,
-			// would actually choose here — restored after.
+			// Mutation-verified, package-wide with no -run filter: collapsing
+			// the SKIP row's own Path selection (the firstPresent/states[0]
+			// switch) to always use states[0].path reddens this case alone
+			// — it would name root's own missing "CLAUDE.md" instead of the
+			// regular, blockless ".claude/CLAUDE.md" that
+			// chooseSnippetLocation, and so planSnippet, would actually choose
+			// here — restored after.
 			name: "no root CLAUDE.md but .claude/CLAUDE.md is a regular file with no block",
 			setup: func(fsys fstest.MapFS, _ host.Host) {
 				setHostFile(fsys, ".claude/CLAUDE.md", []byte("unrelated prose\n"))
@@ -764,13 +819,21 @@ func setAgentFrontmatter(fsys fstest.MapFS, relPath, name string) {
 }
 
 // Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions
-// is the MapFS-backed twin of host_disk_test.go's own duplicate-definition
-// scenario, exercised through (*Server).projectTree's own fs.Sub-backed
-// project tree rather than agentfile.DirTree(root): two project agent
-// files under ".claude/agents" both declare frontmatter "name:
+// pins duplicateDefinitionProblem's own WARN, exercised through
+// (*Server).projectTree's own fs.Sub-backed project tree: two project
+// agent files under ".claude/agents" both declare frontmatter "name:
 // my-reviewer" — the bare binding the reviewer role names — so
 // duplicateDefinitionProblem's own WARN fires once, naming both paths in
 // findIn's own Path order, never twice and never silently picking one.
+// Mutation-verified, package-wide with no -run filter: raising
+// duplicateDefinitionProblem's own `len(defs) < 2` threshold to `< 3`
+// reddens this case alone (two definitions no longer count as a
+// duplicate); reverting (*Server).resolveRoleBinding to call
+// agentfile.DirTree(root) directly, bypassing projectTree, also reddens
+// this case alone (root/.claude/agents then reads through the real "/"
+// filesystem instead of fsys, and the injected fixture is never on disk)
+// — proving projectTree is the path actually exercised here, not merely
+// present in the call graph. Both restored after.
 func Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions(t *testing.T) {
 	fsys := newHostFixtureFS()
 	h := claudeCodeHost(t)

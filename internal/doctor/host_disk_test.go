@@ -5,27 +5,13 @@ package doctor_test
 // shape classifyProbeError has to discriminate — a chmod'd file or
 // directory (present-but-unreadable, at both the Lstat and the ReadFile
 // call), or an ancestor path component that is itself a regular file
-// (ENOTDIR) — or a role-resolution scenario whose project-side tree still
-// reads through a real ".claude/agents" directory tree exercised the same
-// way host_test.go's own MapFS classification cases are, just without a
-// dedicated fs.FS fixture for that one scenario. host_test.go holds every
-// case whose own subject is the classification rule itself (missing,
-// current, older, edited, not-a-regular-file, marker states), run against
-// an in-memory fstest.MapFS instead.
-//
-// Two cases moved to host_test.go as their MapFS-backed twin rather than
-// staying here: "the skill alone, with no plugin or agent file" already
-// lived in host_test.go pre-split and gained a new companion,
-// Test_diagnose_host_plugin_stays_skip_when_only_the_skill_is_installed,
-// pinning anyIntegrationFilePresent's own h.Skills() exclusion directly.
-// "two project definitions of the same name WARN naming both paths" (this
-// file's own former Test_diagnose_roles_resolves_by_frontmatter_name case)
-// was replaced by
-// Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions
-// in host_test.go, now that (*Server).projectTree routes the project-side
-// role tree through the same fs.FS seam as every other probe in this
-// package — it no longer needs real disk to prove the duplicate-definition
-// WARN.
+// (ENOTDIR) — or a roles resolution scenario asserted for exact wording
+// (Test_diagnose_classifies_roles, Test_diagnose_roles_resolves_by_frontmatter_name,
+// Test_diagnose_classifies_roles_skill and its own duplicate-cases
+// sibling). host_test.go holds every case whose own subject is the
+// classification rule itself (missing, current, older, edited,
+// not-a-regular-file, marker states, and the roles duplicate-definition
+// WARN), run against an in-memory fstest.MapFS instead.
 
 import (
 	"fmt"
@@ -85,27 +71,27 @@ func writeHostArtifact(t *testing.T, wd string, f host.File) {
 
 // hostCheckCase is one row of a host-check classification table: setup
 // mutates newHostFixture's own bare baseline, and Diagnose's report must
-// carry checkID at wantSeverity, with wantDetail a substring of Detail and
-// wantFix the exact Fix text (nil when the row carries none). wantPathSuffix,
-// when non-empty, is asserted as a suffix of the row's own Path — most
-// cases only need severity/detail/fix, but a row whose Path names one of
-// two candidates (host-snippet's own CLAUDE.md/​.claude/CLAUDE.md choice)
-// needs the stronger check.
+// carry checkID at wantSeverity, with wantDetail a substring of Detail,
+// wantFix the exact Fix text (nil when the row carries none), and wantRel
+// the row's own Path exactly, relative to wd (newHostFixture's own root)
+// — mandatory, mirroring host_test.go's own hostFSCheckCase: every case in
+// this file has a deterministic Path (host.PluginDir, the hook/agents
+// path, skillPath, or one of the two CLAUDE.md candidates), so an exact
+// assertion is always the stronger check, never a suffix guess.
 type hostCheckCase struct {
-	name              string
-	setup             func(t *testing.T, wd string, h host.Host)
-	checkID           string
-	wantSeverity      doctor.Severity
-	wantDetail        string
-	wantFix           *string
-	wantPathSuffix    string
-	wantPathNotSuffix string
+	name         string
+	setup        func(t *testing.T, wd string, h host.Host)
+	checkID      string
+	wantSeverity doctor.Severity
+	wantDetail   string
+	wantFix      *string
+	wantRel      string
 }
 
 // runHostCheckCases builds newHostFixture(t), applies c.setup, runs
 // Diagnose with an injected empty home, and asserts c.checkID's own row
-// against c.wantSeverity, c.wantDetail (substring), c.wantFix (exact) and,
-// when set, c.wantPathSuffix.
+// against c.wantSeverity, c.wantDetail (substring), c.wantFix (exact) and
+// c.wantRel (the row's own Path, exactly, relative to wd).
 func runHostCheckCases(t *testing.T, cases []hostCheckCase) {
 	t.Helper()
 
@@ -122,14 +108,7 @@ func runHostCheckCases(t *testing.T, cases []hostCheckCase) {
 			assert.Equal(t, c.wantSeverity, check.Severity)
 			assert.Contains(t, check.Detail, c.wantDetail)
 			assert.Equal(t, c.wantFix, check.Fix)
-
-			if c.wantPathSuffix != "" {
-				assert.True(t, strings.HasSuffix(check.Path, c.wantPathSuffix), "path %q must end with %q", check.Path, c.wantPathSuffix)
-			}
-
-			if c.wantPathNotSuffix != "" {
-				assert.False(t, strings.HasSuffix(check.Path, c.wantPathNotSuffix), "path %q must not end with %q", check.Path, c.wantPathNotSuffix)
-			}
+			assert.Equal(t, filepath.Join(wd, filepath.FromSlash(c.wantRel)), check.Path)
 		})
 	}
 }
@@ -180,10 +159,17 @@ func chmodUnreadableDir(t *testing.T, dir string) {
 // equivalent fstest.MapFS fixture) reports plain fs.ErrNotExist here, not
 // ENOTDIR, so a MapFS fixture cannot exercise classifyProbeError's own
 // ENOTDIR arm specifically — only a real filesystem's own directory-walk
-// semantics produce it. Mutation-verified: reverting classifyProbeError to
-// only recognize fs.ErrNotExist (dropping the ENOTDIR arm) reddens all
-// three cases here into ERROR/WARN "incomplete"/"missing …", restored
-// after.
+// semantics produce it. Mutation-verified, across ./internal/doctor/...
+// and ./internal/cli/... with no -run filter: dropping the ENOTDIR arm
+// (`|| errors.Is(err, syscall.ENOTDIR)`) reddens all three cases here —
+// each subject file is now present-but-unreadable rather than absent, so
+// host-plugin becomes ERROR "not readable (not a directory): …" and
+// host-hook/host-agents become WARN "not readable (not a directory)" —
+// plus host_disk_test.go's own
+// Test_diagnose_classifies_host_snippet_unreadable/"the .claude root is a
+// regular file, not a directory" and internal/cli's own
+// Test_doctor_reports_every_host_row_skip_when_dot_claude_is_a_regular_file,
+// restored after.
 func Test_diagnose_reports_not_installed_when_the_claude_root_is_a_regular_file(t *testing.T) {
 	runHostCheckCases(t, []hostCheckCase{
 		{
@@ -197,6 +183,7 @@ func Test_diagnose_reports_not_installed_when_the_claude_root_is_a_regular_file(
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "not installed",
 			wantFix:      new(runInitClaudeCode),
+			wantRel:      host.PluginDir,
 		},
 		{
 			name: "host-hook",
@@ -209,6 +196,7 @@ func Test_diagnose_reports_not_installed_when_the_claude_root_is_a_regular_file(
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "not installed",
 			wantFix:      new(runInitClaudeCode),
+			wantRel:      host.PluginDir + "/hooks/hooks.json",
 		},
 		{
 			name: "host-agents",
@@ -221,6 +209,7 @@ func Test_diagnose_reports_not_installed_when_the_claude_root_is_a_regular_file(
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "not installed",
 			wantFix:      new(runInitWithAgents),
+			wantRel:      host.PluginDir + "/agents",
 		},
 	})
 }
@@ -254,6 +243,7 @@ func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "installed",
 			wantFix:      nil,
+			wantRel:      host.PluginDir,
 		},
 		{
 			// Control: "every subject file is current" above is the
@@ -282,6 +272,7 @@ func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 				host.PluginDir + "/skills/finish/SKILL.md",
 			}, ", "),
 			wantFix: new("chmod u+rwx .claude, then " + runInitClaudeCode),
+			wantRel: host.PluginDir,
 		},
 		{
 			// The blocking directory is two levels below root
@@ -330,6 +321,7 @@ func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 				host.PluginDir + "/skills/finish/SKILL.md",
 			}, ", "),
 			wantFix: new("chmod u+rwx .claude/skills, then " + runInitClaudeCode),
+			wantRel: host.PluginDir,
 		},
 		{
 			// Every directory stays searchable; only the manifest file
@@ -363,6 +355,7 @@ func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 			wantSeverity: doctor.SeverityError,
 			wantDetail:   "not readable (permission denied): " + host.PluginDir + "/.claude-plugin/plugin.json",
 			wantFix:      new("chmod +r " + host.PluginDir + "/.claude-plugin/plugin.json, then " + runInitClaudeCode),
+			wantRel:      host.PluginDir,
 		},
 		{
 			// The install root itself (wd) is the one unsearchable
@@ -398,6 +391,7 @@ func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
 				host.PluginDir + "/skills/finish/SKILL.md",
 			}, ", "),
 			wantFix: new("chmod u+rwx ., then " + runInitClaudeCode),
+			wantRel: host.PluginDir,
 		},
 	})
 }
@@ -425,6 +419,7 @@ func Test_diagnose_classifies_host_hook_unreadable(t *testing.T) {
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "not readable (permission denied)",
 			wantFix:      new("chmod u+rwx .claude, then " + runInitClaudeCode),
+			wantRel:      host.PluginDir + "/hooks/hooks.json",
 		},
 		{
 			// The unreadable-directory case above fails at the Lstat call
@@ -456,6 +451,7 @@ func Test_diagnose_classifies_host_hook_unreadable(t *testing.T) {
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "not readable (permission denied)",
 			wantFix:      new("chmod +r " + host.PluginDir + "/hooks/hooks.json, then " + runInitClaudeCode),
+			wantRel:      host.PluginDir + "/hooks/hooks.json",
 		},
 	})
 }
@@ -488,6 +484,7 @@ func Test_diagnose_classifies_host_agents_unreadable(t *testing.T) {
 				host.PluginDir + "/agents/reviewer.md",
 			}, ", "),
 			wantFix: new("chmod u+rwx .claude, then " + runInitClaudeCode),
+			wantRel: host.PluginDir + "/agents",
 		},
 		{
 			// Every directory stays searchable; only the planner agent
@@ -518,6 +515,7 @@ func Test_diagnose_classifies_host_agents_unreadable(t *testing.T) {
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "not readable (permission denied): " + host.PluginDir + "/agents/planner.md",
 			wantFix:      new("chmod +r " + host.PluginDir + "/agents/planner.md, then " + runInitClaudeCode),
+			wantRel:      host.PluginDir + "/agents",
 		},
 	})
 }
@@ -551,11 +549,11 @@ func Test_diagnose_classifies_host_skill_unreadable(t *testing.T) {
 
 				chmodUnreadable(t, filepath.Join(wd, filepath.FromSlash(skillFile.RelPath)))
 			},
-			checkID:        "host-skill",
-			wantSeverity:   doctor.SeverityWarn,
-			wantDetail:     "not readable (permission denied)",
-			wantFix:        new("chmod +r " + skillPath + ", then " + runInitClaudeCode),
-			wantPathSuffix: skillPath,
+			checkID:      "host-skill",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "not readable (permission denied)",
+			wantFix:      new("chmod +r " + skillPath + ", then " + runInitClaudeCode),
+			wantRel:      skillPath,
 		},
 	})
 }
@@ -659,11 +657,11 @@ func Test_diagnose_classifies_host_snippet_unreadable(t *testing.T) {
 				require.NoError(t, os.WriteFile(path, []byte("unrelated prose\n"), 0o600))
 				chmodUnreadable(t, path)
 			},
-			checkID:           "host-snippet",
-			wantSeverity:      doctor.SeverityWarn,
-			wantDetail:        "not readable (permission denied); cannot check for brief block",
-			wantFix:           new("chmod +r CLAUDE.md, then " + runInitClaudeCode),
-			wantPathNotSuffix: filepath.Join(".claude", "CLAUDE.md"),
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "not readable (permission denied); cannot check for brief block",
+			wantFix:      new("chmod +r CLAUDE.md, then " + runInitClaudeCode),
+			wantRel:      "CLAUDE.md",
 		},
 		{
 			// P1: an ancestor directory doctor cannot even Lstat into (mode
@@ -683,11 +681,11 @@ func Test_diagnose_classifies_host_snippet_unreadable(t *testing.T) {
 				require.NoError(t, os.MkdirAll(claudeDir, 0o755))
 				chmodUnreadableDir(t, claudeDir)
 			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeverityWarn,
-			wantDetail:     "not readable (permission denied); cannot check for brief block",
-			wantFix:        new("chmod u+rwx .claude, then " + runInitClaudeCode),
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "not readable (permission denied); cannot check for brief block",
+			wantFix:      new("chmod u+rwx .claude, then " + runInitClaudeCode),
+			wantRel:      filepath.Join(".claude", "CLAUDE.md"),
 		},
 		{
 			// P1: mirrors host-plugin's own ENOTDIR case — a ".claude" that
@@ -703,6 +701,7 @@ func Test_diagnose_classifies_host_snippet_unreadable(t *testing.T) {
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "not installed",
 			wantFix:      new(runInitClaudeCode),
+			wantRel:      "CLAUDE.md",
 		},
 		{
 			// Pins the block-wins carve-out against an unreadable root
@@ -723,11 +722,11 @@ func Test_diagnose_classifies_host_snippet_unreadable(t *testing.T) {
 				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
 				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), block, 0o600))
 			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeverityOK,
-			wantDetail:     "installed",
-			wantFix:        nil,
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "installed",
+			wantFix:      nil,
+			wantRel:      filepath.Join(".claude", "CLAUDE.md"),
 		},
 	})
 }
@@ -1019,11 +1018,9 @@ const rolesUnresolvedFix = "bind each role to an existing agent in .brief.yaml, 
 // binding matches frontmatter "name:" anywhere under ".claude/agents/"
 // (nested layout, any filename), a project definition shadows a
 // same-named "~/.claude/agents" one, and a user-level-only resolution adds
-// "; user-level: <role>". The duplicate-definition WARN this table used to
-// pin here moved to host_test.go's own
-// Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions,
-// now that (*Server).projectTree routes the project-side tree through the
-// same fs.FS seam as every other probe in this package.
+// "; user-level: <role>". host_test.go's own
+// Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions
+// pins the duplicate-definition WARN, via (*Server).projectTree.
 func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 	cases := []rolesFrontmatterCase{
 		{

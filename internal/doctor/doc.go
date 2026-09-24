@@ -38,16 +38,16 @@
 // env-path's binary identity check (os.SameFile, filepath.EvalSymlinks)
 // and version read (debug/buildinfo.ReadFile), and the home directory
 // lookup (os.UserHomeDir). One further slice is OS-subject only in its
-// *error shape*, not its classification logic: an ancestor path component
+// error shape, not its classification logic: an ancestor path component
 // that is itself a regular file reports ENOTDIR on a real filesystem, the
 // one shape classifyProbeError's own ENOTDIR arm exists to recognize, but
 // an equivalent fstest.MapFS fixture reports plain fs.ErrNotExist for the
-// same shape instead (confirmed against the stdlib directly) — so that one
-// arm, and every chmod-driven permission-denied case alongside it, stays
-// on real disk in host_disk_test.go even though the production code path
-// it exercises is fs.FS-generic. None of these can be expressed against an
-// arbitrary fs.FS without either losing a real permission error's own
-// shape or fabricating one a real filesystem would never produce.
+// same shape instead — so that arm, and every chmod-driven
+// permission-denied case alongside it, is tested against real disk even
+// though the production code path it exercises is fs.FS-generic. None of
+// these can be expressed against an arbitrary fs.FS without either losing
+// a real permission error's own shape or fabricating one a real
+// filesystem would never produce.
 //
 // Every other read in this package — the config family (config-file,
 // config-parse, config-values, config-shadow), env-git, and the six
