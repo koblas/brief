@@ -29,6 +29,24 @@ func findArtifact(t *testing.T, res setup.Result, kind setup.Kind) setup.Artifac
 	return setup.Artifact{}
 }
 
+// findArtifactByPath returns res's own Artifact at path, failing the test
+// if there is none — the by-path lookup a Mem-backed test uses when
+// findArtifact's by-Kind lookup is ambiguous (several rows share one Kind,
+// the plugin's own manifest, start and finish skills all KindPlugin).
+func findArtifactByPath(t *testing.T, res setup.Result, path string) setup.Artifact {
+	t.Helper()
+
+	for _, a := range res.Artifacts {
+		if a.Path == path {
+			return a
+		}
+	}
+
+	t.Fatalf("no row for %s in %v", path, res.Artifacts)
+
+	return setup.Artifact{}
+}
+
 // fsAbs joins slash-separated segments under "/", the way every
 // WithFSRoot-backed test names an absolute path its fstest.MapFS fixture
 // is keyed against — setup's own fsName (fs.go) strips the leading "/"

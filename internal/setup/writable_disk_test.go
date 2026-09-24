@@ -18,6 +18,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Test_an_unwritable_plugin_directory_refuses_before_the_feature_root_is_created
+// pins R10's pre-write check: an unwritable ".claude/skills/brief"
+// directory (already present as a directory, chmod 0o555) is caught before
+// anything is written at all — ErrUnwritable, naming that directory as the
+// blocking ancestor, not ErrPartialWrite — so neither the feature root nor
+// ".brief.yaml" is ever created. Skipped under root, which ignores
+// directory write permission. Moved here from plugin_test.go: every other
+// case in that file converted to rwfs.Mem, but chmod needs real disk.
+func Test_an_unwritable_plugin_directory_refuses_before_the_feature_root_is_created(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory write permission")
+	}
+
+	wd := t.TempDir()
+	pluginDir := filepath.Join(wd, ".claude", "skills", "brief")
+	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
+	require.NoError(t, os.Chmod(pluginDir, 0o555))
+	t.Cleanup(func() { _ = os.Chmod(pluginDir, 0o755) })
+	srv := newServer(t)
+
+	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
+
+	require.ErrorIs(t, err, setup.ErrUnwritable)
+	require.NotErrorIs(t, err, setup.ErrPartialWrite)
+
+	refusal, ok := errors.AsType[*setup.RefusalError](err)
+	require.True(t, ok)
+	assert.Equal(t, pluginDir, refusal.Path)
+
+	_, statErr := os.Stat(filepath.Join(wd, "docs", "specifications"))
+	assert.True(t, os.IsNotExist(statErr))
+
+	_, statErr = os.Stat(filepath.Join(wd, ".brief.yaml"))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
 // Test_init_refuses_an_unwritable_target_before_writing_anything pins R10:
 // a target whose nearest existing ancestor is not a directory, or is a
 // directory that cannot be written to, refuses before any write — a
