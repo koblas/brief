@@ -11,6 +11,46 @@ import (
 	"github.com/koblas/brief/internal/setup"
 )
 
+// memTreeEntry is one memTree entry: isDir alone for a directory, body for
+// a regular file's exact bytes — Mem's own Snapshot carries Mode and
+// ModTime too, which a whole-tree round-trip comparison must ignore (every
+// write advances Mem's fake clock, so ModTime alone would never compare
+// equal across two otherwise-identical snapshots).
+type memTreeEntry struct {
+	isDir bool
+	body  []byte
+}
+
+// memTree extracts snap's own entries under root (root itself excluded),
+// keyed by each entry's own root-relative, slash-separated path — mem's
+// own analogue of a real *_disk_test.go's snapshotTree, sourced from a
+// Mem.Snapshot() rather than a directory walk.
+func memTree(snap fstest.MapFS, root string) map[string]memTreeEntry {
+	prefix := memKey(root) + "/"
+	out := map[string]memTreeEntry{}
+
+	for name, file := range snap {
+		if name == memKey(root) {
+			continue
+		}
+
+		rel, ok := strings.CutPrefix(name, prefix)
+		if !ok {
+			continue
+		}
+
+		if file.Mode.IsDir() {
+			out[rel] = memTreeEntry{isDir: true}
+
+			continue
+		}
+
+		out[rel] = memTreeEntry{body: file.Data}
+	}
+
+	return out
+}
+
 // findArtifact returns res's own first Artifact of kind, failing the test
 // if there is none — the by-kind lookup a Mem-backed test uses in place of
 // an index into Result.Artifacts, so it never depends on that list's own

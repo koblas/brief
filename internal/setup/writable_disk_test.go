@@ -9,6 +9,7 @@ package setup_test
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,6 +18,55 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// treeEntry is one snapshotTree entry: isDir alone for a directory, body
+// for a regular file's exact bytes.
+type treeEntry struct {
+	isDir bool
+	body  []byte
+}
+
+// snapshotTree walks every path under root (root itself excluded), keyed
+// by its path relative to root, recording whether it is a directory or a
+// regular file's own bytes. It walks through an os.Root scoped to root
+// rather than raw path-joined os.ReadFile calls, so every read stays
+// confined to that directory tree. Shared by every *_disk_test.go file in
+// this package that needs a whole-tree before/after comparison against
+// real disk.
+func snapshotTree(t *testing.T, root string) map[string]treeEntry {
+	t.Helper()
+
+	r, err := os.OpenRoot(root)
+	require.NoError(t, err)
+	defer func() { _ = r.Close() }()
+
+	fsys := r.FS()
+	out := map[string]treeEntry{}
+
+	walkErr := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, entryErr error) error {
+		require.NoError(t, entryErr)
+
+		if p == "." {
+			return nil
+		}
+
+		if d.IsDir() {
+			out[p] = treeEntry{isDir: true}
+
+			return nil
+		}
+
+		body, readErr := fs.ReadFile(fsys, p)
+		require.NoError(t, readErr)
+
+		out[p] = treeEntry{body: body}
+
+		return nil
+	})
+	require.NoError(t, walkErr)
+
+	return out
+}
 
 // Test_an_unwritable_plugin_directory_refuses_before_the_feature_root_is_created
 // pins R10's pre-write check: an unwritable ".claude/skills/brief"
