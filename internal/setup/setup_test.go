@@ -1,7 +1,6 @@
 package setup_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -24,10 +23,12 @@ func newServer(t *testing.T) *setup.Server {
 // Test_init_creates_the_config_and_feature_root_in_a_fresh_repo pins R2 for
 // a repository with nothing installed yet: both artifacts report created,
 // the config file's bytes are exactly artifact.ConfigFile(), and the
-// feature root exists as a directory afterward.
+// feature root exists as a directory afterward. Init's own planning and
+// apply here never touch a bound-agent path or a symlink, so this is
+// Mem-backed rather than disk.
 func Test_init_creates_the_config_and_feature_root_in_a_fresh_repo(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd, mem := newRealRootMem(t)
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 
@@ -44,11 +45,12 @@ func Test_init_creates_the_config_and_feature_root_in_a_fresh_repo(t *testing.T)
 	assert.ElementsMatch(t, []string{featureRoot, configPath}, res.Created)
 	assert.Empty(t, res.Modified)
 
-	body, readErr := os.ReadFile(configPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, artifact.ConfigFile(), body)
+	snap := mem.Snapshot()
+	body := snap[memKey(configPath)]
+	require.NotNil(t, body)
+	assert.Equal(t, artifact.ConfigFile(), body.Data)
 
-	info, statErr := os.Stat(featureRoot)
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
+	info := snap[memKey(featureRoot)]
+	require.NotNil(t, info)
+	assert.True(t, info.Mode.IsDir())
 }
