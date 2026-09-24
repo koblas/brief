@@ -18,7 +18,7 @@ import (
 // unreadable or non-directory feature-directory root still propagates an
 // error.
 func (s *Server) Features(_ context.Context) ([]string, error) {
-	topRoot, err := os.OpenRoot(filepath.Join(s.root, s.cfg.FeatureDirectory))
+	topRoot, err := s.openFeatureDir(filepath.Join(s.root, s.cfg.FeatureDirectory))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil

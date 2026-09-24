@@ -12,6 +12,7 @@ import (
 	"github.com/koblas/brief/internal/assemble"
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/host"
+	"github.com/koblas/brief/internal/platform/rwfs"
 )
 
 // checkLong is "brief check"'s help prose.
@@ -165,8 +166,11 @@ func countFindings(groups []assemble.FeatureFindings) (int, int) {
 // positional arguments, flags already parsed away. hookHost is "" unless
 // --hook was given, in which case it dispatches to runCheckHook instead of
 // checking by feature argument; stdin backs --hook's own payload read (no
-// other check path reads it).
-func runCheck(ctx context.Context, wd string, rest []string, hookHost string, stdin io.Reader, out reporter) error {
+// other check path reads it). rootFS is nil in production (resolveRoot and
+// assemble.NewServer both read real disk); a test's withRootFS runSeam
+// substitutes an rwfs.Mem for both — runCheckHook never receives it, since
+// --hook stays real-disk-only regardless (see its own doc comment).
+func runCheck(ctx context.Context, wd string, rest []string, hookHost string, stdin io.Reader, out reporter, rootFS rwfs.FS) error {
 	if hookHost != "" {
 		return runCheckHook(ctx, wd, rest, hookHost, stdin, out)
 	}
@@ -180,16 +184,16 @@ func runCheck(ctx context.Context, wd string, rest []string, hookHost string, st
 		feature = rest[0]
 	}
 
-	cfg, root, err := resolveRoot(wd)
+	cfg, root, err := resolveRoot(rootFS, wd)
 	if err != nil {
 		return out.refusal(err)
 	}
 
-	srv := assemble.NewServer(cfg, root)
+	srv := assemble.NewServer(cfg, root, assemble.WithFS(rootFS))
 
 	findings, err := srv.Check(ctx, feature)
 	if err != nil {
-		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err, rootFS))
 	}
 
 	groups := assemble.GroupByFeature(findings)
@@ -270,6 +274,12 @@ var errMalformedHookPayload = errors.New("brief check: malformed hook payload on
 // returns nil (exit 0); stdout on this path never carries check's own
 // findings table. A feature with no findings, or WARN findings only, is
 // silent, exit 0.
+//
+// Unlike every other command in this package, runCheckHook takes no
+// rootFS: FeatureContaining resolves the edited path's containing feature
+// through os.Lstat and filepath.EvalSymlinks (internal/assemble/
+// features.go), neither of which any seam replaces, so a --hook run always
+// reads real disk regardless of a caller's own withRootFS runSeam.
 func runCheckHook(ctx context.Context, wd string, rest []string, hookHost string, stdin io.Reader, out reporter) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief check: --hook takes no feature argument; run '%s'", checkHookInvocation))
@@ -300,7 +310,7 @@ func runCheckHook(ctx context.Context, wd string, rest []string, hookHost string
 		editedPath = filepath.Join(wd, editedPath)
 	}
 
-	cfg, root, err := resolveRoot(wd)
+	cfg, root, err := resolveRoot(nil, wd)
 	if err != nil {
 		return out.refusal(err)
 	}
@@ -314,7 +324,7 @@ func runCheckHook(ctx context.Context, wd string, rest []string, hookHost string
 
 	findings, err := srv.Check(ctx, feature)
 	if err != nil {
-		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err, nil))
 	}
 
 	errorCount, _ := countFindings(assemble.GroupByFeature(findings))

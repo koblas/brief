@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 
 	"github.com/koblas/brief/internal/platform/markdown"
@@ -72,7 +71,7 @@ func (row FeatureStatus) Complete() bool {
 // regular file entry is skipped with no row at all — the feature directory
 // legitimately holds a README.md or a .DS_Store beside real features.
 func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
-	topRoot, err := os.OpenRoot(filepath.Join(s.root, s.cfg.FeatureDirectory))
+	topRoot, err := s.openFeatureDir(filepath.Join(s.root, s.cfg.FeatureDirectory))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
@@ -129,8 +128,8 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 // rather than propagated, the adapter-level counterpart to StatusFS's own
 // degrade-not-propagate stance on every fault reachable once the directory
 // is open — and delegates to StatusFS.
-func (s *Server) statusRow(topRoot *os.Root, pattern stepfile.Pattern, name, displayPath string) FeatureStatus {
-	root, err := s.openRoot(topRoot, name)
+func (s *Server) statusRow(topRoot dirFS, pattern stepfile.Pattern, name, displayPath string) FeatureStatus {
+	root, err := topRoot.OpenRoot(name)
 	if err != nil {
 		return FeatureStatus{Name: name, Path: displayPath, Problem: newProblem(displayPath, err, false)}
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/koblas/brief/internal/assemble"
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/koblas/brief/internal/setup"
 )
@@ -230,13 +231,16 @@ func knownFeaturesFix(known []string, name string) string {
 // *unknownFeatureError naming every known feature (assemble.Features,
 // fs.ReadDir order). A failure listing the feature directory itself is
 // returned in its place — never rendered as "known: none". Any other err,
-// including nil, passes through unchanged.
-func enrichUnknownFeature(ctx context.Context, cfg config.Config, root, feature string, err error) error {
+// including nil, passes through unchanged. rootFS is nil in production
+// (the assemble.Server this builds reads real disk); a test's withRootFS
+// runSeam substitutes an rwfs.Mem, the same fixture the caller's own
+// scaffold.Server or assemble.Server already reads.
+func enrichUnknownFeature(ctx context.Context, cfg config.Config, root, feature string, err error, rootFS rwfs.FS) error {
 	if !errors.Is(err, scaffold.ErrNoSuchFeature) && !errors.Is(err, assemble.ErrNoSuchFeature) {
 		return err
 	}
 
-	srv := assemble.NewServer(cfg, root)
+	srv := assemble.NewServer(cfg, root, assemble.WithFS(rootFS))
 
 	known, listErr := srv.Features(ctx)
 	if listErr != nil {

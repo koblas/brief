@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/koblas/brief/internal/assemble"
+	"github.com/koblas/brief/internal/platform/rwfs"
 )
 
 // statusLong is "brief status"'s help prose.
@@ -104,18 +105,20 @@ func statusFeatures(rows []assemble.FeatureStatus) []statusFeatureJSON {
 }
 
 // runStatus implements "brief status"; rest is its positional arguments,
-// flags already parsed away, and must be empty.
-func runStatus(ctx context.Context, wd string, rest []string, out reporter) error {
+// flags already parsed away, and must be empty. rootFS is nil in
+// production (resolveRoot and assemble.NewServer both read real disk); a
+// test's withRootFS runSeam substitutes an rwfs.Mem for both.
+func runStatus(ctx context.Context, wd string, rest []string, out reporter, rootFS rwfs.FS) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief status: too many arguments; run '%s'", statusInvocation))
 	}
 
-	cfg, root, err := resolveRoot(wd)
+	cfg, root, err := resolveRoot(rootFS, wd)
 	if err != nil {
 		return out.refusal(err)
 	}
 
-	srv := assemble.NewServer(cfg, root)
+	srv := assemble.NewServer(cfg, root, assemble.WithFS(rootFS))
 
 	rows, err := srv.Status(ctx)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/koblas/brief/internal/assemble"
+	"github.com/koblas/brief/internal/platform/rwfs"
 )
 
 // startLong is "brief start"'s help prose.
@@ -43,8 +44,10 @@ type startDocument struct {
 // away. start's own pflag "json" flag stays registered only so its help
 // table row still renders, since run's own scanJSONFlag strips every
 // "--json" token before pflag ever parses one — out.json alone decides
-// this run's mode.
-func runStart(ctx context.Context, wd string, rest []string, out reporter) error {
+// this run's mode. rootFS is nil in production (resolveRoot and
+// assemble.NewServer both read real disk); a test's withRootFS runSeam
+// substitutes an rwfs.Mem for both.
+func runStart(ctx context.Context, wd string, rest []string, out reporter, rootFS rwfs.FS) error {
 	switch {
 	case len(rest) == 0:
 		return out.usageError(fmt.Sprintf("brief start: no feature given; run '%s'", startInvocation))
@@ -54,16 +57,16 @@ func runStart(ctx context.Context, wd string, rest []string, out reporter) error
 
 	feature := rest[0]
 
-	cfg, root, err := resolveRoot(wd)
+	cfg, root, err := resolveRoot(rootFS, wd)
 	if err != nil {
 		return out.refusal(err)
 	}
 
-	srv := assemble.NewServer(cfg, root)
+	srv := assemble.NewServer(cfg, root, assemble.WithFS(rootFS))
 
 	brief, err := srv.Start(ctx, feature)
 	if err != nil {
-		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err, rootFS))
 	}
 
 	// In --json mode a successful run writes nothing to stderr (R1): every

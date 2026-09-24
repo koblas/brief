@@ -12,6 +12,7 @@ import (
 
 	"github.com/koblas/brief/internal/doctor"
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/setup"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -49,9 +50,24 @@ const rootShort = "brief manages feature specifications as files in your reposit
 // was found, wd itself otherwise. Every command that touches configuration
 // or the repository tree shares this pattern; the caller still renders its
 // own out.refusal(err) on a non-nil error, since the command that refusal
-// renders against differs per caller.
-func resolveRoot(wd string) (config.Config, string, error) {
-	cfg, source, err := config.Resolve(wd)
+// renders against differs per caller. rootFS is nil in production (every
+// run* function reads through config.Resolve, real disk); a test's
+// withRootFS runSeam substitutes an rwfs.Mem, read through resolveRootFS
+// instead — the same nil-means-real-disk contract runDoctor's own
+// rootFS parameter already carries.
+func resolveRoot(rootFS fs.FS, wd string) (config.Config, string, error) {
+	var (
+		cfg    config.Config
+		source string
+		err    error
+	)
+
+	if rootFS != nil {
+		cfg, source, err = resolveRootFS(rootFS, wd)
+	} else {
+		cfg, source, err = config.Resolve(wd)
+	}
+
 	if err != nil {
 		return config.Config{}, "", err
 	}
@@ -62,6 +78,44 @@ func resolveRoot(wd string) (config.Config, string, error) {
 	}
 
 	return cfg, root, nil
+}
+
+// resolveRootFS is resolveRoot's own fsys-backed twin, mirroring
+// config.Resolve exactly — including its unbounded walk. Resolve never
+// applies repo's own git-repository boundary the way config.LocateInRepo
+// does for doctor, init and uninstall: new, finish, start, check and
+// status all resolve configuration the unbounded way, so this never calls
+// repo.RootFS either; doing so would silently stop finding a config above
+// the enclosing git repository that Resolve itself would still find.
+func resolveRootFS(fsys fs.FS, wd string) (config.Config, string, error) {
+	abs, err := filepath.Abs(wd)
+	if err != nil {
+		return config.Config{}, "", fmt.Errorf("resolve config: %w", err)
+	}
+
+	nearest, _, err := config.LocateWithinFS(fsys, abs, "")
+	if err != nil {
+		return config.Config{}, "", fmt.Errorf("resolve config: %w", err)
+	}
+
+	if nearest == "" {
+		return config.Default(), "", nil
+	}
+
+	cfg, violations, err := config.InspectFS(fsys, nearest)
+	if err != nil {
+		if invalidCfg, ok := errors.AsType[*config.InvalidConfigError](err); ok {
+			return config.Config{}, "", fmt.Errorf("resolve config: %w", invalidCfg)
+		}
+
+		return config.Config{}, "", fmt.Errorf("resolve config: %s: %w", nearest, err)
+	}
+
+	if len(violations) > 0 {
+		return config.Config{}, "", fmt.Errorf("resolve config: %w", &config.InvalidConfigError{Path: nearest, Err: violations[0]})
+	}
+
+	return cfg, nearest, nil
 }
 
 // expectedCommandList names cmd's root's available top-level commands, in
@@ -341,7 +395,7 @@ const uninstallDryRunFlagUsage = "print the plan without removing anything"
 type runSeams struct {
 	doctorOpts []doctor.Option
 	setupOpts  []setup.Option
-	rootFS     fs.FS
+	rootFS     rwfs.FS
 }
 
 // runSeam configures one field of a runSeams collector. withDoctorOpts and
@@ -364,14 +418,18 @@ func withSetupOpts(opts ...setup.Option) runSeam {
 	return func(s *runSeams) { s.setupOpts = append(s.setupOpts, opts...) }
 }
 
-// withRootFS sets a runSeams' own rootFS, read by runDoctor's own
-// config-location pre-check (locateInRepoFS) in place of
+// withRootFS sets a runSeams' own rootFS, read by resolveRoot (every
+// run* function below) in place of config.Resolve(wd), and by runDoctor's
+// own config-location pre-check (locateInRepoFS) in place of
 // config.LocateInRepo(wd) — a test injects the same rwfs.Mem it also
-// passed to withDoctorOpts(doctor.WithRootFS(...)), so both the pre-check
-// and Diagnose itself read one fixture. nil (the zero value, production's
-// own default) means "read real disk", identical to before this seam
-// existed.
-func withRootFS(fsys fs.FS) runSeam {
+// passed to withDoctorOpts(doctor.WithRootFS(...)), scaffold.WithFS and
+// assemble.WithFS, so every seamed package reads one fixture. nil (the
+// zero value, production's own default) means "read real disk", identical
+// to before this seam existed. rwfs.FS's read side is exactly fs.FS plus
+// four more interfaces (rwfs/fs.go), so the same value satisfies every
+// fs.FS-typed parameter this seam feeds (resolveRoot, runDoctor) as well
+// as scaffold's and assemble's own rwfs.FS-typed WithFS.
+func withRootFS(fsys rwfs.FS) runSeam {
 	return func(s *runSeams) { s.rootFS = fsys }
 }
 
@@ -486,10 +544,15 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // seams is resolved once (resolveRunSeams) into doctorOpts, setupOpts and
 // rootFS: doctorOpts threads through unchanged to the "doctor" leaf's own
 // RunE, appended after runDoctor's own doctor.WithVersion; setupOpts
-// threads through to "init"'s own RunE, passed to runInit's own
-// extraSetupOpts; rootFS threads to the "doctor" leaf's own RunE alongside
-// doctorOpts, read by runDoctor's own config-location pre-check
-// (locateInRepoFS) in place of real disk — see run's own doc comment.
+// threads through to "init"'s and "uninstall"'s own RunE, passed to
+// runInit's and runUninstall's own extraSetupOpts; rootFS threads to every
+// leaf's own RunE — "doctor" alongside doctorOpts, read by runDoctor's own
+// config-location pre-check (locateInRepoFS) in place of real disk, and
+// "new feature"/"new step"/"finish"/"start"/"status"/"check" (never "check
+// --hook", which stays real-disk-only regardless — see runCheckHook's own
+// doc comment), each passing it to resolveRoot in place of config.Resolve
+// and to scaffold.WithFS/assemble.WithFS when constructing their own
+// Server — see run's own doc comment.
 //
 // One root.SetHelpFunc wrapper backs every help document: root --help, the
 // help stub, runNew's sole-help arm and every leaf's own --help all reach
@@ -537,13 +600,13 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 
 	newFeatureCmd := leafCommand("feature <name>", "scaffold a new feature's specification and state file", newFeatureInvocation, newFeatureLong, addJSONFlag,
 		func(cmd *cobra.Command, args []string) error {
-			return runNewFeature(cmd.Context(), wd, args, out.forCommand(cmd))
+			return runNewFeature(cmd.Context(), wd, args, out.forCommand(cmd), rs.rootFS)
 		})
 	newFeatureCmd.Annotations[writesFilesAnnotation] = "true"
 
 	newStepCmd := leafCommand("step <feature>", "scaffold the next step file and its progress entry", newStepInvocation, newStepLong, addJSONFlag,
 		func(cmd *cobra.Command, args []string) error {
-			return runNewStep(cmd.Context(), wd, args, out.forCommand(cmd))
+			return runNewStep(cmd.Context(), wd, args, out.forCommand(cmd), rs.rootFS)
 		})
 	newStepCmd.Annotations[writesFilesAnnotation] = "true"
 
@@ -559,7 +622,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			handoffPath, _ := cmd.Flags().GetString("handoff")
 			statePath, _ := cmd.Flags().GetString("state")
 
-			return runFinish(cmd.Context(), wd, args, handoffPath, statePath, stdin, out.forCommand(cmd))
+			return runFinish(cmd.Context(), wd, args, handoffPath, statePath, stdin, out.forCommand(cmd), rs.rootFS)
 		})
 	finishCmd.Annotations[writesFilesAnnotation] = "true"
 
@@ -610,12 +673,12 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		leafCommand("start [--json] <feature>", "print the next open step's context", startInvocation, startLong,
 			addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
-				return runStart(cmd.Context(), wd, args, out.forCommand(cmd))
+				return runStart(cmd.Context(), wd, args, out.forCommand(cmd), rs.rootFS)
 			}),
 		finishCmd,
 		leafCommand("status", "print a FEATURE/DONE/BLOCKED/NEXT table of every feature", statusInvocation, statusLong, addJSONFlag,
 			func(cmd *cobra.Command, args []string) error {
-				return runStatus(cmd.Context(), wd, args, out.forCommand(cmd))
+				return runStatus(cmd.Context(), wd, args, out.forCommand(cmd), rs.rootFS)
 			}),
 		leafCommand("check [feature] [--hook <host>]", "report faults finish would now refuse to write over", checkInvocation, checkLong,
 			func(fs *pflag.FlagSet) {
@@ -625,7 +688,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 			func(cmd *cobra.Command, args []string) error {
 				hook, _ := cmd.Flags().GetString("hook")
 
-				return runCheck(cmd.Context(), wd, args, hook, stdin, out.forCommand(cmd))
+				return runCheck(cmd.Context(), wd, args, hook, stdin, out.forCommand(cmd), rs.rootFS)
 			}),
 		initCmd,
 		leafCommand("doctor [--json]", "check brief's setup: config, feature root, host integration", doctorInvocation, doctorLong, addJSONFlag,

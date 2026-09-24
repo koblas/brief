@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/scaffold"
 )
 
@@ -41,8 +42,12 @@ type finishDocument struct {
 
 // runFinish implements "brief finish <feature> <step> --handoff <path>
 // --state <path>"; rest is its positional arguments and handoffPath and
-// statePath its flag values, "" when the flag was not given.
-func runFinish(ctx context.Context, wd string, rest []string, handoffPath, statePath string, stdin io.Reader, out reporter) error {
+// statePath its flag values, "" when the flag was not given. rootFS is nil
+// in production (resolveRoot and scaffold.NewServer both read real disk);
+// a test's withRootFS runSeam substitutes an rwfs.Mem for both — the
+// --handoff/--state file argument itself is never seamed, and always reads
+// real disk (or stdin, for "-") through readSource.
+func runFinish(ctx context.Context, wd string, rest []string, handoffPath, statePath string, stdin io.Reader, out reporter, rootFS rwfs.FS) error {
 	switch {
 	case len(rest) == 0:
 		return out.usageError(fmt.Sprintf("brief finish: no feature given; run '%s'", finishInvocation))
@@ -73,12 +78,12 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 		return out.refusal(err)
 	}
 
-	cfg, root, err := resolveRoot(wd)
+	cfg, root, err := resolveRoot(rootFS, wd)
 	if err != nil {
 		return out.refusal(err)
 	}
 
-	srv := scaffold.NewServer(cfg, root)
+	srv := scaffold.NewServer(cfg, root, scaffold.WithFS(rootFS))
 
 	res, err := srv.Finish(ctx, feature, step, handoff, state)
 	if err != nil {
@@ -91,7 +96,7 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 			}
 		}
 
-		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err, rootFS))
 	}
 
 	if out.json {

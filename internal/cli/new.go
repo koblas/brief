@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/spf13/cobra"
 )
@@ -90,8 +91,10 @@ func runNew(cmd *cobra.Command, args []string, out reporter) error {
 }
 
 // runNewFeature implements "brief new feature <name>"; rest is its
-// positional arguments, flags already parsed away.
-func runNewFeature(ctx context.Context, wd string, rest []string, out reporter) error {
+// positional arguments, flags already parsed away. rootFS is nil in
+// production (resolveRoot and scaffold.NewServer both read real disk); a
+// test's withRootFS runSeam substitutes an rwfs.Mem for both.
+func runNewFeature(ctx context.Context, wd string, rest []string, out reporter, rootFS rwfs.FS) error {
 	switch {
 	case len(rest) == 0:
 		return out.usageError(fmt.Sprintf("brief new feature: no name given; run '%s'", newFeatureInvocation))
@@ -101,12 +104,12 @@ func runNewFeature(ctx context.Context, wd string, rest []string, out reporter) 
 
 	name := rest[0]
 
-	cfg, root, err := resolveRoot(wd)
+	cfg, root, err := resolveRoot(rootFS, wd)
 	if err != nil {
 		return out.refusal(err)
 	}
 
-	srv := scaffold.NewServer(cfg, root)
+	srv := scaffold.NewServer(cfg, root, scaffold.WithFS(rootFS))
 
 	res, err := srv.NewFeature(ctx, name)
 	if err != nil {
@@ -135,8 +138,10 @@ func runNewFeature(ctx context.Context, wd string, rest []string, out reporter) 
 }
 
 // runNewStep implements "brief new step <feature>"; rest is its
-// positional arguments, flags already parsed away.
-func runNewStep(ctx context.Context, wd string, rest []string, out reporter) error {
+// positional arguments, flags already parsed away. rootFS is nil in
+// production (resolveRoot and scaffold.NewServer both read real disk); a
+// test's withRootFS runSeam substitutes an rwfs.Mem for both.
+func runNewStep(ctx context.Context, wd string, rest []string, out reporter, rootFS rwfs.FS) error {
 	switch {
 	case len(rest) == 0:
 		return out.usageError(fmt.Sprintf("brief new step: no feature given; run '%s'", newStepInvocation))
@@ -146,16 +151,16 @@ func runNewStep(ctx context.Context, wd string, rest []string, out reporter) err
 
 	feature := rest[0]
 
-	cfg, root, err := resolveRoot(wd)
+	cfg, root, err := resolveRoot(rootFS, wd)
 	if err != nil {
 		return out.refusal(err)
 	}
 
-	srv := scaffold.NewServer(cfg, root)
+	srv := scaffold.NewServer(cfg, root, scaffold.WithFS(rootFS))
 
 	res, err := srv.NewStep(ctx, feature)
 	if err != nil {
-		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err, rootFS))
 	}
 
 	if out.json {
