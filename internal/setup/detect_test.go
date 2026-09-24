@@ -33,9 +33,8 @@ var errHomeLookup = errors.New("home lookup failed")
 // detection, and reports DetectedBy empty too — it was given, not found;
 // a home() failure is treated the same as no home directory at all, never
 // a refusal. detectHost's own root and home reads both go through fsRoot
-// (detect.go), so every case here is Mem-backed; wd itself stays a real
-// t.TempDir() only because this is a real (non-DryRun) Init, which still
-// runs checkWritable (R10, unconverted) against real disk.
+// (detect.go), so every case here is fully Mem-backed, including wd —
+// newMemServer's own writableCheck never touches real disk either.
 func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 	homeWithClaude := fsAbs("home-with-claude")
 

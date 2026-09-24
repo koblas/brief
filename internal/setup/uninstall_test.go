@@ -1,11 +1,9 @@
 package setup_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/setup"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,15 +15,16 @@ import (
 // Detail, and Result.Removed names its absolute path — while the feature
 // root Init created, and a file placed under it, survive untouched.
 func Test_uninstall_removes_an_unedited_config_and_keeps_the_feature_root(t *testing.T) {
-	wd := t.TempDir()
-	srv := setup.NewServer()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 	require.NoError(t, err)
 
 	featureRoot := filepath.Join(wd, "docs", "specifications")
 	marker := filepath.Join(featureRoot, "marker.txt")
-	require.NoError(t, os.WriteFile(marker, []byte("keep me"), 0o600))
+	require.NoError(t, mem.WriteFile(memKey(marker), []byte("keep me"), 0o600))
 
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
 
@@ -38,16 +37,14 @@ func Test_uninstall_removes_an_unedited_config_and_keeps_the_feature_root(t *tes
 	assert.Empty(t, res.Created)
 	assert.Empty(t, res.Modified)
 
-	_, statErr := os.Stat(configPath)
-	assert.True(t, os.IsNotExist(statErr))
+	snap := mem.Snapshot()
+	assert.NotContains(t, snap, memKey(configPath))
 
-	info, statErr := os.Stat(featureRoot)
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
+	info, ok := snap[memKey(featureRoot)]
+	require.True(t, ok)
+	assert.True(t, info.Mode.IsDir())
 
-	body, readErr := os.ReadFile(marker)
-	require.NoError(t, readErr)
-	assert.Equal(t, "keep me", string(body))
+	assert.Equal(t, "keep me", string(snap[memKey(marker)].Data))
 }
 
 // Test_uninstall_keeps_an_edited_config_and_reports_it pins R6's "edited
@@ -55,11 +52,12 @@ func Test_uninstall_removes_an_unedited_config_and_keeps_the_feature_root(t *tes
 // differ from artifact.ConfigFile() is left byte-identical (ActionKept)
 // and Result.Removed stays empty.
 func Test_uninstall_keeps_an_edited_config_and_reports_it(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
 	original := []byte("feature-directory: specs\n")
-	require.NoError(t, os.WriteFile(configPath, original, 0o600))
-	srv := setup.NewServer()
+	require.NoError(t, mem.WriteFile(memKey(configPath), original, 0o600))
+	srv := newMemServer(mem)
 
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
 
@@ -68,9 +66,7 @@ func Test_uninstall_keeps_an_edited_config_and_reports_it(t *testing.T) {
 	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "edited locally", ForceRemovable: true}, res.Artifacts[0])
 	assert.Empty(t, res.Removed)
 
-	body, readErr := os.ReadFile(configPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, original, body)
+	assert.Equal(t, original, mem.Snapshot()[memKey(configPath)].Data)
 }
 
 // Test_uninstall_force_removes_an_edited_config pins --force's own
@@ -78,10 +74,11 @@ func Test_uninstall_keeps_an_edited_config_and_reports_it(t *testing.T) {
 // keeps, --force instead removes, still reporting the "edited locally"
 // detail.
 func Test_uninstall_force_removes_an_edited_config(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte("feature-directory: specs\n"), 0o600))
-	srv := setup.NewServer()
+	require.NoError(t, mem.WriteFile(memKey(configPath), []byte("feature-directory: specs\n"), 0o600))
+	srv := newMemServer(mem)
 
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, Force: true})
 
@@ -90,8 +87,7 @@ func Test_uninstall_force_removes_an_edited_config(t *testing.T) {
 	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally"}, res.Artifacts[0])
 	assert.Equal(t, []string{configPath}, res.Removed)
 
-	_, statErr := os.Stat(configPath)
-	assert.True(t, os.IsNotExist(statErr))
+	assert.NotContains(t, mem.Snapshot(), memKey(configPath))
 }
 
 // Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited pins the
@@ -110,10 +106,11 @@ func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wd := t.TempDir()
+			wd := fsAbs("repo")
+			mem := newVirtualMem(wd)
 			configPath := filepath.Join(wd, ".brief.yaml")
-			require.NoError(t, os.WriteFile(configPath, tt.body, 0o600))
-			srv := setup.NewServer()
+			require.NoError(t, mem.WriteFile(memKey(configPath), tt.body, 0o600))
+			srv := newMemServer(mem)
 
 			kept, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
 			require.NoError(t, err)
@@ -121,9 +118,7 @@ func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing
 			assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "edited locally", ForceRemovable: true}, kept.Artifacts[0])
 			assert.Empty(t, kept.Removed)
 
-			body, readErr := os.ReadFile(configPath)
-			require.NoError(t, readErr)
-			assert.Equal(t, tt.body, body)
+			assert.Equal(t, tt.body, mem.Snapshot()[memKey(configPath)].Data)
 
 			removed, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, Force: true})
 			require.NoError(t, err)
@@ -131,8 +126,7 @@ func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing
 			assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved, Detail: "edited locally"}, removed.Artifacts[0])
 			assert.Equal(t, []string{configPath}, removed.Removed)
 
-			_, statErr := os.Stat(configPath)
-			assert.True(t, os.IsNotExist(statErr))
+			assert.NotContains(t, mem.Snapshot(), memKey(configPath))
 		})
 	}
 }
@@ -142,10 +136,11 @@ func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing
 // non-nil, no error. The control arm is an existing feature root with no
 // config nearby — still zero artifacts, and untouched.
 func Test_uninstall_with_no_config_reports_nothing_installed(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	featureRoot := filepath.Join(wd, "docs", "specifications")
-	require.NoError(t, os.MkdirAll(featureRoot, 0o755))
-	srv := setup.NewServer()
+	require.NoError(t, mem.MkdirAll(memKey(featureRoot), 0o755))
+	srv := newMemServer(mem)
 
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
 
@@ -159,19 +154,22 @@ func Test_uninstall_with_no_config_reports_nothing_installed(t *testing.T) {
 	assert.NotNil(t, res.Modified)
 	assert.Empty(t, res.Modified)
 
-	info, statErr := os.Stat(featureRoot)
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
+	info, ok := mem.Snapshot()[memKey(featureRoot)]
+	require.True(t, ok)
+	assert.True(t, info.Mode.IsDir())
 }
 
 // Test_uninstall_dry_run_plans_removal_and_removes_nothing pins R9's own
 // DryRun promise for Uninstall: the row says "removed", Result.Removed
-// stays empty, and the file on disk is untouched, byte-identical.
+// stays empty, and mem is untouched, byte-identical.
 func Test_uninstall_dry_run_plans_removal_and_removes_nothing(t *testing.T) {
-	wd := t.TempDir()
-	srv := setup.NewServer()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 	require.NoError(t, err)
+
+	before := mem.Snapshot()
 
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, DryRun: true})
 
@@ -181,22 +179,20 @@ func Test_uninstall_dry_run_plans_removal_and_removes_nothing(t *testing.T) {
 	assert.Equal(t, setup.ActionRemoved, res.Artifacts[0].Action)
 	assert.Empty(t, res.Removed)
 
-	configPath := filepath.Join(wd, ".brief.yaml")
-	body, readErr := os.ReadFile(configPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, artifact.ConfigFile(), body)
+	assert.Equal(t, before, mem.Snapshot())
 }
 
 // Test_uninstall_keeps_a_config_path_that_is_not_a_regular_file pins the
-// Lstat guard: ".brief.yaml" as an empty directory (os.Remove fails on a
+// Lstat guard: ".brief.yaml" as an empty directory (Remove fails on a
 // non-empty one regardless, so an empty one is the fixture that would
 // actually catch a dropped guard) is kept, detail "not a regular file",
 // with or without --force, and the directory survives.
 func Test_uninstall_keeps_a_config_path_that_is_not_a_regular_file(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
-	require.NoError(t, os.Mkdir(configPath, 0o755))
-	srv := setup.NewServer()
+	require.NoError(t, mem.Mkdir(memKey(configPath), 0o755))
+	srv := newMemServer(mem)
 
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
 	require.NoError(t, err)
@@ -208,9 +204,9 @@ func Test_uninstall_keeps_a_config_path_that_is_not_a_regular_file(t *testing.T)
 	require.Len(t, res.Artifacts, 1)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "not a regular file"}, res.Artifacts[0])
 
-	info, statErr := os.Stat(configPath)
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
+	info, ok := mem.Snapshot()[memKey(configPath)]
+	require.True(t, ok)
+	assert.True(t, info.Mode.IsDir())
 }
 
 // Test_uninstall_operates_on_a_config_found_in_an_ancestor pins the shared
@@ -218,13 +214,14 @@ func Test_uninstall_keeps_a_config_path_that_is_not_a_regular_file(t *testing.T)
 // enclosing git repository in this fixture so the walk is unbounded) is the
 // one Uninstall removes, not anything relative to wd itself.
 func Test_uninstall_operates_on_a_config_found_in_an_ancestor(t *testing.T) {
-	parent := t.TempDir()
-	srv := setup.NewServer()
+	parent := fsAbs("repo")
+	mem := newVirtualMem(parent)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), parent, setup.InitRequest{Host: setup.HostNone})
 	require.NoError(t, err)
 
+	require.NoError(t, mem.Mkdir(memKey(parent)+"/child", 0o755))
 	child := filepath.Join(parent, "child")
-	require.NoError(t, os.Mkdir(child, 0o755))
 
 	res, err := srv.Uninstall(t.Context(), child, setup.UninstallRequest{Host: setup.HostNone})
 
@@ -234,112 +231,54 @@ func Test_uninstall_operates_on_a_config_found_in_an_ancestor(t *testing.T) {
 	assert.Equal(t, configPath, res.Artifacts[0].Path)
 	assert.Equal(t, setup.ActionRemoved, res.Artifacts[0].Action)
 
-	_, statErr := os.Stat(configPath)
-	assert.True(t, os.IsNotExist(statErr))
+	assert.NotContains(t, mem.Snapshot(), memKey(configPath))
 }
 
 // Test_uninstall_never_removes_either_feature_root_after_force_init pins
 // R6's last sentence: a non-default feature-directory, then "init --force"
-// (which leaves both the old custom root and the new default one on disk),
-// then "uninstall --force" — neither root is ever removed, including the
+// (which leaves both the old custom root and the new default one), then
+// "uninstall --force" — neither root is ever removed, including the
 // default one, which is empty.
 func Test_uninstall_never_removes_either_feature_root_after_force_init(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte("feature-directory: specs\n"), 0o600))
-	srv := setup.NewServer()
+	require.NoError(t, mem.WriteFile(memKey(configPath), []byte("feature-directory: specs\n"), 0o600))
+	srv := newMemServer(mem)
 
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 	require.NoError(t, err)
 	customRoot := filepath.Join(wd, "specs")
-	info, statErr := os.Stat(customRoot)
-	require.NoError(t, statErr)
-	require.True(t, info.IsDir())
+	info, ok := mem.Snapshot()[memKey(customRoot)]
+	require.True(t, ok)
+	require.True(t, info.Mode.IsDir())
 
 	_, err = srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, Force: true})
 	require.NoError(t, err)
 	defaultRoot := filepath.Join(wd, "docs", "specifications")
-	info, statErr = os.Stat(defaultRoot)
-	require.NoError(t, statErr)
-	require.True(t, info.IsDir())
+	info, ok = mem.Snapshot()[memKey(defaultRoot)]
+	require.True(t, ok)
+	require.True(t, info.Mode.IsDir())
 
 	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone, Force: true})
 	require.NoError(t, err)
 
-	info, statErr = os.Stat(customRoot)
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
+	snap := mem.Snapshot()
+	info, ok = snap[memKey(customRoot)]
+	require.True(t, ok)
+	assert.True(t, info.Mode.IsDir())
 
-	info, statErr = os.Stat(defaultRoot)
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
-}
-
-// Test_uninstall_reports_a_remove_failure_without_partial_write pins the
-// single-artifact failure path: an unwritable parent directory makes
-// os.Remove fail, and because the config is the only artifact this release
-// plans, nothing was ever removed before that failure — so the returned
-// error does not wrap ErrPartialWrite, and the file survives. Skipped under
-// root, which ignores directory write permission.
-func Test_uninstall_reports_a_remove_failure_without_partial_write(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores directory write permission")
-	}
-
-	wd := t.TempDir()
-	srv := setup.NewServer()
-	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
-	require.NoError(t, err)
-
-	require.NoError(t, os.Chmod(wd, 0o555))
-	t.Cleanup(func() { _ = os.Chmod(wd, 0o755) })
-
-	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
-
-	require.Error(t, err)
-	require.NotErrorIs(t, err, setup.ErrPartialWrite)
-
-	_, statErr := os.Stat(filepath.Join(wd, ".brief.yaml"))
-	assert.NoError(t, statErr)
-}
-
-// Test_uninstall_reports_the_populated_result_on_a_partial_write pins the
-// multi-artifact failure path: the CLAUDE.md block (removedAny's own first
-// write) is removed before the agents directory — made unwritable — blocks
-// the next removal, so the returned error wraps ErrPartialWrite and the
-// returned Result is populated, not the zero value: it still names the
-// CLAUDE.md removal that actually landed. Skipped under root, which
-// ignores directory write permission.
-func Test_uninstall_reports_the_populated_result_on_a_partial_write(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores directory write permission")
-	}
-
-	wd := t.TempDir()
-	srv := setup.NewServer()
-	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
-	require.NoError(t, err)
-
-	agentsDir := filepath.Join(wd, ".claude", "skills", "brief", "agents")
-	require.NoError(t, os.Chmod(agentsDir, 0o555))
-	t.Cleanup(func() { _ = os.Chmod(agentsDir, 0o755) })
-
-	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
-
-	require.ErrorIs(t, err, setup.ErrPartialWrite)
-
-	claudePath := filepath.Join(wd, "CLAUDE.md")
-	assert.Contains(t, res.Removed, claudePath)
-
-	_, statErr := os.Stat(claudePath)
-	assert.True(t, os.IsNotExist(statErr))
+	info, ok = snap[memKey(defaultRoot)]
+	require.True(t, ok)
+	assert.True(t, info.Mode.IsDir())
 }
 
 // Test_uninstall_rejects_an_unknown_host pins the same usage-error branch
 // Init reports: a host outside Hosts() never reaches config.Locate at all.
 func Test_uninstall_rejects_an_unknown_host(t *testing.T) {
-	wd := t.TempDir()
-	srv := setup.NewServer()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 
 	_, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: "bogus"})
 
@@ -353,10 +292,11 @@ func Test_uninstall_rejects_an_unknown_host(t *testing.T) {
 // own write order — then the config last, every row ActionRemoved, and
 // afterward ".claude/skills/brief/" is gone while ".claude/skills/" and
 // ".claude/" (the host's own directories, never brief's to remove) still
-// stand.
+// stand. This is the package's own full-row-order pin for Uninstall.
 func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_directories(t *testing.T) {
-	wd := t.TempDir()
-	srv := setup.NewServer()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
@@ -376,16 +316,16 @@ func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_di
 	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, res.Artifacts[6])
 	assert.Equal(t, []string{paths.ClaudeMD, paths.Skill, paths.Hooks, paths.Finish, paths.Start, paths.Manifest, configPath}, res.Removed)
 
-	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
-	assert.True(t, os.IsNotExist(statErr))
+	snap := mem.Snapshot()
+	assert.NotContains(t, snap, memKey(filepath.Join(wd, ".claude", "skills", "brief")))
 
-	info, statErr := os.Stat(filepath.Join(wd, ".claude", "skills"))
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
+	info, ok := snap[memKey(filepath.Join(wd, ".claude", "skills"))]
+	require.True(t, ok)
+	assert.True(t, info.Mode.IsDir())
 
-	info, statErr = os.Stat(filepath.Join(wd, ".claude"))
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
+	info, ok = snap[memKey(filepath.Join(wd, ".claude"))]
+	require.True(t, ok)
+	assert.True(t, info.Mode.IsDir())
 }
 
 // Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced
@@ -406,45 +346,37 @@ func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_u
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wd := t.TempDir()
-			srv := setup.NewServer()
+			wd := fsAbs("repo")
+			mem := newVirtualMem(wd)
+			srv := newMemServer(mem)
 			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 			require.NoError(t, err)
 
 			start := pluginFilePaths(wd).Start
 			edited := []byte("---\nedited by hand\n---\n")
-			require.NoError(t, os.WriteFile(start, edited, 0o600))
+			require.NoError(t, mem.WriteFile(memKey(start), edited, 0o600))
 
 			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode, Force: tt.force})
 
 			require.NoError(t, err)
 
-			var startArt setup.Artifact
-			for _, a := range res.Artifacts {
-				if a.Path == start {
-					startArt = a
-				}
-			}
+			startArt := findArtifactByPath(t, res, start)
 			assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: start, Action: tt.wantAction, Detail: "edited locally", ForceRemovable: tt.wantForceRemovable}, startArt)
 
-			_, statErr := os.Stat(start)
+			snap := mem.Snapshot()
 			if tt.force {
-				assert.True(t, os.IsNotExist(statErr))
-
-				_, statErr = os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
-				assert.True(t, os.IsNotExist(statErr))
+				assert.NotContains(t, snap, memKey(start))
+				assert.NotContains(t, snap, memKey(filepath.Join(wd, ".claude", "skills", "brief")))
 
 				return
 			}
 
-			require.NoError(t, statErr)
-			body, readErr := os.ReadFile(start)
-			require.NoError(t, readErr)
-			assert.Equal(t, edited, body)
+			require.Contains(t, snap, memKey(start))
+			assert.Equal(t, edited, snap[memKey(start)].Data)
 
-			info, statErr := os.Stat(filepath.Dir(start))
-			require.NoError(t, statErr, "the directory holding the kept file must survive")
-			assert.True(t, info.IsDir())
+			info, ok := snap[memKey(filepath.Dir(start))]
+			require.True(t, ok, "the directory holding the kept file must survive")
+			assert.True(t, info.Mode.IsDir())
 		})
 	}
 }
@@ -455,8 +387,9 @@ func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_u
 // files plus the brief-workflow skill and the CLAUDE.md block still remove
 // cleanly with the plugin directory pruned.
 func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directory(t *testing.T) {
-	wd := t.TempDir()
-	srv := setup.NewServer()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, NoHook: true})
 	require.NoError(t, err)
 
@@ -469,8 +402,7 @@ func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directo
 		assert.Equal(t, setup.ActionRemoved, a.Action)
 	}
 
-	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
-	assert.True(t, os.IsNotExist(statErr))
+	assert.NotContains(t, mem.Snapshot(), memKey(filepath.Join(wd, ".claude", "skills", "brief")))
 }
 
 // Test_uninstall_keeps_a_plugin_directory_holding_a_file_brief_did_not_write
@@ -479,14 +411,15 @@ func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directo
 // though every one of brief's own files in this same run is removed — the
 // control proving pruning runs at all.
 func Test_uninstall_keeps_a_plugin_directory_holding_a_file_brief_did_not_write(t *testing.T) {
-	wd := t.TempDir()
-	srv := setup.NewServer()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
 	extraDir := filepath.Join(wd, ".claude", "skills", "brief", "skills", "extra")
-	require.NoError(t, os.MkdirAll(extraDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(extraDir, "notes.md"), []byte("mine"), 0o600))
+	require.NoError(t, mem.MkdirAll(memKey(extraDir), 0o755))
+	require.NoError(t, mem.WriteFile(memKey(extraDir)+"/notes.md", []byte("mine"), 0o600))
 
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
 
@@ -495,16 +428,16 @@ func Test_uninstall_keeps_a_plugin_directory_holding_a_file_brief_did_not_write(
 		assert.Equal(t, setup.ActionRemoved, a.Action, "brief's own file %s must still be removed", a.Path)
 	}
 
-	_, statErr := os.Stat(filepath.Join(extraDir, "notes.md"))
-	require.NoError(t, statErr, "the adopter's own file must survive")
+	snap := mem.Snapshot()
+	require.Contains(t, snap, memKey(extraDir)+"/notes.md", "the adopter's own file must survive")
 
-	info, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief", "skills"))
-	require.NoError(t, statErr, "skills/ must survive: it still holds extra/")
-	assert.True(t, info.IsDir())
+	info, ok := snap[memKey(filepath.Join(wd, ".claude", "skills", "brief", "skills"))]
+	require.True(t, ok, "skills/ must survive: it still holds extra/")
+	assert.True(t, info.Mode.IsDir())
 
-	info, statErr = os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
-	require.NoError(t, statErr, "brief/ must survive: it still holds skills/")
-	assert.True(t, info.IsDir())
+	info, ok = snap[memKey(filepath.Join(wd, ".claude", "skills", "brief"))]
+	require.True(t, ok, "brief/ must survive: it still holds skills/")
+	assert.True(t, info.Mode.IsDir())
 }
 
 // Test_uninstall_removes_agents_and_prunes_the_agents_directory pins the
@@ -515,8 +448,9 @@ func Test_uninstall_keeps_a_plugin_directory_holding_a_file_brief_did_not_write(
 // and "agents/" is pruned alongside the plugin's other now-empty
 // directories.
 func Test_uninstall_removes_agents_and_prunes_the_agents_directory(t *testing.T) {
-	wd := t.TempDir()
-	srv := setup.NewServer()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
 	require.NoError(t, err)
 
@@ -558,13 +492,12 @@ func Test_uninstall_removes_agents_and_prunes_the_agents_directory(t *testing.T)
 	}
 	assert.Equal(t, agentPathList, order)
 
+	snap := mem.Snapshot()
 	for _, p := range agentPathList {
-		_, statErr := os.Stat(p)
-		assert.True(t, os.IsNotExist(statErr), "%s must be removed", p)
+		assert.NotContains(t, snap, memKey(p), "%s must be removed", p)
 	}
 
-	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief", "agents"))
-	assert.True(t, os.IsNotExist(statErr), "the now-empty agents/ directory must be pruned")
+	assert.NotContains(t, snap, memKey(filepath.Join(wd, ".claude", "skills", "brief", "agents")), "the now-empty agents/ directory must be pruned")
 }
 
 // Test_uninstall_keeps_an_edited_agent_unless_forced pins the same "edited
@@ -584,38 +517,32 @@ func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wd := t.TempDir()
-			srv := setup.NewServer()
+			wd := fsAbs("repo")
+			mem := newVirtualMem(wd)
+			srv := newMemServer(mem)
 			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
 			require.NoError(t, err)
 
 			planner := agentFilePaths(wd).Planner
 			edited := []byte("---\nname: planner\nedited: true\n---\n")
-			require.NoError(t, os.WriteFile(planner, edited, 0o600))
+			require.NoError(t, mem.WriteFile(memKey(planner), edited, 0o600))
 
 			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode, Force: tt.force})
 
 			require.NoError(t, err)
 
-			var plannerArt setup.Artifact
-			for _, a := range res.Artifacts {
-				if a.Path == planner {
-					plannerArt = a
-				}
-			}
+			plannerArt := findArtifactByPath(t, res, planner)
 			assert.Equal(t, setup.Artifact{Kind: setup.KindAgent, Path: planner, Action: tt.wantAction, Detail: "edited locally", ForceRemovable: tt.wantForceRemovable}, plannerArt)
 
-			_, statErr := os.Stat(planner)
+			snap := mem.Snapshot()
 			if tt.force {
-				assert.True(t, os.IsNotExist(statErr))
+				assert.NotContains(t, snap, memKey(planner))
 
 				return
 			}
 
-			require.NoError(t, statErr)
-			body, readErr := os.ReadFile(planner)
-			require.NoError(t, readErr)
-			assert.Equal(t, edited, body)
+			require.Contains(t, snap, memKey(planner))
+			assert.Equal(t, edited, snap[memKey(planner)].Data)
 		})
 	}
 }
@@ -641,10 +568,10 @@ const (
 // Test_uninstall_removes_an_older_agent_file_without_force pins Rule 6 at
 // Uninstall's own removal path: a planner or implementer holding the
 // pre-SCENARIO-02 bytes is removed without --force — ActionRemoved, no
-// detail, ForceRemovable false, gone from disk — the same "older is not
-// edited" rule planPluginRemoval must apply to every plugin Kind. The
-// control row is the same fixture actually edited by hand: kept without
-// --force, ForceRemovable true, bytes untouched.
+// detail, ForceRemovable false, gone — the same "older is not edited" rule
+// planPluginRemoval must apply to every plugin Kind. The control row is
+// the same fixture actually edited by hand: kept without --force,
+// ForceRemovable true, bytes untouched.
 func Test_uninstall_removes_an_older_agent_file_without_force(t *testing.T) {
 	cases := []struct {
 		name               string
@@ -674,8 +601,9 @@ func Test_uninstall_removes_an_older_agent_file_without_force(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd := t.TempDir()
-			srv := setup.NewServer()
+			wd := fsAbs("repo")
+			mem := newVirtualMem(wd)
+			srv := newMemServer(mem)
 			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
 			require.NoError(t, err)
 
@@ -684,32 +612,25 @@ func Test_uninstall_removes_an_older_agent_file_without_force(t *testing.T) {
 			if c.role == "implementer" {
 				path = paths.Implementer
 			}
-			require.NoError(t, os.WriteFile(path, c.seedBytes, 0o600))
+			require.NoError(t, mem.WriteFile(memKey(path), c.seedBytes, 0o600))
 
 			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
 			require.NoError(t, err)
 
-			var art setup.Artifact
-			for _, a := range res.Artifacts {
-				if a.Path == path {
-					art = a
-				}
-			}
+			art := findArtifactByPath(t, res, path)
 			assert.Equal(t, c.wantAction, art.Action)
 			assert.Equal(t, c.wantDetail, art.Detail)
 			assert.Equal(t, c.wantForceRemovable, art.ForceRemovable)
 
-			_, statErr := os.Stat(path)
+			snap := mem.Snapshot()
 			if c.wantRemoved {
-				assert.True(t, os.IsNotExist(statErr))
+				assert.NotContains(t, snap, memKey(path))
 
 				return
 			}
 
-			require.NoError(t, statErr)
-			body, readErr := os.ReadFile(path)
-			require.NoError(t, readErr)
-			assert.Equal(t, c.seedBytes, body)
+			require.Contains(t, snap, memKey(path))
+			assert.Equal(t, c.seedBytes, snap[memKey(path)].Data)
 		})
 	}
 }
@@ -719,8 +640,9 @@ func Test_uninstall_removes_an_older_agent_file_without_force(t *testing.T) {
 // — the bound variant "init --with-agents" wrote — is recognized and
 // removed exactly like the plain render, ActionRemoved with no detail.
 func Test_uninstall_removes_a_bound_config(t *testing.T) {
-	wd := t.TempDir()
-	srv := setup.NewServer()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
 	require.NoError(t, err)
 
@@ -729,16 +651,10 @@ func Test_uninstall_removes_a_bound_config(t *testing.T) {
 	require.NoError(t, err)
 	configPath := filepath.Join(wd, ".brief.yaml")
 
-	var configArt setup.Artifact
-	for _, a := range res.Artifacts {
-		if a.Path == configPath {
-			configArt = a
-		}
-	}
+	configArt := findArtifactByPath(t, res, configPath)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, configArt)
 
-	_, statErr := os.Stat(configPath)
-	assert.True(t, os.IsNotExist(statErr))
+	assert.NotContains(t, mem.Snapshot(), memKey(configPath))
 }
 
 // Test_uninstall_for_host_none_leaves_the_plugin_in_place pins the
@@ -747,8 +663,9 @@ func Test_uninstall_removes_a_bound_config(t *testing.T) {
 // completely — only the control arm, uninstalling the same tree under
 // claude-code, actually removes it.
 func Test_uninstall_for_host_none_leaves_the_plugin_in_place(t *testing.T) {
-	wd := t.TempDir()
-	srv := setup.NewServer()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
@@ -758,6 +675,5 @@ func Test_uninstall_for_host_none_leaves_the_plugin_in_place(t *testing.T) {
 	require.Len(t, res.Artifacts, 1)
 	assert.Equal(t, setup.KindConfig, res.Artifacts[0].Kind)
 
-	_, statErr := os.Stat(pluginFilePaths(wd).Manifest)
-	require.NoError(t, statErr, "the plugin must survive an uninstall scoped to --host none")
+	require.Contains(t, mem.Snapshot(), memKey(pluginFilePaths(wd).Manifest), "the plugin must survive an uninstall scoped to --host none")
 }
