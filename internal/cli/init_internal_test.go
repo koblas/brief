@@ -1,88 +1,31 @@
 // This file reaches the unexported run directly to inject a runSeam: the
 // rwfs.Mem-backed cases below substitute setup.WithFSRoot (plus
-// WithResolveRoot, WithHomeDir and WithWritableCheck) via newMemInitSeam so
-// host detection (R8) and the plain install path never touch real disk or
-// the developer's own "~/.claude". init's bound-agent and
-// missing-workflow-skill tests stay in init_bound_agent_internal_test.go: bound_agent.go's
-// own confinedAgentFile always reads and writes real agent files through
-// real disk regardless of setup.WithFSRoot (internal/setup's own doc.go),
-// so no rwfs.Mem fixture can stand in for one. This file also calls
-// missingSkillHeader and missingSkillLines directly, unexported: both are
-// pure functions of a []setup.MissingSkillAgent, and their own combined
-// four-group rendering is pinned against hand-built rows rather than
-// through real agent files on disk.
+// WithResolveRoot, WithHomeDir and WithWritableCheck) via newMemSetupSeam
+// (mem_internal_test.go) so host detection (R8) and the plain install path never
+// touch real disk or the developer's own "~/.claude". init's bound-agent
+// and missing-workflow-skill tests stay in
+// init_bound_agent_internal_test.go: bound_agent.go's own confinedAgentFile
+// always reads and writes real agent files through real disk regardless of
+// setup.WithFSRoot (internal/setup's own doc.go), so no rwfs.Mem fixture
+// can stand in for one. This file also calls missingSkillHeader and
+// missingSkillLines directly, unexported: both are pure functions of a
+// []setup.MissingSkillAgent, and their own combined four-group rendering
+// is pinned against hand-built rows rather than through real agent files
+// on disk.
 
 package cli
 
 import (
 	"bytes"
-	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/koblas/brief/internal/platform/agentfile"
-	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/setup"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// fsAbs joins slash-separated segments under "/", the way every
-// newMemInitSeam-backed test names an absolute path its rwfs.Mem fixture
-// is keyed against. Identical to internal/setup's, config's, repo's and
-// doctor's own fsAbs test helper, duplicated for the same reason those
-// packages duplicate fsName from each other.
-func fsAbs(elem ...string) string {
-	return filepath.FromSlash("/" + filepath.ToSlash(filepath.Join(elem...)))
-}
-
-// memKey turns abs — an already-absolute, fsAbs-fabricated path — into the
-// name a Mem's own fstest.MapFS is keyed against: fsName's own inverse
-// (internal/setup's fs.go, package-private, so this package cannot call it
-// directly), duplicated for the same reason internal/setup's own mem_test.go
-// duplicates it from config/repo/doctor.
-func memKey(abs string) string {
-	trimmed := strings.TrimPrefix(filepath.ToSlash(abs), "/")
-	if trimmed == "" {
-		return "."
-	}
-
-	return trimmed
-}
-
-// newVirtualMem returns an rwfs.Mem seeded with root as an explicit
-// directory entry — every fsys read Init performs starts by confirming wd
-// itself exists (config.LocateWithinFS's own first check), so any fixture
-// needs at least this much regardless of what else it seeds. root is
-// virtual, fabricated as an absolute path — never a real disk path — since
-// newMemInitSeam's own writableCheck never reaches real disk to ask.
-func newVirtualMem(root string) *rwfs.Mem {
-	return rwfs.NewMem(fstest.MapFS{memKey(root): &fstest.MapFile{Mode: fs.ModeDir | 0o755}})
-}
-
-// newMemInitSeam returns the runSeam a command-level init/uninstall test
-// runs mem's own fixture through instead of real disk: setup.WithFSRoot and
-// setup.WithResolveRoot(identity) — mem names no real directory for
-// filepath.EvalSymlinks to resolve — plus setup.WithWritableCheck's own
-// no-op, so R10's pre-write check never asks real disk about a target that
-// only exists on mem, mirroring internal/setup's own newMemServer recipe
-// (mem_test.go). setup.WithHomeDir defaults to a fixed empty string, the
-// same as emptyHomeSeam, so a bare-name role binding never resolves against
-// the developer's own real "~/.claude/agents"; extra opts are appended
-// last, so a test can still override any of these without repeating the
-// others.
-func newMemInitSeam(mem *rwfs.Mem, extra ...setup.Option) runSeam {
-	opts := append([]setup.Option{
-		setup.WithFSRoot(mem),
-		setup.WithResolveRoot(func(root string) (string, error) { return root, nil }),
-		setup.WithHomeDir(func() (string, error) { return "", nil }),
-		setup.WithWritableCheck(func([]string) error { return nil }),
-	}, extra...)
-
-	return withSetupOpts(opts...)
-}
 
 // Test_init_without_host_detects_the_host_from_the_tree pins R8's
 // detection rule at the cli boundary: nothing present resolves to
@@ -95,7 +38,7 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 		mem := newVirtualMem(wd)
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, newMemInitSeam(mem))
+		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Equal(t, "created .brief.yaml\ncreated docs/specifications/\n", stdout.String())
@@ -108,7 +51,7 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 		require.NoError(t, mem.WriteFile(memKey(filepath.Join(wd, "CLAUDE.md")), []byte("# hi\n"), 0o600))
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, newMemInitSeam(mem))
+		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Contains(t, stdout.String(), "created .claude/skills/brief/.claude-plugin/plugin.json\n")
@@ -123,7 +66,7 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 		require.NoError(t, mem.Mkdir(memKey(filepath.Join(wd, ".claude")), 0o755))
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, newMemInitSeam(mem))
+		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Equal(t, "brief init: installed for claude-code (detected .claude; use --host none to skip); "+
@@ -137,7 +80,7 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 		require.NoError(t, mem.Mkdir(memKey(filepath.Join(wd, ".claude")), 0o755))
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, newMemInitSeam(mem))
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
@@ -148,7 +91,7 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 		mem := newVirtualMem(wd)
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init", "--json"}, nil, &stdout, &stderr, noBuildInfo, newMemInitSeam(mem))
+		err := run(t.Context(), wd, []string{"init", "--json"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Empty(t, stderr.String())
@@ -162,7 +105,7 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 		require.NoError(t, mem.Mkdir(memKey(filepath.Join(wd, ".claude")), 0o755))
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init", "--json"}, nil, &stdout, &stderr, noBuildInfo, newMemInitSeam(mem))
+		err := run(t.Context(), wd, []string{"init", "--json"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Empty(t, stderr.String())
@@ -180,7 +123,7 @@ func Test_init_with_agents_follows_the_detected_host(t *testing.T) {
 		mem := newVirtualMem(wd)
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemInitSeam(mem))
+		err := run(t.Context(), wd, []string{"init", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.Error(t, err)
 		assert.Equal(t, 2, ExitCode(err))
@@ -197,7 +140,7 @@ func Test_init_with_agents_follows_the_detected_host(t *testing.T) {
 		require.NoError(t, mem.Mkdir(memKey(filepath.Join(wd, ".claude")), 0o755))
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemInitSeam(mem))
+		err := run(t.Context(), wd, []string{"init", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Contains(t, stdout.String(), "created .claude/skills/brief/agents/planner.md\n")
@@ -213,7 +156,7 @@ func Test_init_edit_agents_requires_claude_code(t *testing.T) {
 	mem := newVirtualMem(wd)
 	var stdout, stderr bytes.Buffer
 
-	err := run(t.Context(), wd, []string{"init", "--host", "none", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemInitSeam(mem))
+	err := run(t.Context(), wd, []string{"init", "--host", "none", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 	require.Error(t, err)
 	assert.Equal(t, 2, ExitCode(err))
