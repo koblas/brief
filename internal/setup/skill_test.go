@@ -1,7 +1,6 @@
 package setup_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -66,8 +65,9 @@ func Test_init_for_claude_code_writes_the_workflow_skill_after_the_hook(t *testi
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd := t.TempDir()
-			srv := newServer(t)
+			wd := fsAbs("repo")
+			mem := newVirtualMem(wd)
+			srv := newMemServer(mem)
 
 			res, err := srv.Init(t.Context(), wd, c.req)
 
@@ -85,9 +85,7 @@ func Test_init_for_claude_code_writes_the_workflow_skill_after_the_hook(t *testi
 			assert.Equal(t, skillFilePath(wd), skillArt.Path)
 			assert.Equal(t, setup.ActionCreated, skillArt.Action)
 
-			body, readErr := os.ReadFile(skillFilePath(wd))
-			require.NoError(t, readErr)
-			assert.Equal(t, artifact.SkillWorkflow(), body)
+			assert.Equal(t, artifact.SkillWorkflow(), mem.Snapshot()[memKey(skillFilePath(wd))].Data)
 		})
 	}
 }
@@ -97,8 +95,9 @@ func Test_init_for_claude_code_writes_the_workflow_skill_after_the_hook(t *testi
 // while the control arm — the identical repository, initialized under
 // claude-code — does.
 func Test_init_for_host_none_writes_no_skill_row(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 
@@ -107,11 +106,12 @@ func Test_init_for_host_none_writes_no_skill_row(t *testing.T) {
 		assert.NotEqual(t, setup.KindSkill, a.Kind)
 	}
 
-	_, statErr := os.Stat(skillFilePath(wd))
-	assert.True(t, os.IsNotExist(statErr))
+	assert.NotContains(t, mem.Snapshot(), memKey(skillFilePath(wd)))
 
-	control := t.TempDir()
-	controlRes, err := srv.Init(t.Context(), control, setup.InitRequest{Host: setup.HostClaudeCode})
+	control := fsAbs("control")
+	controlMem := newVirtualMem(control)
+	controlSrv := newMemServer(controlMem)
+	controlRes, err := controlSrv.Init(t.Context(), control, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
 	var sawSkill bool
@@ -127,8 +127,9 @@ func Test_init_for_host_none_writes_no_skill_row(t *testing.T) {
 // convergence for the skill file: a second, identical run reports it
 // ActionUnchanged and writes nothing further.
 func Test_rerunning_init_for_claude_code_reports_the_skill_unchanged(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
@@ -136,12 +137,7 @@ func Test_rerunning_init_for_claude_code_reports_the_skill_unchanged(t *testing.
 
 	require.NoError(t, err)
 
-	var skillArt setup.Artifact
-	for _, a := range res.Artifacts {
-		if a.Kind == setup.KindSkill {
-			skillArt = a
-		}
-	}
+	skillArt := findArtifact(t, res, setup.KindSkill)
 	assert.Equal(t, setup.ActionUnchanged, skillArt.Action)
 	assert.NotContains(t, res.Created, skillFilePath(wd))
 }
@@ -151,81 +147,69 @@ func Test_rerunning_init_for_claude_code_reports_the_skill_unchanged(t *testing.
 // edited copy is kept, ActionKept, detail "edited locally", byte-identical,
 // even under --force — which only ever rewrites the config.
 func Test_init_keeps_an_edited_skill_file_even_under_force(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
 	edited := []byte("---\nedited by hand\n---\n")
-	require.NoError(t, os.WriteFile(skillFilePath(wd), edited, 0o600))
+	require.NoError(t, mem.WriteFile(memKey(skillFilePath(wd)), edited, 0o600))
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, Force: true})
 
 	require.NoError(t, err)
 
-	var skillArt setup.Artifact
-	for _, a := range res.Artifacts {
-		if a.Kind == setup.KindSkill {
-			skillArt = a
-		}
-	}
+	skillArt := findArtifact(t, res, setup.KindSkill)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindSkill, Path: skillFilePath(wd), Action: setup.ActionKept, Detail: "edited locally"}, skillArt)
 
-	body, readErr := os.ReadFile(skillFilePath(wd))
-	require.NoError(t, readErr)
-	assert.Equal(t, edited, body)
+	assert.Equal(t, edited, mem.Snapshot()[memKey(skillFilePath(wd))].Data)
 }
 
 // Test_init_keeps_a_skill_path_that_is_not_a_regular_file pins the Lstat
 // guard mirroring a plugin file's own: a directory at the skill's own path
 // is kept, detail "not a regular file", never followed nor written.
 func Test_init_keeps_a_skill_path_that_is_not_a_regular_file(t *testing.T) {
-	wd := t.TempDir()
-	require.NoError(t, os.MkdirAll(skillFilePath(wd), 0o755))
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	require.NoError(t, mem.MkdirAll(memKey(skillFilePath(wd)), 0o755))
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 
 	require.NoError(t, err)
 
-	var skillArt setup.Artifact
-	for _, a := range res.Artifacts {
-		if a.Kind == setup.KindSkill {
-			skillArt = a
-		}
-	}
+	skillArt := findArtifact(t, res, setup.KindSkill)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindSkill, Path: skillFilePath(wd), Action: setup.ActionKept, Detail: "not a regular file"}, skillArt)
 }
 
 // Test_init_dry_run_for_claude_code_reports_the_skill_row_and_writes_nothing
 // pins R9 for the skill: the same pending row a real run would report, and
-// no file on disk afterward.
+// no bytes written to mem afterward.
 func Test_init_dry_run_for_claude_code_reports_the_skill_row_and_writes_nothing(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	before := mem.Snapshot()
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, DryRun: true})
 
 	require.NoError(t, err)
 
-	var skillArt setup.Artifact
-	for _, a := range res.Artifacts {
-		if a.Kind == setup.KindSkill {
-			skillArt = a
-		}
-	}
+	skillArt := findArtifact(t, res, setup.KindSkill)
 	assert.Equal(t, setup.ActionCreated, skillArt.Action)
 
-	_, statErr := os.Stat(skillFilePath(wd))
-	assert.True(t, os.IsNotExist(statErr))
+	assert.Equal(t, before, mem.Snapshot())
 }
 
 // Test_init_print_reports_the_skill_body pins R9's --print shape for the
 // skill: a PrintCreate entry whose body equals artifact.SkillWorkflow(),
-// and nothing written to disk.
+// and nothing written to mem.
 func Test_init_print_reports_the_skill_body(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	before := mem.Snapshot()
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, Print: true})
 
@@ -239,8 +223,7 @@ func Test_init_print_reports_the_skill_body(t *testing.T) {
 	}
 	assert.Equal(t, setup.PrintArtifact{Path: skillFilePath(wd), Action: setup.PrintCreate, Body: string(artifact.SkillWorkflow())}, skillPrint)
 
-	_, statErr := os.Stat(skillFilePath(wd))
-	assert.True(t, os.IsNotExist(statErr))
+	assert.Equal(t, before, mem.Snapshot())
 }
 
 // Test_init_over_an_install_without_the_skill_creates_only_it pins the
@@ -249,11 +232,12 @@ func Test_init_print_reports_the_skill_body(t *testing.T) {
 // reruns to create only the skill row — everything else already converged
 // to ActionUnchanged.
 func Test_init_over_an_install_without_the_skill_creates_only_it(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
-	require.NoError(t, os.Remove(skillFilePath(wd)))
+	require.NoError(t, mem.Remove(memKey(skillFilePath(wd))))
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 
@@ -278,14 +262,15 @@ func Test_init_over_an_install_without_the_skill_creates_only_it(t *testing.T) {
 // between the last agent row and the hook row (Uninstall's own reverse of
 // Init's write order).
 func Test_uninstall_removes_an_unedited_skill_and_prunes_its_directory(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
 	require.NoError(t, err)
 
 	otherSkillDir := filepath.Join(wd, ".claude", "skills", "other")
-	require.NoError(t, os.MkdirAll(otherSkillDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(otherSkillDir, "SKILL.md"), []byte("mine"), 0o600))
+	require.NoError(t, mem.MkdirAll(memKey(otherSkillDir), 0o755))
+	require.NoError(t, mem.WriteFile(memKey(otherSkillDir)+"/SKILL.md", []byte("mine"), 0o600))
 
 	res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
 
@@ -309,19 +294,17 @@ func Test_uninstall_removes_an_unedited_skill_and_prunes_its_directory(t *testin
 	assert.Greater(t, skillIdx, lastAgentIdx, "the skill row must come after every agent row")
 	assert.Less(t, skillIdx, hookIdx, "the skill row must come before the hook row")
 
-	_, statErr := os.Stat(skillFilePath(wd))
-	assert.True(t, os.IsNotExist(statErr))
+	snap := mem.Snapshot()
+	assert.NotContains(t, snap, memKey(skillFilePath(wd)))
+	assert.NotContains(t, snap, memKey(filepath.Join(wd, ".claude", "skills", "brief-workflow")), "the now-empty brief-workflow/ directory must be pruned")
 
-	_, statErr = os.Stat(filepath.Join(wd, ".claude", "skills", "brief-workflow"))
-	assert.True(t, os.IsNotExist(statErr), "the now-empty brief-workflow/ directory must be pruned")
+	info, ok := snap[memKey(otherSkillDir)]
+	require.True(t, ok, "a sibling skill directory brief never wrote must survive")
+	assert.True(t, info.Mode.IsDir())
 
-	info, statErr := os.Stat(otherSkillDir)
-	require.NoError(t, statErr, "a sibling skill directory brief never wrote must survive")
-	assert.True(t, info.IsDir())
-
-	info, statErr = os.Stat(filepath.Join(wd, ".claude", "skills"))
-	require.NoError(t, statErr, ".claude/skills/ itself must never be pruned")
-	assert.True(t, info.IsDir())
+	info, ok = snap[memKey(filepath.Join(wd, ".claude", "skills"))]
+	require.True(t, ok, ".claude/skills/ itself must never be pruned")
+	assert.True(t, info.Mode.IsDir())
 }
 
 // Test_uninstall_keeps_an_edited_skill_unless_forced pins the "edited
@@ -341,37 +324,31 @@ func Test_uninstall_keeps_an_edited_skill_unless_forced(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wd := t.TempDir()
-			srv := newServer(t)
+			wd := fsAbs("repo")
+			mem := newVirtualMem(wd)
+			srv := newMemServer(mem)
 			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 			require.NoError(t, err)
 
 			edited := []byte("---\nedited by hand\n---\n")
-			require.NoError(t, os.WriteFile(skillFilePath(wd), edited, 0o600))
+			require.NoError(t, mem.WriteFile(memKey(skillFilePath(wd)), edited, 0o600))
 
 			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode, Force: tt.force})
 
 			require.NoError(t, err)
 
-			var skillArt setup.Artifact
-			for _, a := range res.Artifacts {
-				if a.Kind == setup.KindSkill {
-					skillArt = a
-				}
-			}
+			skillArt := findArtifact(t, res, setup.KindSkill)
 			assert.Equal(t, setup.Artifact{Kind: setup.KindSkill, Path: skillFilePath(wd), Action: tt.wantAction, Detail: "edited locally", ForceRemovable: tt.wantForceRemovable}, skillArt)
 
-			_, statErr := os.Stat(skillFilePath(wd))
+			snap := mem.Snapshot()
 			if tt.force {
-				assert.True(t, os.IsNotExist(statErr))
+				assert.NotContains(t, snap, memKey(skillFilePath(wd)))
 
 				return
 			}
 
-			require.NoError(t, statErr)
-			body, readErr := os.ReadFile(skillFilePath(wd))
-			require.NoError(t, readErr)
-			assert.Equal(t, edited, body)
+			require.Contains(t, snap, memKey(skillFilePath(wd)))
+			assert.Equal(t, edited, snap[memKey(skillFilePath(wd))].Data)
 		})
 	}
 }
@@ -381,8 +358,9 @@ func Test_uninstall_keeps_an_edited_skill_unless_forced(t *testing.T) {
 // --host none never plans the skill row, so it survives an uninstall scoped
 // to none even though a claude-code install wrote it.
 func Test_uninstall_for_host_none_leaves_the_skill_in_place(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
@@ -393,6 +371,5 @@ func Test_uninstall_for_host_none_leaves_the_skill_in_place(t *testing.T) {
 		assert.NotEqual(t, setup.KindSkill, a.Kind)
 	}
 
-	_, statErr := os.Stat(skillFilePath(wd))
-	require.NoError(t, statErr, "the skill file must survive an uninstall scoped to --host none")
+	require.Contains(t, mem.Snapshot(), memKey(skillFilePath(wd)), "the skill file must survive an uninstall scoped to --host none")
 }
