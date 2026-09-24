@@ -141,7 +141,7 @@ bug — fix it rather than working around it.
   (one package, roughly ≤15 steps) pass `model: "sonnet"` on the Agent call. Keep Opus for
   multi-package or design-heavy scenarios.
 - **Measure with the repo's scripts, not ad hoc.** Counts come from
-  `.claude/scripts/test-stats.sh`; untested additions from
+  `.claude/scripts/test-stats.py`; untested additions from
   `.claude/scripts/uncovered-diff.py` (see `.claude/rules/agent-briefs.md`).
 
 ## Agent roster

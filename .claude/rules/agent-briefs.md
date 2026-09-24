@@ -39,12 +39,12 @@ Rules:
 - **Never pipe a verification command through `head`/`tail`.** It hides failures below the
   cut, and `$?` becomes the pipe's status — `go build ./nonexistent 2>&1 | tail -2` reports
   **exit 0** for a failed build. If you must pipe, prefix with `set -o pipefail`.
-- **Report the exact test count and the delta, from `.claude/scripts/test-stats.sh`** —
+- **Report the exact test count and the delta, from `.claude/scripts/test-stats.py`** —
   "green" is not a result, and hand-rolled counts drifted by up to nine tests between agents
   on the same commit. Quote `tests` (top-level), and `pass`/`skip` from `--run` when leaves
   matter. Never write a counting script of your own. A count that moved without explanation
   is a finding, not a rounding error.
-- A green summary does not mean everything ran. `test-stats.sh --run <pkgdir>` reports skips;
+- A green summary does not mean everything ran. `test-stats.py --run <pkgdir>` reports skips;
   check them before leaning on a package.
 - Write scratch files only under `$TMPDIR` or the session scratchpad — never `/tmp`, never a
   path outside the worktree you were given.
