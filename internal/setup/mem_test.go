@@ -105,6 +105,21 @@ func fsAbs(elem ...string) string {
 // a symlink.
 func identityResolveRoot(root string) (string, error) { return root, nil }
 
+// memData returns snap's own bytes at key and whether key is present at
+// all — the unconditional pair a table-driven test's own wantExists /
+// wantBytes fields compare against, so neither branch of a force/no-force
+// (or similar) table skips the other's own assertion inside an
+// if/return: both arms of the table always run the identical two
+// comparisons, only the expected values differ.
+func memData(snap fstest.MapFS, key string) ([]byte, bool) {
+	f, ok := snap[key]
+	if !ok {
+		return nil, false
+	}
+
+	return f.Data, true
+}
+
 // memKey turns abs — an already-absolute path, real or fsAbs-fabricated —
 // into the name a Mem's own fstest.MapFS is keyed against: fsName's own
 // inverse (fs.go, package-private, so this test package cannot call it

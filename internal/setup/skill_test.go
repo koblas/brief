@@ -16,51 +16,19 @@ func skillFilePath(root string) string {
 }
 
 // Test_init_for_claude_code_writes_the_workflow_skill_after_the_hook pins
-// the skill's own row position (Rule 1): config, feature-root, plugin
-// files, hook (or, under NoHook, nothing in its place), skill, then agent
-// files (under WithAgents) or the snippet — by table over the three shapes
-// that change what sits immediately before or after the skill row.
+// the skill's own row position (Rule 1) by relative position rather than a
+// hardcoded full Kind sequence, so it holds regardless of which other flags
+// change what sits immediately around the skill row: the skill row comes
+// after every KindPlugin/KindHook row and before every KindAgent/KindSnippet
+// row, over the three shapes that change what those neighbors are.
 func Test_init_for_claude_code_writes_the_workflow_skill_after_the_hook(t *testing.T) {
 	cases := []struct {
-		name      string
-		req       setup.InitRequest
-		wantKinds []setup.Kind
-		wantIndex int
+		name string
+		req  setup.InitRequest
 	}{
-		{
-			name: "plain claude-code install",
-			req:  setup.InitRequest{Host: setup.HostClaudeCode},
-			wantKinds: []setup.Kind{
-				setup.KindConfig, setup.KindFeatureRoot,
-				setup.KindPlugin, setup.KindPlugin, setup.KindPlugin, setup.KindHook,
-				setup.KindSkill,
-				setup.KindSnippet,
-			},
-			wantIndex: 6,
-		},
-		{
-			name: "no-hook install",
-			req:  setup.InitRequest{Host: setup.HostClaudeCode, NoHook: true},
-			wantKinds: []setup.Kind{
-				setup.KindConfig, setup.KindFeatureRoot,
-				setup.KindPlugin, setup.KindPlugin, setup.KindPlugin,
-				setup.KindSkill,
-				setup.KindSnippet,
-			},
-			wantIndex: 5,
-		},
-		{
-			name: "with-agents install",
-			req:  setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true},
-			wantKinds: []setup.Kind{
-				setup.KindConfig, setup.KindFeatureRoot,
-				setup.KindPlugin, setup.KindPlugin, setup.KindPlugin, setup.KindHook,
-				setup.KindSkill,
-				setup.KindAgent, setup.KindAgent, setup.KindAgent,
-				setup.KindSnippet,
-			},
-			wantIndex: 6,
-		},
+		{name: "plain claude-code install", req: setup.InitRequest{Host: setup.HostClaudeCode}},
+		{name: "no-hook install", req: setup.InitRequest{Host: setup.HostClaudeCode, NoHook: true}},
+		{name: "with-agents install", req: setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true}},
 	}
 
 	for _, c := range cases {
@@ -72,16 +40,28 @@ func Test_init_for_claude_code_writes_the_workflow_skill_after_the_hook(t *testi
 			res, err := srv.Init(t.Context(), wd, c.req)
 
 			require.NoError(t, err)
-			require.Len(t, res.Artifacts, len(c.wantKinds))
 
-			kinds := make([]setup.Kind, len(res.Artifacts))
+			skillIdx, lastPluginOrHookIdx, firstAgentOrSnippetIdx := -1, -1, len(res.Artifacts)
+
 			for i, a := range res.Artifacts {
-				kinds[i] = a.Kind
+				switch a.Kind {
+				case setup.KindSkill:
+					skillIdx = i
+				case setup.KindPlugin, setup.KindHook:
+					lastPluginOrHookIdx = i
+				case setup.KindAgent, setup.KindSnippet:
+					if firstAgentOrSnippetIdx == len(res.Artifacts) {
+						firstAgentOrSnippetIdx = i
+					}
+				case setup.KindConfig, setup.KindFeatureRoot, setup.KindBoundAgent:
+				}
 			}
-			assert.Equal(t, c.wantKinds, kinds)
 
-			skillArt := res.Artifacts[c.wantIndex]
-			assert.Equal(t, setup.KindSkill, skillArt.Kind)
+			require.NotEqualf(t, -1, skillIdx, "no KindSkill row in %v", res.Artifacts)
+			assert.Greater(t, skillIdx, lastPluginOrHookIdx, "the skill row must come after every plugin/hook row")
+			assert.Less(t, skillIdx, firstAgentOrSnippetIdx, "the skill row must come before every agent/snippet row")
+
+			skillArt := res.Artifacts[skillIdx]
 			assert.Equal(t, skillFilePath(wd), skillArt.Path)
 			assert.Equal(t, setup.ActionCreated, skillArt.Action)
 
@@ -244,15 +224,23 @@ func Test_init_over_an_install_without_the_skill_creates_only_it(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{skillFilePath(wd)}, res.Created)
 
-	for _, a := range res.Artifacts {
-		if a.Kind == setup.KindSkill {
-			assert.Equal(t, setup.ActionCreated, a.Action)
-
-			continue
-		}
-
-		assert.Equalf(t, setup.ActionUnchanged, a.Action, "artifact %s must already have converged", a.Path)
+	paths := pluginFilePaths(wd)
+	wantActions := map[string]setup.Action{
+		filepath.Join(wd, ".brief.yaml"):            setup.ActionUnchanged,
+		filepath.Join(wd, "docs", "specifications"): setup.ActionUnchanged,
+		paths.Manifest: setup.ActionUnchanged,
+		paths.Start:    setup.ActionUnchanged,
+		paths.Finish:   setup.ActionUnchanged,
+		paths.Hooks:    setup.ActionUnchanged,
+		paths.Skill:    setup.ActionCreated,
+		paths.ClaudeMD: setup.ActionUnchanged,
 	}
+
+	gotActions := make(map[string]setup.Action, len(res.Artifacts))
+	for _, a := range res.Artifacts {
+		gotActions[a.Path] = a.Action
+	}
+	assert.Equal(t, wantActions, gotActions)
 }
 
 // Test_uninstall_removes_an_unedited_skill_and_prunes_its_directory pins
@@ -312,14 +300,18 @@ func Test_uninstall_removes_an_unedited_skill_and_prunes_its_directory(t *testin
 // file's own: kept without --force, removed (still detail "edited
 // locally") with it.
 func Test_uninstall_keeps_an_edited_skill_unless_forced(t *testing.T) {
+	edited := []byte("---\nedited by hand\n---\n")
+
 	tests := []struct {
 		name               string
 		force              bool
 		wantAction         setup.Action
 		wantForceRemovable bool
+		wantExists         bool
+		wantBytes          []byte
 	}{
-		{name: "no force: kept", force: false, wantAction: setup.ActionKept, wantForceRemovable: true},
-		{name: "force: removed", force: true, wantAction: setup.ActionRemoved, wantForceRemovable: false},
+		{name: "no force: kept", force: false, wantAction: setup.ActionKept, wantForceRemovable: true, wantExists: true, wantBytes: edited},
+		{name: "force: removed", force: true, wantAction: setup.ActionRemoved, wantForceRemovable: false, wantExists: false, wantBytes: nil},
 	}
 
 	for _, tt := range tests {
@@ -330,7 +322,6 @@ func Test_uninstall_keeps_an_edited_skill_unless_forced(t *testing.T) {
 			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 			require.NoError(t, err)
 
-			edited := []byte("---\nedited by hand\n---\n")
 			require.NoError(t, mem.WriteFile(memKey(skillFilePath(wd)), edited, 0o600))
 
 			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode, Force: tt.force})
@@ -340,15 +331,9 @@ func Test_uninstall_keeps_an_edited_skill_unless_forced(t *testing.T) {
 			skillArt := findArtifact(t, res, setup.KindSkill)
 			assert.Equal(t, setup.Artifact{Kind: setup.KindSkill, Path: skillFilePath(wd), Action: tt.wantAction, Detail: "edited locally", ForceRemovable: tt.wantForceRemovable}, skillArt)
 
-			snap := mem.Snapshot()
-			if tt.force {
-				assert.NotContains(t, snap, memKey(skillFilePath(wd)))
-
-				return
-			}
-
-			require.Contains(t, snap, memKey(skillFilePath(wd)))
-			assert.Equal(t, edited, snap[memKey(skillFilePath(wd))].Data)
+			data, exists := memData(mem.Snapshot(), memKey(skillFilePath(wd)))
+			assert.Equal(t, tt.wantExists, exists)
+			assert.Equal(t, tt.wantBytes, data)
 		})
 	}
 }

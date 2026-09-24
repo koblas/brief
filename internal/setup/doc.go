@@ -128,8 +128,9 @@
 // now-empty-directory removals (never RemoveAll) — imports only
 // internal/platform/agentfile, internal/platform/config,
 // internal/platform/artifact, internal/platform/atomicfile,
-// internal/platform/host and internal/platform/rwfs alongside the standard
-// library, and never internal/scaffold or internal/doctor: those own the
+// internal/platform/host, internal/platform/repo, internal/platform/rwfs
+// and internal/platform/writable alongside the standard library, and
+// never internal/scaffold or internal/doctor: those own the
 // write and read paths over a feature's own content, a question setup
 // never asks.
 //
@@ -141,7 +142,7 @@
 // deliberately unconfined rather than rwfs.OS's own os.Root confinement:
 // planPluginFile's DryRun planning has a passing test that depends on
 // today's symlink-following read behavior through a ".claude" pointed
-// outside the repository (bound_agent_test.go), and R10's own writability
+// outside the repository (bound_agent_disk_test.go), and R10's own writability
 // pre-check (checkWritable, still real os.Lstat/writable.Probe,
 // unconfined) does not gate every write a broader confinement would newly
 // refuse (init_disk_test.go pins this with a mutation). A test substitutes

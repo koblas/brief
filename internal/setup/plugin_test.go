@@ -42,9 +42,11 @@ func pluginFilePaths(root string) pluginPaths {
 // ActionCreated with KindPlugin (KindHook for hooks.json, KindSnippet for
 // CLAUDE.md), the bytes written equal their own artifact.Render (or
 // artifact.SnippetBlock for CLAUDE.md), Created lists files only in write
-// order, and Result.Root is the install root. This is the package's own
-// full-row-order pin: every other rewritten test in this file looks a row
-// up by Kind or path instead (findArtifact, findArtifactByPath).
+// order, and Result.Root is the install root. The package's own
+// index-by-index full-row-order pin is agents_test.go's --with-agents Init
+// (Test_init_with_agents_writes_three_agents_and_a_config_binding_them);
+// this test still pins the same order for the plain, no-agents case, but
+// as one whole-slice equality rather than per-index assertions.
 func Test_init_for_claude_code_writes_the_plugin_after_the_feature_root_and_before_the_config(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -59,15 +61,16 @@ func Test_init_for_claude_code_writes_the_plugin_after_the_feature_root_and_befo
 	featureRoot := filepath.Join(wd, "docs", "specifications")
 	paths := pluginFilePaths(wd)
 
-	require.Len(t, res.Artifacts, 8)
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated}, res.Artifacts[0])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated}, res.Artifacts[1])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionCreated}, res.Artifacts[2])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionCreated}, res.Artifacts[3])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionCreated}, res.Artifacts[4])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindHook, Path: paths.Hooks, Action: setup.ActionCreated}, res.Artifacts[5])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindSkill, Path: paths.Skill, Action: setup.ActionCreated}, res.Artifacts[6])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindSnippet, Path: paths.ClaudeMD, Action: setup.ActionCreated}, res.Artifacts[7])
+	assert.Equal(t, []setup.Artifact{
+		{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated},
+		{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: paths.Manifest, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: paths.Start, Action: setup.ActionCreated},
+		{Kind: setup.KindPlugin, Path: paths.Finish, Action: setup.ActionCreated},
+		{Kind: setup.KindHook, Path: paths.Hooks, Action: setup.ActionCreated},
+		{Kind: setup.KindSkill, Path: paths.Skill, Action: setup.ActionCreated},
+		{Kind: setup.KindSnippet, Path: paths.ClaudeMD, Action: setup.ActionCreated},
+	}, res.Artifacts)
 
 	assert.Equal(t, []string{featureRoot, paths.Manifest, paths.Start, paths.Finish, paths.Hooks, paths.Skill, paths.ClaudeMD, configPath}, res.Created)
 

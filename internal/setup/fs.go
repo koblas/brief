@@ -51,7 +51,7 @@ func fsName(path string) string {
 // symlink under a repository root (a ".claude" pointed elsewhere) is
 // followed exactly as it always was: rwfs.OS's own confinement guarantee is
 // deliberately not adopted here, since Init and Uninstall's own planning
-// already has a passing test (bound_agent_test.go's "a .claude symlinked
+// already has a passing test (bound_agent_disk_test.go's "a .claude symlinked
 // outside the repo gets no row" case) that depends on today's
 // symlink-following read behavior, and R10's own writability pre-check
 // (checkWritable, unconfined, stays real disk) does not gate every write

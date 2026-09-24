@@ -26,8 +26,8 @@ func Test_a_second_run_reports_every_artifact_unchanged(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, res.Created)
 	assert.Empty(t, res.Modified)
-	assert.Equal(t, setup.ActionUnchanged, res.Artifacts[0].Action)
-	assert.Equal(t, setup.ActionUnchanged, res.Artifacts[1].Action)
+	assert.Equal(t, setup.ActionUnchanged, findArtifact(t, res, setup.KindConfig).Action)
+	assert.Equal(t, setup.ActionUnchanged, findArtifact(t, res, setup.KindFeatureRoot).Action)
 }
 
 // Test_a_valid_existing_config_is_kept_and_its_own_feature_directory_wins
@@ -47,8 +47,8 @@ func Test_a_valid_existing_config_is_kept_and_its_own_feature_directory_wins(t *
 
 	require.NoError(t, err)
 	featureRoot := filepath.Join(wd, "specs")
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "edited locally"}, res.Artifacts[0])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated}, res.Artifacts[1])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionKept, Detail: "edited locally"}, findArtifact(t, res, setup.KindConfig))
+	assert.Equal(t, setup.Artifact{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated}, findArtifact(t, res, setup.KindFeatureRoot))
 	assert.Equal(t, []string{featureRoot}, res.Created)
 
 	assert.Equal(t, original, mem.Snapshot()[memKey(configPath)].Data)
@@ -112,7 +112,7 @@ func Test_force_over_an_invalid_config_rewrites_it_from_defaults(t *testing.T) {
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, Force: true})
 
 	require.NoError(t, err)
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated, Detail: "rewritten from defaults"}, res.Artifacts[0])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated, Detail: "rewritten from defaults"}, findArtifact(t, res, setup.KindConfig))
 
 	assert.Equal(t, artifact.ConfigFile(), mem.Snapshot()[memKey(configPath)].Data)
 }
@@ -132,7 +132,7 @@ func Test_force_over_the_current_render_reports_unchanged(t *testing.T) {
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, Force: true})
 
 	require.NoError(t, err)
-	assert.Equal(t, setup.ActionUnchanged, res.Artifacts[0].Action)
+	assert.Equal(t, setup.ActionUnchanged, findArtifact(t, res, setup.KindConfig).Action)
 	assert.NotContains(t, res.Created, configPath)
 }
 
@@ -180,8 +180,10 @@ func Test_force_with_the_config_path_as_a_directory_reports_a_partial_write(t *t
 	assert.True(t, info.Mode.IsDir())
 
 	assert.Contains(t, res.Created, featureRoot)
-	require.Len(t, res.Artifacts, 2)
-	assert.Equal(t, setup.Artifact{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated}, res.Artifacts[1])
+	assert.ElementsMatch(t, []setup.Artifact{
+		{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated, Detail: "rewritten from defaults"},
+		{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated},
+	}, res.Artifacts)
 }
 
 // Test_dry_run_returns_the_plan_and_writes_nothing pins R9: DryRun reports
@@ -199,8 +201,8 @@ func Test_dry_run_returns_the_plan_and_writes_nothing(t *testing.T) {
 	assert.True(t, res.DryRun)
 	assert.Empty(t, res.Created)
 	assert.Empty(t, res.Modified)
-	assert.Equal(t, setup.ActionCreated, res.Artifacts[0].Action)
-	assert.Equal(t, setup.ActionCreated, res.Artifacts[1].Action)
+	assert.Equal(t, setup.ActionCreated, findArtifact(t, res, setup.KindConfig).Action)
+	assert.Equal(t, setup.ActionCreated, findArtifact(t, res, setup.KindFeatureRoot).Action)
 
 	assert.Equal(t, before, mem.Snapshot())
 }
@@ -234,6 +236,7 @@ func Test_operates_in_the_directory_of_a_config_found_in_an_ancestor(t *testing.
 
 	require.NoError(t, err)
 	featureRoot := filepath.Join(parent, "specs")
-	assert.Equal(t, setup.ActionCreated, res.Artifacts[1].Action)
-	assert.Equal(t, featureRoot, res.Artifacts[1].Path)
+	row := findArtifact(t, res, setup.KindFeatureRoot)
+	assert.Equal(t, setup.ActionCreated, row.Action)
+	assert.Equal(t, featureRoot, row.Path)
 }

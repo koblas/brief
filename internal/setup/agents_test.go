@@ -152,7 +152,7 @@ func Test_init_with_agents_never_edits_an_existing_config(t *testing.T) {
 			res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
 
 			require.NoError(t, err)
-			assert.Equal(t, c.wantAction, res.Artifacts[0].Action)
+			assert.Equal(t, c.wantAction, findArtifact(t, res, setup.KindConfig).Action)
 			assert.NotContains(t, res.Created, configPath)
 			assert.NotContains(t, res.Modified, configPath)
 
@@ -255,7 +255,7 @@ func Test_init_with_agents_on_a_bound_config_reports_it_unchanged_with_nothing_t
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
 
 	require.NoError(t, err)
-	assert.Equal(t, setup.ActionUnchanged, res.Artifacts[0].Action)
+	assert.Equal(t, setup.ActionUnchanged, findArtifact(t, res, setup.KindConfig).Action)
 	assert.Equal(t, []string{}, res.RolesToAdd)
 
 	assert.Equal(t, artifact.ConfigFileWithRoles(), mem.Snapshot()[memKey(configPath)].Data)
@@ -276,7 +276,7 @@ func Test_force_init_with_agents_rewrites_a_plain_config_to_the_bound_variant(t 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true, Force: true})
 
 	require.NoError(t, err)
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated, Detail: "rewritten from defaults"}, res.Artifacts[0])
+	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated, Detail: "rewritten from defaults"}, findArtifact(t, res, setup.KindConfig))
 
 	assert.Equal(t, artifact.ConfigFileWithRoles(), mem.Snapshot()[memKey(configPath)].Data)
 }

@@ -334,14 +334,19 @@ func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_di
 // --force it is removed, detail "edited locally", and the plugin's own
 // directory tree is pruned same as the happy path.
 func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced(t *testing.T) {
+	edited := []byte("---\nedited by hand\n---\n")
+
 	tests := []struct {
-		name               string
-		force              bool
-		wantAction         setup.Action
-		wantForceRemovable bool
+		name                string
+		force               bool
+		wantAction          setup.Action
+		wantForceRemovable  bool
+		wantExists          bool
+		wantBytes           []byte
+		wantPluginDirExists bool
 	}{
-		{name: "no force: kept", force: false, wantAction: setup.ActionKept, wantForceRemovable: true},
-		{name: "force: removed", force: true, wantAction: setup.ActionRemoved, wantForceRemovable: false},
+		{name: "no force: kept", force: false, wantAction: setup.ActionKept, wantForceRemovable: true, wantExists: true, wantBytes: edited, wantPluginDirExists: true},
+		{name: "force: removed", force: true, wantAction: setup.ActionRemoved, wantForceRemovable: false, wantExists: false, wantBytes: nil, wantPluginDirExists: false},
 	}
 
 	for _, tt := range tests {
@@ -353,7 +358,6 @@ func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_u
 			require.NoError(t, err)
 
 			start := pluginFilePaths(wd).Start
-			edited := []byte("---\nedited by hand\n---\n")
 			require.NoError(t, mem.WriteFile(memKey(start), edited, 0o600))
 
 			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode, Force: tt.force})
@@ -363,20 +367,12 @@ func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_u
 			startArt := findArtifactByPath(t, res, start)
 			assert.Equal(t, setup.Artifact{Kind: setup.KindPlugin, Path: start, Action: tt.wantAction, Detail: "edited locally", ForceRemovable: tt.wantForceRemovable}, startArt)
 
-			snap := mem.Snapshot()
-			if tt.force {
-				assert.NotContains(t, snap, memKey(start))
-				assert.NotContains(t, snap, memKey(filepath.Join(wd, ".claude", "skills", "brief")))
+			data, exists := memData(mem.Snapshot(), memKey(start))
+			assert.Equal(t, tt.wantExists, exists)
+			assert.Equal(t, tt.wantBytes, data)
 
-				return
-			}
-
-			require.Contains(t, snap, memKey(start))
-			assert.Equal(t, edited, snap[memKey(start)].Data)
-
-			info, ok := snap[memKey(filepath.Dir(start))]
-			require.True(t, ok, "the directory holding the kept file must survive")
-			assert.True(t, info.Mode.IsDir())
+			_, pluginDirExists := mem.Snapshot()[memKey(filepath.Join(wd, ".claude", "skills", "brief"))]
+			assert.Equal(t, tt.wantPluginDirExists, pluginDirExists)
 		})
 	}
 }
@@ -505,14 +501,18 @@ func Test_uninstall_removes_agents_and_prunes_the_agents_directory(t *testing.T)
 // --force, removed (still detail "edited locally") with it, mirroring
 // Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced.
 func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
+	edited := []byte("---\nname: planner\nedited: true\n---\n")
+
 	tests := []struct {
 		name               string
 		force              bool
 		wantAction         setup.Action
 		wantForceRemovable bool
+		wantExists         bool
+		wantBytes          []byte
 	}{
-		{name: "no force: kept", force: false, wantAction: setup.ActionKept, wantForceRemovable: true},
-		{name: "force: removed", force: true, wantAction: setup.ActionRemoved, wantForceRemovable: false},
+		{name: "no force: kept", force: false, wantAction: setup.ActionKept, wantForceRemovable: true, wantExists: true, wantBytes: edited},
+		{name: "force: removed", force: true, wantAction: setup.ActionRemoved, wantForceRemovable: false, wantExists: false, wantBytes: nil},
 	}
 
 	for _, tt := range tests {
@@ -524,7 +524,6 @@ func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
 			require.NoError(t, err)
 
 			planner := agentFilePaths(wd).Planner
-			edited := []byte("---\nname: planner\nedited: true\n---\n")
 			require.NoError(t, mem.WriteFile(memKey(planner), edited, 0o600))
 
 			res, err := srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode, Force: tt.force})
@@ -534,15 +533,9 @@ func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
 			plannerArt := findArtifactByPath(t, res, planner)
 			assert.Equal(t, setup.Artifact{Kind: setup.KindAgent, Path: planner, Action: tt.wantAction, Detail: "edited locally", ForceRemovable: tt.wantForceRemovable}, plannerArt)
 
-			snap := mem.Snapshot()
-			if tt.force {
-				assert.NotContains(t, snap, memKey(planner))
-
-				return
-			}
-
-			require.Contains(t, snap, memKey(planner))
-			assert.Equal(t, edited, snap[memKey(planner)].Data)
+			data, exists := memData(mem.Snapshot(), memKey(planner))
+			assert.Equal(t, tt.wantExists, exists)
+			assert.Equal(t, tt.wantBytes, data)
 		})
 	}
 }
@@ -580,22 +573,24 @@ func Test_uninstall_removes_an_older_agent_file_without_force(t *testing.T) {
 		wantAction         setup.Action
 		wantDetail         string
 		wantForceRemovable bool
-		wantRemoved        bool
+		wantExists         bool
+		wantBytes          []byte
 	}{
 		{
 			name: "older planner is removed without force", role: "planner",
 			seedBytes:  []byte(olderPlannerBytesForUninstall),
-			wantAction: setup.ActionRemoved, wantDetail: "", wantForceRemovable: false, wantRemoved: true,
+			wantAction: setup.ActionRemoved, wantDetail: "", wantForceRemovable: false, wantExists: false, wantBytes: nil,
 		},
 		{
 			name: "older implementer is removed without force", role: "implementer",
 			seedBytes:  []byte(olderImplementerBytesForUninstall),
-			wantAction: setup.ActionRemoved, wantDetail: "", wantForceRemovable: false, wantRemoved: true,
+			wantAction: setup.ActionRemoved, wantDetail: "", wantForceRemovable: false, wantExists: false, wantBytes: nil,
 		},
 		{
 			name: "edited planner is kept without force", role: "planner",
 			seedBytes:  []byte("---\nname: planner\nedited: true\n---\n"),
-			wantAction: setup.ActionKept, wantDetail: "edited locally", wantForceRemovable: true, wantRemoved: false,
+			wantAction: setup.ActionKept, wantDetail: "edited locally", wantForceRemovable: true,
+			wantExists: true, wantBytes: []byte("---\nname: planner\nedited: true\n---\n"),
 		},
 	}
 
@@ -622,15 +617,9 @@ func Test_uninstall_removes_an_older_agent_file_without_force(t *testing.T) {
 			assert.Equal(t, c.wantDetail, art.Detail)
 			assert.Equal(t, c.wantForceRemovable, art.ForceRemovable)
 
-			snap := mem.Snapshot()
-			if c.wantRemoved {
-				assert.NotContains(t, snap, memKey(path))
-
-				return
-			}
-
-			require.Contains(t, snap, memKey(path))
-			assert.Equal(t, c.seedBytes, snap[memKey(path)].Data)
+			data, exists := memData(mem.Snapshot(), memKey(path))
+			assert.Equal(t, c.wantExists, exists)
+			assert.Equal(t, c.wantBytes, data)
 		})
 	}
 }
