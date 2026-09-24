@@ -25,7 +25,7 @@ expensive habit a scenario can have and proves nothing the final run does not.
 test. Run, once, in the Verify phase (and at the end of every fix pass):
 
 ```bash
-.claude/scripts/uncovered-diff.sh <base>   # base = the commit your scenario / fix pass started from
+.claude/scripts/uncovered-diff.py <base>   # base = the commit your scenario / fix pass started from
 ```
 
 It lists each added non-test line no test executes and exits 1 if there is any. Reach zero,

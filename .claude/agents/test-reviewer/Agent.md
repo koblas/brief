@@ -18,7 +18,7 @@ Strict test quality reviewer for project following Clean Architecture and TDD.
 ## Review procedure
 
 **Start from the coverage report, not from reading.** Run
-`.claude/scripts/uncovered-diff.sh <base of the range you were given>` first. Every line it
+`.claude/scripts/uncovered-diff.py <base of the range you were given>` first. Every line it
 lists is an added production line no test executes — each is a finding (MAJOR by the shared
 contract, "untested change") unless the developer's report already names it as unreachable
 with a reason you accept. That mechanical pass replaces hunting for untested branches by eye;

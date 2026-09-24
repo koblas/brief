@@ -142,7 +142,7 @@ bug — fix it rather than working around it.
   multi-package or design-heavy scenarios.
 - **Measure with the repo's scripts, not ad hoc.** Counts come from
   `.claude/scripts/test-stats.sh`; untested additions from
-  `.claude/scripts/uncovered-diff.sh` (see `.claude/rules/agent-briefs.md`).
+  `.claude/scripts/uncovered-diff.py` (see `.claude/rules/agent-briefs.md`).
 
 ## Agent roster
 

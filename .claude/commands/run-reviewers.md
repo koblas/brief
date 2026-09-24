@@ -84,7 +84,7 @@ Name the files. A reviewer told only "focus on `internal/`" reads the package; o
 paths reads six diffs.
 
 **Run the coverage gate once, before spawning, and paste its output into every prompt:**
-`.claude/scripts/uncovered-diff.sh <range base>`. Uncovered added lines are an untested-change
+`.claude/scripts/uncovered-diff.py <range base>`. Uncovered added lines are an untested-change
 finding no reviewer needs to rediscover by reading; handing every reviewer the same list stops
 three of them paying to find it separately. If it is non-empty and the developer's report does
 not name each line as unreachable, send it back to the developer before spending a review
