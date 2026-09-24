@@ -539,16 +539,23 @@ func (ba boundAgentArtifact) agentFile() confinedAgentFile {
 }
 
 // boundAgentTargets selects --edit-agents' and Uninstall's own shared
-// target set (Rule 3, Rule 4): resolvedRoot is root, symlinks resolved, for
+// target set (Rule 3, Rule 4): resolvedRoot is resolveRoot(root) — real
+// disk (filepath.EvalSymlinks) in production, a test-injected identity
+// function (WithResolveRoot) against a Server built over an
+// rwfs.Mem, where root names no real directory to resolve — for
 // planBoundAgent's and planBoundAgentRemoval's own escape check; paths is
 // every bare-name planner or implementer binding's own ScopeProject
 // agentfile.Definition, deduped by path (the first role wins — planner is
 // walked before implementer), in that order. A binding that is
 // BindingBrief, BindingPlugin, unbound or unresolved contributes nothing —
 // neither caller ever touches a "brief:*" binding, another plugin's, or one
-// under "~/.claude" (Rule 3).
-func boundAgentTargets(root, home string, roles config.RoleBindings) (resolvedRoot string, paths []string, err error) {
-	resolvedRoot, err = filepath.EvalSymlinks(root)
+// under "~/.claude" (Rule 3). planBoundAgent and planBoundAgentRemoval
+// themselves, and the agentfile.ResolveBinding search behind paths, always
+// read and write through real disk regardless of resolveRoot — this seam
+// only replaces the EvalSymlinks(root) call above, never the bound-agent
+// file's own confinement (bound_agent.go's confinedAgentFile).
+func boundAgentTargets(resolveRoot func(string) (string, error), root, home string, roles config.RoleBindings) (resolvedRoot string, paths []string, err error) {
+	resolvedRoot, err = resolveRoot(root)
 	if err != nil {
 		return "", nil, fmt.Errorf("setup: resolve %s: %w", root, err)
 	}
@@ -577,8 +584,8 @@ func boundAgentTargets(root, home string, roles config.RoleBindings) (resolvedRo
 
 // planBoundAgents plans --edit-agents' own targets (Rule 3, Rule 4):
 // boundAgentTargets' own selector, each planned through planBoundAgent.
-func planBoundAgents(root, home string, roles config.RoleBindings) ([]boundAgentArtifact, error) {
-	resolvedRoot, paths, err := boundAgentTargets(root, home, roles)
+func planBoundAgents(resolveRoot func(string) (string, error), root, home string, roles config.RoleBindings) ([]boundAgentArtifact, error) {
+	resolvedRoot, paths, err := boundAgentTargets(resolveRoot, root, home, roles)
 	if err != nil {
 		return nil, err
 	}
@@ -607,8 +614,8 @@ func planBoundAgents(root, home string, roles config.RoleBindings) ([]boundAgent
 // implementer before planner, the strict reversal of planBoundAgents' own
 // planner-first walk, matching Uninstall's own reversed row order
 // elsewhere (the agent files, the plugin files).
-func planBoundAgentRemovals(root, home string, roles config.RoleBindings) ([]boundAgentArtifact, error) {
-	resolvedRoot, paths, err := boundAgentTargets(root, home, roles)
+func planBoundAgentRemovals(resolveRoot func(string) (string, error), root, home string, roles config.RoleBindings) ([]boundAgentArtifact, error) {
+	resolvedRoot, paths, err := boundAgentTargets(resolveRoot, root, home, roles)
 	if err != nil {
 		return nil, err
 	}

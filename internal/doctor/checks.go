@@ -3,6 +3,7 @@ package doctor
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,13 +171,13 @@ func checkRootDir(wd, root, featureDirectory string) Check {
 	return Check{ID: "root-dir", Severity: SeverityOK, Path: path, Detail: "exists, readable and writable"}
 }
 
-// checkEnvGit builds env-git's own row from repo.Root's own walk up from wd
-// for a ".git" entry, directory or file (a linked worktree's ".git" is a
-// file naming its real gitdir elsewhere) — found is OK, none anywhere is
-// WARN with fix "git init". The same walk bounds Diagnose's own install
-// root (R3, config.LocateInRepo).
-func checkEnvGit(wd string) Check {
-	if root, ok := repo.Root(wd); ok {
+// checkEnvGit builds env-git's own row from repo.RootFS's own walk up from
+// wd, against fsys, for a ".git" entry, directory or file (a linked
+// worktree's ".git" is a file naming its real gitdir elsewhere) — found is
+// OK, none anywhere is WARN with fix "git init". The same walk, against the
+// same fsys, bounds Diagnose's own install root (R3, (*Server).locateInRepo).
+func checkEnvGit(fsys fs.FS, wd string) Check {
+	if root, ok := repo.RootFS(fsys, wd); ok {
 		return Check{ID: "env-git", Severity: SeverityOK, Path: filepath.Join(root, ".git"), Detail: "found"}
 	}
 

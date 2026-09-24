@@ -70,4 +70,35 @@
 // it, so a script can rely on that suffix to know a refusal changed
 // nothing on disk. Every other error flattens to one line without that
 // guarantee.
+//
+// run (cli.go), unlike the exported Run, takes a trailing ...runSeam: a
+// test builds one with withDoctorOpts, withSetupOpts or withRootFS to
+// substitute doctor's, setup's, scaffold's and assemble's own rwfs.FS
+// seams — doctor.WithRootFS, doctor.WithHomeTree, setup.WithFSRoot,
+// setup.WithResolveRoot, setup.WithWritableCheck, scaffold.WithFS and
+// assemble.WithFS — for one shared rwfs.Mem, so a command-level test can
+// exercise doctor's, init's, uninstall's, new's, finish's, start's,
+// check's and status's own logic without touching real disk. withRootFS
+// also drives resolveRoot (in place of config.Resolve), runDoctor's own
+// config-location pre-check (locateInRepoFS, in place of
+// config.LocateInRepo) and finish's own readSource (in place of
+// os.ReadFile, for a non-"-" --handoff/--state argument, mapped through
+// fsName). runNewFeature, runNewStep, runFinish, runStart, runCheck and
+// runStatus — the six that call resolveRoot — pass it straight through to
+// that call and to their own scaffold.WithFS/assemble.WithFS/readSource
+// calls; runDoctor, runInit and runUninstall never call resolveRoot at
+// all, reading configuration through their own seams instead (doctor's
+// locateInRepoFS, setup's WithFSRoot); runCheckHook receives it through
+// neither path (see below). Run always calls run with no seams, so
+// production is unaffected: every seam's default reproduces exactly the
+// OS adapter it replaces. A handful of checks stay OS-subject regardless
+// of any seam —
+// doctor's own root-dir and env-path rows, setup's R10 writability
+// pre-check unless a test also overrides WithWritableCheck, and check
+// --hook's own FeatureContaining resolution (real os.Lstat/
+// filepath.EvalSymlinks, no seam) — since they probe real permission bits,
+// compare real binaries, or resolve a caller-given path outside any
+// configuration this package controls; a command-level test covering one
+// of those stays on real disk (a *_disk_test.go file, per this package's
+// own naming convention for a test that cannot move off it).
 package cli

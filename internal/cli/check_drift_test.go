@@ -1,13 +1,15 @@
 package cli_test
 
 import (
-	"os"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/koblas/brief/internal/assemble"
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +23,13 @@ import (
 // only place this comparison can be written; it calls both Servers
 // directly rather than through cli.Run, since the claim is about the two
 // packages' own Problem strings, not about any rendering either command
-// layers on top of them.
+// layers on top of them. Neither Server ever touches real disk here: both
+// take the same rwfs.Mem fixture through their own exported WithFS
+// Option, so this file needs no access to cli's own internal seams.
+
+// driftRoot is the virtual root every fixture in this file resolves
+// against — fabricated, never a real disk path.
+const driftRoot = "/repo"
 
 // stateWithUnterminatedFence carries every one of the default profile's
 // four required headings, each followed by content, then an opened fence
@@ -41,52 +49,66 @@ const stateMissingTraps = "## Binding decisions\n\ndecision\n\n" +
 	"## Left unbuilt\n\nsymbol\n\n" +
 	"## Open debts\n\ndebt\n"
 
-// checklistDrift builds one feature's fixture whose only step,
-// SCENARIO-01, carries status and a checklist holding one ticked item and
-// one open item ("second thing", the drift assertion's own item text), and
-// returns its root — callers vary only status between the two fixtures
-// this predicate needs.
-func checklistDrift(t *testing.T, status string) string {
-	t.Helper()
-
-	root := t.TempDir()
-	featureDir := filepath.Join(root, "docs", "specifications", "demo")
-	writeCheckFixtureFeature(t, featureDir)
-	writeCheckStep(t, featureDir, "SCENARIO-01", status, []string{"- [x] first thing", "- [ ] second thing"})
-
-	return root
+// driftKey turns an already-absolute path under driftRoot into the name
+// an fstest.MapFS entry is keyed against: the leading separator stripped.
+func driftKey(path string) string {
+	return strings.TrimPrefix(filepath.ToSlash(path), "/")
 }
 
-// writeCheckFixtureFeature writes a conforming specification and state
-// file under featureDir — the drift tests' shared starting point before
-// each one corrupts exactly the one input its predicate concerns.
-func writeCheckFixtureFeature(t *testing.T, featureDir string) {
-	t.Helper()
+// driftFixtureFS returns an rwfs.Mem holding a conforming specification
+// and state file for "demo" under driftRoot's default layout, plus one
+// step file, SCENARIO-01, carrying status and checklistItems, extended by
+// extra (each a driftRoot-relative path and its body) — the drift tests'
+// shared starting point before each one corrupts exactly the one input
+// its predicate concerns.
+func driftFixtureFS(status string, checklistItems []string, extra map[string]string) *rwfs.Mem {
+	featureDir := filepath.Join(driftRoot, "docs", "specifications", "demo")
 
-	require.NoError(t, os.MkdirAll(featureDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(conformingSpec), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(conformingState), 0o600))
+	var checklist strings.Builder
+	for _, item := range checklistItems {
+		checklist.WriteString(item + "\n")
+	}
+
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: " + status + "\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01\n\n" +
+		"## Scenario\n\nthe acceptance criteria\n\n" +
+		"## Implementation Plan\n\n" +
+		checklist.String()
+
+	files := fstest.MapFS{
+		driftKey(driftRoot): &fstest.MapFile{Mode: fs.ModeDir | 0o755},
+		driftKey(filepath.Join(featureDir, "specification.md")): &fstest.MapFile{Data: []byte(conformingSpec), Mode: 0o600},
+		driftKey(filepath.Join(featureDir, "STATE.md")):         &fstest.MapFile{Data: []byte(conformingState), Mode: 0o600},
+		driftKey(filepath.Join(featureDir, "SCENARIO-01.md")):   &fstest.MapFile{Data: []byte(step), Mode: 0o600},
+	}
+
+	for name, body := range extra {
+		files[driftKey(filepath.Join(driftRoot, name))] = &fstest.MapFile{Data: []byte(body), Mode: 0o600}
+	}
+
+	return rwfs.NewMem(files)
 }
 
 func Test_check_drift_over_cap_handoff_matches_finishes_own_refusal(t *testing.T) {
-	root := t.TempDir()
-	featureDir := filepath.Join(root, "docs", "specifications", "demo")
-	writeCheckFixtureFeature(t, featureDir)
-	writeCheckStep(t, featureDir, "SCENARIO-01", "done", []string{"- [x] do the thing"})
-
 	overCap := checkBodyOfLines(61)
-	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md"), []byte(overCap), 0o600))
+	mem := driftFixtureFS("done", []string{"- [x] do the thing"}, map[string]string{
+		filepath.Join("docs", "specifications", "demo", "SCENARIO-01-HANDOFF.md"): overCap,
+	})
 
 	cfg := config.Default()
 
-	scaffoldSrv := scaffold.NewServer(cfg, root)
+	scaffoldSrv := scaffold.NewServer(cfg, driftRoot, scaffold.WithFS(mem))
 	_, finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte(overCap), []byte(conformingState))
 	require.ErrorIs(t, finishErr, scaffold.ErrOverCap)
 
 	var refusal *scaffold.RefusalError
 	require.ErrorAs(t, finishErr, &refusal)
 
-	assembleSrv := assemble.NewServer(cfg, root)
+	assembleSrv := assemble.NewServer(cfg, driftRoot, assemble.WithFS(mem))
 	findings, checkErr := assembleSrv.Check(t.Context(), "demo")
 	require.NoError(t, checkErr)
 
@@ -95,22 +117,20 @@ func Test_check_drift_over_cap_handoff_matches_finishes_own_refusal(t *testing.T
 }
 
 func Test_check_drift_unterminated_state_fence_matches_finishes_own_refusal(t *testing.T) {
-	root := t.TempDir()
-	featureDir := filepath.Join(root, "docs", "specifications", "demo")
-	writeCheckFixtureFeature(t, featureDir)
-	writeCheckStep(t, featureDir, "SCENARIO-01", "done", []string{"- [x] do the thing"})
-	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(stateWithUnterminatedFence), 0o600))
+	mem := driftFixtureFS("done", []string{"- [x] do the thing"}, map[string]string{
+		filepath.Join("docs", "specifications", "demo", "STATE.md"): stateWithUnterminatedFence,
+	})
 
 	cfg := config.Default()
 
-	scaffoldSrv := scaffold.NewServer(cfg, root)
+	scaffoldSrv := scaffold.NewServer(cfg, driftRoot, scaffold.WithFS(mem))
 	_, finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte("a fine handoff\n"), []byte(stateWithUnterminatedFence))
 	require.ErrorIs(t, finishErr, scaffold.ErrUnterminatedFence)
 
 	var refusal *scaffold.RefusalError
 	require.ErrorAs(t, finishErr, &refusal)
 
-	assembleSrv := assemble.NewServer(cfg, root)
+	assembleSrv := assemble.NewServer(cfg, driftRoot, assemble.WithFS(mem))
 	findings, checkErr := assembleSrv.Check(t.Context(), "demo")
 	require.NoError(t, checkErr)
 
@@ -119,22 +139,20 @@ func Test_check_drift_unterminated_state_fence_matches_finishes_own_refusal(t *t
 }
 
 func Test_check_drift_missing_state_heading_matches_finishes_own_refusal(t *testing.T) {
-	root := t.TempDir()
-	featureDir := filepath.Join(root, "docs", "specifications", "demo")
-	writeCheckFixtureFeature(t, featureDir)
-	writeCheckStep(t, featureDir, "SCENARIO-01", "done", []string{"- [x] do the thing"})
-	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(stateMissingTraps), 0o600))
+	mem := driftFixtureFS("done", []string{"- [x] do the thing"}, map[string]string{
+		filepath.Join("docs", "specifications", "demo", "STATE.md"): stateMissingTraps,
+	})
 
 	cfg := config.Default()
 
-	scaffoldSrv := scaffold.NewServer(cfg, root)
+	scaffoldSrv := scaffold.NewServer(cfg, driftRoot, scaffold.WithFS(mem))
 	_, finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte("a fine handoff\n"), []byte(stateMissingTraps))
 	require.ErrorIs(t, finishErr, scaffold.ErrMissingStateHeading)
 
 	var refusal *scaffold.RefusalError
 	require.ErrorAs(t, finishErr, &refusal)
 
-	assembleSrv := assemble.NewServer(cfg, root)
+	assembleSrv := assemble.NewServer(cfg, driftRoot, assemble.WithFS(mem))
 	findings, checkErr := assembleSrv.Check(t.Context(), "demo")
 	require.NoError(t, checkErr)
 
@@ -149,18 +167,19 @@ func Test_check_drift_missing_state_heading_matches_finishes_own_refusal(t *test
 // only in status:, still prove one definition: the problem text depends on
 // the item's own text alone, never on the step's status.
 func Test_check_drift_open_checklist_item_matches_finishes_own_refusal(t *testing.T) {
-	openRoot := checklistDrift(t, "open")
 	cfg := config.Default()
+	items := []string{"- [x] first thing", "- [ ] second thing"}
 
-	scaffoldSrv := scaffold.NewServer(cfg, openRoot)
+	openMem := driftFixtureFS("open", items, nil)
+	scaffoldSrv := scaffold.NewServer(cfg, driftRoot, scaffold.WithFS(openMem))
 	_, finishErr := scaffoldSrv.Finish(t.Context(), "demo", "SCENARIO-01", []byte("a fine handoff\n"), []byte(conformingState))
 	require.ErrorIs(t, finishErr, scaffold.ErrOpenChecklistItem)
 
 	var refusal *scaffold.RefusalError
 	require.ErrorAs(t, finishErr, &refusal)
 
-	doneRoot := checklistDrift(t, "done")
-	assembleSrv := assemble.NewServer(cfg, doneRoot)
+	doneMem := driftFixtureFS("done", items, nil)
+	assembleSrv := assemble.NewServer(cfg, driftRoot, assemble.WithFS(doneMem))
 	findings, checkErr := assembleSrv.Check(t.Context(), "demo")
 	require.NoError(t, checkErr)
 

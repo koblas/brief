@@ -13,14 +13,12 @@ import (
 // onto RoleBindings.Reviewer with no violation, the same as planner and
 // implementer.
 func Test_a_config_binding_the_reviewer_role_decodes(t *testing.T) {
-	root := t.TempDir()
-	writeConfig(t, root, `roles:
-  reviewer: brief:reviewer
-`)
+	fsys := inspectFixture("roles:\n  reviewer: brief:reviewer\n")
 
-	cfg, _, err := config.Resolve(root)
+	cfg, violations, err := config.InspectFS(fsys, fsAbs(inspectFixtureName))
 
 	require.NoError(t, err)
+	assert.Empty(t, violations)
 	assert.Equal(t, "brief:reviewer", cfg.Roles.Reviewer)
 }
 
@@ -71,8 +69,7 @@ func Test_the_default_profile_names_the_handoff_file_suffix(t *testing.T) {
 // all. init writes a commented config whose effective values are these
 // defaults, so R3's "converges" promise relies on this holding.
 func Test_the_shipped_profile_passes_validation(t *testing.T) {
-	root := t.TempDir()
-	writeConfig(t, root, `feature-directory: docs/specifications
+	fsys := inspectFixture(`feature-directory: docs/specifications
 step-file-pattern: "SCENARIO-%02d.md"
 specification-file: specification.md
 state-file: STATE.md
@@ -90,9 +87,10 @@ state-cap-lines: 80
 default-output-budget-bytes: 8192
 `)
 
-	cfg, _, err := config.Resolve(root)
+	cfg, violations, err := config.InspectFS(fsys, fsAbs(inspectFixtureName))
 
 	require.NoError(t, err)
+	assert.Empty(t, violations)
 	assert.Equal(t, config.Default(), cfg)
 }
 
@@ -102,8 +100,7 @@ default-output-budget-bytes: 8192
 // has a legitimate, non-default value here that must satisfy it — proving
 // the rules refuse only the bad input, not configuration in general.
 func Test_Resolve_accepts_a_config_that_sets_every_validated_key_to_a_valid_non_default_value(t *testing.T) {
-	root := t.TempDir()
-	writeConfig(t, root, `step-file-pattern: "STEP-%03d.md"
+	fsys := inspectFixture(`step-file-pattern: "STEP-%03d.md"
 specification-file: SPEC.md
 state-file: PROGRESS.md
 progress-heading: "## Custom Progress"
@@ -120,9 +117,10 @@ state-cap-lines: 20
 default-output-budget-bytes: 4096
 `)
 
-	cfg, _, err := config.Resolve(root)
+	cfg, violations, err := config.InspectFS(fsys, fsAbs(inspectFixtureName))
 
 	require.NoError(t, err)
+	assert.Empty(t, violations)
 	assert.Equal(t, "STEP-%03d.md", cfg.StepFilePattern)
 	assert.Equal(t, "SPEC.md", cfg.SpecificationFile)
 	assert.Equal(t, "PROGRESS.md", cfg.StateFile)

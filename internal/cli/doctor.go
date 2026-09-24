@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 
 	"github.com/koblas/brief/internal/doctor"
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/repo"
 )
 
 // doctorLong is "brief doctor"'s help prose.
@@ -138,18 +141,28 @@ func doctorSummary(counts doctor.Counts) string {
 // runDoctor implements "brief doctor [--json]"; rest is its positional
 // arguments, flags already parsed away, and must be empty. It never calls
 // resolveRoot: an invalid or unparseable ".brief.yaml" is reported as
-// rows (R13), never a refusal. config.LocateInRepo's own nonexistent-startDir
-// guard — unreachable when wd comes from os.Getwd — is the one refusal
-// runDoctor emits; every other setup fault becomes a Check. extraOpts are
-// appended after runDoctor's own doctor.WithVersion, so a caller (a test)
-// can override any seam, including the version, by supplying it again.
-func runDoctor(ctx context.Context, wd string, rest []string, readBuildInfo func() (*debug.BuildInfo, bool), out reporter, extraOpts ...doctor.Option) error {
+// rows (R13), never a refusal. Its own config-location pre-check — a
+// nonexistent-startDir guard unreachable when wd comes from os.Getwd — is
+// the one refusal runDoctor emits; every other setup fault becomes a
+// Check. rootFS is nil in production (the pre-check runs against real
+// disk, config.LocateInRepo); a test's withRootFS seam substitutes an
+// rwfs.Mem, read through locateInRepoFS instead, so the pre-check and
+// Diagnose itself (via extraOpts' own doctor.WithRootFS) agree on one
+// fixture. extraOpts are appended after runDoctor's own doctor.WithVersion,
+// so a caller (a test) can override any seam, including the version, by
+// supplying it again.
+func runDoctor(ctx context.Context, wd string, rest []string, readBuildInfo func() (*debug.BuildInfo, bool), out reporter, rootFS fs.FS, extraOpts ...doctor.Option) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief doctor: too many arguments; run '%s'", doctorInvocation))
 	}
 
-	if _, _, err := config.LocateInRepo(wd); err != nil {
-		return out.refusal(err)
+	locateErr := locateInRepo(wd)
+	if rootFS != nil {
+		locateErr = locateInRepoFS(rootFS, wd)
+	}
+
+	if locateErr != nil {
+		return out.refusal(locateErr)
 	}
 
 	opts := append([]doctor.Option{doctor.WithVersion(versionString(readBuildInfo))}, extraOpts...)
@@ -187,4 +200,38 @@ func runDoctor(ctx context.Context, wd string, rest []string, readBuildInfo func
 	fmt.Fprintf(out.stderr, "brief doctor: %s\n", doctorSummary(counts))
 
 	return runErr
+}
+
+// locateInRepo is runDoctor's own production pre-check: config.LocateInRepo,
+// its nearest and shadowed results discarded — runDoctor only ever branches
+// on whether wd itself resolves.
+func locateInRepo(wd string) error {
+	_, _, err := config.LocateInRepo(wd)
+
+	return err
+}
+
+// locateInRepoFS is locateInRepo's own fsys-backed twin, mirroring
+// internal/doctor's own (*Server).locateInRepo and internal/setup's own
+// locateInRepo: the walk and the git-repository boundary both run against
+// fsys rather than config.LocateInRepo's and repo.Root's own hardcoded
+// "/"-rooted namespace, so a withRootFS-backed test can substitute an
+// rwfs.Mem. It reproduces config.LocateWithin's own "resolve config:" wrap
+// verbatim.
+func locateInRepoFS(fsys fs.FS, wd string) error {
+	abs, err := filepath.Abs(wd)
+	if err != nil {
+		return fmt.Errorf("resolve config: %w", err)
+	}
+
+	boundary := ""
+	if root, ok := repo.RootFS(fsys, abs); ok {
+		boundary = root
+	}
+
+	if _, _, err := config.LocateWithinFS(fsys, abs, boundary); err != nil {
+		return fmt.Errorf("resolve config: %w", err)
+	}
+
+	return nil
 }

@@ -1,5 +1,11 @@
 package setup_test
 
+// OS-subject: every case in this file binds a bare-name planner or
+// implementer role, which reaches agentfile.ResolveBinding's own real file
+// search and planBoundAgent's own real os.Lstat/os.ReadFile — neither is
+// routed through the fsRoot seam (fs.go, doc.go), so a Mem fixture would
+// silently resolve against nothing rather than this file's own content.
+
 import (
 	"os"
 	"path/filepath"

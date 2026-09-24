@@ -1,110 +1,32 @@
 package doctor_test
 
+// Host-integration classification tests: every case here builds its
+// subject file tree in an in-memory fstest.MapFS (newHostFixtureFS) rather
+// than on disk. Diagnose's own root-dir and env-path rows still consult
+// the real OS (root-dir os.Stats the fabricated "repo/docs/specifications"
+// that does not exist there; env-path calls exec.LookPath and reads the
+// running binary's build info) — neither row is asserted against by any
+// case here, so those incidental reads never affect a result this file
+// checks. Cases whose own subject is an OS error shape — a chmod'd file or
+// directory (classifyProbeError's own unreadable arm), or an ancestor path
+// component that is a regular file (ENOTDIR) — live in host_disk_test.go
+// instead, where the OS itself, not a fabricated fs.FS, produces the error
+// classifyProbeError has to discriminate.
+
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/koblas/brief/internal/doctor"
+	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/host"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// newHostFixture builds a wd with a valid ".brief.yaml" (unbound roles) and
-// its default feature root, but no Claude Code integration installed — the
-// baseline every case in this file starts from, adding exactly the files
-// its own scenario needs. Fixtures in this file are built from
-// internal/platform/artifact renders directly, never through internal/setup.
-func newHostFixture(t *testing.T) string {
-	t.Helper()
-
-	wd := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: \"## Progress\"\n"), 0o600))
-	require.NoError(t, os.MkdirAll(filepath.Join(wd, "docs", "specifications"), 0o755))
-
-	return wd
-}
-
-// claudeCodeHost returns the claude-code Host every fixture in this file
-// builds files for.
-func claudeCodeHost(t *testing.T) host.Host {
-	t.Helper()
-
-	h, ok := host.Lookup(host.ClaudeCode)
-	require.True(t, ok)
-
-	return h
-}
-
-// writeHostArtifact writes f's own current artifact.Render at wd/f.RelPath.
-func writeHostArtifact(t *testing.T, wd string, f host.File) {
-	t.Helper()
-
-	writeHostFile(t, wd, f.RelPath, artifact.Render(f.Kind))
-}
-
-// writeHostDir creates a directory at wd/relPath, standing in for an
-// integration file a repository owner replaced with a directory.
-func writeHostDir(t *testing.T, wd, relPath string) {
-	t.Helper()
-
-	require.NoError(t, os.MkdirAll(filepath.Join(wd, filepath.FromSlash(relPath)), 0o755))
-}
-
-// hostCheckCase is one row of a host-check classification table: setup
-// mutates newHostFixture's own bare baseline, and Diagnose's report must
-// carry checkID at wantSeverity, with wantDetail a substring of Detail and
-// wantFix the exact Fix text (nil when the row carries none). wantPathSuffix,
-// when non-empty, is asserted as a suffix of the row's own Path — most
-// cases only need severity/detail/fix, but a row whose Path names one of
-// two candidates (host-snippet's own CLAUDE.md/​.claude/CLAUDE.md choice)
-// needs the stronger check.
-type hostCheckCase struct {
-	name              string
-	setup             func(t *testing.T, wd string, h host.Host)
-	checkID           string
-	wantSeverity      doctor.Severity
-	wantDetail        string
-	wantFix           *string
-	wantPathSuffix    string
-	wantPathNotSuffix string
-}
-
-// runHostCheckCases builds newHostFixture(t), applies c.setup, runs
-// Diagnose with an injected empty home, and asserts c.checkID's own row
-// against c.wantSeverity, c.wantDetail (substring), c.wantFix (exact) and,
-// when set, c.wantPathSuffix.
-func runHostCheckCases(t *testing.T, cases []hostCheckCase) {
-	t.Helper()
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			wd := newHostFixture(t)
-			h := claudeCodeHost(t)
-			c.setup(t, wd, h)
-
-			srv := doctor.NewServer(emptyHomeDir(t))
-			report := srv.Diagnose(t.Context(), wd)
-
-			check := findCheck(t, report, c.checkID)
-			assert.Equal(t, c.wantSeverity, check.Severity)
-			assert.Contains(t, check.Detail, c.wantDetail)
-			assert.Equal(t, c.wantFix, check.Fix)
-
-			if c.wantPathSuffix != "" {
-				assert.True(t, strings.HasSuffix(check.Path, c.wantPathSuffix), "path %q must end with %q", check.Path, c.wantPathSuffix)
-			}
-
-			if c.wantPathNotSuffix != "" {
-				assert.False(t, strings.HasSuffix(check.Path, c.wantPathNotSuffix), "path %q must not end with %q", check.Path, c.wantPathNotSuffix)
-			}
-		})
-	}
-}
 
 // runInit is short for "run 'brief init'" — the fix text repeated across
 // host-plugin, host-hook, host-snippet and host-agents rows whenever a
@@ -118,72 +40,169 @@ const runInitClaudeCode = "run 'brief init --host claude-code'"
 // remedy needs --with-agents specifically.
 const runInitWithAgents = "run 'brief init --with-agents'"
 
+// claudeCodeHost returns the claude-code Host every fixture in this file
+// builds files for.
+func claudeCodeHost(t *testing.T) host.Host {
+	t.Helper()
+
+	h, ok := host.Lookup(host.ClaudeCode)
+	require.True(t, ok)
+
+	return h
+}
+
+// newHostFixtureFS returns an in-memory fstest.MapFS, rooted at
+// fsAbs("repo"), holding a valid ".brief.yaml" (unbound roles, the default
+// feature directory) with no Claude Code integration installed. Each case
+// adds exactly the files its own scenario needs, via
+// setHostArtifact/setHostFile/setHostDir/setHostSymlink.
+func newHostFixtureFS() fstest.MapFS {
+	return fstest.MapFS{
+		"repo/.brief.yaml": &fstest.MapFile{Data: []byte("progress-heading: \"## Progress\"\n")},
+	}
+}
+
+// setHostArtifact sets f's own current artifact.Render at repo/f.RelPath
+// in fsys.
+func setHostArtifact(fsys fstest.MapFS, f host.File) {
+	fsys["repo/"+f.RelPath] = &fstest.MapFile{Data: artifact.Render(f.Kind)}
+}
+
+// setHostFile sets body at repo/relPath in fsys.
+func setHostFile(fsys fstest.MapFS, relPath string, body []byte) {
+	fsys["repo/"+relPath] = &fstest.MapFile{Data: body}
+}
+
+// setHostDir sets a directory entry at repo/relPath in fsys, standing in
+// for an integration file a repository owner replaced with a directory.
+func setHostDir(fsys fstest.MapFS, relPath string) {
+	fsys["repo/"+relPath] = &fstest.MapFile{Mode: fs.ModeDir}
+}
+
+// setHostSymlink sets a symlink at repo/relPath in fsys pointing at
+// target — target is resolved relative to relPath's own directory, the
+// same way fstest.MapFS resolves every symlink it holds; an absolute
+// target never resolves, mirroring the restriction fs.ReadLinkFS's own
+// production adapter (os.DirFS) does not share but this package's probes
+// never rely on: only Lstat's own non-regular classification is ever
+// exercised against a symlink here, never a followed read.
+func setHostSymlink(fsys fstest.MapFS, relPath, target string) {
+	fsys["repo/"+relPath] = &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte(target)}
+}
+
+// hostFSCheckCase is one row of an in-memory host-check classification
+// table: setup mutates newHostFixtureFS's own bare baseline, and
+// Diagnose's report must carry checkID at wantSeverity, with wantDetail a
+// substring of Detail, wantFix the exact Fix text (nil when the row
+// carries none), and wantRel the row's own Path exactly, relative to
+// fsAbs("repo") — MapFS paths are deterministic, so every case pins the
+// full path rather than guessing at a suffix the way host_disk_test.go's
+// own hostCheckCase sometimes has to.
+type hostFSCheckCase struct {
+	name         string
+	setup        func(fsys fstest.MapFS, h host.Host)
+	checkID      string
+	wantSeverity doctor.Severity
+	wantDetail   string
+	wantFix      *string
+	wantRel      string
+}
+
+// runHostFSCheckCases builds newHostFixtureFS(), applies c.setup, runs
+// Diagnose over the resulting fstest.MapFS (doctor.WithRootFS) rooted at
+// fsAbs("repo"), and asserts c.checkID's own row against c.wantSeverity,
+// c.wantDetail (substring), c.wantFix (exact) and c.wantRel (the row's own
+// Path, exactly).
+func runHostFSCheckCases(t *testing.T, cases []hostFSCheckCase) {
+	t.Helper()
+
+	h := claudeCodeHost(t)
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fsys := newHostFixtureFS()
+			c.setup(fsys, h)
+
+			srv := doctor.NewServer(emptyHomeDir(t), doctor.WithRootFS(fsys))
+			report := srv.Diagnose(t.Context(), fsAbs("repo"))
+
+			check := findCheck(t, report, c.checkID)
+			assert.Equal(t, c.wantSeverity, check.Severity)
+			assert.Contains(t, check.Detail, c.wantDetail)
+			assert.Equal(t, c.wantFix, check.Fix)
+			assert.Equal(t, fsAbs("repo", c.wantRel), check.Path)
+		})
+	}
+}
+
 // Test_diagnose_classifies_host_plugin pins host-plugin's own precedence:
 // nothing installed anywhere is SKIP; once something is installed
 // (Plugin(true) ∪ Agents()), a missing or non-regular subject file
 // (Plugin(false)) is ERROR "incomplete", naming it; an edited one is OK
-// "edited locally"; every subject file current is OK "installed".
-// Mutation-verified: disabling hostPluginCheck's own missing-file
-// precedence branch reddens exactly the three "missing"/"is a directory"
-// cases here — never "edited locally" or "every subject file is
-// current" — proving this table actually discriminates on it rather than
-// passing regardless.
+// "edited locally"; every subject file current is OK "installed". The
+// ENOTDIR "ancestor is a regular file" arm lives in host_disk_test.go: a
+// direct probe against the stdlib shows the same fixture over
+// fstest.MapFS reports plain fs.ErrNotExist rather than ENOTDIR, so it
+// cannot exercise classifyProbeError's own ENOTDIR arm here.
+// Mutation-verified, package-wide with no -run filter: forcing
+// hostPluginCheck's own missing-file precedence branch to `false` reddens
+// exactly the three ERROR "incomplete" cases here ("manifest missing …",
+// "a skill file is a directory", "only the hook is installed") — never
+// "edited locally" or "every subject file is current" — proving this
+// table actually discriminates on it rather than passing regardless.
 func Test_diagnose_classifies_host_plugin(t *testing.T) {
-	runHostCheckCases(t, []hostCheckCase{
+	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
 			name:         "nothing installed anywhere",
-			setup:        func(t *testing.T, _ string, _ host.Host) { t.Helper() },
+			setup:        func(fstest.MapFS, host.Host) {},
 			checkID:      "host-plugin",
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "not installed",
 			wantFix:      new(runInitClaudeCode),
+			wantRel:      host.PluginDir,
 		},
 		{
 			name: "manifest missing while the rest of the plugin is installed",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Plugin(true) {
 					if f.Kind == artifact.KindPluginManifest {
 						continue
 					}
 
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
 			checkID:      "host-plugin",
 			wantSeverity: doctor.SeverityError,
 			wantDetail:   "incomplete: missing .claude/skills/brief/.claude-plugin/plugin.json",
 			wantFix:      new(runInit),
+			wantRel:      host.PluginDir,
 		},
 		{
 			name: "a skill file is a directory",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Plugin(true) {
 					if f.Kind == artifact.KindSkillStart {
-						writeHostDir(t, wd, f.RelPath)
+						setHostDir(fsys, f.RelPath)
 
 						continue
 					}
 
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
 			checkID:      "host-plugin",
 			wantSeverity: doctor.SeverityError,
 			wantDetail:   "incomplete: missing .claude/skills/brief/skills/start/SKILL.md",
 			wantFix:      new(runInit),
+			wantRel:      host.PluginDir,
 		},
 		{
 			name: "only the hook is installed",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Plugin(true) {
 					if f.Hook {
-						writeHostArtifact(t, wd, f)
+						setHostArtifact(fsys, f)
 					}
 				}
 			},
@@ -191,245 +210,48 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 			wantSeverity: doctor.SeverityError,
 			wantDetail:   "incomplete: missing .claude/skills/brief/.claude-plugin/plugin.json, .claude/skills/brief/skills/start/SKILL.md, .claude/skills/brief/skills/finish/SKILL.md",
 			wantFix:      new(runInit),
+			wantRel:      host.PluginDir,
 		},
 		{
 			name: "a subject file was edited locally",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 
-				writeHostFile(t, wd, host.PluginDir+"/.claude-plugin/plugin.json", []byte(`{"name": "brief", "custom": true}`))
+				setHostFile(fsys, host.PluginDir+"/.claude-plugin/plugin.json", []byte(`{"name": "brief", "custom": true}`))
 			},
 			checkID:      "host-plugin",
 			wantSeverity: doctor.SeverityOK,
-			wantDetail:   "edited locally: .claude/skills/brief/.claude-plugin/plugin.json",
+			wantDetail:   "edited locally: " + host.PluginDir + "/.claude-plugin/plugin.json",
 			wantFix:      nil,
+			wantRel:      host.PluginDir,
 		},
 		{
 			name: "every subject file is current",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
 			checkID:      "host-plugin",
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "installed",
 			wantFix:      nil,
-		},
-		{
-			// P1: an ancestor path component that is a regular file, not a
-			// directory, proves absence (os.Lstat fails with ENOTDIR) — the
-			// same "not installed" every genuinely missing ".claude" gets,
-			// never present-but-unreadable. Mutation-verified: reverting
-			// classifyProbeError to only recognize fs.ErrNotExist (dropping
-			// the ENOTDIR arm) reddens this case alone into ERROR
-			// "incomplete: missing …", restored after.
-			name: "the .claude root is a regular file, not a directory",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude"), []byte("not a directory\n"), 0o600))
-			},
-			checkID:      "host-plugin",
-			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "not installed",
-			wantFix:      new(runInitClaudeCode),
+			wantRel:      host.PluginDir,
 		},
 	})
 }
 
-// Test_diagnose_classifies_host_plugin_unreadable pins host-plugin's own
-// unreadable-vs-missing split (P1): an ancestor directory doctor cannot even
-// Lstat into (mode 0o000) is unreadable, never "missing" — every subject
-// file keeps its own "not readable" name rather than the "incomplete:
-// missing" wording a genuinely absent file gets, both ERROR, since Claude
-// Code cannot load the skill through a file it cannot read any more than
-// one that is not there. The fix targets whichever call actually failed: a
-// failed Lstat targets blockingDir's own result, the directory missing its
-// search bit, never necessarily the subject's immediate parent; a failed
-// ReadFile targets the subject file itself (chmod +r).
-func Test_diagnose_classifies_host_plugin_unreadable(t *testing.T) {
-	runHostCheckCases(t, []hostCheckCase{
-		{
-			// Control for every case below: the identical install, fully
-			// readable, OK.
-			name: "every subject file is current",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
-				}
-			},
-			checkID:      "host-plugin",
-			wantSeverity: doctor.SeverityOK,
-			wantDetail:   "installed",
-			wantFix:      nil,
-		},
-		{
-			// Control: "every subject file is current" above is the
-			// identical install, readable, OK. Mutation-verified:
-			// dropping integrationFileRowDetail's own
-			// call ahead of missingRelPaths turns this case OK
-			// "installed" — every file is unreadable, so missingRelPaths
-			// itself finds nothing left to call missing — reddening this
-			// case and every other case or test that depends on
-			// host-plugin's own unreadable arm, restored after.
-			name: "a subject file is unreadable, not missing",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
-				}
-
-				chmodUnreadableDir(t, filepath.Join(wd, ".claude"))
-			},
-			checkID:      "host-plugin",
-			wantSeverity: doctor.SeverityError,
-			wantDetail: "not readable (permission denied): " + strings.Join([]string{
-				host.PluginDir + "/.claude-plugin/plugin.json",
-				host.PluginDir + "/skills/start/SKILL.md",
-				host.PluginDir + "/skills/finish/SKILL.md",
-			}, ", "),
-			wantFix: new("chmod u+rwx .claude, then " + runInitClaudeCode),
-		},
-		{
-			// The blocking directory is two levels below root
-			// (".claude/skills"), not root's own immediate child
-			// (".claude", left at 0o755): notReadableFix's own ancestor
-			// walk must climb past every unresolvable descendant and stop
-			// at the first ancestor whose own Lstat succeeds, not at the
-			// subject file's immediate parent and not at root. Control:
-			// "a subject file is unreadable, not missing" above chmods
-			// ".claude" itself and expects the walk to stop one level
-			// higher still. Mutation-verified against this package and
-			// internal/cli, with no -run filter: hardcoding blockingDir to
-			// always return root's immediate child segment of the
-			// resolved ancestor (truncating any deeper walk back down to
-			// ".claude") reddens this case alone package-wide, since every
-			// other case exercising the walk already resolves to that
-			// immediate child or, for "the install root itself is
-			// unsearchable" below, to root itself regardless. Checking
-			// each ancestor's own parent instead of the ancestor itself
-			// reddens this case together with "a subject file is
-			// unreadable, not missing" above, host-hook's and
-			// host-agents' own unreadable-ancestor cases, "the install
-			// root itself is unsearchable" below, and
-			// Test_diagnose_host_plugin_hook_agents_unreadable_fix_is_relative_to_wd.
-			// Disabling the loop's success branch entirely, so it never
-			// returns before dir == root, reddens the same set except
-			// "the install root itself is unsearchable" — whose own
-			// correct answer already is root — and additionally reddens
-			// host-snippet's own "no root CLAUDE.md, .claude itself
-			// cannot be Lstat'd" case. Both restored after.
-			name: "the blocking dir is .claude/skills, .claude itself stays 0755",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
-				}
-
-				chmodUnreadableDir(t, filepath.Join(wd, ".claude", "skills"))
-			},
-			checkID:      "host-plugin",
-			wantSeverity: doctor.SeverityError,
-			wantDetail: "not readable (permission denied): " + strings.Join([]string{
-				host.PluginDir + "/.claude-plugin/plugin.json",
-				host.PluginDir + "/skills/start/SKILL.md",
-				host.PluginDir + "/skills/finish/SKILL.md",
-			}, ", "),
-			wantFix: new("chmod u+rwx .claude/skills, then " + runInitClaudeCode),
-		},
-		{
-			// Every directory stays searchable; only the manifest file
-			// itself is chmodded 0o000, so the failure is in the ReadFile
-			// call rather than the Lstat call (statFailed is false) —
-			// mirrors host-hook's own "the hook file itself is unreadable,
-			// its directory is searchable" case. Control: "every subject
-			// file is current" above is the identical install, readable,
-			// OK. Mutation-verified: hardcoding first.statFailed to true
-			// in integrationFileRowDetail's own notReadableFix call
-			// reddens this case alone (the fix reverts to "chmod u+rwx
-			// .claude/skills/brief/.claude-plugin, then …"), restored
-			// after.
-			name: "a subject file itself is unreadable, its directory is searchable",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				var manifestPath string
-
-				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
-
-					if f.Kind == artifact.KindPluginManifest {
-						manifestPath = filepath.Join(wd, filepath.FromSlash(f.RelPath))
-					}
-				}
-
-				chmodUnreadable(t, manifestPath)
-			},
-			checkID:      "host-plugin",
-			wantSeverity: doctor.SeverityError,
-			wantDetail:   "not readable (permission denied): " + host.PluginDir + "/.claude-plugin/plugin.json",
-			wantFix:      new("chmod +r " + host.PluginDir + "/.claude-plugin/plugin.json, then " + runInitClaudeCode),
-		},
-		{
-			// The install root itself (wd) is the one unsearchable
-			// directory, not any of its descendants: blockingDir's own
-			// walk never finds a resolvable ancestor before dir == root,
-			// so it falls through to its own "return root" fallback
-			// rather than the loop's success branch the two chmodded-
-			// directory cases above ("a subject file is unreadable, not
-			// missing" and "the blocking dir is .claude/skills") reach.
-			// Control: "a subject file is unreadable, not missing" above
-			// leaves root itself searchable and stops one level lower, at
-			// ".claude". Mutation-verified against this package and
-			// internal/cli, with no -run filter: changing that fallback
-			// to "return filepath.Dir(root)" reddens this case alone,
-			// package-wide; the exact resulting fix text was not asserted
-			// against, only that it stops matching "chmod u+rwx ., then
-			// …", restored after.
-			name: "the install root itself is unsearchable",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
-				}
-
-				chmodUnreadableDir(t, wd)
-			},
-			checkID:      "host-plugin",
-			wantSeverity: doctor.SeverityError,
-			wantDetail: "not readable (permission denied): " + strings.Join([]string{
-				host.PluginDir + "/.claude-plugin/plugin.json",
-				host.PluginDir + "/skills/start/SKILL.md",
-				host.PluginDir + "/skills/finish/SKILL.md",
-			}, ", "),
-			wantFix: new("chmod u+rwx ., then " + runInitClaudeCode),
-		},
-	})
-}
-
-// writeHostPluginWithoutHook writes every h.Plugin(true) file at wd except
-// the trailing hook entry.
-func writeHostPluginWithoutHook(t *testing.T, wd string, h host.Host) {
-	t.Helper()
-
+// writeHostPluginWithoutHookFS sets every h.Plugin(true) file in fsys
+// except the trailing hook entry.
+func writeHostPluginWithoutHookFS(fsys fstest.MapFS, h host.Host) {
 	for _, f := range h.Plugin(true) {
 		if f.Hook {
 			continue
 		}
 
-		writeHostArtifact(t, wd, f)
+		setHostArtifact(fsys, f)
 	}
 }
 
@@ -437,39 +259,44 @@ func writeHostPluginWithoutHook(t *testing.T, wd string, h host.Host) {
 // nothing installed anywhere is SKIP; the rest of the plugin installed
 // with no hook file is WARN, since doctor cannot tell a lost file from
 // --no-hook; a hook path that is a directory is ERROR; an edited hook is
-// OK "edited locally"; a current hook is OK "installed".
+// OK "edited locally"; a current hook is OK "installed". The ENOTDIR and
+// unreadable arms live in host_disk_test.go — see
+// Test_diagnose_classifies_host_plugin's own doc comment for why.
+// Mutation-verified, package-wide with no -run filter: inverting
+// hostHookCheck's own absent-branch condition (`if !installed` to `if
+// installed`) reddens both "nothing installed anywhere" (SKIP flips to
+// WARN) and "the rest of the plugin is installed but the hook file is
+// missing" (WARN flips to SKIP) — no other case here — restored after.
 func Test_diagnose_classifies_host_hook(t *testing.T) {
-	runHostCheckCases(t, []hostCheckCase{
+	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
 			name:         "nothing installed anywhere",
-			setup:        func(t *testing.T, _ string, _ host.Host) { t.Helper() },
+			setup:        func(fstest.MapFS, host.Host) {},
 			checkID:      "host-hook",
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "not installed",
 			wantFix:      new(runInitClaudeCode),
+			wantRel:      host.PluginDir + "/hooks/hooks.json",
 		},
 		{
 			name: "the rest of the plugin is installed but the hook file is missing",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				writeHostPluginWithoutHook(t, wd, h)
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				writeHostPluginWithoutHookFS(fsys, h)
 			},
 			checkID:      "host-hook",
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "installed without the check hook",
 			wantFix:      new("run 'brief init' to add it"),
+			wantRel:      host.PluginDir + "/hooks/hooks.json",
 		},
 		{
 			name: "the hook path is a directory",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				writeHostPluginWithoutHook(t, wd, h)
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				writeHostPluginWithoutHookFS(fsys, h)
 
 				for _, f := range h.Plugin(true) {
 					if f.Hook {
-						writeHostDir(t, wd, f.RelPath)
+						setHostDir(fsys, f.RelPath)
 					}
 				}
 			},
@@ -477,275 +304,139 @@ func Test_diagnose_classifies_host_hook(t *testing.T) {
 			wantSeverity: doctor.SeverityError,
 			wantDetail:   "not a regular file",
 			wantFix:      new(runInit),
+			wantRel:      host.PluginDir + "/hooks/hooks.json",
 		},
 		{
 			name: "the hook file was edited locally",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 
-				writeHostFile(t, wd, host.PluginDir+"/hooks/hooks.json", []byte(`{"hooks": {}}`))
+				setHostFile(fsys, host.PluginDir+"/hooks/hooks.json", []byte(`{"hooks": {}}`))
 			},
 			checkID:      "host-hook",
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "edited locally",
 			wantFix:      nil,
+			wantRel:      host.PluginDir + "/hooks/hooks.json",
 		},
 		{
 			name: "the hook file is current",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
 			checkID:      "host-hook",
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "installed",
 			wantFix:      nil,
-		},
-		{
-			// P1: mirrors host-plugin's own ENOTDIR case — a ".claude" that
-			// is a regular file proves absence, never present-but-unreadable.
-			name: "the .claude root is a regular file, not a directory",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude"), []byte("not a directory\n"), 0o600))
-			},
-			checkID:      "host-hook",
-			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "not installed",
-			wantFix:      new(runInitClaudeCode),
-		},
-		{
-			// An unreadable hook file is WARN "not readable", never the
-			// ERROR "not a regular file" a genuine wrong-shape hook gets.
-			// Control: "the hook file is current" above is the identical
-			// install, readable, OK.
-			name: "the hook file is unreadable, not wrong-shaped",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
-				}
-
-				chmodUnreadableDir(t, filepath.Join(wd, ".claude"))
-			},
-			checkID:      "host-hook",
-			wantSeverity: doctor.SeverityWarn,
-			wantDetail:   "not readable (permission denied)",
-			wantFix:      new("chmod u+rwx .claude, then " + runInitClaudeCode),
-		},
-		{
-			// The unreadable-directory case above fails at the Lstat call
-			// itself (statFailed); this one leaves every directory
-			// searchable and chmods the hook file directly, so the failure
-			// is in the ReadFile call instead — the fix must target the
-			// file (chmod +r), not its parent directory.
-			// Mutation-verified: dropping probeIntegrationFile's own
-			// `state.unreadable = true` in its ReadFile-failure arm reddens
-			// this case alone (the row falls to ERROR "not a regular
-			// file"), restored after.
-			name: "the hook file itself is unreadable, its directory is searchable",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				var hookPath string
-
-				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
-
-					if f.Hook {
-						hookPath = filepath.Join(wd, filepath.FromSlash(f.RelPath))
-					}
-				}
-
-				chmodUnreadable(t, hookPath)
-			},
-			checkID:      "host-hook",
-			wantSeverity: doctor.SeverityWarn,
-			wantDetail:   "not readable (permission denied)",
-			wantFix:      new("chmod +r " + host.PluginDir + "/hooks/hooks.json, then " + runInitClaudeCode),
+			wantRel:      host.PluginDir + "/hooks/hooks.json",
 		},
 	})
 }
 
 // Test_diagnose_classifies_host_agents pins host-agents' own precedence,
 // distinct from host-plugin's: none of the three agent files present is
-// SKIP; a missing or non-regular one, given at least one of the three
-// exists, is WARN (never ERROR — an unbound agent is not itself a fault);
-// an older render is WARN naming it; an edited one is OK "edited locally";
-// all three current is OK "installed". Every fix here names --with-agents,
-// since a plain "brief init" never touches agent files. Mutation-verified:
-// disabling hostAgentsCheck's own missing-file precedence branch reddens
-// exactly "one of the three agent files is missing" here — never "edited
-// locally" or "all three agent files are current".
+// SKIP; a missing one, given at least one of the three exists, is WARN
+// (never ERROR — an unbound agent is not itself a fault); an older render
+// is WARN naming it; an edited one is OK "edited locally"; all three
+// current is OK "installed". Every fix here names --with-agents, since a
+// plain "brief init" never touches agent files. The ENOTDIR and unreadable
+// arms live in host_disk_test.go — see Test_diagnose_classifies_host_plugin's
+// own doc comment for why. Mutation-verified, package-wide with no -run
+// filter, one precedence branch at a time: forcing hostAgentsCheck's own
+// missing branch (`len(missing) > 0`) to false reddens exactly "one of the
+// three agent files is missing"; forcing the older branch
+// (`len(older) > 0`) to false reddens exactly "an older planner render";
+// forcing the edited branch (`len(edited) > 0`) to false reddens exactly
+// "an agent file was edited locally" — each restored before the next.
 func Test_diagnose_classifies_host_agents(t *testing.T) {
-	runHostCheckCases(t, []hostCheckCase{
+	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
 			name:         "none of the three agent files present",
-			setup:        func(t *testing.T, _ string, _ host.Host) { t.Helper() },
+			setup:        func(fstest.MapFS, host.Host) {},
 			checkID:      "host-agents",
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "not installed",
 			wantFix:      new(runInitWithAgents),
+			wantRel:      host.PluginDir + "/agents",
 		},
 		{
 			name: "one of the three agent files is missing",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Agents() {
 					if f.Kind == artifact.KindAgentReviewer {
 						continue
 					}
 
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
 			checkID:      "host-agents",
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "missing .claude/skills/brief/agents/reviewer.md",
 			wantFix:      new(runInitWithAgents),
+			wantRel:      host.PluginDir + "/agents",
 		},
 		{
 			// SCENARIO-02: the pre-scenario planner render, captured
-			// mechanically (%q dump) before agents.go changed and now moved
-			// to olderAgentPlannerDigests — the one fixture that actually
-			// reaches host-agents' own OriginOlder arm today (every other
-			// Kind's older…Digests list still ships empty). Mutation-verify
-			// by emptying olderAgentPlannerDigests: this case alone reddens
-			// (falls through to "edited locally"), the others above and
-			// below stay green.
+			// mechanically (%q dump) before agents.go changed — the one
+			// fixture that actually reaches host-agents' own OriginOlder
+			// arm today (every other Kind's older…Digests list still ships
+			// empty). See Test_diagnose_classifies_host_agents's own doc
+			// comment for the mutation this case is verified against (forcing
+			// hostAgentsCheck's own `len(older) > 0` branch to false).
 			name: "an older planner render",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Agents() {
 					if f.Kind == artifact.KindAgentPlanner {
 						continue
 					}
 
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 
 				older := []byte("---\nname: planner\ndescription: Turn a feature's specification into ordered scenario " +
 					"plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's " +
 					"specification into ordered scenario plans: run `brief new step <feature>` for the next " +
 					"scenario, then fill its plan file. Never write production or test code.\n")
-				writeHostFile(t, wd, host.PluginDir+"/agents/planner.md", older)
+				setHostFile(fsys, host.PluginDir+"/agents/planner.md", older)
 			},
 			checkID:      "host-agents",
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "installed by an older brief release: .claude/skills/brief/agents/planner.md",
 			wantFix:      new(runInitWithAgents),
+			wantRel:      host.PluginDir + "/agents",
 		},
 		{
 			name: "an agent file was edited locally",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Agents() {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 
-				writeHostFile(t, wd, host.PluginDir+"/agents/planner.md", []byte("---\nname: planner\n---\n\ncustom\n"))
+				setHostFile(fsys, host.PluginDir+"/agents/planner.md", []byte("---\nname: planner\n---\n\ncustom\n"))
 			},
 			checkID:      "host-agents",
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "edited locally: .claude/skills/brief/agents/planner.md",
 			wantFix:      nil,
+			wantRel:      host.PluginDir + "/agents",
 		},
 		{
 			name: "all three agent files are current",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Agents() {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
 			checkID:      "host-agents",
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "installed",
 			wantFix:      nil,
-		},
-		{
-			// P1: mirrors host-plugin's own ENOTDIR case — a ".claude" that
-			// is a regular file proves absence, never present-but-unreadable
-			// (which would otherwise flip this row's own SKIP to WARN).
-			name: "the .claude root is a regular file, not a directory",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude"), []byte("not a directory\n"), 0o600))
-			},
-			checkID:      "host-agents",
-			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "not installed",
-			wantFix:      new(runInitWithAgents),
-		},
-		{
-			// An unreadable agent file is WARN "not readable", never the
-			// "missing" wording a genuinely absent one gets. Control: "all
-			// three agent files are current" above is the identical install,
-			// readable, OK.
-			name: "an agent file is unreadable, not missing",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				for _, f := range h.Agents() {
-					writeHostArtifact(t, wd, f)
-				}
-
-				chmodUnreadableDir(t, filepath.Join(wd, ".claude"))
-			},
-			checkID:      "host-agents",
-			wantSeverity: doctor.SeverityWarn,
-			wantDetail: "not readable (permission denied): " + strings.Join([]string{
-				host.PluginDir + "/agents/planner.md",
-				host.PluginDir + "/agents/implementer.md",
-				host.PluginDir + "/agents/reviewer.md",
-			}, ", "),
-			wantFix: new("chmod u+rwx .claude, then " + runInitClaudeCode),
-		},
-		{
-			// Every directory stays searchable; only the planner agent
-			// file itself is chmodded 0o000, so the failure is in the
-			// ReadFile call rather than the Lstat call (statFailed is
-			// false) — mirrors host-plugin's own equivalent case. Control:
-			// "all three agent files are current" above is the identical
-			// install, readable, OK. Mutation-verified: hardcoding
-			// first.statFailed to true in integrationFileRowDetail's own
-			// notReadableFix call reddens this case alone (the fix
-			// reverts to "chmod u+rwx .claude/skills/brief/agents,
-			// then …"), restored after.
-			name: "an agent file itself is unreadable, its directory is searchable",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				var plannerPath string
-
-				for _, f := range h.Agents() {
-					writeHostArtifact(t, wd, f)
-
-					if f.Kind == artifact.KindAgentPlanner {
-						plannerPath = filepath.Join(wd, filepath.FromSlash(f.RelPath))
-					}
-				}
-
-				chmodUnreadable(t, plannerPath)
-			},
-			checkID:      "host-agents",
-			wantSeverity: doctor.SeverityWarn,
-			wantDetail:   "not readable (permission denied): " + host.PluginDir + "/agents/planner.md",
-			wantFix:      new("chmod +r " + host.PluginDir + "/agents/planner.md, then " + runInitClaudeCode),
+			wantRel:      host.PluginDir + "/agents",
 		},
 	})
 }
@@ -753,240 +444,138 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 // Test_diagnose_classifies_host_skill pins host-skill's own precedence:
 // nothing installed anywhere is SKIP; the skill missing while some other
 // Claude Code integration file is installed is WARN, since a bound role
-// can never preload a skill that is not there; an unreadable skill is
-// WARN; a skill path that is a directory is ERROR — Rule 7's one new
-// ERROR arm; an edited skill is OK "edited locally"; a current one,
-// alongside a full install, is OK "installed"; and the skill alone, with
-// no plugin or agent file present at all, still classifies itself OK
-// "installed" rather than SKIP — only an absent skill defers to whether
-// anything else is installed.
+// can never preload a skill that is not there; a skill path that is a
+// directory is ERROR — Rule 7's one new ERROR arm; an edited skill is OK
+// "edited locally"; a current one, alongside a full install, is OK
+// "installed"; and the skill alone, with no plugin or agent file present
+// at all, still classifies itself OK "installed" rather than SKIP — only
+// an absent skill defers to whether anything else is installed. The
+// unreadable arm (skill mode 0o000) lives in host_disk_test.go.
+// Mutation-verified, package-wide with no -run filter, one arm at a time:
+// inverting hostSkillRow's own absent-branch condition (`if !installed` to
+// `if installed`) reddens both "nothing installed anywhere" and "plugin
+// files present and skill absent"; changing the ERROR not-a-regular-file
+// arm's own Severity to WARN reddens "skill path is a directory" alone;
+// changing that same arm's own Fix to runInit (dropping
+// hostSkillNotRegularFix) reddens "skill path is a directory" alone too;
+// replacing the final originRow-derived return with a hardcoded ERROR row
+// reddens "the skill was edited locally", "the skill is current, alongside
+// a full install" and "the skill alone, with no plugin or agent file" —
+// every case that actually reaches it — together. Each restored before the
+// next.
 func Test_diagnose_classifies_host_skill(t *testing.T) {
 	skillPath := host.WorkflowSkillDir + "/SKILL.md"
 
-	runHostCheckCases(t, []hostCheckCase{
+	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
-			name:           "nothing installed anywhere",
-			setup:          func(t *testing.T, _ string, _ host.Host) { t.Helper() },
-			checkID:        "host-skill",
-			wantSeverity:   doctor.SeveritySkip,
-			wantDetail:     "not installed",
-			wantFix:        new(runInitClaudeCode),
-			wantPathSuffix: skillPath,
+			name:         "nothing installed anywhere",
+			setup:        func(fstest.MapFS, host.Host) {},
+			checkID:      "host-skill",
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "not installed",
+			wantFix:      new(runInitClaudeCode),
+			wantRel:      skillPath,
 		},
 		{
 			name: "plugin files present and skill absent",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
-			checkID:        "host-skill",
-			wantSeverity:   doctor.SeverityWarn,
-			wantDetail:     "not installed; bound agents cannot preload it",
-			wantFix:        new(runInit),
-			wantPathSuffix: skillPath,
-		},
-		{
-			name: "skill mode 0o000 beside the plugin",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
-				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
-				}
-
-				var skillFile host.File
-
-				for _, f := range h.Skills() {
-					writeHostArtifact(t, wd, f)
-					skillFile = f
-				}
-
-				chmodUnreadable(t, filepath.Join(wd, filepath.FromSlash(skillFile.RelPath)))
-			},
-			checkID:        "host-skill",
-			wantSeverity:   doctor.SeverityWarn,
-			wantDetail:     "not readable (permission denied)",
-			wantFix:        new("chmod +r " + skillPath + ", then " + runInitClaudeCode),
-			wantPathSuffix: skillPath,
+			checkID:      "host-skill",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "not installed; bound agents cannot preload it",
+			wantFix:      new(runInit),
+			wantRel:      skillPath,
 		},
 		{
 			name: "skill path is a directory",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				writeHostDir(t, wd, skillPath)
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostDir(fsys, skillPath)
 			},
-			checkID:        "host-skill",
-			wantSeverity:   doctor.SeverityError,
-			wantDetail:     "not a regular file",
-			wantFix:        new("remove " + skillPath + ", then " + runInit),
-			wantPathSuffix: skillPath,
+			checkID:      "host-skill",
+			wantSeverity: doctor.SeverityError,
+			wantDetail:   "not a regular file",
+			wantFix:      new("remove " + skillPath + ", then " + runInit),
+			wantRel:      skillPath,
 		},
 		{
 			name: "the skill was edited locally",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				writeHostFile(t, wd, skillPath, []byte("custom skill body\n"))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostFile(fsys, skillPath, []byte("custom skill body\n"))
 			},
-			checkID:        "host-skill",
-			wantSeverity:   doctor.SeverityOK,
-			wantDetail:     "edited locally",
-			wantFix:        nil,
-			wantPathSuffix: skillPath,
+			checkID:      "host-skill",
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "edited locally",
+			wantFix:      nil,
+			wantRel:      skillPath,
 		},
 		{
 			name: "the skill is current, alongside a full install",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 
 				for _, f := range h.Skills() {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
-			checkID:        "host-skill",
-			wantSeverity:   doctor.SeverityOK,
-			wantDetail:     "installed",
-			wantFix:        nil,
-			wantPathSuffix: skillPath,
+			checkID:      "host-skill",
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "installed",
+			wantFix:      nil,
+			wantRel:      skillPath,
 		},
 		{
 			name: "the skill alone, with no plugin or agent file",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Skills() {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
-			checkID:        "host-skill",
-			wantSeverity:   doctor.SeverityOK,
-			wantDetail:     "installed",
-			wantFix:        nil,
-			wantPathSuffix: skillPath,
+			checkID:      "host-skill",
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "installed",
+			wantFix:      nil,
+			wantRel:      skillPath,
 		},
 	})
 }
 
-// Test_diagnose_host_plugin_hook_agents_unreadable_fix_is_relative_to_wd
-// pins the same wd-vs-root split fix pass 8 gave host-snippet's own "not
-// readable" fix (Test_diagnose_host_snippet_unreadable_fix_is_relative_to_wd)
-// for host-plugin, host-hook and host-agents: Diagnose run from a
-// subdirectory below root must recommend "chmod u+rwx ../<dir>", not the
-// bare root-relative form every hostCheckCase table in this file pins
-// (wd == root there). Mutation-verified: passing root instead of absWd as
-// wd into hostPluginCheck/hostHookCheck/hostAgentsCheck in doctor.go's own
-// Diagnose reddens all three assertions here — the fix text stops
-// changing between wd == root and wd != root — while leaving every table
-// in this file green.
-func Test_diagnose_host_plugin_hook_agents_unreadable_fix_is_relative_to_wd(t *testing.T) {
-	wd := newHostFixture(t)
+// Test_diagnose_host_plugin_stays_skip_when_only_the_skill_is_installed
+// pins anyIntegrationFilePresent's own h.Skills() exclusion (R13's own
+// doc comment on that function): the skill is never an install signal on
+// its own, so host-plugin — whose own "installed" flag is
+// anyIntegrationFilePresent's result — must stay SKIP "not installed" even
+// though the skill file itself is genuinely present and OK (pinned
+// separately by "the skill alone, with no plugin or agent file" above).
+// Control: "nothing installed anywhere" in Test_diagnose_classifies_host_plugin
+// is the same SKIP row with nothing at all present. Mutation-verified,
+// package-wide with no -run filter: adding h.Skills() to
+// anyIntegrationFilePresent's own OR reddens this case (host-plugin flips
+// to ERROR "incomplete: missing …") and, since the same result also feeds
+// (*Server).Diagnose's own integrationInstalled for env-path, doctor_test.go's
+// own Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed/
+// "not on PATH, only the brief-workflow skill is installed" — no other
+// case in the package, restored after.
+func Test_diagnose_host_plugin_stays_skip_when_only_the_skill_is_installed(t *testing.T) {
+	fsys := newHostFixtureFS()
 	h := claudeCodeHost(t)
 
-	for _, f := range h.Plugin(true) {
-		writeHostArtifact(t, wd, f)
+	for _, f := range h.Skills() {
+		setHostArtifact(fsys, f)
 	}
 
-	for _, f := range h.Agents() {
-		writeHostArtifact(t, wd, f)
-	}
-
-	chmodUnreadableDir(t, filepath.Join(wd, ".claude"))
-
-	subdir := filepath.Join(wd, "docs")
-
-	srv := doctor.NewServer(emptyHomeDir(t))
-	report := srv.Diagnose(t.Context(), subdir)
-
-	pluginCheck := findCheck(t, report, "host-plugin")
-	assert.Equal(t, doctor.SeverityError, pluginCheck.Severity)
-	require.NotNil(t, pluginCheck.Fix)
-	assert.Equal(t, "chmod u+rwx ../.claude, then "+runInitClaudeCode, *pluginCheck.Fix)
-
-	hookCheck := findCheck(t, report, "host-hook")
-	assert.Equal(t, doctor.SeverityWarn, hookCheck.Severity)
-	require.NotNil(t, hookCheck.Fix)
-	assert.Equal(t, "chmod u+rwx ../.claude, then "+runInitClaudeCode, *hookCheck.Fix)
-
-	agentsCheck := findCheck(t, report, "host-agents")
-	assert.Equal(t, doctor.SeverityWarn, agentsCheck.Severity)
-	require.NotNil(t, agentsCheck.Fix)
-	assert.Equal(t, "chmod u+rwx ../.claude, then "+runInitClaudeCode, *agentsCheck.Fix)
-}
-
-// Test_diagnose_host_plugin_detail_names_unreadable_and_missing_together
-// pins integrationFileRowDetail's own mixed-row wording: a host-plugin row
-// spanning one unreadable subject file and one genuinely missing sibling
-// must name both, in separate fragments, never silently drop the missing
-// one behind the unreadable one's own "not readable" wording. Only
-// ".claude-plugin" (holding plugin.json) is chmodded unreadable here;
-// "skills/start" and "skills/finish" are never created at all, so their
-// own SKILL.md files read as plain-missing, not unreadable.
-// Mutation-verified: deleting integrationFileRowDetail's own "; missing …"
-// append reddens this case alone — the fragment disappears from Detail —
-// restored after.
-func Test_diagnose_host_plugin_detail_names_unreadable_and_missing_together(t *testing.T) {
-	wd := newHostFixture(t)
-	h := claudeCodeHost(t)
-
-	for _, f := range h.Plugin(true) {
-		if f.Kind == artifact.KindPluginManifest {
-			writeHostArtifact(t, wd, f)
-		}
-	}
-
-	chmodUnreadableDir(t, filepath.Join(wd, host.PluginDir, ".claude-plugin"))
-
-	srv := doctor.NewServer(emptyHomeDir(t))
-	report := srv.Diagnose(t.Context(), wd)
+	srv := doctor.NewServer(emptyHomeDir(t), doctor.WithRootFS(fsys))
+	report := srv.Diagnose(t.Context(), fsAbs("repo"))
 
 	check := findCheck(t, report, "host-plugin")
-	assert.Equal(t, doctor.SeverityError, check.Severity)
-	assert.Contains(t, check.Detail, "not readable (permission denied): "+host.PluginDir+"/.claude-plugin/plugin.json")
-	assert.Contains(t, check.Detail, "; missing "+host.PluginDir+"/skills/start/SKILL.md, "+host.PluginDir+"/skills/finish/SKILL.md")
-}
-
-// chmodUnreadable chmods path to 0o000 and registers a t.Cleanup that
-// restores it to 0o600 before TempDir's own removal runs — an unreadable
-// file left at 0o000 would otherwise make RemoveAll fail on some
-// platforms. Skips the test outright under euid 0, where chmod's
-// permission bits have no effect and the read would silently succeed,
-// which would make the case pass vacuously rather than exercise the WARN
-// this file pins.
-func chmodUnreadable(t *testing.T, path string) {
-	t.Helper()
-
-	if os.Geteuid() == 0 {
-		t.Skip("chmod has no effect as root")
-	}
-
-	require.NoError(t, os.Chmod(path, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
-}
-
-// chmodUnreadableDir chmods dir to 0o000 and registers a t.Cleanup that
-// restores it to 0o755 before TempDir's own removal runs — an inaccessible
-// directory left at 0o000 (no execute/search bit) would otherwise make
-// RemoveAll unable to traverse into it at all, unlike chmodUnreadable's own
-// 0o600 restore, which is only safe for a plain file. Skips under euid 0,
-// the same as chmodUnreadable, where chmod's permission bits have no
-// effect and every Lstat underneath would silently succeed.
-func chmodUnreadableDir(t *testing.T, dir string) {
-	t.Helper()
-
-	if os.Geteuid() == 0 {
-		t.Skip("chmod has no effect as root")
-	}
-
-	require.NoError(t, os.Chmod(dir, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	assert.Equal(t, doctor.SeveritySkip, check.Severity)
+	assert.Equal(t, "not installed", check.Detail)
+	require.NotNil(t, check.Fix)
+	assert.Equal(t, runInitClaudeCode, *check.Fix)
 }
 
 // Test_diagnose_classifies_host_snippet pins host-snippet's own rules: a
@@ -999,418 +588,330 @@ func chmodUnreadableDir(t *testing.T, dir string) {
 // endings are CRLF (which can never exactly match the LF marker), is SKIP
 // "not installed"; a candidate that exists but is not a regular file — a
 // directory or a symlink — is WARN, naming which. The unreadable-vs-absent
-// split — a candidate Lstat or ReadFile cannot resolve, or an ancestor
-// path component that is itself a regular file — is pinned separately in
-// Test_diagnose_classifies_host_snippet_unreadable.
+// split lives in host_disk_test.go's own
+// Test_diagnose_classifies_host_snippet_unreadable. Mutation-verified,
+// package-wide with no -run filter: short-circuiting hostSnippetCheck's
+// own marker-defect loop (`for _, s := range states { if s.prob != nil
+// {…} }`) to never fire reddens "a lone begin marker" alone — the only
+// case here whose subject is a marker defect.
 func Test_diagnose_classifies_host_snippet(t *testing.T) {
-	runHostCheckCases(t, []hostCheckCase{
+	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
 			name: "a lone begin marker",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), []byte("intro\n"+artifact.SnippetBegin+"\nno end after this\n"), 0o600))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostFile(fsys, "CLAUDE.md", []byte("intro\n"+artifact.SnippetBegin+"\nno end after this\n"))
 			},
 			checkID:      "host-snippet",
 			wantSeverity: doctor.SeverityError,
 			wantDetail:   "line 2",
 			wantFix:      new("add " + artifact.SnippetEnd + " after it, or remove the lone marker"),
+			wantRel:      "CLAUDE.md",
 		},
 		{
 			name: "a block exists in both candidates",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, _ host.Host) {
 				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
-				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), block, 0o600))
-				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), block, 0o600))
+				setHostFile(fsys, "CLAUDE.md", block)
+				setHostFile(fsys, ".claude/CLAUDE.md", block)
 			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeverityError,
-			wantDetail:     "a brief block already exists in CLAUDE.md",
-			wantFix:        new("delete that block"),
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeverityError,
+			wantDetail:   "a brief block already exists in CLAUDE.md",
+			wantFix:      new("delete that block"),
+			wantRel:      ".claude/CLAUDE.md",
 		},
 		{
 			name: "a block only in .claude/CLAUDE.md",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, _ host.Host) {
 				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
-				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), block, 0o600))
+				setHostFile(fsys, ".claude/CLAUDE.md", block)
 			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeverityOK,
-			wantDetail:     "installed",
-			wantFix:        nil,
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "installed",
+			wantFix:      nil,
+			wantRel:      ".claude/CLAUDE.md",
 		},
 		{
 			name: "a current block names a different feature directory",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, _ host.Host) {
 				block := append(append([]byte{}, artifact.SnippetBlock("elsewhere")...), '\n')
-				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), block, 0o600))
+				setHostFile(fsys, "CLAUDE.md", block)
 			},
 			checkID:      "host-snippet",
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "names elsewhere/, .brief.yaml says docs/specifications/",
 			wantFix:      new(runInit),
+			wantRel:      "CLAUDE.md",
 		},
 		{
 			name: "the config is unparseable so the directory is not compared",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostFile(fsys, ".brief.yaml", []byte("progress-heading: [not a scalar\n"))
 
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: [not a scalar\n"), 0o600))
 				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
-				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), block, 0o600))
+				setHostFile(fsys, "CLAUDE.md", block)
 			},
 			checkID:      "host-snippet",
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "installed (feature directory not compared: .brief.yaml did not parse)",
 			wantFix:      nil,
+			wantRel:      "CLAUDE.md",
 		},
 		{
 			name: "the block was edited locally",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, _ host.Host) {
 				body := artifact.SnippetBegin + "\ncustom prose\n" + artifact.SnippetEnd + "\n"
-				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), []byte(body), 0o600))
+				setHostFile(fsys, "CLAUDE.md", []byte(body))
 			},
 			checkID:      "host-snippet",
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "edited locally",
 			wantFix:      nil,
+			wantRel:      "CLAUDE.md",
 		},
 		{
 			name:         "no CLAUDE.md anywhere",
-			setup:        func(t *testing.T, _ string, _ host.Host) { t.Helper() },
+			setup:        func(fstest.MapFS, host.Host) {},
 			checkID:      "host-snippet",
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "not installed",
 			wantFix:      new(runInitClaudeCode),
+			wantRel:      "CLAUDE.md",
 		},
 		{
 			name: "CLAUDE.md is a directory",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				writeHostDir(t, wd, "CLAUDE.md")
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostDir(fsys, "CLAUDE.md")
 			},
 			checkID:      "host-snippet",
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "not a regular file (directory); brief block not installed",
 			wantFix:      new("run 'brief init --print' and add the CLAUDE.md block by hand"),
+			wantRel:      "CLAUDE.md",
 		},
 		{
+			// This is this table's own discriminator between fs.Lstat and
+			// fs.Stat: a dangling symlink target ("elsewhere.md" is never
+			// created in this fixture) still resolves under Lstat, since
+			// Lstat never follows it, but resolves as absent under Stat.
+			// Mutation-verified, package-wide with no -run filter: changing
+			// scanSnippetCandidateStates's own fs.Lstat call to fs.Stat
+			// reddens this case alone — Stat follows the dangling symlink,
+			// finds nothing, and the row falls to SKIP "not installed" —
+			// restored after.
 			name: "CLAUDE.md is a symlink",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				elsewhere := filepath.Join(wd, "elsewhere.md")
-				require.NoError(t, os.WriteFile(elsewhere, []byte("elsewhere"), 0o600))
-				require.NoError(t, os.Symlink(elsewhere, filepath.Join(wd, "CLAUDE.md")))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostSymlink(fsys, "CLAUDE.md", "elsewhere.md")
 			},
 			checkID:      "host-snippet",
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "not a regular file (symlink); brief block not installed",
 			wantFix:      new("run 'brief init --print' and add the CLAUDE.md block by hand"),
+			wantRel:      "CLAUDE.md",
 		},
 		{
 			name: "CLAUDE.md is a symlink but .claude/CLAUDE.md holds a real block",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				elsewhere := filepath.Join(wd, "elsewhere.md")
-				require.NoError(t, os.WriteFile(elsewhere, []byte("elsewhere"), 0o600))
-				require.NoError(t, os.Symlink(elsewhere, filepath.Join(wd, "CLAUDE.md")))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostSymlink(fsys, "CLAUDE.md", "elsewhere.md")
 
 				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
-				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), block, 0o600))
+				setHostFile(fsys, ".claude/CLAUDE.md", block)
 			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeverityOK,
-			wantDetail:     "installed",
-			wantFix:        nil,
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "installed",
+			wantFix:      nil,
+			wantRel:      ".claude/CLAUDE.md",
 		},
 		{
-			// Mutation-verified: hardcoding states[0] instead of looping
-			// (`if states[0].notRegular` in place of the `for` loop) turns
-			// this WARN into the fallback SKIP "not installed" — reddened
-			// by this case alone, restored after.
+			// Mutation-verified, package-wide with no -run filter: replacing
+			// the firstPresent-finding loop with an unconditional
+			// "firstPresent = &states[0] if states[0] is present, else nil"
+			// (dropping the search past states[0]) reddens this case — root
+			// CLAUDE.md is absent here, so firstPresent never reaches
+			// ".claude/CLAUDE.md" and the row falls to the fallback SKIP "not
+			// installed" — together with every other case whose own
+			// first-present candidate is not states[0]: "no root CLAUDE.md
+			// but .claude/CLAUDE.md is a regular file with no block" below,
+			// host_disk_test.go's own
+			// Test_diagnose_classifies_host_snippet_unreadable/"no root
+			// CLAUDE.md, .claude itself cannot be Lstat'd", and doctor_test.go's
+			// own
+			// Test_diagnose_treats_an_unreadable_host_snippet_directory_as_present_not_absent.
+			// Restored after.
 			name: "no root CLAUDE.md but .claude/CLAUDE.md is a directory",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				writeHostDir(t, wd, filepath.Join(".claude", "CLAUDE.md"))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostDir(fsys, ".claude/CLAUDE.md")
 			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeverityWarn,
-			wantDetail:     "not a regular file (directory); brief block not installed",
-			wantFix:        new("run 'brief init --print' and add the CLAUDE.md block by hand"),
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "not a regular file (directory); brief block not installed",
+			wantFix:      new("run 'brief init --print' and add the CLAUDE.md block by hand"),
+			wantRel:      ".claude/CLAUDE.md",
 		},
 		{
 			// Pins C1's fix: planSnippet would choose root CLAUDE.md here
 			// (chooseSnippetLocation's own "first candidate that exists at
 			// all" rule) and merge into it, never touching the directory at
 			// ".claude/CLAUDE.md" — doctor must agree, not WARN about a
-			// candidate init would never look at. Mutation-verified twice:
-			// (1) reverting to scanning every state for notRegular (the
-			// pre-C1 shape) turns this SKIP into the WARN case above's own
-			// detail; (2) wantPathNotSuffix itself — a plain "CLAUDE.md"
-			// suffix assertion here would pass vacuously against either
-			// candidate's own path, so it must be the stronger negative
-			// check: replacing the SKIP row's own Path selection with
-			// states[len(states)-1].path (always the last candidate) reddens
-			// this case alone via wantPathNotSuffix, leaving the sibling case
-			// below — where the last candidate is also the first-present one
-			// — green for the wrong reason. Each reddened, restored after.
+			// candidate init would never look at. wantRel's own exact-path
+			// assertion is the stronger check here: it fails both if the
+			// SKIP row ever named ".claude/CLAUDE.md" instead and if it
+			// named neither candidate.
 			name: "root CLAUDE.md exists with no block, .claude/CLAUDE.md is a directory",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), []byte("unrelated prose\n"), 0o600))
-				writeHostDir(t, wd, filepath.Join(".claude", "CLAUDE.md"))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostFile(fsys, "CLAUDE.md", []byte("unrelated prose\n"))
+				setHostDir(fsys, ".claude/CLAUDE.md")
 			},
-			checkID:           "host-snippet",
-			wantSeverity:      doctor.SeveritySkip,
-			wantDetail:        "not installed",
-			wantFix:           new(runInitClaudeCode),
-			wantPathNotSuffix: filepath.Join(".claude", "CLAUDE.md"),
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "not installed",
+			wantFix:      new(runInitClaudeCode),
+			wantRel:      "CLAUDE.md",
 		},
 		{
-			// Mutation-verified: hardcoding states[0].path as the SKIP row's
-			// own Path (rather than the first-present candidate found by the
-			// loop above) reddens this case alone — it would name root's own
-			// missing "CLAUDE.md" instead of the regular, blockless
-			// ".claude/CLAUDE.md" that chooseSnippetLocation, and so planSnippet,
-			// would actually choose here — restored after.
+			// Mutation-verified, package-wide with no -run filter: collapsing
+			// the SKIP row's own Path selection (the firstPresent/states[0]
+			// switch) to always use states[0].path reddens this case alone
+			// — it would name root's own missing "CLAUDE.md" instead of the
+			// regular, blockless ".claude/CLAUDE.md" that
+			// chooseSnippetLocation, and so planSnippet, would actually choose
+			// here — restored after.
 			name: "no root CLAUDE.md but .claude/CLAUDE.md is a regular file with no block",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), []byte("unrelated prose\n"), 0o600))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostFile(fsys, ".claude/CLAUDE.md", []byte("unrelated prose\n"))
 			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeveritySkip,
-			wantDetail:     "not installed",
-			wantFix:        new(runInitClaudeCode),
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
+			checkID:      "host-snippet",
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "not installed",
+			wantFix:      new(runInitClaudeCode),
+			wantRel:      ".claude/CLAUDE.md",
 		},
 		{
 			name: "a current block with CRLF line endings",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, _ host.Host) {
 				block := string(artifact.SnippetBlock("docs/specifications")) + "\n"
 				crlf := strings.ReplaceAll(block, "\n", "\r\n")
-				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), []byte(crlf), 0o600))
+				setHostFile(fsys, "CLAUDE.md", []byte(crlf))
 			},
 			checkID:      "host-snippet",
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "not installed",
 			wantFix:      new(runInitClaudeCode),
+			wantRel:      "CLAUDE.md",
 		},
 	})
 }
 
-// Test_diagnose_classifies_host_snippet_unreadable pins host-snippet's own
-// unreadable-vs-absent split (P1): a candidate that exists, is regular,
-// but could not be read is WARN naming the underlying reason, never the
-// "not installed" a genuinely absent candidate gets; an ancestor
-// directory doctor cannot even Lstat into is WARN too, its fix targeting
-// that directory rather than a file it never reached; an ancestor path
-// component that is itself a regular file (ENOTDIR) proves absence
-// instead, the same "not installed" a genuinely missing CLAUDE.md gets;
-// either unreadable arm yields to the other candidate's own real block,
-// which wins exactly as it would against a notRegular candidate.
-func Test_diagnose_classifies_host_snippet_unreadable(t *testing.T) {
-	runHostCheckCases(t, []hostCheckCase{
-		{
-			name: "CLAUDE.md exists but is not readable",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				path := filepath.Join(wd, "CLAUDE.md")
-				require.NoError(t, os.WriteFile(path, []byte("unrelated prose\n"), 0o600))
-				chmodUnreadable(t, path)
-			},
-			checkID:           "host-snippet",
-			wantSeverity:      doctor.SeverityWarn,
-			wantDetail:        "not readable (permission denied); cannot check for brief block",
-			wantFix:           new("chmod +r CLAUDE.md, then " + runInitClaudeCode),
-			wantPathNotSuffix: filepath.Join(".claude", "CLAUDE.md"),
-		},
-		{
-			// P1: an ancestor directory doctor cannot even Lstat into (mode
-			// 0o000) is unreadable at the Lstat call itself, not the
-			// ReadFile call — the fix must target the broken directory
-			// (chmod u+rwx, the search bit to read through it again and
-			// the write bit init needs to create entries under it), not a
-			// "chmod +r" on a file it never reached. Mutation-verified:
-			// hardcoding statFailed to false in notReadableFix's own caller
-			// reddens this case alone (the fix text reverts to "chmod +r
-			// .claude/CLAUDE.md, then …"), restored after.
-			name: "no root CLAUDE.md, .claude itself cannot be Lstat'd",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				claudeDir := filepath.Join(wd, ".claude")
-				require.NoError(t, os.MkdirAll(claudeDir, 0o755))
-				chmodUnreadableDir(t, claudeDir)
-			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeverityWarn,
-			wantDetail:     "not readable (permission denied); cannot check for brief block",
-			wantFix:        new("chmod u+rwx .claude, then " + runInitClaudeCode),
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
-		},
-		{
-			// P1: mirrors host-plugin's own ENOTDIR case — a ".claude" that
-			// is a regular file proves absence (both candidates read as
-			// absent), never present-but-unreadable.
-			name: "the .claude root is a regular file, not a directory",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude"), []byte("not a directory\n"), 0o600))
-			},
-			checkID:      "host-snippet",
-			wantSeverity: doctor.SeveritySkip,
-			wantDetail:   "not installed",
-			wantFix:      new(runInitClaudeCode),
-		},
-		{
-			// Pins the block-wins carve-out against an unreadable root
-			// candidate specifically (P1): brief cannot tell whether root's
-			// own CLAUDE.md carries a block, but .claude/CLAUDE.md's own
-			// real block still wins, exactly as it does against a
-			// notRegular root candidate in
-			// Test_diagnose_classifies_host_snippet.
-			name: "CLAUDE.md is not readable but .claude/CLAUDE.md holds a real block",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
-				path := filepath.Join(wd, "CLAUDE.md")
-				require.NoError(t, os.WriteFile(path, []byte("unrelated prose\n"), 0o600))
-				chmodUnreadable(t, path)
-
-				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
-				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "CLAUDE.md"), block, 0o600))
-			},
-			checkID:        "host-snippet",
-			wantSeverity:   doctor.SeverityOK,
-			wantDetail:     "installed",
-			wantFix:        nil,
-			wantPathSuffix: filepath.Join(".claude", "CLAUDE.md"),
-		},
-	})
-}
-
-// Test_diagnose_host_snippet_unreadable_fix_is_relative_to_wd pins fix pass
-// 8's M1 fix: host-snippet's own "not readable" WARN must render its fix
-// command relative to the same working directory as the row's own Path
-// (cli.doctorRow's own displayPath(wd, ...)), never relative to the
-// install root. Diagnose run from a subdirectory below root must recommend
-// "chmod +r ../CLAUDE.md", not the bare root-relative "chmod +r CLAUDE.md"
-// the pre-fix code always rendered: run from that subdirectory, the bare
-// form either fails outright (no CLAUDE.md there) or — the second case
-// here — silently chmods an unrelated file the caller happens to have,
-// leaving the WARN in place. Mutation-verified: reverting
-// notReadableFix's own caller to firstPresent.relPath (the pre-fix
-// root-relative field) reddens both cases here — the fix text stops
-// changing between them — while leaving every case in
-// Test_diagnose_classifies_host_snippet (wd == root there, so the two
-// relativizations coincide) green.
-func Test_diagnose_host_snippet_unreadable_fix_is_relative_to_wd(t *testing.T) {
-	cases := []struct {
-		name  string
-		setup func(t *testing.T, subdir string)
-	}{
-		{
-			name:  "no CLAUDE.md in the subdirectory",
-			setup: func(t *testing.T, _ string) { t.Helper() },
-		},
-		{
-			name: "the subdirectory holds its own unrelated CLAUDE.md",
-			setup: func(t *testing.T, subdir string) {
-				t.Helper()
-
-				require.NoError(t, os.WriteFile(filepath.Join(subdir, "CLAUDE.md"), []byte("decoy\n"), 0o600))
-			},
-		},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			wd := newHostFixture(t)
-
-			claudeMD := filepath.Join(wd, "CLAUDE.md")
-			require.NoError(t, os.WriteFile(claudeMD, []byte("unrelated prose\n"), 0o600))
-			chmodUnreadable(t, claudeMD)
-
-			subdir := filepath.Join(wd, "docs")
-			c.setup(t, subdir)
-
-			srv := doctor.NewServer(emptyHomeDir(t))
-			report := srv.Diagnose(t.Context(), subdir)
-
-			check := findCheck(t, report, "host-snippet")
-			assert.Equal(t, doctor.SeverityWarn, check.Severity)
-			assert.Contains(t, check.Detail, "not readable (permission denied); cannot check for brief block")
-			assert.Equal(t, claudeMD, check.Path)
-			require.NotNil(t, check.Fix)
-			assert.Equal(t, "chmod +r ../CLAUDE.md, then "+runInitClaudeCode, *check.Fix)
-		})
+// setPluginAgent sets host.PluginDir's own current render for role's
+// plugin agent file (planner, implementer or reviewer) in fsys.
+func setPluginAgent(fsys fstest.MapFS, h host.Host, role string) {
+	for _, f := range h.Agents() {
+		if strings.HasSuffix(f.RelPath, "/"+role+".md") {
+			setHostArtifact(fsys, f)
+		}
 	}
 }
 
-// writeRolesConfig overwrites wd's own ".brief.yaml" with role bindings for
-// all three positions — a bare "" leaves that position unbound.
-func writeRolesConfig(t *testing.T, wd, planner, implementer, reviewer string) {
-	t.Helper()
+// setAgentFrontmatter sets a minimal agent file at repo/relPath in fsys
+// declaring frontmatter "name: name".
+func setAgentFrontmatter(fsys fstest.MapFS, relPath, name string) {
+	setHostFile(fsys, relPath, []byte("---\nname: "+name+"\n---\n\nbody\n"))
+}
 
+// Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions
+// pins duplicateDefinitionProblem's own WARN, exercised through
+// (*Server).projectTree's own fs.Sub-backed project tree: two project
+// agent files under ".claude/agents" both declare frontmatter "name:
+// my-reviewer" — the bare binding the reviewer role names — so
+// duplicateDefinitionProblem's own WARN fires once, naming both paths in
+// findIn's own Path order, never twice and never silently picking one.
+// Mutation-verified, package-wide with no -run filter: raising
+// duplicateDefinitionProblem's own `len(defs) < 2` threshold to `< 3`
+// reddens this case alone (two definitions no longer count as a
+// duplicate); reverting (*Server).resolveRoleBinding to call
+// agentfile.DirTree(root) directly, bypassing projectTree, also reddens
+// this case alone (root/.claude/agents then reads through the real "/"
+// filesystem instead of fsys, and the injected fixture is never on disk)
+// — proving projectTree is the path actually exercised here, not merely
+// present in the call graph. Both restored after.
+func Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions(t *testing.T) {
+	fsys := newHostFixtureFS()
+	h := claudeCodeHost(t)
+
+	setHostFile(fsys, ".brief.yaml", []byte(
+		"progress-heading: \"## Progress\"\n"+
+			"roles:\n"+
+			"  planner: brief:planner\n"+
+			"  implementer: brief:implementer\n"+
+			"  reviewer: my-reviewer\n"))
+	setPluginAgent(fsys, h, "planner")
+	setPluginAgent(fsys, h, "implementer")
+	setAgentFrontmatter(fsys, ".claude/agents/my-reviewer.md", "my-reviewer")
+	setAgentFrontmatter(fsys, ".claude/agents/team/r.md", "my-reviewer")
+
+	srv := doctor.NewServer(emptyHomeDir(t), doctor.WithRootFS(fsys))
+	report := srv.Diagnose(t.Context(), fsAbs("repo"))
+
+	check := findCheck(t, report, "roles")
+	assert.Equal(t, doctor.SeverityWarn, check.Severity)
+	assert.Equal(t, "reviewer: my-reviewer defined 2 times under .claude/agents (.claude/agents/my-reviewer.md, .claude/agents/team/r.md)", check.Detail)
+	require.NotNil(t, check.Fix)
+	assert.Equal(t, "bind each role to an existing agent in .brief.yaml, or "+runInitWithAgents, *check.Fix)
+}
+
+// homeAgentTree returns a roles test's own home field: an agentfile.Tree
+// over an in-memory fstest.MapFS holding one agent file at relPath (rooted
+// the way agentfile.DirTree roots a real "~/.claude/agents" directory, so
+// relPath is always ".claude/agents/…") whose contents are body.
+func homeAgentTree(relPath, body string) func(t *testing.T) agentfile.Tree {
+	return func(t *testing.T) agentfile.Tree {
+		t.Helper()
+
+		return agentfile.Tree{
+			Dir: fsAbs("home"),
+			FS:  fstest.MapFS{relPath: &fstest.MapFile{Data: []byte(body)}},
+		}
+	}
+}
+
+// setRolesConfig sets "repo/.brief.yaml" in fsys with role bindings for all
+// three positions — a bare "" leaves that position unbound.
+func setRolesConfig(fsys fstest.MapFS, planner, implementer, reviewer string) {
 	body := "progress-heading: \"## Progress\"\n" +
 		"roles:\n" +
 		fmt.Sprintf("  planner: %q\n", planner) +
 		fmt.Sprintf("  implementer: %q\n", implementer) +
 		fmt.Sprintf("  reviewer: %q\n", reviewer)
 
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(body), 0o600))
+	setHostFile(fsys, ".brief.yaml", []byte(body))
 }
 
-// writePluginAgent writes host.PluginDir's own current render for role's
-// plugin agent file (planner, implementer or reviewer).
-func writePluginAgent(t *testing.T, wd, role string) {
+// homeTreeOption builds the doctor.WithHomeTree option a roles/roles-skill
+// case's own home field selects: home(t) when set, else the zero Tree,
+// searched by nothing — the same "nothing here" a real, empty home
+// directory would produce.
+func homeTreeOption(t *testing.T, home func(t *testing.T) agentfile.Tree) doctor.Option {
 	t.Helper()
 
-	h := claudeCodeHost(t)
-
-	for _, f := range h.Agents() {
-		if strings.HasSuffix(f.RelPath, "/"+role+".md") {
-			writeHostArtifact(t, wd, f)
+	return doctor.WithHomeTree(func() agentfile.Tree {
+		if home != nil {
+			return home(t)
 		}
-	}
+
+		return agentfile.Tree{}
+	})
 }
 
 // rolesCase is one row of Test_diagnose_classifies_roles: setup mutates
-// newHostFixture's own bare baseline, home overrides WithHomeDir (an empty
-// temp dir when nil), and the roles row must carry wantSeverity, with
-// wantDetail a substring of Detail and wantFix the exact Fix.
+// newHostFixtureFS's own bare baseline, home overrides WithHomeTree, and the
+// roles row must carry wantSeverity, with wantDetail a substring of Detail
+// and wantFix the exact Fix.
 type rolesCase struct {
 	name         string
-	setup        func(t *testing.T, wd string)
-	home         func(t *testing.T) string
+	setup        func(fsys fstest.MapFS, h host.Host)
+	home         func(t *testing.T) agentfile.Tree
 	wantSeverity doctor.Severity
 	wantDetail   string
 	wantFix      *string
@@ -1430,29 +931,26 @@ type rolesCase struct {
 // named after the bound role, with frontmatter added only so they still
 // resolve.
 func Test_diagnose_classifies_roles(t *testing.T) {
+	h := claudeCodeHost(t)
 	cases := []rolesCase{
 		{
-			name: "no config anywhere",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				require.NoError(t, os.Remove(filepath.Join(wd, ".brief.yaml")))
-			},
+			name:         "no config anywhere",
+			setup:        func(fsys fstest.MapFS, _ host.Host) { delete(fsys, "repo/.brief.yaml") },
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "no roles bound",
 			wantFix:      new(runInitWithAgents),
 		},
 		{
 			name:         "every binding is empty",
-			setup:        func(t *testing.T, _ string) { t.Helper() },
+			setup:        func(fstest.MapFS, host.Host) {},
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "no roles bound",
 			wantFix:      new(runInitWithAgents),
 		},
 		{
 			name: "the config is unparseable",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: [not a scalar\n"), 0o600))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostFile(fsys, ".brief.yaml", []byte("progress-heading: [not a scalar\n"))
 			},
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   ".brief.yaml did not parse",
@@ -1460,11 +958,10 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 		},
 		{
 			name: "the planner role is unbound",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "", "brief:implementer", "brief:reviewer")
-				writePluginAgent(t, wd, "implementer")
-				writePluginAgent(t, wd, "reviewer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "", "brief:implementer", "brief:reviewer")
+				setPluginAgent(fsys, h, "implementer")
+				setPluginAgent(fsys, h, "reviewer")
 			},
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "planner unbound",
@@ -1472,11 +969,10 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 		},
 		{
 			name: "brief:reviewer is bound but its plugin agent file was removed",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "brief:reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "brief:reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
 			},
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "reviewer: brief:reviewer not found",
@@ -1484,13 +980,11 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 		},
 		{
 			name: "brief:reviewer's plugin file is gone but a project override exists",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "brief:reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
-				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude", "agents"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "agents", "reviewer.md"), []byte("custom reviewer\n"), 0o600))
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "brief:reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setHostFile(fsys, ".claude/agents/reviewer.md", []byte("custom reviewer\n"))
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound",
@@ -1498,13 +992,11 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 		},
 		{
 			name: "a bare role name resolves via the project's own .claude/agents",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
-				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude", "agents"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "agents", "my-reviewer.md"), []byte("---\nname: my-reviewer\n---\n\ncustom reviewer\n"), 0o600))
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setAgentFrontmatter(fsys, ".claude/agents/my-reviewer.md", "my-reviewer")
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound",
@@ -1512,30 +1004,22 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 		},
 		{
 			name: "a bare role name resolves only via the injected home",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
 			},
-			home: func(t *testing.T) string {
-				t.Helper()
-				home := t.TempDir()
-				require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "agents"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "agents", "my-reviewer.md"), []byte("---\nname: my-reviewer\n---\n\ncustom reviewer\n"), 0o600))
-				return home
-			},
+			home:         homeAgentTree(".claude/agents/my-reviewer.md", agentBody("my-reviewer")),
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound",
 			wantFix:      nil,
 		},
 		{
 			name: "a bare role name resolves nowhere",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
 			},
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "reviewer: my-reviewer not found",
@@ -1543,11 +1027,10 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 		},
 		{
 			name: "a binding for a different plugin counts as bound but unverified",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "other:reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "other:reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "not verified: reviewer",
@@ -1557,16 +1040,11 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd := newHostFixture(t)
-			c.setup(t, wd)
+			fsys := newHostFixtureFS()
+			c.setup(fsys, h)
 
-			home := t.TempDir()
-			if c.home != nil {
-				home = c.home(t)
-			}
-
-			srv := doctor.NewServer(doctor.WithHomeDir(func() (string, error) { return home, nil }))
-			report := srv.Diagnose(t.Context(), wd)
+			srv := doctor.NewServer(doctor.WithRootFS(fsys), homeTreeOption(t, c.home))
+			report := srv.Diagnose(t.Context(), fsAbs("repo"))
 
 			check := findCheck(t, report, "roles")
 			assert.Equal(t, c.wantSeverity, check.Severity)
@@ -1579,25 +1057,15 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 // rolesFrontmatterCase is one row of
 // Test_diagnose_roles_resolves_by_frontmatter_name: unlike rolesCase,
 // wantDetail is asserted for exact equality, since these cases pin the
-// literal wording of the new duplicate WARN and user-level/not-verified OK
-// suffixes rather than just the presence of a substring.
+// literal wording of the user-level/not-verified OK suffixes rather than
+// just the presence of a substring.
 type rolesFrontmatterCase struct {
 	name         string
-	setup        func(t *testing.T, wd string)
-	home         func(t *testing.T) string
+	setup        func(fsys fstest.MapFS, h host.Host)
+	home         func(t *testing.T) agentfile.Tree
 	wantSeverity doctor.Severity
 	wantDetail   string
 	wantFix      *string
-}
-
-// writeAgentFrontmatter writes a minimal agent file at wd's relPath
-// declaring frontmatter "name: name".
-func writeAgentFrontmatter(t *testing.T, wd, relPath, name string) {
-	t.Helper()
-
-	path := filepath.Join(wd, filepath.FromSlash(relPath))
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	require.NoError(t, os.WriteFile(path, []byte("---\nname: "+name+"\n---\n\nbody\n"), 0o600))
 }
 
 // rolesUnresolvedFix is the WARN fix roles reports whenever any binding is
@@ -1607,19 +1075,19 @@ const rolesUnresolvedFix = "bind each role to an existing agent in .brief.yaml, 
 // Test_diagnose_roles_resolves_by_frontmatter_name pins Rule 5: a bare
 // binding matches frontmatter "name:" anywhere under ".claude/agents/"
 // (nested layout, any filename), a project definition shadows a
-// same-named "~/.claude/agents" one, a name defined twice under the
-// project's own ".claude/agents" WARNs naming both paths, and a
-// user-level-only resolution adds "; user-level: <role>".
+// same-named "~/.claude/agents" one, and a user-level-only resolution adds
+// "; user-level: <role>". Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions
+// pins the duplicate-definition WARN, via (*Server).projectTree.
 func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
+	h := claudeCodeHost(t)
 	cases := []rolesFrontmatterCase{
 		{
 			name: "a nested project agent resolves by frontmatter name, not filename",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "developer", "brief:reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "reviewer")
-				writeAgentFrontmatter(t, wd, ".claude/agents/developer/Agent.md", "developer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "developer", "brief:reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "reviewer")
+				setAgentFrontmatter(fsys, ".claude/agents/developer/Agent.md", "developer")
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound",
@@ -1627,12 +1095,11 @@ func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 		},
 		{
 			name: "a filename match whose frontmatter name differs is not found",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
-				writeAgentFrontmatter(t, wd, ".claude/agents/my-reviewer.md", "someone-else")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setAgentFrontmatter(fsys, ".claude/agents/my-reviewer.md", "someone-else")
 			},
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "reviewer: my-reviewer not found",
@@ -1640,68 +1107,36 @@ func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 		},
 		{
 			name: "a project definition shadows a same-named user definition, no suffix",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
-				writeAgentFrontmatter(t, wd, ".claude/agents/team/y.md", "my-reviewer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setAgentFrontmatter(fsys, ".claude/agents/team/y.md", "my-reviewer")
 			},
-			home: func(t *testing.T) string {
-				t.Helper()
-				home := t.TempDir()
-				writeAgentFrontmatter(t, home, ".claude/agents/team/x.md", "my-reviewer")
-				return home
-			},
+			home:         homeAgentTree(".claude/agents/team/x.md", agentBody("my-reviewer")),
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound",
 			wantFix:      nil,
 		},
 		{
 			name: "control: the same user definition with no project file adds the user-level suffix",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
 			},
-			home: func(t *testing.T) string {
-				t.Helper()
-				home := t.TempDir()
-				writeAgentFrontmatter(t, home, ".claude/agents/team/x.md", "my-reviewer")
-				return home
-			},
+			home:         homeAgentTree(".claude/agents/team/x.md", agentBody("my-reviewer")),
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound; user-level: reviewer",
 			wantFix:      nil,
 		},
 		{
-			name: "two project definitions of the same name WARN naming both paths",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
-				writeAgentFrontmatter(t, wd, ".claude/agents/my-reviewer.md", "my-reviewer")
-				writeAgentFrontmatter(t, wd, ".claude/agents/team/r.md", "my-reviewer")
-			},
-			wantSeverity: doctor.SeverityWarn,
-			wantDetail:   "reviewer: my-reviewer defined 2 times under .claude/agents (.claude/agents/my-reviewer.md, .claude/agents/team/r.md)",
-			wantFix:      new(rolesUnresolvedFix),
-		},
-		{
 			name: "user-level and not-verified suffixes follow RoleBindings order",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "my-planner", "brief:implementer", "other:reviewer")
-				writePluginAgent(t, wd, "implementer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "my-planner", "brief:implementer", "other:reviewer")
+				setPluginAgent(fsys, h, "implementer")
 			},
-			home: func(t *testing.T) string {
-				t.Helper()
-				home := t.TempDir()
-				writeAgentFrontmatter(t, home, ".claude/agents/my-planner.md", "my-planner")
-				return home
-			},
+			home:         homeAgentTree(".claude/agents/my-planner.md", agentBody("my-planner")),
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound; user-level: planner; not verified: reviewer",
 			wantFix:      nil,
@@ -1710,16 +1145,11 @@ func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd := newHostFixture(t)
-			c.setup(t, wd)
+			fsys := newHostFixtureFS()
+			c.setup(fsys, h)
 
-			home := t.TempDir()
-			if c.home != nil {
-				home = c.home(t)
-			}
-
-			srv := doctor.NewServer(doctor.WithHomeDir(func() (string, error) { return home, nil }))
-			report := srv.Diagnose(t.Context(), wd)
+			srv := doctor.NewServer(doctor.WithRootFS(fsys), homeTreeOption(t, c.home))
+			report := srv.Diagnose(t.Context(), fsAbs("repo"))
 
 			check := findCheck(t, report, "roles")
 			assert.Equal(t, c.wantSeverity, check.Severity)
@@ -1734,9 +1164,9 @@ func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 const rolesSkillMissingFix = `add "brief-workflow" to the "skills:" list of each agent named, or run 'brief init --edit-agents' for those in the repository`
 
 // blockSkillsFragment, flowSkillsFragment and scalarSkillsFragment are the
-// literal "skills:" YAML fragments rolesSkillCase setups embed in an agent
-// file's own frontmatter, each ending in its own trailing newline so a
-// caller can simply concatenate.
+// literal "skills:" YAML fragments a rolesSkillCase setup embeds in an
+// agent file's own frontmatter, each ending in its own trailing newline so
+// a caller can simply concatenate.
 const (
 	blockSkillsFragment  = "skills:\n  - brief-workflow\n"
 	flowSkillsFragment   = "skills: [brief-workflow]\n"
@@ -1756,16 +1186,16 @@ func agentBody(name string, fragments ...string) string {
 }
 
 // rolesSkillCase is one row of Test_diagnose_classifies_roles_skill: setup
-// mutates newHostFixture's own bare baseline, home overrides WithHomeDir
-// (an empty temp dir when nil), and the roles-skill row must carry
-// wantSeverity, wantDetail (exact) and wantFix (exact). wantRolesDetail,
-// when non-empty, also asserts the sibling "roles" row's own exact Detail
-// — the scalar-skills guard's own control, proving a loose decode never
-// drops the agent out of Rule 5 resolution.
+// mutates newHostFixtureFS's own bare baseline, home overrides WithHomeTree,
+// and the roles-skill row must carry wantSeverity, wantDetail (exact) and
+// wantFix (exact). wantRolesDetail, when non-empty, also asserts the
+// sibling "roles" row's own exact Detail — the scalar-skills guard's own
+// control, proving a loose decode never drops the agent out of Rule 5
+// resolution.
 type rolesSkillCase struct {
 	name            string
-	setup           func(t *testing.T, wd string)
-	home            func(t *testing.T) string
+	setup           func(fsys fstest.MapFS, h host.Host)
+	home            func(t *testing.T) agentfile.Tree
 	noConfig        bool
 	wantSeverity    doctor.Severity
 	wantDetail      string
@@ -1790,11 +1220,8 @@ type rolesSkillCase struct {
 func Test_diagnose_classifies_roles_skill(t *testing.T) {
 	cases := []rolesSkillCase{
 		{
-			name: "no config anywhere",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				require.NoError(t, os.Remove(filepath.Join(wd, ".brief.yaml")))
-			},
+			name:         "no config anywhere",
+			setup:        func(fsys fstest.MapFS, _ host.Host) { delete(fsys, "repo/.brief.yaml") },
 			noConfig:     true,
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "no bound planner or implementer brief can check",
@@ -1802,9 +1229,8 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 		},
 		{
 			name: "the config is unparseable",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: [not a scalar\n"), 0o600))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostFile(fsys, ".brief.yaml", []byte("progress-heading: [not a scalar\n"))
 			},
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "no bound planner or implementer brief can check",
@@ -1812,10 +1238,9 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 		},
 		{
 			name: "planner and implementer unbound, reviewer bound",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "", "", "brief:reviewer")
-				writePluginAgent(t, wd, "reviewer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "", "", "brief:reviewer")
+				setPluginAgent(fsys, h, "reviewer")
 			},
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "no bound planner or implementer brief can check",
@@ -1823,9 +1248,8 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 		},
 		{
 			name: "planner and implementer bound but not found",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "my-planner", "my-implementer", "")
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "my-planner", "my-implementer", "")
 			},
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "no bound planner or implementer brief can check",
@@ -1833,9 +1257,8 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 		},
 		{
 			name: "planner and implementer are both other-plugin bindings",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "acme:planner", "acme:implementer", "")
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "acme:planner", "acme:implementer", "")
 			},
 			wantSeverity: doctor.SeveritySkip,
 			wantDetail:   "no bound planner or implementer brief can check",
@@ -1843,11 +1266,10 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 		},
 		{
 			name: "bare names, block-list skills",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "my-planner", "my-implementer", "")
-				writeHostFile(t, wd, ".claude/agents/my-planner.md", []byte(agentBody("my-planner", blockSkillsFragment)))
-				writeHostFile(t, wd, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", blockSkillsFragment)))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "my-planner", "my-implementer", "")
+				setHostFile(fsys, ".claude/agents/my-planner.md", []byte(agentBody("my-planner", blockSkillsFragment)))
+				setHostFile(fsys, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", blockSkillsFragment)))
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer preload brief-workflow",
@@ -1855,11 +1277,10 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 		},
 		{
 			name: "bare names, flow-list skills",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "my-planner", "my-implementer", "")
-				writeHostFile(t, wd, ".claude/agents/my-planner.md", []byte(agentBody("my-planner", flowSkillsFragment)))
-				writeHostFile(t, wd, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", flowSkillsFragment)))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "my-planner", "my-implementer", "")
+				setHostFile(fsys, ".claude/agents/my-planner.md", []byte(agentBody("my-planner", flowSkillsFragment)))
+				setHostFile(fsys, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", flowSkillsFragment)))
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer preload brief-workflow",
@@ -1867,11 +1288,10 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 		},
 		{
 			name: "brief:planner/brief:implementer against rendered plugin agents",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer preload brief-workflow",
@@ -1879,13 +1299,11 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 		},
 		{
 			name: "brief:implementer overridden by a project file with no frontmatter",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
-				require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude", "agents"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "agents", "implementer.md"), []byte("not a claude code agent file\n"), 0o600))
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setHostFile(fsys, ".claude/agents/implementer.md", []byte("not a claude code agent file\n"))
 			},
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "implementer: brief:implementer does not preload brief-workflow",
@@ -1910,10 +1328,9 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 	cases := []rolesSkillCase{
 		{
 			name: "planner resolved with the skill, implementer is an other-plugin binding",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "acme:impl", "")
-				writePluginAgent(t, wd, "planner")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "acme:impl", "")
+				setPluginAgent(fsys, h, "planner")
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner preloads brief-workflow; not verified: implementer",
@@ -1926,10 +1343,9 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 			// "planner" — a hardcoded "planner" literal would still pass
 			// the sibling case above but fail here.
 			name: "implementer resolved with the skill, planner is an other-plugin binding",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "acme:planner", "brief:implementer", "")
-				writePluginAgent(t, wd, "implementer")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "acme:planner", "brief:implementer", "")
+				setPluginAgent(fsys, h, "implementer")
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "implementer preloads brief-workflow; not verified: planner",
@@ -1937,11 +1353,10 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 		},
 		{
 			name: "planner and implementer both lack the skill, implementer omits CLAUDE.md",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "my-planner", "my-implementer", "")
-				writeHostFile(t, wd, ".claude/agents/my-planner.md", []byte(agentBody("my-planner")))
-				writeHostFile(t, wd, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", omitClaudeMdTrue)))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "my-planner", "my-implementer", "")
+				setHostFile(fsys, ".claude/agents/my-planner.md", []byte(agentBody("my-planner")))
+				setHostFile(fsys, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", omitClaudeMdTrue)))
 			},
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail: "planner: my-planner does not preload brief-workflow; " +
@@ -1950,10 +1365,9 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 		},
 		{
 			name: "a non-bool omitClaudeMd never adds the suffix",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "", "my-implementer", "")
-				writeHostFile(t, wd, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", omitClaudeMdLoose)))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "", "my-implementer", "")
+				setHostFile(fsys, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", omitClaudeMdLoose)))
 			},
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "implementer: my-implementer does not preload brief-workflow",
@@ -1961,12 +1375,11 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 		},
 		{
 			name: "reviewer lacks the skill but is excluded",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "brief:implementer", "my-reviewer")
-				writePluginAgent(t, wd, "planner")
-				writePluginAgent(t, wd, "implementer")
-				writeHostFile(t, wd, ".claude/agents/my-reviewer.md", []byte(agentBody("my-reviewer")))
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setHostFile(fsys, ".claude/agents/my-reviewer.md", []byte(agentBody("my-reviewer")))
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer preload brief-workflow",
@@ -1974,17 +1387,10 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 		},
 		{
 			name: "a user-level-only planner carries the skill",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "my-planner", "", "")
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "my-planner", "", "")
 			},
-			home: func(t *testing.T) string {
-				t.Helper()
-				home := t.TempDir()
-				require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "agents"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "agents", "my-planner.md"), []byte(agentBody("my-planner", blockSkillsFragment)), 0o600))
-				return home
-			},
+			home:         homeAgentTree(".claude/agents/my-planner.md", agentBody("my-planner", blockSkillsFragment)),
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner preloads brief-workflow",
 			wantFix:      nil,
@@ -1996,10 +1402,9 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 			// roles row's own detail would gain an "implementer: … not
 			// found" problem instead of staying silent about it.
 			name: "scalar skills guards the loose decode",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "", "my-implementer", "")
-				writeHostFile(t, wd, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", scalarSkillsFragment)))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "", "my-implementer", "")
+				setHostFile(fsys, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", scalarSkillsFragment)))
 			},
 			wantSeverity:    doctor.SeverityWarn,
 			wantDetail:      "implementer: my-implementer does not preload brief-workflow",
@@ -2012,11 +1417,10 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 			// skill — the WARN must appear once for implementer, not
 			// twice.
 			name: "a duplicate definition WARNs once",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "", "dup-implementer", "")
-				writeHostFile(t, wd, ".claude/agents/aaa.md", []byte(agentBody("dup-implementer", blockSkillsFragment)))
-				writeHostFile(t, wd, ".claude/agents/zzz.md", []byte(agentBody("dup-implementer")))
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "", "dup-implementer", "")
+				setHostFile(fsys, ".claude/agents/aaa.md", []byte(agentBody("dup-implementer", blockSkillsFragment)))
+				setHostFile(fsys, ".claude/agents/zzz.md", []byte(agentBody("dup-implementer")))
 			},
 			wantSeverity: doctor.SeverityWarn,
 			wantDetail:   "implementer: dup-implementer does not preload brief-workflow",
@@ -2024,10 +1428,9 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 		},
 		{
 			name: "planner resolved with the skill, implementer unbound",
-			setup: func(t *testing.T, wd string) {
-				t.Helper()
-				writeRolesConfig(t, wd, "brief:planner", "", "")
-				writePluginAgent(t, wd, "planner")
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "", "")
+				setPluginAgent(fsys, h, "planner")
 			},
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner preloads brief-workflow",
@@ -2039,26 +1442,23 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 }
 
 // runRolesSkillCases runs each rolesSkillCase in cases as its own subtest,
-// diagnosing a fresh fixture and asserting roles-skill's own row (and,
-// where wantRolesDetail is set, the sibling roles row) against it — the
-// execution loop Test_diagnose_classifies_roles_skill and
+// diagnosing a fresh newHostFixtureFS and asserting roles-skill's own row
+// (and, where wantRolesDetail is set, the sibling roles row) against it —
+// the execution loop Test_diagnose_classifies_roles_skill and
 // Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases both
 // share.
 func runRolesSkillCases(t *testing.T, cases []rolesSkillCase) {
 	t.Helper()
 
+	h := claudeCodeHost(t)
+
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd := newHostFixture(t)
-			c.setup(t, wd)
+			fsys := newHostFixtureFS()
+			c.setup(fsys, h)
 
-			home := t.TempDir()
-			if c.home != nil {
-				home = c.home(t)
-			}
-
-			srv := doctor.NewServer(doctor.WithHomeDir(func() (string, error) { return home, nil }))
-			report := srv.Diagnose(t.Context(), wd)
+			srv := doctor.NewServer(doctor.WithRootFS(fsys), homeTreeOption(t, c.home))
+			report := srv.Diagnose(t.Context(), fsAbs("repo"))
 
 			check := findCheck(t, report, "roles-skill")
 			assert.Equal(t, c.wantSeverity, check.Severity)
@@ -2068,7 +1468,7 @@ func runRolesSkillCases(t *testing.T, cases []rolesSkillCase) {
 			if c.noConfig {
 				assert.Empty(t, check.Path)
 			} else {
-				assert.Equal(t, filepath.Join(wd, ".brief.yaml"), check.Path)
+				assert.Equal(t, fsAbs("repo", ".brief.yaml"), check.Path)
 			}
 
 			if c.wantRolesDetail != "" {

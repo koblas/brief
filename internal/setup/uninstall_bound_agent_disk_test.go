@@ -1,13 +1,18 @@
 package setup_test
 
+// OS-subject: Uninstall's own bound-agent rows (Rule 8) always read and
+// write through bound_agent.go's own real os.Lstat/os.ReadFile and
+// confinedAgentFile, regardless of the fsRoot seam (fs.go) — see doc.go.
+//
 // Black-box: Uninstall's own bound-agent removal path (Rule 8). Every test
 // in this file starts from a real claude-code install — the config, plugin,
 // skill and snippet files a bound-agent row's own row-order and skill-kept
 // gate depend on — via installClaudeCode, then writes one bound-agent
 // fixture and calls Uninstall directly. findBoundAgentRow and
-// assertNoBoundAgentRow are bound_agent_test.go's own helpers, shared here
-// since both files live in package setup_test; writeConfigWithRoles,
-// writeMissingSkillAgent and newServerWithHome are missing_skill_test.go's.
+// assertNoBoundAgentRow are bound_agent_disk_test.go's own helpers, shared
+// here since both files live in package setup_test; writeConfigWithRoles,
+// writeMissingSkillAgent and newServerWithHome are
+// missing_skill_disk_test.go's.
 
 import (
 	"io/fs"

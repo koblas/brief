@@ -8,11 +8,12 @@ package setup
 // artifact.ScanSnippetMarkers, tested in internal/platform/artifact.
 
 import (
-	"os"
-	"path/filepath"
+	"io/fs"
 	"testing"
+	"testing/fstest"
 
 	"github.com/koblas/brief/internal/platform/artifact"
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -151,31 +152,28 @@ func Test_removeSnippet_on_a_block_the_user_moved_drops_only_the_span(t *testing
 // file's bytes changed, it now exists when planning found nothing, or it
 // no longer exists at all.
 func Test_verifyFileUnchanged(t *testing.T) {
-	t.Run("unchanged existing bytes is nil", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "CLAUDE.md")
-		require.NoError(t, os.WriteFile(path, []byte("stable"), 0o600))
+	path := "/repo/CLAUDE.md"
 
-		err := verifyFileUnchanged(path, true, []byte("stable"), "brief init")
+	t.Run("unchanged existing bytes is nil", func(t *testing.T) {
+		mem := rwfs.NewMem(fstest.MapFS{"repo/CLAUDE.md": &fstest.MapFile{Data: []byte("stable")}})
+
+		err := verifyFileUnchanged(mem, path, true, []byte("stable"), "brief init")
 
 		assert.NoError(t, err)
 	})
 
 	t.Run("still absent when planning found nothing is nil", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "CLAUDE.md")
+		mem := rwfs.NewMem(fstest.MapFS{})
 
-		err := verifyFileUnchanged(path, false, nil, "brief init")
+		err := verifyFileUnchanged(mem, path, false, nil, "brief init")
 
 		assert.NoError(t, err)
 	})
 
 	t.Run("bytes changed since planning refuses", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "CLAUDE.md")
-		require.NoError(t, os.WriteFile(path, []byte("edited by someone else"), 0o600))
+		mem := rwfs.NewMem(fstest.MapFS{"repo/CLAUDE.md": &fstest.MapFile{Data: []byte("edited by someone else")}})
 
-		err := verifyFileUnchanged(path, true, []byte("stable"), "brief init")
+		err := verifyFileUnchanged(mem, path, true, []byte("stable"), "brief init")
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 
@@ -186,30 +184,25 @@ func Test_verifyFileUnchanged(t *testing.T) {
 	})
 
 	t.Run("created out from under planning refuses", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "CLAUDE.md")
-		require.NoError(t, os.WriteFile(path, []byte("raced into existence"), 0o600))
+		mem := rwfs.NewMem(fstest.MapFS{"repo/CLAUDE.md": &fstest.MapFile{Data: []byte("raced into existence")}})
 
-		err := verifyFileUnchanged(path, false, nil, "brief uninstall")
+		err := verifyFileUnchanged(mem, path, false, nil, "brief uninstall")
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 	})
 
 	t.Run("removed out from under planning refuses", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "CLAUDE.md")
+		mem := rwfs.NewMem(fstest.MapFS{})
 
-		err := verifyFileUnchanged(path, true, []byte("stable"), "brief uninstall")
+		err := verifyFileUnchanged(mem, path, true, []byte("stable"), "brief uninstall")
 
 		require.ErrorIs(t, err, ErrConcurrentEdit)
 	})
 
 	t.Run("an unrelated read failure is returned unwrapped", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "sub", "CLAUDE.md")
-		require.NoError(t, os.MkdirAll(path, 0o755))
+		mem := rwfs.NewMem(fstest.MapFS{"repo/CLAUDE.md": &fstest.MapFile{Mode: fs.ModeDir | 0o755}})
 
-		err := verifyFileUnchanged(path, true, []byte("stable"), "brief init")
+		err := verifyFileUnchanged(mem, path, true, []byte("stable"), "brief init")
 
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, ErrConcurrentEdit)

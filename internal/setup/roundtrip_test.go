@@ -1,9 +1,7 @@
 package setup_test
 
 import (
-	"io/fs"
 	"maps"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -11,64 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// treeEntry is one snapshotTree entry: isDir alone for a directory, body
-// for a regular file's exact bytes.
-type treeEntry struct {
-	isDir bool
-	body  []byte
-}
-
-// readFileT reads path, failing the test on any error — a small helper
-// this file's own round-trip snapshots use for readability.
-func readFileT(t *testing.T, path string) []byte {
-	t.Helper()
-
-	body, err := os.ReadFile(path)
-	require.NoError(t, err)
-
-	return body
-}
-
-// snapshotTree walks every path under root (root itself excluded), keyed
-// by its path relative to root, recording whether it is a directory or a
-// regular file's own bytes. It walks through an os.Root scoped to root
-// rather than raw path-joined os.ReadFile calls, so every read stays
-// confined to that directory tree.
-func snapshotTree(t *testing.T, root string) map[string]treeEntry {
-	t.Helper()
-
-	r, err := os.OpenRoot(root)
-	require.NoError(t, err)
-	defer func() { _ = r.Close() }()
-
-	fsys := r.FS()
-	out := map[string]treeEntry{}
-
-	walkErr := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, entryErr error) error {
-		require.NoError(t, entryErr)
-
-		if p == "." {
-			return nil
-		}
-
-		if d.IsDir() {
-			out[p] = treeEntry{isDir: true}
-
-			return nil
-		}
-
-		body, readErr := fs.ReadFile(fsys, p)
-		require.NoError(t, readErr)
-
-		out[p] = treeEntry{body: body}
-
-		return nil
-	})
-	require.NoError(t, walkErr)
-
-	return out
-}
 
 // Test_init_then_uninstall_leaves_the_tree_as_before_except_the_feature_root
 // pins R6's own asymmetry end to end: against a repository already
@@ -78,30 +18,31 @@ func snapshotTree(t *testing.T, root string) map[string]treeEntry {
 // root directory Init created and Uninstall deliberately never removes —
 // asserted present, not merely tolerated if it happened to still be there.
 func Test_init_then_uninstall_leaves_the_tree_as_before_except_the_feature_root(t *testing.T) {
-	wd := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(wd, "README.md"), []byte("hello\n"), 0o600))
-	require.NoError(t, os.MkdirAll(filepath.Join(wd, "src", "pkg"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(wd, "src", "pkg", "main.go"), []byte("package pkg\n"), 0o600))
-	require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "notes.md"), []byte("notes\n"), 0o600))
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	require.NoError(t, mem.WriteFile(memKey(wd)+"/README.md", []byte("hello\n"), 0o600))
+	require.NoError(t, mem.MkdirAll(memKey(wd)+"/src/pkg", 0o755))
+	require.NoError(t, mem.WriteFile(memKey(wd)+"/src/pkg/main.go", []byte("package pkg\n"), 0o600))
+	require.NoError(t, mem.MkdirAll(memKey(wd)+"/.claude", 0o755))
+	require.NoError(t, mem.WriteFile(memKey(wd)+"/.claude/notes.md", []byte("notes\n"), 0o600))
 
-	before := snapshotTree(t, wd)
+	before := memTree(mem.Snapshot(), wd)
 
-	srv := setup.NewServer()
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 	require.NoError(t, err)
 
 	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostNone})
 	require.NoError(t, err)
 
-	after := snapshotTree(t, wd)
+	after := memTree(mem.Snapshot(), wd)
 
 	featureRootRel := filepath.Join("docs", "specifications")
 
-	expected := map[string]treeEntry{}
+	expected := map[string]memTreeEntry{}
 	maps.Copy(expected, before)
-	expected["docs"] = treeEntry{isDir: true}
-	expected[featureRootRel] = treeEntry{isDir: true}
+	expected["docs"] = memTreeEntry{isDir: true}
+	expected[featureRootRel] = memTreeEntry{isDir: true}
 
 	assert.Equal(t, expected, after)
 
@@ -119,32 +60,33 @@ func Test_init_then_uninstall_leaves_the_tree_as_before_except_the_feature_root(
 // proving the snapshot actually changed after Init, so "unchanged after
 // round trip" is not vacuously true of a run that wrote nothing.
 func Test_init_then_uninstall_for_claude_code_leaves_pre_existing_claude_files_byte_identical(t *testing.T) {
-	wd := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(wd, ".claude", "skills", "other"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "settings.json"), []byte(`{"env":{}}`+"\n"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude", "skills", "other", "SKILL.md"), []byte("---\ndescription: mine\n---\nhello\n"), 0o600))
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	require.NoError(t, mem.MkdirAll(memKey(wd)+"/.claude/skills/other", 0o755))
+	require.NoError(t, mem.WriteFile(memKey(wd)+"/.claude/settings.json", []byte(`{"env":{}}`+"\n"), 0o600))
+	require.NoError(t, mem.WriteFile(memKey(wd)+"/.claude/skills/other/SKILL.md", []byte("---\ndescription: mine\n---\nhello\n"), 0o600))
 
-	before := snapshotTree(t, wd)
+	before := memTree(mem.Snapshot(), wd)
 
-	srv := setup.NewServer()
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
-	afterInit := snapshotTree(t, wd)
+	afterInit := memTree(mem.Snapshot(), wd)
 	assert.NotEqual(t, before, afterInit, "init must actually have written the plugin")
 	assert.Contains(t, afterInit, filepath.Join(".claude", "skills", "brief", ".claude-plugin", "plugin.json"))
 
 	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
-	after := snapshotTree(t, wd)
+	after := memTree(mem.Snapshot(), wd)
 
 	featureRootRel := filepath.Join("docs", "specifications")
 
-	expected := map[string]treeEntry{}
+	expected := map[string]memTreeEntry{}
 	maps.Copy(expected, before)
-	expected["docs"] = treeEntry{isDir: true}
-	expected[featureRootRel] = treeEntry{isDir: true}
+	expected["docs"] = memTreeEntry{isDir: true}
+	expected[featureRootRel] = memTreeEntry{isDir: true}
 
 	assert.Equal(t, expected, after)
 }
@@ -171,39 +113,42 @@ func Test_init_then_uninstall_leaves_claude_md_byte_identical(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd := t.TempDir()
+			wd := fsAbs("repo")
+			mem := newVirtualMem(wd)
 
 			if c.relPath != "" {
-				require.NoError(t, os.MkdirAll(filepath.Join(wd, filepath.Dir(c.relPath)), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(wd, c.relPath), []byte(c.body), 0o600))
+				if dir := filepath.Dir(c.relPath); dir != "." {
+					require.NoError(t, mem.MkdirAll(memKey(wd)+"/"+filepath.ToSlash(dir), 0o755))
+				}
+				require.NoError(t, mem.WriteFile(memKey(wd)+"/"+filepath.ToSlash(c.relPath), []byte(c.body), 0o600))
 			}
 
-			before := snapshotTree(t, wd)
+			before := memTree(mem.Snapshot(), wd)
 
-			srv := setup.NewServer()
+			srv := newMemServer(mem)
 			_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 			require.NoError(t, err)
 
-			afterInit := snapshotTree(t, wd)
+			afterInit := memTree(mem.Snapshot(), wd)
 			assert.NotEqual(t, before, afterInit, "init must actually have written the CLAUDE.md block")
 
 			_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
 			require.NoError(t, err)
 
-			after := snapshotTree(t, wd)
+			after := memTree(mem.Snapshot(), wd)
 
 			featureRootRel := filepath.Join("docs", "specifications")
 
-			expected := map[string]treeEntry{}
+			expected := map[string]memTreeEntry{}
 			maps.Copy(expected, before)
-			expected["docs"] = treeEntry{isDir: true}
-			expected[featureRootRel] = treeEntry{isDir: true}
+			expected["docs"] = memTreeEntry{isDir: true}
+			expected[featureRootRel] = memTreeEntry{isDir: true}
 			// A claude-code Init always creates ".claude/skills/brief/..."; Uninstall
 			// prunes empty directories only down to and including host.PluginDir
 			// (R6 never removes ".claude/skills/" or ".claude/" themselves), so both
 			// survive, empty, regardless of what the CLAUDE.md fixture pre-created.
-			expected[".claude"] = treeEntry{isDir: true}
-			expected[filepath.Join(".claude", "skills")] = treeEntry{isDir: true}
+			expected[".claude"] = memTreeEntry{isDir: true}
+			expected[filepath.Join(".claude", "skills")] = memTreeEntry{isDir: true}
 
 			assert.Equal(t, expected, after)
 		})
@@ -220,35 +165,35 @@ func Test_init_then_uninstall_leaves_claude_md_byte_identical(t *testing.T) {
 // survive empty, the same boundary a plain claude-code round trip already
 // pins.
 func Test_init_with_agents_then_uninstall_leaves_the_tree_as_before(t *testing.T) {
-	wd := t.TempDir()
-	before := snapshotTree(t, wd)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	before := memTree(mem.Snapshot(), wd)
 
-	srv := setup.NewServer()
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true})
 	require.NoError(t, err)
 
-	afterInit := snapshotTree(t, wd)
+	afterInit := memTree(mem.Snapshot(), wd)
 	assert.NotEqual(t, before, afterInit, "init --with-agents must actually have written something")
 	assert.Contains(t, afterInit, filepath.Join(".claude", "skills", "brief", "agents", "planner.md"))
 
 	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
-	after := snapshotTree(t, wd)
+	after := memTree(mem.Snapshot(), wd)
 
 	featureRootRel := filepath.Join("docs", "specifications")
 
-	expected := map[string]treeEntry{}
+	expected := map[string]memTreeEntry{}
 	maps.Copy(expected, before)
-	expected["docs"] = treeEntry{isDir: true}
-	expected[featureRootRel] = treeEntry{isDir: true}
-	expected[".claude"] = treeEntry{isDir: true}
-	expected[filepath.Join(".claude", "skills")] = treeEntry{isDir: true}
+	expected["docs"] = memTreeEntry{isDir: true}
+	expected[featureRootRel] = memTreeEntry{isDir: true}
+	expected[".claude"] = memTreeEntry{isDir: true}
+	expected[filepath.Join(".claude", "skills")] = memTreeEntry{isDir: true}
 
 	assert.Equal(t, expected, after)
 
-	_, statErr := os.Stat(filepath.Join(wd, ".claude", "skills", "brief"))
-	assert.True(t, os.IsNotExist(statErr), "the plugin directory, agents/ included, must be fully removed")
+	assert.NotContains(t, after, filepath.Join(".claude", "skills", "brief"), "the plugin directory, agents/ included, must be fully removed")
 }
 
 // Test_init_then_uninstall_deletes_a_pre_existing_empty_CLAUDE_md pins the
@@ -257,75 +202,17 @@ func Test_init_with_agents_then_uninstall_leaves_the_tree_as_before(t *testing.T
 // file brief emptied apart from one that started empty — so a pre-existing,
 // already-empty CLAUDE.md is deleted too, not restored as an empty file.
 func Test_init_then_uninstall_deletes_a_pre_existing_empty_CLAUDE_md(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	claudeMD := filepath.Join(wd, "CLAUDE.md")
-	require.NoError(t, os.WriteFile(claudeMD, []byte{}, 0o600))
+	require.NoError(t, mem.WriteFile(memKey(claudeMD), []byte{}, 0o600))
 
-	srv := setup.NewServer()
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
 	_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 
-	_, statErr := os.Stat(claudeMD)
-	assert.True(t, os.IsNotExist(statErr), "a pre-existing empty CLAUDE.md is deleted, not restored")
-}
-
-// Test_init_edit_agents_then_uninstall_leaves_bound_agents_byte_identical
-// pins R16's own round trip across every shape it holds for: a bare-name
-// role bound to an agent carrying no top-level "skills:" key, one bound to
-// an agent carrying a non-empty block list, and one bound to an agent
-// already carrying a canonical single-entry flow list — Init --edit-agents
-// then Uninstall reproduces each one exactly byte-identical. The control
-// (afterEdit != before) proves the edit actually landed before the round
-// trip claims to undo it.
-func Test_init_edit_agents_then_uninstall_leaves_bound_agents_byte_identical(t *testing.T) {
-	roundTrip := func(t *testing.T, planner, plannerBody, implementer, implementerBody string) {
-		t.Helper()
-
-		wd := t.TempDir()
-		home := t.TempDir()
-
-		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-			"feature-directory: docs/specifications\nroles:\n"+
-				"  planner: "+planner+"\n  implementer: "+implementer+"\n",
-		), 0o600))
-
-		plannerPath := filepath.Join(wd, ".claude", "agents", planner+".md")
-		implementerPath := filepath.Join(wd, ".claude", "agents", implementer+".md")
-
-		require.NoError(t, os.MkdirAll(filepath.Dir(plannerPath), 0o755))
-		require.NoError(t, os.WriteFile(plannerPath, []byte(plannerBody), 0o600))
-		require.NoError(t, os.WriteFile(implementerPath, []byte(implementerBody), 0o600))
-
-		before := map[string][]byte{plannerPath: []byte(plannerBody), implementerPath: []byte(implementerBody)}
-
-		srv := setup.NewServer(setup.WithHomeDir(func() (string, error) { return home, nil }))
-		_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, EditAgents: true})
-		require.NoError(t, err)
-
-		afterEdit := map[string][]byte{plannerPath: readFileT(t, plannerPath), implementerPath: readFileT(t, implementerPath)}
-		assert.NotEqual(t, before, afterEdit, "init --edit-agents must actually have changed both files")
-
-		_, err = srv.Uninstall(t.Context(), wd, setup.UninstallRequest{Host: setup.HostClaudeCode})
-		require.NoError(t, err)
-
-		afterUninstall := map[string][]byte{plannerPath: readFileT(t, plannerPath), implementerPath: readFileT(t, implementerPath)}
-		assert.Equal(t, before, afterUninstall)
-	}
-
-	t.Run("no key and a non-empty block list", func(t *testing.T) {
-		roundTrip(t,
-			"no-key-agent", "---\nname: no-key-agent\n---\n\nbody\n",
-			"block-agent", "---\nname: block-agent\nskills:\n  - other\n---\n\nbody\n",
-		)
-	})
-
-	t.Run("canonical flow list", func(t *testing.T) {
-		roundTrip(t,
-			"flow-agent", "---\nname: flow-agent\nskills: [a]\n---\n\nbody\n",
-			"no-key-agent-2", "---\nname: no-key-agent-2\n---\n\nbody\n",
-		)
-	})
+	assert.NotContains(t, mem.Snapshot(), memKey(claudeMD), "a pre-existing empty CLAUDE.md is deleted, not restored")
 }

@@ -58,18 +58,23 @@
 //
 // scaffold writes through internal/platform/rwfs.FS rather than the OS
 // package directly; there is no Store port. NewFeature, NewStep and Finish
-// each build one rwfs.FS — an OS adapter, via rwfs.OpenOS, confined to the
-// configured feature directory or, for NewStep and Finish, nested one
-// level deeper at the feature's own subdirectory — and delegate to an
-// exported FS-taking core (NewFeatureFS, NewStepFS, FinishFS) that carries
-// every check and write. That core is what most of this package's tests
-// exercise, against rwfs.Mem instead of a real directory tree. A handful
-// of contracts remain properties of a real filesystem that rwfs.Mem does
-// not reproduce — a symlinked feature entry refused rather than followed,
-// a write blocked by a directory at atomicfile's own temp-sibling name, a
-// file's permission bits under a pinned umask — and those tests run
-// against the OS adapter instead; see rwfs/doc.go for the full list of
-// what Mem does not model. Every write that replaces an existing file's
-// full contents goes through rwfs.FS.WriteFile — atomicfile on the OS
-// adapter — so a reader never observes a truncated specification.
+// each build one rwfs.FS through Server's own mkdirAll/openDir methods — an
+// OS adapter, via rwfs.OpenOS, confined to the configured feature directory
+// or, for NewStep and Finish, nested one level deeper at the feature's own
+// subdirectory, in production — and delegate to an exported FS-taking core
+// (NewFeatureFS, NewStepFS, FinishFS) that carries every check and write.
+// That core is what most of this package's tests exercise, against
+// rwfs.Mem instead of a real directory tree; a command-level test one
+// layer up (internal/cli) reaches the same fixture through NewServer's own
+// WithFS Option, which substitutes an rwfs.Mem for mkdirAll/openDir's
+// production bodies wholesale — os.MkdirAll and rwfs.OpenOS — so no real
+// disk is touched from NewFeature down. A handful of contracts remain
+// properties of a real filesystem that rwfs.Mem does not reproduce — a
+// symlinked feature entry refused rather than followed, a write blocked by
+// a directory at atomicfile's own temp-sibling name, a file's permission
+// bits under a pinned umask — and those tests run against the OS adapter
+// instead, WithFS unset; see rwfs/doc.go for the full list of what Mem does
+// not model. Every write that replaces an existing file's full contents
+// goes through rwfs.FS.WriteFile — atomicfile on the OS adapter — so a
+// reader never observes a truncated specification.
 package scaffold

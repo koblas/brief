@@ -1,39 +1,33 @@
-// This file reaches the unexported run directly so host detection (R8) can
-// be pinned against an injected, empty home directory: through cli.Run a
-// bare "init" would detect against the developer's own "~/.claude", which
-// exists for nearly every Claude Code user and would make these tests
-// depend on the machine they happen to run on. It also calls
-// missingSkillHeader and missingSkillLines directly, unexported: both are
-// pure functions of a []setup.MissingSkillAgent, and their own combined
-// four-group rendering is pinned against hand-built rows rather than
-// through real agent files on disk.
+// This file reaches the unexported run directly to inject a runSeam: the
+// rwfs.Mem-backed cases below substitute setup.WithFSRoot (plus
+// WithResolveRoot, WithHomeDir and WithWritableCheck) via newMemSetupSeam
+// (mem_internal_test.go) so host detection (R8) and the plain install path never
+// touch real disk or the developer's own "~/.claude". init's bound-agent
+// and missing-workflow-skill tests stay in
+// init_bound_agent_internal_test.go: bound_agent.go's own confinedAgentFile
+// always reads and writes real agent files through real disk regardless of
+// setup.WithFSRoot (internal/setup's own doc.go), so no rwfs.Mem fixture
+// can stand in for one. This file also calls missingSkillHeader and
+// missingSkillLines directly, unexported: both are pure functions of a
+// []setup.MissingSkillAgent, and their own combined four-group rendering
+// is pinned against hand-built rows rather than through real agent files
+// on disk.
 
 package cli
 
 import (
 	"bytes"
-	"encoding/json"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/agentfile"
+	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/setup"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// emptyHomeSeam returns a runSeam pinning setup.WithHomeDir to a fresh,
-// empty t.TempDir() — a home directory that exists but carries no
-// ".claude" of its own, so detection never finds anything through it.
-func emptyHomeSeam(t *testing.T) runSeam {
-	t.Helper()
-
-	home := t.TempDir()
-
-	return withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
-}
 
 // Test_init_without_host_detects_the_host_from_the_tree pins R8's
 // detection rule at the cli boundary: nothing present resolves to
@@ -42,10 +36,11 @@ func emptyHomeSeam(t *testing.T) runSeam {
 // --json a detected-none run leaves stderr empty and reports "host":"none".
 func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 	t.Run("nothing present detects none", func(t *testing.T) {
-		wd := t.TempDir()
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Equal(t, "created .brief.yaml\ncreated docs/specifications/\n", stdout.String())
@@ -53,11 +48,12 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 	})
 
 	t.Run("a root CLAUDE.md detects claude-code", func(t *testing.T) {
-		wd := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), []byte("# hi\n"), 0o600))
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
+		require.NoError(t, mem.WriteFile(memKey(filepath.Join(wd, "CLAUDE.md")), []byte("# hi\n"), 0o600))
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Contains(t, stdout.String(), "created .claude/skills/brief/.claude-plugin/plugin.json\n")
@@ -67,11 +63,12 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 	})
 
 	t.Run("a root .claude directory detects claude-code and names it", func(t *testing.T) {
-		wd := t.TempDir()
-		require.NoError(t, os.Mkdir(filepath.Join(wd, ".claude"), 0o755))
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
+		require.NoError(t, mem.Mkdir(memKey(filepath.Join(wd, ".claude")), 0o755))
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+		err := run(t.Context(), wd, []string{"init"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Equal(t, "brief init: installed for claude-code (detected .claude; use --host none to skip); "+
@@ -80,21 +77,23 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 	})
 
 	t.Run("an explicit --host claude-code names no detection signal", func(t *testing.T) {
-		wd := t.TempDir()
-		require.NoError(t, os.Mkdir(filepath.Join(wd, ".claude"), 0o755))
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
+		require.NoError(t, mem.Mkdir(memKey(filepath.Join(wd, ".claude")), 0o755))
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
 	})
 
 	t.Run("detected none under --json leaves stderr empty", func(t *testing.T) {
-		wd := t.TempDir()
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init", "--json"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+		err := run(t.Context(), wd, []string{"init", "--json"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Empty(t, stderr.String())
@@ -103,11 +102,12 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 	})
 
 	t.Run("a detected host reports detected_by under --json", func(t *testing.T) {
-		wd := t.TempDir()
-		require.NoError(t, os.Mkdir(filepath.Join(wd, ".claude"), 0o755))
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
+		require.NoError(t, mem.Mkdir(memKey(filepath.Join(wd, ".claude")), 0o755))
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init", "--json"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+		err := run(t.Context(), wd, []string{"init", "--json"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Empty(t, stderr.String())
@@ -121,399 +121,52 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 // detected claude-code root installs the three agents.
 func Test_init_with_agents_follows_the_detected_host(t *testing.T) {
 	t.Run("nothing detected refuses", func(t *testing.T) {
-		wd := t.TempDir()
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+		err := run(t.Context(), wd, []string{"init", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.Error(t, err)
 		assert.Equal(t, 2, ExitCode(err))
 		assert.Equal(t, "brief init: --with-agents requires --host claude-code; run 'brief init --host claude-code --with-agents'\n", stderr.String())
 
-		entries, readErr := os.ReadDir(wd)
+		entries, readErr := mem.ReadDir(memKey(wd))
 		require.NoError(t, readErr)
 		assert.Empty(t, entries)
 	})
 
 	t.Run("a detected claude-code root installs the agents", func(t *testing.T) {
-		wd := t.TempDir()
-		require.NoError(t, os.Mkdir(filepath.Join(wd, ".claude"), 0o755))
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
+		require.NoError(t, mem.Mkdir(memKey(filepath.Join(wd, ".claude")), 0o755))
 		var stdout, stderr bytes.Buffer
 
-		err := run(t.Context(), wd, []string{"init", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+		err := run(t.Context(), wd, []string{"init", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 		require.NoError(t, err)
 		assert.Contains(t, stdout.String(), "created .claude/skills/brief/agents/planner.md\n")
 	})
 }
 
-// missingSkillHeaderLine is the exact stderr header init's own missing-skill
-// block renders (Surface & Copy) when at least one listed agent is one
-// "--edit-agents" could still reach and this run did not already pass it,
-// including the "brief init: " prefix.
-const missingSkillHeaderLine = `brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each, or rerun with --edit-agents:`
-
-// missingSkillHeaderLinePlain is missingSkillHeaderLine's own counterpart
-// (Surface & Copy) rendered instead whenever suggesting "--edit-agents"
-// could not help: this run already passed it, or every listed agent
-// already carries its own "edit by hand" annotation.
-const missingSkillHeaderLinePlain = `brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each:`
-
-// installedNextActionLine is the exact stderr next-action line an explicit
-// "--host claude-code" run reports once at least one artifact changed and
-// root == wd — no detection clause, since the host was given explicitly.
-const installedNextActionLine = "brief init: installed for claude-code; start Claude Code in this directory " +
-	"(or run /reload-plugins in a session already here), then 'brief new feature <name>'"
-
-// Test_init_lists_bound_agents_missing_the_workflow_skill pins S06's own
-// stderr block: a home-level "planner" agent and a project, nested
-// ".claude/agents/developer/Agent.md" bound as implementer, neither
-// carrying the skill. The project row renders first, then the user row —
-// display groups project-scope rows ahead of user-scope ones, distinct
-// from Result.AgentsMissingSkill's own role-major order (setup's own
-// missing_skill_test.go pins that order directly). Neither agent file is
-// touched, and a --dry-run sub-case reports the identical block. The
-// "--edit-agents" sub-case merges the fixable project row and re-checks
-// the header itself: once this run already carries the flag, the header
-// never suggests it again, even though a listed row (the user-level one)
-// remains — missingSkillHeaderLinePlain, not missingSkillHeaderLine.
-func Test_init_lists_bound_agents_missing_the_workflow_skill(t *testing.T) {
-	wd := t.TempDir()
-	home := t.TempDir()
-
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-		"feature-directory: docs/specifications\nroles:\n  planner: planner\n  implementer: developer\n",
-	), 0o600))
-
-	homePlanner := filepath.Join(home, ".claude", "agents", "planner.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(homePlanner), 0o755))
-	plannerBody := []byte("---\nname: planner\n---\n\nbody\n")
-	require.NoError(t, os.WriteFile(homePlanner, plannerBody, 0o600))
-
-	projectDeveloper := filepath.Join(wd, ".claude", "agents", "developer", "Agent.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(projectDeveloper), 0o755))
-	developerBody := []byte("---\nname: developer\n---\n\nbody\n")
-	require.NoError(t, os.WriteFile(projectDeveloper, developerBody, 0o600))
-
-	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
-
-	wantBlock := missingSkillHeaderLine + "\n" +
-		"  .claude/agents/developer/Agent.md (implementer)\n" +
-		"  ~/.claude/agents/planner.md (planner; user-level, edit by hand)\n"
-
-	t.Run("without --dry-run", func(t *testing.T) {
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, seam)
-
-		require.NoError(t, err)
-		assert.Equal(t, wantBlock+installedNextActionLine+"\n", stderr.String())
-
-		after, readErr := os.ReadFile(projectDeveloper)
-		require.NoError(t, readErr)
-		assert.Equal(t, developerBody, after)
-
-		homeAfter, readErr := os.ReadFile(homePlanner)
-		require.NoError(t, readErr)
-		assert.Equal(t, plannerBody, homeAfter)
-	})
-
-	t.Run("--dry-run reports the same block", func(t *testing.T) {
-		wd := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-			"feature-directory: docs/specifications\nroles:\n  planner: planner\n  implementer: developer\n",
-		), 0o600))
-
-		projectDeveloper := filepath.Join(wd, ".claude", "agents", "developer", "Agent.md")
-		require.NoError(t, os.MkdirAll(filepath.Dir(projectDeveloper), 0o755))
-		require.NoError(t, os.WriteFile(projectDeveloper, developerBody, 0o600))
-
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--dry-run"}, nil, &stdout, &stderr, noBuildInfo, seam)
-
-		require.NoError(t, err)
-		assert.Equal(t, wantBlock+"brief init: dry run, no files changed; rerun without --dry-run to apply\n", stderr.String())
-
-		entries, readErr := os.ReadDir(filepath.Join(wd, ".claude"))
-		require.NoError(t, readErr)
-		assert.Len(t, entries, 1, "--dry-run must write nothing beyond the fixture's own agents directory")
-	})
-
-	t.Run("--edit-agents merges the project agent and leaves the user-level one alone", func(t *testing.T) {
-		wd := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-			"feature-directory: docs/specifications\nroles:\n  planner: planner\n  implementer: developer\n",
-		), 0o600))
-
-		projectDeveloper := filepath.Join(wd, ".claude", "agents", "developer", "Agent.md")
-		require.NoError(t, os.MkdirAll(filepath.Dir(projectDeveloper), 0o755))
-		require.NoError(t, os.WriteFile(projectDeveloper, developerBody, 0o600))
-
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, seam)
-
-		require.NoError(t, err)
-		assert.Contains(t, stdout.String(), "merged .claude/agents/developer/Agent.md (brief-workflow added to skills)\n")
-
-		wantBlock := missingSkillHeaderLinePlain + "\n" +
-			"  ~/.claude/agents/planner.md (planner; user-level, edit by hand)\n"
-		assert.Equal(t, wantBlock+installedNextActionLine+"\n", stderr.String())
-
-		after, readErr := os.ReadFile(projectDeveloper)
-		require.NoError(t, readErr)
-		assert.Equal(t, "---\nname: developer\nskills: [brief-workflow]\n---\n\nbody\n", string(after))
-
-		homeAfter, readErr := os.ReadFile(homePlanner)
-		require.NoError(t, readErr)
-		assert.Equal(t, plannerBody, homeAfter)
-	})
-}
-
-// nothingToEditLine is --edit-agents' own exit-0 "nothing to edit" stderr
-// line (Surface & Copy), including the "brief init: " prefix.
-const nothingToEditLine = `brief init: --edit-agents: no planner or implementer bound to an agent under .claude/agents; nothing to edit`
-
-// Test_init_edit_agents_says_nothing_to_edit pins the nothing-to-edit line:
-// no bare planner or implementer bound at all, and a bare binding that only
-// resolves at user scope, both trigger it, in text mode only, placed after
-// roles_to_add and before the missing-skill block.
-func Test_init_edit_agents_says_nothing_to_edit(t *testing.T) {
-	t.Run("no bare planner or implementer bound", func(t *testing.T) {
-		wd := t.TempDir()
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
-
-		require.NoError(t, err)
-		assert.Contains(t, stderr.String(), nothingToEditLine+"\n")
-	})
-
-	t.Run("only bare binding is user-level: nothing-to-edit precedes the missing-skill block", func(t *testing.T) {
-		wd := t.TempDir()
-		home := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-			"feature-directory: docs/specifications\nroles:\n  implementer: planner\n",
-		), 0o600))
-
-		homePlanner := filepath.Join(home, ".claude", "agents", "planner.md")
-		require.NoError(t, os.MkdirAll(filepath.Dir(homePlanner), 0o755))
-		require.NoError(t, os.WriteFile(homePlanner, []byte("---\nname: planner\n---\n\nbody\n"), 0o600))
-
-		seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, seam)
-
-		require.NoError(t, err)
-
-		nothingIdx := strings.Index(stderr.String(), nothingToEditLine)
-		missingIdx := strings.Index(stderr.String(), missingSkillHeaderLinePlain)
-		require.NotEqual(t, -1, nothingIdx)
-		require.NotEqual(t, -1, missingIdx)
-		assert.Less(t, nothingIdx, missingIdx)
-	})
-
-	t.Run("absent under --json", func(t *testing.T) {
-		wd := t.TempDir()
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents", "--json"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
-
-		require.NoError(t, err)
-		assert.Empty(t, stderr.String())
-		assert.NotContains(t, stdout.String(), "nothing to edit")
-	})
-}
-
-// Test_init_missing_skill_header_omits_edit_agents_suggestion_when_it_cannot_help
-// pins missingSkillHeader's own conditional suffix (product-vision fix
-// round): ", or rerun with --edit-agents:" is appended only when this run
-// did not already carry the flag AND at least one listed agent is one
-// "--edit-agents" could still reach — a bare-name project binding, not
-// escaping the repository. Two ways that condition fails, both getting the
-// plain header: no "--edit-agents" was given, but the only lacking agent
-// is user-level (which the flag could never reach); "--edit-agents" was
-// given and already tried its one bound agent, which it could not edit (an
-// unrecognized "skills:" shape, left "kept").
-func Test_init_missing_skill_header_omits_edit_agents_suggestion_when_it_cannot_help(t *testing.T) {
-	t.Run("no --edit-agents given, only a user-level agent remains", func(t *testing.T) {
-		wd := t.TempDir()
-		home := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-			"feature-directory: docs/specifications\nroles:\n  planner: planner\n",
-		), 0o600))
-
-		homePlanner := filepath.Join(home, ".claude", "agents", "planner.md")
-		require.NoError(t, os.MkdirAll(filepath.Dir(homePlanner), 0o755))
-		require.NoError(t, os.WriteFile(homePlanner, []byte("---\nname: planner\n---\n\nbody\n"), 0o600))
-
-		seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, seam)
-
-		require.NoError(t, err)
-		assert.Equal(t,
-			missingSkillHeaderLinePlain+"\n"+
-				"  ~/.claude/agents/planner.md (planner; user-level, edit by hand)\n"+
-				installedNextActionLine+"\n",
-			stderr.String())
-	})
-
-	t.Run("--edit-agents given, already kept its one bound agent as uneditable", func(t *testing.T) {
-		wd := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-			"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
-		), 0o600))
-
-		agentPath := filepath.Join(wd, ".claude", "agents", "developer.md")
-		require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
-		require.NoError(t, os.WriteFile(agentPath, []byte("---\nname: developer\nskills: brief-workflow\n---\n\nbody\n"), 0o600))
-
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
-
-		require.NoError(t, err)
-		assert.Contains(t, stdout.String(), "kept .claude/agents/developer.md (skills: is not a list brief can edit; add brief-workflow by hand)\n")
-		assert.Equal(t,
-			missingSkillHeaderLinePlain+"\n"+
-				"  .claude/agents/developer.md (implementer; skills: is not a list brief can edit, edit by hand)\n"+
-				installedNextActionLine+"\n",
-			stderr.String())
-	})
-}
-
-// Test_init_missing_skill_lists_an_escaping_bound_agent_separately pins the
-// third missing-skill row shape (product-vision fix round): a bound
-// implementer resolved only through a ".claude" symlinked outside the
-// repository is listed with "; outside the repository, edit by hand" —
-// distinct from a real project row and from a user-level one — and its
-// presence alone (no in-repository row) still keeps the header plain, since
-// "--edit-agents" cannot reach it either.
-func Test_init_missing_skill_lists_an_escaping_bound_agent_separately(t *testing.T) {
-	wd := t.TempDir()
-	home := t.TempDir()
-	outsideClaude := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-		"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
-	), 0o600))
-
-	agentPath := filepath.Join(outsideClaude, "agents", "developer.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
-	require.NoError(t, os.WriteFile(agentPath, []byte("---\nname: developer\n---\n\nbody\n"), 0o600))
-	require.NoError(t, os.Symlink(outsideClaude, filepath.Join(wd, ".claude")))
-
-	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+// Test_init_edit_agents_requires_claude_code pins the exit-2 refusal when
+// the resolved host is not claude-code, whether explicit or detected. This
+// refusal fires before Init ever reads a bound agent file, so it needs no
+// real disk.
+func Test_init_edit_agents_requires_claude_code(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	var stdout, stderr bytes.Buffer
 
-	// --dry-run: a real run would also need to create the plugin/skill
-	// files under the symlinked ".claude" for the first time, which trips
-	// R10's own writability pre-check (Lstat never resolves a symlink at
-	// the exact path it is asked to check) — an unrelated concern this
-	// test is not proving; the missing-skill report itself is computed
-	// identically either way (bound_agent_test.go's own precedent).
-	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--dry-run"}, nil, &stdout, &stderr, noBuildInfo, seam)
+	err := run(t.Context(), wd, []string{"init", "--host", "none", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
-	require.NoError(t, err)
-	assert.Equal(t,
-		missingSkillHeaderLinePlain+"\n"+
-			"  .claude/agents/developer.md (implementer; outside the repository, edit by hand)\n"+
-			"brief init: dry run, no files changed; rerun without --dry-run to apply\n",
-		stderr.String())
-}
+	require.Error(t, err)
+	assert.Equal(t, 2, ExitCode(err))
+	assert.Equal(t, "brief init: --edit-agents requires --host claude-code; run 'brief init --host claude-code --edit-agents'\n", stderr.String())
 
-// Test_init_missing_skill_lists_a_not_regular_leaf_separately pins the
-// fourth missing-skill row shape (REVIEW fix round, MAJOR 1): a bound
-// implementer resolved to a symlinked leaf whose own target still resolves
-// inside the repository does not escape it (Rule 3's own escape test never
-// fires — the leaf's own resolved path stays under root) but is still
-// unreachable by "--edit-agents": planBoundAgent Lstats the leaf itself and
-// never reads through a non-regular file. Alone, it is listed "; not a
-// regular file, edit by hand" and keeps the header plain, since
-// "--edit-agents" cannot reach it either. The control proves the symlink
-// itself is what disqualifies the row, not its bytes: the identical
-// frontmatter written as a plain regular file instead resolves fixable,
-// plain row format, header suffixed.
-func Test_init_missing_skill_lists_a_not_regular_leaf_separately(t *testing.T) {
-	body := []byte("---\nname: developer\n---\n\nbody\n")
-
-	t.Run("symlinked leaf, target inside the repository", func(t *testing.T) {
-		wd := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-			"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
-		), 0o600))
-
-		agentsDir := filepath.Join(wd, ".claude", "agents")
-		require.NoError(t, os.MkdirAll(agentsDir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "developer-body.txt"), body, 0o600))
-		require.NoError(t, os.Symlink("developer-body.txt", filepath.Join(agentsDir, "developer.md")))
-
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
-
-		require.NoError(t, err)
-		assert.Equal(t,
-			missingSkillHeaderLinePlain+"\n"+
-				"  .claude/agents/developer.md (implementer; not a regular file, edit by hand)\n"+
-				installedNextActionLine+"\n",
-			stderr.String())
-	})
-
-	t.Run("control: identical bytes as a regular file resolve fixable", func(t *testing.T) {
-		wd := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-			"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
-		), 0o600))
-
-		agentPath := filepath.Join(wd, ".claude", "agents", "developer.md")
-		require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
-		require.NoError(t, os.WriteFile(agentPath, body, 0o600))
-
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
-
-		require.NoError(t, err)
-		assert.Equal(t,
-			missingSkillHeaderLine+"\n"+
-				"  .claude/agents/developer.md (implementer)\n"+
-				installedNextActionLine+"\n",
-			stderr.String())
-	})
-}
-
-// Test_init_missing_skill_lists_an_uneditable_shape_without_edit_agents pins
-// the fifth missing-skill row shape (REVIEW fix round, MAJOR 1): a bound
-// implementer whose own "skills:" frontmatter is a scalar addWorkflowSkill
-// cannot edit is listed "; skills: is not a list brief can edit, edit by
-// hand" even when "--edit-agents" was never given on this run — a row's own
-// reach is decided by its shape (setup.planBoundAgent's own verdict), never
-// by whether an edit was attempted, so the header never dangles a flag that
-// could not help it either way.
-func Test_init_missing_skill_lists_an_uneditable_shape_without_edit_agents(t *testing.T) {
-	wd := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-		"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
-	), 0o600))
-
-	agentPath := filepath.Join(wd, ".claude", "agents", "developer.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
-	require.NoError(t, os.WriteFile(agentPath, []byte("---\nname: developer\nskills: tdd\n---\n\nbody\n"), 0o600))
-
-	var stdout, stderr bytes.Buffer
-
-	err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
-
-	require.NoError(t, err)
-	assert.Equal(t,
-		missingSkillHeaderLinePlain+"\n"+
-			"  .claude/agents/developer.md (implementer; skills: is not a list brief can edit, edit by hand)\n"+
-			installedNextActionLine+"\n",
-		stderr.String())
+	entries, readErr := mem.ReadDir(memKey(wd))
+	require.NoError(t, readErr)
+	assert.Empty(t, entries)
 }
 
 // Test_missing_skill_lines_group_order pins missingSkillHeader and
@@ -535,9 +188,10 @@ func Test_init_missing_skill_lists_an_uneditable_shape_without_edit_agents(t *te
 // missingSkillHeader and missingSkillLines never touch the filesystem, so
 // every Reach combination can be pinned directly without constructing real
 // agent files. headerSuffixed and headerPlain are missingSkillHeaderLine
-// and missingSkillHeaderLinePlain's own unprefixed counterparts —
-// missingSkillHeader itself renders without the "brief init: " prefix
-// runInit prepends — so a direct call can be compared against them as-is.
+// and missingSkillHeaderLinePlain's own unprefixed counterparts (both
+// defined in init_bound_agent_internal_test.go, same package) — missingSkillHeader itself
+// renders without the "brief init: " prefix runInit prepends — so a direct
+// call can be compared against them as-is.
 func Test_missing_skill_lines_group_order(t *testing.T) {
 	const wd = "/repo"
 
@@ -641,296 +295,613 @@ func Test_missing_skill_lines_treats_a_scope_project_row_carrying_reach_none_as_
 	})
 }
 
-// Test_init_edit_agents_requires_claude_code pins the exit-2 refusal when
-// the resolved host is not claude-code, whether explicit or detected.
-func Test_init_edit_agents_requires_claude_code(t *testing.T) {
-	wd := t.TempDir()
+// Test_init_reports_created_then_unchanged pins R2/R3/R11's happy path: a
+// fresh repository's first "brief init --host none" reports both artifacts
+// created, with the feature root's row carrying a trailing "/", and the
+// "installed" next-action line on stderr; a second, identical run reports
+// both "unchanged" and the "already installed" next-action line, exit 0.
+func Test_init_reports_created_then_unchanged(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	seam := newMemSetupSeam(mem)
 	var stdout, stderr bytes.Buffer
 
-	err := run(t.Context(), wd, []string{"init", "--host", "none", "--edit-agents"}, nil, &stdout, &stderr, noBuildInfo, emptyHomeSeam(t))
+	err := run(t.Context(), wd, []string{"init", "--host", "none"}, nil, &stdout, &stderr, noBuildInfo, seam)
 
-	require.Error(t, err)
-	assert.Equal(t, 2, ExitCode(err))
-	assert.Equal(t, "brief init: --edit-agents requires --host claude-code; run 'brief init --host claude-code --edit-agents'\n", stderr.String())
+	require.NoError(t, err)
+	assert.Equal(t, 0, ExitCode(err))
+	assert.Equal(t, "created .brief.yaml\ncreated docs/specifications/\n", stdout.String())
+	assert.Equal(t, "brief init: installed config and feature root; run 'brief new feature <name>'\n", stderr.String())
 
-	entries, readErr := os.ReadDir(wd)
+	body, readErr := mem.ReadFile(memKey(filepath.Join(wd, ".brief.yaml")))
+	require.NoError(t, readErr)
+	assert.Equal(t, artifact.ConfigFile(), body)
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run(t.Context(), wd, []string{"init", "--host", "none"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, ExitCode(err))
+	assert.Equal(t, "unchanged .brief.yaml\nunchanged docs/specifications/\n", stdout.String())
+	assert.Equal(t, "brief init: already installed; nothing changed\n", stderr.String())
+}
+
+// Test_init_keeps_a_valid_existing_config_and_reports_it pins R6's "edited
+// locally" branch: a config that decodes without violation but differs
+// from the shipped render is reported "kept", and the feature root it
+// names — not Default()'s — is what gets created.
+func Test_init_keeps_a_valid_existing_config_and_reports_it(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	require.NoError(t, mem.WriteFile(memKey(filepath.Join(wd, ".brief.yaml")), []byte("feature-directory: specs\n"), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "none"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	require.NoError(t, err)
+	assert.Equal(t, "kept .brief.yaml (edited locally)\ncreated specs/\n", stdout.String())
+	assert.Equal(t, "brief init: installed config and feature root; run 'brief new feature <name>'\n", stderr.String())
+}
+
+// Test_init_refuses_an_unparseable_config_leaving_the_tree_untouched pins
+// R3's refusal branch: exit 1, a stderr line naming the "(no files
+// changed)" promise, and the working directory carrying exactly the one
+// file that was already there.
+func Test_init_refuses_an_unparseable_config_leaving_the_tree_untouched(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	require.NoError(t, mem.WriteFile(memKey(filepath.Join(wd, ".brief.yaml")), []byte("feature-directory: [unterminated\n"), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "none"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	assert.Equal(t, 1, ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "(no files changed)")
+	assert.Contains(t, stderr.String(), "brief init --force")
+
+	entries, readErr := mem.ReadDir(memKey(wd))
+	require.NoError(t, readErr)
+	assert.Len(t, entries, 1)
+}
+
+// Test_the_directory_probe_sees_new_entries_on_a_successful_init is the
+// control arm for the refusal test above: the identical directory-listing
+// probe, against a fresh repository instead of the refusing fixture, does
+// grow a second entry — proving the probe is capable of catching a write,
+// not merely one that happens to see none.
+func Test_the_directory_probe_sees_new_entries_on_a_successful_init(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "none"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	require.NoError(t, err)
+
+	entries, readErr := mem.ReadDir(memKey(wd))
+	require.NoError(t, readErr)
+	assert.Len(t, entries, 2)
+}
+
+// Test_init_refuses_an_invalid_config_value_naming_the_key_value_and_force_fix
+// pins the STATE.md open debt this scenario closes: the stderr line names
+// the offending key, its value, and 'brief init --force' as the fix.
+func Test_init_refuses_an_invalid_config_value_naming_the_key_value_and_force_fix(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	require.NoError(t, mem.WriteFile(memKey(filepath.Join(wd, ".brief.yaml")), []byte("handoff-cap-lines: 0\n"), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "none"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	assert.Equal(t, 1, ExitCode(err))
+	assert.Contains(t, stderr.String(), "handoff-cap-lines is 0")
+	assert.Contains(t, stderr.String(), "brief init --force")
+}
+
+// Test_init_force_rewrites_an_existing_config_from_defaults pins --force's
+// own report shape: "created", detail "rewritten from defaults", against
+// the same fixture the refusal tests above refuse on.
+func Test_init_force_rewrites_an_existing_config_from_defaults(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	require.NoError(t, mem.WriteFile(memKey(filepath.Join(wd, ".brief.yaml")), []byte("handoff-cap-lines: 0\n"), 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "none", "--force"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	require.NoError(t, err)
+	assert.Equal(t, "created .brief.yaml (rewritten from defaults)\ncreated docs/specifications/\n", stdout.String())
+}
+
+// Test_init_dry_run_prints_the_plan_and_writes_nothing pins R9: the same
+// rows a real run would print, the dry-run stderr line, and an unchanged
+// working directory.
+func Test_init_dry_run_prints_the_plan_and_writes_nothing(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "none", "--dry-run"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	require.NoError(t, err)
+	assert.Equal(t, "created .brief.yaml\ncreated docs/specifications/\n", stdout.String())
+	assert.Equal(t, "brief init: dry run, no files changed; rerun without --dry-run to apply\n", stderr.String())
+
+	entries, readErr := mem.ReadDir(memKey(wd))
 	require.NoError(t, readErr)
 	assert.Empty(t, entries)
 }
 
-// Test_init_edit_agents_dry_run_and_print pins --dry-run and --print's own
-// rendering: the same merged row and an unwritten file under --dry-run, the
-// merge header and only the inserted line under --print with no CR
-// surviving from a CRLF fixture, and the merge body under --print --json.
-func Test_init_edit_agents_dry_run_and_print(t *testing.T) {
-	newFixture := func(t *testing.T, crlf bool) (string, runSeam, string) {
-		t.Helper()
-
-		wd := t.TempDir()
-		home := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-			"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
-		), 0o600))
-
-		agentPath := filepath.Join(wd, ".claude", "agents", "developer", "Agent.md")
-		require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
-
-		body := "---\nname: developer\n---\n\nbody\n"
-		if crlf {
-			body = "---\r\nname: developer\r\n---\r\n\r\nbody\r\n"
-		}
-
-		require.NoError(t, os.WriteFile(agentPath, []byte(body), 0o600))
-
-		seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
-
-		return wd, seam, agentPath
-	}
-
-	t.Run("--dry-run shows the merged row and leaves the file unchanged", func(t *testing.T) {
-		wd, seam, agentPath := newFixture(t, false)
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents", "--dry-run"}, nil, &stdout, &stderr, noBuildInfo, seam)
-		require.NoError(t, err)
-		assert.Contains(t, stdout.String(), "merged .claude/agents/developer/Agent.md (brief-workflow added to skills)\n")
-
-		after, readErr := os.ReadFile(agentPath)
-		require.NoError(t, readErr)
-		assert.Equal(t, "---\nname: developer\n---\n\nbody\n", string(after))
-	})
-
-	t.Run("--print shows the merge header and only the inserted line, no CR from a CRLF fixture", func(t *testing.T) {
-		wd, seam, agentPath := newFixture(t, true)
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents", "--print"}, nil, &stdout, &stderr, noBuildInfo, seam)
-		require.NoError(t, err)
-
-		assert.Contains(t, stdout.String(), "# .claude/agents/developer/Agent.md (merge)\nskills: [brief-workflow]\n")
-		assert.NotContains(t, stdout.String(), "skills: [brief-workflow]\r")
-
-		after, readErr := os.ReadFile(agentPath)
-		require.NoError(t, readErr)
-		assert.Equal(t, "---\r\nname: developer\r\n---\r\n\r\nbody\r\n", string(after))
-	})
-
-	t.Run("--print --json carries the merge body", func(t *testing.T) {
-		wd, seam, agentPath := newFixture(t, false)
-		var stdout, stderr bytes.Buffer
-
-		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents", "--print", "--json"}, nil, &stdout, &stderr, noBuildInfo, seam)
-		require.NoError(t, err)
-
-		var doc struct {
-			Artifacts []struct {
-				Path   string `json:"path"`
-				Action string `json:"action"`
-				Body   string `json:"body"`
-			} `json:"artifacts"`
-		}
-		require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
-
-		var found bool
-		for _, a := range doc.Artifacts {
-			if a.Path == agentPath {
-				found = true
-				assert.Equal(t, "merge", a.Action)
-				assert.Equal(t, "skills: [brief-workflow]", a.Body)
-			}
-		}
-		assert.True(t, found)
-	})
-}
-
-// Test_init_edit_agents_json pins "--edit-agents --json": a "bound-agent"
-// artifact row action "merged", the path listed in "modified", and the
-// merged path excluded from "agents_missing_skill".
-func Test_init_edit_agents_json(t *testing.T) {
-	wd := t.TempDir()
-	home := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-		"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
-	), 0o600))
-
-	agentPath := filepath.Join(wd, ".claude", "agents", "developer.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
-	require.NoError(t, os.WriteFile(agentPath, []byte("---\nname: developer\n---\n\nbody\n"), 0o600))
-
-	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+// Test_init_refuses_an_unknown_host pins R8's usage-error branch: exit 2,
+// naming the given value, the accepted list, and --print as the by-hand
+// route. "bogus" is used rather than "claude-code" — S03 does not accept
+// it yet.
+func Test_init_refuses_an_unknown_host(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	var stdout, stderr bytes.Buffer
 
-	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--edit-agents", "--json"}, nil, &stdout, &stderr, noBuildInfo, seam)
-	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
+	err := run(t.Context(), wd, []string{"init", "--host", "bogus"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
-	var doc struct {
-		Modified  []string `json:"modified"`
-		Artifacts []struct {
-			Kind   string `json:"kind"`
-			Path   string `json:"path"`
-			Action string `json:"action"`
-		} `json:"artifacts"`
-		AgentsMissingSkill []struct {
-			Path string `json:"path"`
-		} `json:"agents_missing_skill"`
-	}
-	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
-
-	assert.Contains(t, doc.Modified, agentPath)
-
-	var found bool
-	for _, a := range doc.Artifacts {
-		if a.Path == agentPath {
-			found = true
-			assert.Equal(t, "bound-agent", a.Kind)
-			assert.Equal(t, "merged", a.Action)
-		}
-	}
-	assert.True(t, found)
-
-	for _, m := range doc.AgentsMissingSkill {
-		assert.NotEqual(t, agentPath, m.Path)
-	}
+	assert.Equal(t, 2, ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, `brief init: unknown host "bogus"; expected one of: claude-code, none; run 'brief init --print' to wire it by hand`+"\n", stderr.String())
 }
 
-// Test_init_prints_roles_to_add_before_the_missing_skill_block pins R7's
-// stderr order (Surface & Copy): the "roles_to_add" block, then the
-// missing-skill block, then the next-action line — never the reverse.
-func Test_init_prints_roles_to_add_before_the_missing_skill_block(t *testing.T) {
-	wd := t.TempDir()
-	home := t.TempDir()
+// Test_init_refuses_a_stray_positional_argument pins the usage-error
+// branch for an argument init takes none of — checked before wd is ever
+// read, so it needs no fixture at all.
+func Test_init_refuses_a_stray_positional_argument(t *testing.T) {
+	var stdout, stderr bytes.Buffer
 
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-		"feature-directory: docs/specifications\nroles:\n  implementer: developer\n",
-	), 0o600))
+	err := run(t.Context(), fsAbs("repo"), []string{"init", "extra"}, nil, &stdout, &stderr, noBuildInfo)
 
-	developer := filepath.Join(wd, ".claude", "agents", "developer.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(developer), 0o755))
-	require.NoError(t, os.WriteFile(developer, []byte("---\nname: developer\n---\n\nbody\n"), 0o600))
+	assert.Equal(t, 2, ExitCode(err))
+	assert.Contains(t, stderr.String(), "too many arguments")
+}
 
-	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+// Test_init_for_claude_code_installs_the_plugin_and_says_where_to_start_claude_code
+// pins the user-visible contract for a fresh repository: all six rows in
+// order, the claude-code next-action line naming "this directory" since
+// the install root is wd itself, and every plugin file's bytes equal to
+// its own artifact render.
+func Test_init_for_claude_code_installs_the_plugin_and_says_where_to_start_claude_code(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, ExitCode(err))
+	assert.Equal(t, ""+
+		"created .brief.yaml\n"+
+		"created docs/specifications/\n"+
+		"created .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"created .claude/skills/brief/skills/start/SKILL.md\n"+
+		"created .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"created .claude/skills/brief/hooks/hooks.json\n"+
+		"created .claude/skills/brief-workflow/SKILL.md\n"+
+		"created CLAUDE.md\n", stdout.String())
+	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
+
+	manifest, err2 := mem.ReadFile(memKey(filepath.Join(wd, ".claude", "skills", "brief", ".claude-plugin", "plugin.json")))
+	require.NoError(t, err2)
+	assert.Equal(t, artifact.PluginManifest(), manifest)
+}
+
+// Test_init_from_a_subdirectory_names_the_install_root_in_the_next_action
+// pins the root ≠ wd form: run from a child directory of a repository
+// already configured at the parent, the next-action line names the
+// parent, relative to wd, in both places the root=wd control arm above
+// says "this directory"/"here".
+func Test_init_from_a_subdirectory_names_the_install_root_in_the_next_action(t *testing.T) {
+	parent := fsAbs("repo")
+	mem := newVirtualMem(parent)
+	require.NoError(t, mem.WriteFile(memKey(filepath.Join(parent, ".brief.yaml")), []byte("feature-directory: specs\n"), 0o600))
+	child := filepath.Join(parent, "child")
+	require.NoError(t, mem.Mkdir(memKey(child), 0o755))
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), child, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	require.NoError(t, err)
+	assert.Equal(t, "brief init: installed for claude-code in ..; start Claude Code in .. (or run /reload-plugins in a session already there), then 'brief new feature <name>'\n", stderr.String())
+}
+
+// Test_init_no_hook_omits_the_hook_row pins --no-hook: the same five rows
+// minus hooks.json, and no hooks.json file on disk.
+func Test_init_no_hook_omits_the_hook_row(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--no-hook"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"created .brief.yaml\n"+
+		"created docs/specifications/\n"+
+		"created .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"created .claude/skills/brief/skills/start/SKILL.md\n"+
+		"created .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"created .claude/skills/brief-workflow/SKILL.md\n"+
+		"created CLAUDE.md\n", stdout.String())
+
+	_, statErr := mem.Stat(memKey(filepath.Join(wd, ".claude", "skills", "brief", "hooks", "hooks.json")))
+	assert.ErrorIs(t, statErr, fs.ErrNotExist)
+}
+
+// Test_no_hook_with_host_none_is_accepted_and_changes_nothing pins
+// --no-hook's own no-op under --host none: no plugin was ever planned, so
+// --no-hook has nothing to omit, and init still installs just the config
+// and feature root.
+func Test_no_hook_with_host_none_is_accepted_and_changes_nothing(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "none", "--no-hook"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	require.NoError(t, err)
+	assert.Equal(t, "created .brief.yaml\ncreated docs/specifications/\n", stdout.String())
+}
+
+// Test_init_rerunning_for_claude_code_reports_unchanged_and_edited_files_kept
+// pins convergence and "edited locally" together: a second run reports
+// every row "unchanged" except the finish skill, edited between runs,
+// reported "kept (edited locally)" — even under --force, which only ever
+// rewrites the config.
+func Test_init_rerunning_for_claude_code_reports_unchanged_and_edited_files_kept(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	seam := newMemSetupSeam(mem)
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, seam)
+	require.NoError(t, err)
+
+	finish := filepath.Join(wd, ".claude", "skills", "brief", "skills", "finish", "SKILL.md")
+	require.NoError(t, mem.WriteFile(memKey(finish), []byte("---\nedited: true\n---\n"), 0o600))
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run(t.Context(), wd, []string{"init", "--host", "claude-code", "--force"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"unchanged .brief.yaml\n"+
+		"unchanged docs/specifications/\n"+
+		"unchanged .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"unchanged .claude/skills/brief/skills/start/SKILL.md\n"+
+		"kept .claude/skills/brief/skills/finish/SKILL.md (edited locally)\n"+
+		"unchanged .claude/skills/brief/hooks/hooks.json\n"+
+		"unchanged .claude/skills/brief-workflow/SKILL.md\n"+
+		"unchanged CLAUDE.md\n", stdout.String())
+	assert.Equal(t, "brief init: already installed; nothing changed\n", stderr.String())
+}
+
+// Test_init_merging_only_the_snippet_reports_installed_not_nothing_changed
+// pins the trap a merge-only run is exposed to: every other artifact
+// already converged (unchanged), only the CLAUDE.md block needs replacing
+// (it was brief-written for a different feature directory) — the
+// next-action line must still say "installed", not "already installed;
+// nothing changed", so initNextAction has to treat ActionMerged as a
+// change alongside ActionCreated.
+func Test_init_merging_only_the_snippet_reports_installed_not_nothing_changed(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	seam := newMemSetupSeam(mem)
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, seam)
+	require.NoError(t, err)
+
+	require.NoError(t, mem.WriteFile(memKey(filepath.Join(wd, "CLAUDE.md")), artifact.SnippetBlock("elsewhere"), 0o600))
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+	require.NoError(t, err)
+	assert.Equal(t, ""+
+		"unchanged .brief.yaml\n"+
+		"unchanged docs/specifications/\n"+
+		"unchanged .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"unchanged .claude/skills/brief/skills/start/SKILL.md\n"+
+		"unchanged .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"unchanged .claude/skills/brief/hooks/hooks.json\n"+
+		"unchanged .claude/skills/brief-workflow/SKILL.md\n"+
+		"merged CLAUDE.md (block updated)\n", stdout.String())
+	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
+
+	body, readErr := mem.ReadFile(memKey(filepath.Join(wd, "CLAUDE.md")))
+	require.NoError(t, readErr)
+	assert.Equal(t, artifact.SnippetBlock("docs/specifications"), body)
+}
+
+// Test_init_over_an_install_without_the_workflow_skill_creates_only_it pins
+// the upgrade path every current adopter hits: a repository already
+// carrying every other claude-code artifact but no brief-workflow skill
+// (the pre-S01 shape) reruns to print exactly one "created" row, and stderr
+// still reads the ordinary "installed for claude-code; …" line —
+// initNextAction is kind-generic, not skill-specific.
+func Test_init_over_an_install_without_the_workflow_skill_creates_only_it(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	seam := newMemSetupSeam(mem)
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, seam)
+	require.NoError(t, err)
+	require.NoError(t, mem.Remove(memKey(filepath.Join(wd, ".claude", "skills", "brief-workflow", "SKILL.md"))))
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, ExitCode(err))
+	assert.Equal(t, ""+
+		"unchanged .brief.yaml\n"+
+		"unchanged docs/specifications/\n"+
+		"unchanged .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"unchanged .claude/skills/brief/skills/start/SKILL.md\n"+
+		"unchanged .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"unchanged .claude/skills/brief/hooks/hooks.json\n"+
+		"created .claude/skills/brief-workflow/SKILL.md\n"+
+		"unchanged CLAUDE.md\n", stdout.String())
+	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
+}
+
+// Test_init_with_agents_installs_three_agents_and_binds_roles pins the
+// fresh-repository happy path for --with-agents: ten rows in order, the
+// three agents created under "agents/", the config's own bytes equal
+// artifact.ConfigFileWithRoles(), and the ordinary "installed for
+// claude-code" next-action line — no roles hint, since this run authored
+// the bindings itself.
+func Test_init_with_agents_installs_three_agents_and_binds_roles(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, ExitCode(err))
+	assert.Equal(t, ""+
+		"created .brief.yaml\n"+
+		"created docs/specifications/\n"+
+		"created .claude/skills/brief/.claude-plugin/plugin.json\n"+
+		"created .claude/skills/brief/skills/start/SKILL.md\n"+
+		"created .claude/skills/brief/skills/finish/SKILL.md\n"+
+		"created .claude/skills/brief/hooks/hooks.json\n"+
+		"created .claude/skills/brief-workflow/SKILL.md\n"+
+		"created .claude/skills/brief/agents/planner.md\n"+
+		"created .claude/skills/brief/agents/implementer.md\n"+
+		"created .claude/skills/brief/agents/reviewer.md\n"+
+		"created CLAUDE.md\n", stdout.String())
+	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
+
+	body, readErr := mem.ReadFile(memKey(filepath.Join(wd, ".brief.yaml")))
+	require.NoError(t, readErr)
+	assert.Equal(t, artifact.ConfigFileWithRoles(), body)
+}
+
+// Test_init_with_agents_reports_an_older_agent_as_merged_updated pins R11's
+// stdout row for Rule 6's upgrade path: a planner file holding the
+// pre-SCENARIO-02 bytes is reported "merged … (updated)", exit 0, and its
+// bytes are rewritten to today's own render.
+func Test_init_with_agents_reports_an_older_agent_as_merged_updated(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	seam := newMemSetupSeam(mem)
 	var stdout, stderr bytes.Buffer
 
 	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, seam)
+	require.NoError(t, err)
+
+	plannerPath := filepath.Join(wd, ".claude", "skills", "brief", "agents", "planner.md")
+	older := []byte("---\nname: planner\ndescription: Turn a feature's specification into ordered scenario " +
+		"plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's " +
+		"specification into ordered scenario plans: run `brief new step <feature>` for the next " +
+		"scenario, then fill its plan file. Never write production or test code.\n")
+	require.NoError(t, mem.WriteFile(memKey(plannerPath), older, 0o600))
+
+	stdout.Reset()
+	stderr.Reset()
+
+	err = run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, ExitCode(err))
+	assert.Contains(t, stdout.String(), "merged .claude/skills/brief/agents/planner.md (updated)\n")
+
+	body, readErr := mem.ReadFile(memKey(plannerPath))
+	require.NoError(t, readErr)
+	assert.Equal(t, artifact.AgentPlanner(), body)
+}
+
+// Test_init_with_agents_over_an_existing_config_prints_the_roles_lines_to_add
+// pins R7's stderr hint, exact copy: the config is never edited, and the
+// hint block — "was not edited" line, then "roles:" and the three bare
+// "  <role>: brief:<role>" lines, no "brief init: " prefix on those since
+// they are meant to be pasted verbatim into .brief.yaml — lands before the
+// ordinary next-action line.
+func Test_init_with_agents_over_an_existing_config_prints_the_roles_lines_to_add(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	configKey := memKey(filepath.Join(wd, ".brief.yaml"))
+	original := []byte("feature-directory: specs\n")
+	require.NoError(t, mem.WriteFile(configKey, original, 0o600))
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
 	require.NoError(t, err)
 	assert.Equal(t, ""+
 		"brief init: .brief.yaml was not edited; to bind brief's agents, add these lines to it:\n"+
 		"roles:\n"+
 		"  planner: brief:planner\n"+
+		"  implementer: brief:implementer\n"+
 		"  reviewer: brief:reviewer\n"+
-		missingSkillHeaderLine+"\n"+
-		"  .claude/agents/developer.md (implementer)\n"+
-		installedNextActionLine+"\n", stderr.String())
+		"brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
+
+	body, readErr := mem.ReadFile(configKey)
+	require.NoError(t, readErr)
+	assert.Equal(t, original, body)
 }
 
-// Test_init_json_lists_agents_missing_the_skill pins "agents_missing_skill"
-// --json's own item shape (S06): exactly the keys role, agent, path
-// (absolute) and scope, in that order, values "project"/"user", stderr
-// empty — the same fixture Test_init_lists_bound_agents_missing_the_workflow_skill
-// uses.
-func Test_init_json_lists_agents_missing_the_skill(t *testing.T) {
-	wd := t.TempDir()
-	home := t.TempDir()
-
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
-		"feature-directory: docs/specifications\nroles:\n  planner: planner\n  implementer: developer\n",
-	), 0o600))
-
-	homePlanner := filepath.Join(home, ".claude", "agents", "planner.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(homePlanner), 0o755))
-	require.NoError(t, os.WriteFile(homePlanner, []byte("---\nname: planner\n---\n\nbody\n"), 0o600))
-
-	projectDeveloper := filepath.Join(wd, ".claude", "agents", "developer", "Agent.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(projectDeveloper), 0o755))
-	require.NoError(t, os.WriteFile(projectDeveloper, []byte("---\nname: developer\n---\n\nbody\n"), 0o600))
-
-	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
+// Test_init_with_agents_and_host_none_is_a_usage_error pins the
+// flag-combination rule (checked on the resolved host): an explicit
+// "--host none" alongside "--with-agents" refuses, exit 2, tree unchanged.
+// A bare "--with-agents" (host resolved by detection) is
+// Test_init_with_agents_follows_the_detected_host, above.
+func Test_init_with_agents_and_host_none_is_a_usage_error(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	var stdout, stderr bytes.Buffer
 
-	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--json"}, nil, &stdout, &stderr, noBuildInfo, seam)
+	err := run(t.Context(), wd, []string{"init", "--host", "none", "--with-agents"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
-	require.NoError(t, err)
-	assert.Empty(t, stderr.String())
+	assert.Equal(t, 2, ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, `brief init: --with-agents requires --host claude-code; run 'brief init --host claude-code --with-agents'`+"\n", stderr.String())
 
-	var doc struct {
-		AgentsMissingSkill []struct {
-			Role  string `json:"role"`
-			Agent string `json:"agent"`
-			Path  string `json:"path"`
-			Scope string `json:"scope"`
-		} `json:"agents_missing_skill"`
-	}
-	require.NoError(t, json.Unmarshal(stdout.Bytes(), &doc))
-
-	require.Len(t, doc.AgentsMissingSkill, 2)
-
-	byRole := map[string]struct {
-		Role  string
-		Agent string
-		Path  string
-		Scope string
-	}{}
-	for _, a := range doc.AgentsMissingSkill {
-		byRole[a.Role] = struct {
-			Role  string
-			Agent string
-			Path  string
-			Scope string
-		}{a.Role, a.Agent, a.Path, a.Scope}
-	}
-
-	require.Contains(t, byRole, "planner")
-	require.Contains(t, byRole, "implementer")
-
-	assert.Equal(t, "planner", byRole["planner"].Agent)
-	assert.Equal(t, homePlanner, byRole["planner"].Path)
-	assert.True(t, filepath.IsAbs(byRole["planner"].Path))
-	assert.Equal(t, "user", byRole["planner"].Scope)
-
-	assert.Equal(t, "developer", byRole["implementer"].Agent)
-	assert.Equal(t, projectDeveloper, byRole["implementer"].Path)
-	assert.True(t, filepath.IsAbs(byRole["implementer"].Path))
-	assert.Equal(t, "project", byRole["implementer"].Scope)
-
-	rawKeys := extractFirstObjectKeys(t, stdout.Bytes(), "agents_missing_skill")
-	assert.Equal(t, []string{"role", "agent", "path", "scope"}, rawKeys)
+	entries, readErr := mem.ReadDir(memKey(wd))
+	require.NoError(t, readErr)
+	assert.Empty(t, entries)
 }
 
-// extractFirstObjectKeys decodes doc[field]'s own first array element as an
-// ordered list of its own JSON object keys, via json.Decoder's own token
-// stream — the one way to observe encoding/json's own field order without
-// relying on a Go struct's field order to prove it.
-func extractFirstObjectKeys(t *testing.T, doc []byte, field string) []string {
-	t.Helper()
+// Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file pins
+// the "not a regular file" row: a directory already occupying the
+// manifest's own path is kept, never followed, never written.
+func Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file(t *testing.T) {
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	manifest := filepath.Join(wd, ".claude", "skills", "brief", ".claude-plugin", "plugin.json")
+	require.NoError(t, mem.MkdirAll(memKey(manifest), 0o755))
+	var stdout, stderr bytes.Buffer
 
-	var raw map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(doc, &raw))
+	err := run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
 
-	var items []json.RawMessage
-	require.NoError(t, json.Unmarshal(raw[field], &items))
-	require.NotEmpty(t, items)
-
-	dec := json.NewDecoder(bytes.NewReader(items[0]))
-
-	tok, err := dec.Token()
 	require.NoError(t, err)
-	require.Equal(t, json.Delim('{'), tok)
+	assert.Contains(t, stdout.String(), "kept .claude/skills/brief/.claude-plugin/plugin.json (not a regular file)\n")
+}
 
-	var keys []string
-
-	for dec.More() {
-		keyTok, err := dec.Token()
-		require.NoError(t, err)
-
-		key, ok := keyTok.(string)
-		require.True(t, ok, "an object key token must decode as a string")
-		keys = append(keys, key)
-
-		var discard json.RawMessage
-		require.NoError(t, dec.Decode(&discard))
+// Test_init_dry_run_with_print_is_a_usage_error pins R9's own
+// flag-combination rule, checked before setup ever runs, in either flag
+// order: exit 2, the exact stderr line, stdout empty, tree unchanged.
+func Test_init_dry_run_with_print_is_a_usage_error(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "--dry-run before --print", args: []string{"init", "--dry-run", "--print"}},
+		{name: "--print before --dry-run", args: []string{"init", "--print", "--dry-run"}},
 	}
 
-	return keys
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wd := fsAbs("repo")
+			mem := newVirtualMem(wd)
+			var stdout, stderr bytes.Buffer
+
+			err := run(t.Context(), wd, c.args, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+			assert.Equal(t, 2, ExitCode(err))
+			assert.Empty(t, stdout.String())
+			assert.Equal(t, "brief init: --dry-run and --print cannot be combined; run 'brief init --print'\n", stderr.String())
+
+			entries, readErr := mem.ReadDir(memKey(wd))
+			require.NoError(t, readErr)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
+// Test_init_print_writes_bodies_to_stdout_and_nothing_to_disk pins R9's
+// own text-mode shape: a fresh claude-code install prints one
+// "# <path> (create)" header plus body per artifact, blank-line
+// separated, none after the last, the exact stderr line, exit 0, and an
+// unchanged tree; a CLAUDE.md merge case reports "(merge)"; an
+// already-installed tree reports empty stdout and the "already installed"
+// stderr line instead.
+func Test_init_print_writes_bodies_to_stdout_and_nothing_to_disk(t *testing.T) {
+	t.Run("fresh install", func(t *testing.T) {
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--print"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+		require.NoError(t, err)
+		assert.Equal(t, 0, ExitCode(err))
+		assert.Equal(t, "brief init: printed only, no files changed; apply the output above by hand, or rerun without --print\n", stderr.String())
+
+		want := "# .brief.yaml (create)\n" + string(artifact.ConfigFile()) +
+			"\n# .claude/skills/brief/.claude-plugin/plugin.json (create)\n" + string(artifact.PluginManifest()) +
+			"\n# .claude/skills/brief/skills/start/SKILL.md (create)\n" + string(artifact.SkillStart()) +
+			"\n# .claude/skills/brief/skills/finish/SKILL.md (create)\n" + string(artifact.SkillFinish()) +
+			"\n# .claude/skills/brief/hooks/hooks.json (create)\n" + string(artifact.ClaudeHooks()) +
+			"\n# .claude/skills/brief-workflow/SKILL.md (create)\n" + string(artifact.SkillWorkflow()) +
+			"\n# CLAUDE.md (create)\n" + string(artifact.SnippetBlock("docs/specifications")) + "\n"
+		assert.Equal(t, want, stdout.String())
+
+		entries, readErr := mem.ReadDir(memKey(wd))
+		require.NoError(t, readErr)
+		assert.Empty(t, entries)
+	})
+
+	t.Run("merges into an existing CLAUDE.md", func(t *testing.T) {
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
+		require.NoError(t, mem.WriteFile(memKey(filepath.Join(wd, "CLAUDE.md")), []byte("# hello\n"), 0o600))
+		var stdout, stderr bytes.Buffer
+
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--print"}, nil, &stdout, &stderr, noBuildInfo, newMemSetupSeam(mem))
+
+		require.NoError(t, err)
+		assert.Contains(t, stdout.String(), "# CLAUDE.md (merge)\n")
+
+		body, readErr := mem.ReadFile(memKey(filepath.Join(wd, "CLAUDE.md")))
+		require.NoError(t, readErr)
+		assert.Equal(t, []byte("# hello\n"), body)
+	})
+
+	t.Run("already installed prints nothing pending", func(t *testing.T) {
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
+		seam := newMemSetupSeam(mem)
+		var initStdout, initStderr bytes.Buffer
+		require.NoError(t, run(t.Context(), wd, []string{"init", "--host", "claude-code"}, nil, &initStdout, &initStderr, noBuildInfo, seam))
+
+		var stdout, stderr bytes.Buffer
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--print"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+		require.NoError(t, err)
+		assert.Empty(t, stdout.String())
+		assert.Equal(t, "brief init: already installed; nothing changed\n", stderr.String())
+	})
+
+	t.Run("a non-regular CLAUDE.md still prints the block to add by hand", func(t *testing.T) {
+		wd := fsAbs("repo")
+		mem := newVirtualMem(wd)
+		seam := newMemSetupSeam(mem)
+		var initStdout, initStderr bytes.Buffer
+		require.NoError(t, run(t.Context(), wd, []string{"init", "--host", "claude-code", "--no-hook"}, nil, &initStdout, &initStderr, noBuildInfo, seam))
+		require.NoError(t, mem.Remove(memKey(filepath.Join(wd, "CLAUDE.md"))))
+		require.NoError(t, mem.Mkdir(memKey(filepath.Join(wd, "CLAUDE.md")), 0o755))
+
+		var stdout, stderr bytes.Buffer
+		err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--no-hook", "--print"}, nil, &stdout, &stderr, noBuildInfo, seam)
+
+		require.NoError(t, err)
+		assert.Equal(t, "# CLAUDE.md (merge)\n"+string(artifact.SnippetBlock("docs/specifications"))+"\n", stdout.String())
+		assert.Equal(t, "brief init: printed only, no files changed; apply the output above by hand, or rerun without --print\n", stderr.String())
+	})
 }

@@ -1,7 +1,6 @@
 package setup_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -15,16 +14,17 @@ import (
 // artifact set at the Server boundary: a fresh, plain claude-code install
 // reports the config, every plugin file, the brief-workflow skill and the
 // CLAUDE.md block, each PrintCreate, bodies equal to what a real run would
-// write, and the tree byte-identical before and after.
+// write, and mem byte-identical before and after.
 func Test_init_print_returns_pending_bodies_and_writes_nothing(t *testing.T) {
-	wd := t.TempDir()
-	before := snapshotTree(t, wd)
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	before := mem.Snapshot()
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, Print: true})
 
 	require.NoError(t, err)
-	assert.Equal(t, before, snapshotTree(t, wd))
+	assert.Equal(t, before, mem.Snapshot())
 
 	configPath := filepath.Join(wd, ".brief.yaml")
 	paths := pluginFilePaths(wd)
@@ -46,19 +46,21 @@ func Test_init_print_returns_pending_bodies_and_writes_nothing(t *testing.T) {
 // ActionMerged, so its own PrintArtifact reports PrintMerge, body still
 // the bare block rather than the merged file.
 func Test_init_print_reports_merge_for_an_existing_claude_md(t *testing.T) {
-	wd := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), []byte("# hello\n"), 0o600))
-	before := snapshotTree(t, wd)
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	claudeMD := filepath.Join(wd, "CLAUDE.md")
+	require.NoError(t, mem.WriteFile(memKey(claudeMD), []byte("# hello\n"), 0o600))
+	before := mem.Snapshot()
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, Print: true})
 
 	require.NoError(t, err)
-	assert.Equal(t, before, snapshotTree(t, wd))
+	assert.Equal(t, before, mem.Snapshot())
 
 	var snippet setup.PrintArtifact
 	for _, a := range res.Print {
-		if a.Path == filepath.Join(wd, "CLAUDE.md") {
+		if a.Path == claudeMD {
 			snippet = a
 		}
 	}
@@ -71,8 +73,9 @@ func Test_init_print_reports_merge_for_an_existing_claude_md(t *testing.T) {
 // ConfigFileWithRoles(), and the three agent files each report
 // PrintCreate with their own render.
 func Test_init_print_with_agents_reports_the_bound_config_and_three_agents(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, WithAgents: true, Print: true})
 
@@ -102,10 +105,11 @@ func Test_init_print_with_agents_reports_the_bound_config_and_three_agents(t *te
 // PrintCreate with the desired variant's own bytes — the plain render
 // here, since WithAgents is not set.
 func Test_init_print_force_over_a_kept_config_reports_create_with_the_desired_variant(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte("feature-directory: specs\n"), 0o600))
-	srv := newServer(t)
+	require.NoError(t, mem.WriteFile(memKey(configPath), []byte("feature-directory: specs\n"), 0o600))
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, Force: true, Print: true})
 
@@ -119,8 +123,9 @@ func Test_init_print_force_over_a_kept_config_reports_create_with_the_desired_va
 // converged, so Print carries no entries but is still a non-nil, empty
 // slice rather than nil.
 func Test_init_print_after_a_real_init_reports_nothing_pending(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
 

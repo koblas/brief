@@ -173,7 +173,7 @@ func (s *Server) Check(_ context.Context, feature string) ([]Finding, error) {
 		return nil, ErrNoSuchFeature
 	}
 
-	topRoot, err := os.OpenRoot(filepath.Join(s.root, s.cfg.FeatureDirectory))
+	topRoot, err := s.openFeatureDir(filepath.Join(s.root, s.cfg.FeatureDirectory))
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("assemble: %w", err)
@@ -205,7 +205,7 @@ func (s *Server) Check(_ context.Context, feature string) ([]Finding, error) {
 		case e.Type()&fs.ModeSymlink != 0:
 			all = append(all, symlinkFeatureFinding(featurePath))
 		case e.IsDir():
-			root, err := s.openRoot(topRoot, e.Name())
+			root, err := topRoot.OpenRoot(e.Name())
 			if err != nil {
 				all = append(all, unreadableFeatureFinding(featurePath, err))
 				continue
@@ -250,7 +250,7 @@ func validFeatureArgument(feature string) bool {
 // symlink is marked rather than followed — the same stance the
 // all-features loop in Check takes — and a missing entry refuses with
 // ErrNoSuchFeature rather than being folded into an "unreadable" Finding.
-func (s *Server) checkNamedFeature(topRoot *os.Root, feature string, pattern stepfile.Pattern, handoffPattern stepfile.HandoffPattern) ([]Finding, error) {
+func (s *Server) checkNamedFeature(topRoot dirFS, feature string, pattern stepfile.Pattern, handoffPattern stepfile.HandoffPattern) ([]Finding, error) {
 	featurePath := filepath.Join(s.root, s.cfg.FeatureDirectory, feature)
 
 	info, err := topRoot.Lstat(feature)
@@ -270,7 +270,7 @@ func (s *Server) checkNamedFeature(topRoot *os.Root, feature string, pattern ste
 		return nil, ErrNoSuchFeature
 	}
 
-	root, err := s.openRoot(topRoot, feature)
+	root, err := topRoot.OpenRoot(feature)
 	if err != nil {
 		return []Finding{unreadableFeatureFinding(featurePath, err)}, nil
 	}

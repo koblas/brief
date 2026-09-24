@@ -14,7 +14,24 @@ import (
 	"github.com/koblas/brief/internal/platform/host"
 )
 
-// classifyProbeError classifies err — from a failed os.Lstat against a
+// fsName maps abs, an absolute OS path, onto the name fsys — every probe
+// in this package's own (*Server).rootFS, defaulting to os.DirFS("/"), or
+// a test's own fstest.MapFS standing in for it — expects: the leading path
+// separator stripped, forward-slash separated, "." for the root itself.
+// Duplicated from an identical helper in internal/platform/config and
+// internal/platform/repo rather than shared, the same reasoning those two
+// already give each other: a shared package would invert the dependency
+// for an eight-line mapping.
+func fsName(abs string) string {
+	trimmed := strings.TrimPrefix(filepath.ToSlash(abs), "/")
+	if trimmed == "" {
+		return "."
+	}
+
+	return trimmed
+}
+
+// classifyProbeError classifies err — from a failed fs.Lstat against a
 // host integration file or a CLAUDE.md candidate — into the one
 // absent-vs-unreadable decision every Lstat probe in this package renders
 // from: fs.ErrNotExist proves the path itself is not there, and so does
@@ -23,8 +40,9 @@ import (
 // one; any other error proves nothing about absence, so it is unreadable,
 // its reason readFailureReason's own extracted cause. err is always
 // non-nil. Checked on darwin and linux, devenv.nix's own build targets,
-// where ENOTDIR carries this meaning; a windows build of this package was
-// not exercised.
+// where ENOTDIR carries this meaning against the production fsys
+// (os.DirFS("/"), whose Lstat is a thin os.Lstat wrapper); a windows build
+// of this package was not exercised.
 func classifyProbeError(err error) (bool, string) {
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		return true, ""
@@ -52,18 +70,18 @@ type integrationFileState struct {
 	statFailed bool
 }
 
-// probeIntegrationFile Lstats root/f.RelPath and, for a regular file,
-// reads and artifact.Recognizes its bytes against f.Kind. A Lstat failure
-// renders through classifyProbeError; a ReadFile failure against a file
-// Lstat itself just resolved as regular is always unreadable — typically
-// the file's own mode denying read, but never reclassified as absent,
-// since only a race between the two calls could make that reclassification
-// correct.
-func probeIntegrationFile(root string, f host.File) integrationFileState {
+// probeIntegrationFile Lstats root/f.RelPath through fsys (fsName's own
+// mapping) and, for a regular file, reads and artifact.Recognizes its
+// bytes against f.Kind, through fsys too. A Lstat failure renders through
+// classifyProbeError; a ReadFile failure against a file Lstat itself just
+// resolved as regular is always unreadable — typically the file's own mode
+// denying read, but never reclassified as absent, since only a race
+// between the two calls could make that reclassification correct.
+func probeIntegrationFile(fsys fs.FS, root string, f host.File) integrationFileState {
 	path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 	state := integrationFileState{relPath: f.RelPath, path: path}
 
-	info, err := os.Lstat(path)
+	info, err := fs.Lstat(fsys, fsName(path))
 	if err != nil {
 		absent, reason := classifyProbeError(err)
 		if !absent {
@@ -82,7 +100,7 @@ func probeIntegrationFile(root string, f host.File) integrationFileState {
 		return state
 	}
 
-	body, err := os.ReadFile(path)
+	body, err := fs.ReadFile(fsys, fsName(path))
 	if err != nil {
 		state.unreadable = true
 		state.reason = readFailureReason(err)
@@ -96,11 +114,12 @@ func probeIntegrationFile(root string, f host.File) integrationFileState {
 	return state
 }
 
-// probeIntegrationFiles probes every file in files, in order.
-func probeIntegrationFiles(root string, files []host.File) []integrationFileState {
+// probeIntegrationFiles probes every file in files, through fsys, in
+// order.
+func probeIntegrationFiles(fsys fs.FS, root string, files []host.File) []integrationFileState {
 	out := make([]integrationFileState, 0, len(files))
 	for _, f := range files {
-		out = append(out, probeIntegrationFile(root, f))
+		out = append(out, probeIntegrationFile(fsys, root, f))
 	}
 
 	return out
@@ -163,7 +182,7 @@ func unreadableRelPaths(states []integrationFileState) []string {
 // notReadableFix against that same first unreadable state, root bounding
 // its own ancestor walk. ok is false when states holds no unreadable file
 // at all.
-func integrationFileRowDetail(wd, root string, states []integrationFileState) (string, string, bool) {
+func integrationFileRowDetail(fsys fs.FS, wd, root string, states []integrationFileState) (string, string, bool) {
 	unreadable := unreadableRelPaths(states)
 	if len(unreadable) == 0 {
 		return "", "", false
@@ -185,7 +204,7 @@ func integrationFileRowDetail(wd, root string, states []integrationFileState) (s
 		fragments = append(fragments, "missing "+strings.Join(missing, ", "))
 	}
 
-	return strings.Join(fragments, "; "), notReadableFix(wd, root, first.path, first.statFailed), true
+	return strings.Join(fragments, "; "), notReadableFix(fsys, wd, root, first.path, first.statFailed), true
 }
 
 // relPathsWithOrigin returns the relPath of every present, regular state
@@ -232,15 +251,15 @@ func originRow(origin artifact.Origin, olderFix, suffix string) (Severity, strin
 }
 
 // anyIntegrationFilePresent reports whether any file of h.Plugin(true) ∪
-// h.Agents() is present under root, of any file type — the predicate
-// host-plugin's, host-hook's and host-skill's own SKIP rows share (R13).
-// h.Skills() is deliberately excluded: the skill is never an install
-// signal (Rule 1) — uninstall can leave an edited SKILL.md behind after
-// every other file is removed, and counting it here would flip
+// h.Agents() is present under root, through fsys, of any file type — the
+// predicate host-plugin's, host-hook's and host-skill's own SKIP rows
+// share (R13). h.Skills() is deliberately excluded: the skill is never an
+// install signal (Rule 1) — uninstall can leave an edited SKILL.md behind
+// after every other file is removed, and counting it here would flip
 // host-plugin back to ERROR "incomplete", host-hook to WARN and env-path
 // to ERROR after a clean uninstall.
-func anyIntegrationFilePresent(root string, h host.Host) bool {
-	return anyPresent(probeIntegrationFiles(root, h.Plugin(true))) || anyPresent(probeIntegrationFiles(root, h.Agents()))
+func anyIntegrationFilePresent(fsys fs.FS, root string, h host.Host) bool {
+	return anyPresent(probeIntegrationFiles(fsys, root, h.Plugin(true))) || anyPresent(probeIntegrationFiles(fsys, root, h.Agents()))
 }
 
 // hostPluginCheck builds host-plugin's own row: not installed anywhere is
@@ -253,16 +272,16 @@ func anyIntegrationFilePresent(root string, h host.Host) bool {
 // file current is OK "installed" — in that precedence (originRow, applied
 // across every subject file at once rather than one row at a time, since
 // a single host-plugin row must summarize all three).
-func hostPluginCheck(wd, root string, h host.Host, installed bool) Check {
+func hostPluginCheck(fsys fs.FS, wd, root string, h host.Host, installed bool) Check {
 	path := filepath.Join(root, host.PluginDir)
 
 	if !installed {
 		return Check{ID: "host-plugin", Severity: SeveritySkip, Path: path, Detail: "not installed", Fix: new(runInitClaudeCode)}
 	}
 
-	states := probeIntegrationFiles(root, h.Plugin(false))
+	states := probeIntegrationFiles(fsys, root, h.Plugin(false))
 
-	if detail, fix, ok := integrationFileRowDetail(wd, root, states); ok {
+	if detail, fix, ok := integrationFileRowDetail(fsys, wd, root, states); ok {
 		return Check{ID: "host-plugin", Severity: SeverityError, Path: path, Detail: detail, Fix: new(fix)}
 	}
 
@@ -303,9 +322,9 @@ func hookFileOf(h host.Host) host.File {
 // hook file is WARN, naming the reason (notReadableReason); a present but
 // non-regular hook is ERROR; an older render is WARN; an edited one is OK
 // "edited locally"; a current one is OK "installed".
-func hostHookCheck(wd, root string, h host.Host, installed bool) Check {
+func hostHookCheck(fsys fs.FS, wd, root string, h host.Host, installed bool) Check {
 	hookFile := hookFileOf(h)
-	state := probeIntegrationFile(root, hookFile)
+	state := probeIntegrationFile(fsys, root, hookFile)
 
 	if !state.present {
 		if !installed {
@@ -316,7 +335,7 @@ func hostHookCheck(wd, root string, h host.Host, installed bool) Check {
 	}
 
 	if state.unreadable {
-		return Check{ID: "host-hook", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(wd, root, state.path, state.statFailed))}
+		return Check{ID: "host-hook", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(fsys, wd, root, state.path, state.statFailed))}
 	}
 
 	if !state.regular {
@@ -339,16 +358,16 @@ func hostHookCheck(wd, root string, h host.Host, installed bool) Check {
 // never plans an agent file at all, so it can never repair a missing one
 // on its own, but a file that already exists needs no re-plan, only
 // permission repair.
-func hostAgentsCheck(wd, root string, h host.Host) Check {
+func hostAgentsCheck(fsys fs.FS, wd, root string, h host.Host) Check {
 	agentFiles := h.Agents()
 	path := filepath.Join(root, host.PluginDir, "agents")
-	states := probeIntegrationFiles(root, agentFiles)
+	states := probeIntegrationFiles(fsys, root, agentFiles)
 
 	if !anyPresent(states) {
 		return Check{ID: "host-agents", Severity: SeveritySkip, Path: path, Detail: "not installed", Fix: new(runInitWithAgents)}
 	}
 
-	if detail, fix, ok := integrationFileRowDetail(wd, root, states); ok {
+	if detail, fix, ok := integrationFileRowDetail(fsys, wd, root, states); ok {
 		return Check{ID: "host-agents", Severity: SeverityWarn, Path: path, Detail: detail, Fix: new(fix)}
 	}
 
@@ -458,23 +477,23 @@ func notReadableDetail(reason string) string {
 }
 
 // blockingDir walks from filepath.Dir(path) upward, Lstat'ing each
-// ancestor, until one resolves: that ancestor is the directory actually
-// missing its own search (+x) bit, since every descendant beneath it
-// failed to Lstat while it itself did not — Lstat needs +x on a path's
-// parent to find its directory entry, never on the path itself, so an
-// unsearchable directory still resolves its own Lstat but blocks every
-// Lstat of anything nested inside it. The walk never rises above root —
-// the one directory every host check already treats as its own install
-// boundary — and returns root itself when no ancestor below it resolves,
-// which is exactly the answer when root is the unsearchable directory.
-// A symlinked ancestor resolves its own Lstat without its target being
-// consulted, so the walk stops at the link, not at an unsearchable
-// directory behind it.
-func blockingDir(root, path string) string {
+// ancestor through fsys, until one resolves: that ancestor is the
+// directory actually missing its own search (+x) bit, since every
+// descendant beneath it failed to Lstat while it itself did not — Lstat
+// needs +x on a path's parent to find its directory entry, never on the
+// path itself, so an unsearchable directory still resolves its own Lstat
+// but blocks every Lstat of anything nested inside it. The walk never
+// rises above root — the one directory every host check already treats as
+// its own install boundary — and returns root itself when no ancestor
+// below it resolves, which is exactly the answer when root is the
+// unsearchable directory. A symlinked ancestor resolves its own Lstat
+// without its target being consulted, so the walk stops at the link, not
+// at an unsearchable directory behind it.
+func blockingDir(fsys fs.FS, root, path string) string {
 	dir := filepath.Dir(path)
 
 	for dir != root {
-		if _, err := os.Lstat(dir); err == nil {
+		if _, err := fs.Lstat(fsys, fsName(dir)); err == nil {
 			return dir
 		}
 
@@ -496,10 +515,11 @@ func blockingDir(root, path string) string {
 // 'brief init --host claude-code', the same repair every "not installed"
 // row already points at. path and its fix target are rendered relative to
 // wd, the same wd Diagnose was called with, since every row's own Path is
-// rendered relative to wd too; root bounds blockingDir's own walk.
-func notReadableFix(wd, root, path string, statFailed bool) string {
+// rendered relative to wd too; root bounds blockingDir's own walk, run
+// against the same fsys every other probe in this package reads through.
+func notReadableFix(fsys fs.FS, wd, root, path string, statFailed bool) string {
 	if statFailed {
-		return fmt.Sprintf("chmod u+rwx %s, then %s", relPath(wd, blockingDir(root, path)), runInitClaudeCode)
+		return fmt.Sprintf("chmod u+rwx %s, then %s", relPath(wd, blockingDir(fsys, root, path)), runInitClaudeCode)
 	}
 
 	return fmt.Sprintf("chmod +r %s, then %s", relPath(wd, path), runInitClaudeCode)
@@ -515,14 +535,14 @@ func notReadableFix(wd, root, path string, statFailed bool) string {
 // correct — the same split probeIntegrationFile applies for a host
 // integration file. A candidate that exists but is not a regular file
 // reports notRegular true and kind set (nonRegularKind), never read.
-func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateState {
+func scanSnippetCandidateStates(fsys fs.FS, root string, h host.Host) []snippetCandidateState {
 	rel := h.InstructionFiles()
 	out := make([]snippetCandidateState, 0, len(rel))
 
 	for _, r := range rel {
 		path := filepath.Join(root, filepath.FromSlash(r))
 
-		info, err := os.Lstat(path)
+		info, err := fs.Lstat(fsys, fsName(path))
 		if err != nil {
 			absent, reason := classifyProbeError(err)
 			if absent {
@@ -542,7 +562,7 @@ func scanSnippetCandidateStates(root string, h host.Host) []snippetCandidateStat
 			continue
 		}
 
-		body, err := os.ReadFile(path)
+		body, err := fs.ReadFile(fsys, fsName(path))
 		if err != nil {
 			out = append(out, snippetCandidateState{path: path, present: true, unreadable: true, readErr: readFailureReason(err)})
 
@@ -591,7 +611,7 @@ func snippetBlockFound(states []snippetCandidateState) bool {
 // or the first present one is a regular, readable, blockless file, is
 // SKIP "not installed", Path naming that first-present candidate (or the
 // first candidate in priority order when none is present at all).
-func hostSnippetCheck(wd, root string, states []snippetCandidateState, dir string, dirKnown bool) Check {
+func hostSnippetCheck(fsys fs.FS, wd, root string, states []snippetCandidateState, dir string, dirKnown bool) Check {
 	for _, s := range states {
 		if s.prob != nil {
 			return Check{ID: "host-snippet", Severity: SeverityError, Path: s.path, Detail: fmt.Sprintf("%s (line %d)", s.prob.Problem, s.prob.Line), Fix: &s.prob.Fix}
@@ -637,7 +657,7 @@ func hostSnippetCheck(wd, root string, states []snippetCandidateState, dir strin
 			return Check{
 				ID: "host-snippet", Severity: SeverityWarn, Path: firstPresent.path,
 				Detail: notReadableDetail(firstPresent.readErr),
-				Fix:    new(notReadableFix(wd, root, firstPresent.path, firstPresent.statFailed)),
+				Fix:    new(notReadableFix(fsys, wd, root, firstPresent.path, firstPresent.statFailed)),
 			}
 		}
 
@@ -678,19 +698,36 @@ func hostSnippetCheck(wd, root string, states []snippetCandidateState, dir strin
 	}
 }
 
-// resolveRoleBinding resolves home (R7) and classifies value (a
-// config.RoleBindings field) against root via agentfile.ResolveBinding —
-// the binding-classification logic setup's own missing-skill report reuses
-// (agentfile.Binding, Rule 5). doctor stays the caller here rather than
-// agentfile itself resolving home, since only doctor carries s.homeDir's
-// own injectable seam (setup.WithHomeDir mirrors it independently).
+// resolveRoleBinding classifies value (a config.RoleBindings field) against
+// s.projectTree(root) and s.userTree() (R7) via agentfile.ResolveBindingIn
+// — the binding-classification logic setup's own missing-skill report
+// reuses (agentfile.Binding, Rule 5). doctor stays the caller here rather
+// than agentfile itself resolving home, since only doctor carries
+// s.homeDir's (and, for a test, s.homeTree's) own injectable seam
+// (setup.WithHomeDir mirrors the homeDir one independently).
 func (s *Server) resolveRoleBinding(root, value string) agentfile.Binding {
-	home, err := s.homeDir()
+	return agentfile.ResolveBindingIn(s.projectTree(root), s.userTree(), value)
+}
+
+// projectTree returns the agentfile.Tree a bare-name role binding's own
+// Rule 5 search runs against for the project scope: s.rootFS()'s own
+// subtree rooted at root (fs.Sub, over fsName's relative mapping), Dir set
+// to root itself — findIn's own Definition.Path is filepath.Join(tree.Dir,
+// p), and duplicateDefinitionProblem's own filepath.Rel(root, d.Path)
+// reads it back, so both render exactly as agentfile.DirTree(root) already
+// did. fs.Sub(fsys, name) is documented equivalent to os.DirFS(joined
+// path) once fsys is os.DirFS("/") itself (production's own default), so
+// production behavior is unchanged; a test's fstest.MapFS behaves the same
+// way. A root fs.Sub cannot resolve (an invalid name) falls back to the
+// zero FS, the same "nothing here" agentfile.DirTree("") already returns
+// for an unknown home.
+func (s *Server) projectTree(root string) agentfile.Tree {
+	sub, err := fs.Sub(s.rootFS(), fsName(root))
 	if err != nil {
-		home = ""
+		return agentfile.Tree{Dir: root}
 	}
 
-	return agentfile.ResolveBinding(root, home, value)
+	return agentfile.Tree{FS: sub, Dir: root}
 }
 
 // roleBinding names one role position alongside its own configured value,
@@ -827,7 +864,7 @@ const hostSkillNotRegularFix = "remove " + host.WorkflowSkillDir + "/SKILL.md, t
 // suffix), the same "run 'brief init'" fix host-hook and host-snippet
 // share. A present skill always classifies itself, whatever installed
 // carries: only the absent arm consults it.
-func hostSkillRow(wd, root string, state integrationFileState, installed bool) Check {
+func hostSkillRow(fsys fs.FS, wd, root string, state integrationFileState, installed bool) Check {
 	if !state.present {
 		if !installed {
 			return Check{ID: "host-skill", Severity: SeveritySkip, Path: state.path, Detail: "not installed", Fix: new(runInitClaudeCode)}
@@ -837,7 +874,7 @@ func hostSkillRow(wd, root string, state integrationFileState, installed bool) C
 	}
 
 	if state.unreadable {
-		return Check{ID: "host-skill", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(wd, root, state.path, state.statFailed))}
+		return Check{ID: "host-skill", Severity: SeverityWarn, Path: state.path, Detail: notReadableReason(state.reason), Fix: new(notReadableFix(fsys, wd, root, state.path, state.statFailed))}
 	}
 
 	if !state.regular {
@@ -851,8 +888,8 @@ func hostSkillRow(wd, root string, state integrationFileState, installed bool) C
 
 // hostSkillCheck probes skillFileOf(h) under root and builds host-skill's
 // own row from the result via hostSkillRow.
-func hostSkillCheck(wd, root string, h host.Host, installed bool) Check {
-	return hostSkillRow(wd, root, probeIntegrationFile(root, skillFileOf(h)), installed)
+func hostSkillCheck(fsys fs.FS, wd, root string, h host.Host, installed bool) Check {
+	return hostSkillRow(fsys, wd, root, probeIntegrationFile(fsys, root, skillFileOf(h)), installed)
 }
 
 // rolesSkillNoConfigDetail is roles-skill's own SKIP detail whenever no

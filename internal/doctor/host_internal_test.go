@@ -22,7 +22,9 @@ package doctor
 //     OriginOlder arm is reachable only by calling hostSkillRow directly
 //     with a synthetic integrationFileState carrying artifact.OriginOlder,
 //     mirroring originRow's own case above. Every other arm is covered
-//     black-box, in host_test.go's Test_diagnose_classifies_host_skill.
+//     black-box: host_test.go's Test_diagnose_classifies_host_skill covers
+//     the MapFS-reachable arms, host_disk_test.go's
+//     Test_diagnose_classifies_host_skill_unreadable the chmod'd one.
 //   - nonRegularKind's own default (neither-symlink-nor-directory) arm needs
 //     a mode a black-box fixture cannot portably construct: os.Symlink and
 //     os.Mkdir work on every platform this project targets, but a named
@@ -37,6 +39,7 @@ package doctor
 import (
 	"os"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/koblas/brief/internal/platform/artifact"
@@ -103,7 +106,9 @@ func Test_originRow_reports_older_as_warn_with_the_init_fix(t *testing.T) {
 }
 
 // Test_hostSkillRow_reports_an_older_render_as_warn pins host-skill's own
-// OriginOlder arm, reachable only through this synthetic call.
+// OriginOlder arm, reachable only through this synthetic call. The empty
+// fstest.MapFS passed as fsys is never read: OriginOlder resolves through
+// originRow, never reaching the unreadable branch that would consult it.
 func Test_hostSkillRow_reports_an_older_render_as_warn(t *testing.T) {
 	state := integrationFileState{
 		path:    "/repo/.claude/skills/brief-workflow/SKILL.md",
@@ -112,7 +117,7 @@ func Test_hostSkillRow_reports_an_older_render_as_warn(t *testing.T) {
 		origin:  artifact.OriginOlder,
 	}
 
-	check := hostSkillRow("/repo", "/repo", state, true)
+	check := hostSkillRow(fstest.MapFS{}, "/repo", "/repo", state, true)
 
 	assert.Equal(t, "host-skill", check.ID)
 	assert.Equal(t, SeverityWarn, check.Severity)

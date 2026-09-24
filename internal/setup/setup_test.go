@@ -1,7 +1,6 @@
 package setup_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -24,10 +23,20 @@ func newServer(t *testing.T) *setup.Server {
 // Test_init_creates_the_config_and_feature_root_in_a_fresh_repo pins R2 for
 // a repository with nothing installed yet: both artifacts report created,
 // the config file's bytes are exactly artifact.ConfigFile(), and the
-// feature root exists as a directory afterward.
+// feature root exists as a directory afterward. Init's own planning and
+// apply here never touch a bound-agent path or a symlink, so this is
+// Mem-backed rather than disk. This HostNone run has only two rows, so it
+// is not the package's own full-row-order pin (R11's whole order — plugin
+// files, skill, agents, bound-agent, snippet, config — needs a
+// HostClaudeCode --with-agents run instead; agents_test.go's own
+// Test_init_with_agents_writes_three_agents_and_a_config_binding_them is
+// that pin, and plugin_test.go's own
+// Test_init_for_claude_code_writes_the_plugin_after_the_feature_root_and_before_the_config
+// pins the plugin files' own sub-order through res.Created).
 func Test_init_creates_the_config_and_feature_root_in_a_fresh_repo(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 
@@ -38,17 +47,19 @@ func Test_init_creates_the_config_and_feature_root_in_a_fresh_repo(t *testing.T)
 	configPath := filepath.Join(wd, ".brief.yaml")
 	featureRoot := filepath.Join(wd, "docs", "specifications")
 
-	require.Len(t, res.Artifacts, 2)
-	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated}, res.Artifacts[0])
-	assert.Equal(t, setup.Artifact{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated}, res.Artifacts[1])
+	assert.ElementsMatch(t, []setup.Artifact{
+		{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated},
+		{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated},
+	}, res.Artifacts)
 	assert.ElementsMatch(t, []string{featureRoot, configPath}, res.Created)
 	assert.Empty(t, res.Modified)
 
-	body, readErr := os.ReadFile(configPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, artifact.ConfigFile(), body)
+	snap := mem.Snapshot()
+	body := snap[memKey(configPath)]
+	require.NotNil(t, body)
+	assert.Equal(t, artifact.ConfigFile(), body.Data)
 
-	info, statErr := os.Stat(featureRoot)
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
+	info := snap[memKey(featureRoot)]
+	require.NotNil(t, info)
+	assert.True(t, info.Mode.IsDir())
 }

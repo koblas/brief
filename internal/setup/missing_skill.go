@@ -72,8 +72,8 @@ type MissingSkillAgent struct {
 // root's own symlink resolution failing is returned as an error, the same
 // treatment boundAgentTargets gives it — nothing meaningful can be
 // classified against an unresolvable root. The result is never nil.
-func agentsMissingSkill(root, home string, roles config.RoleBindings) ([]MissingSkillAgent, error) {
-	resolvedRoot, err := filepath.EvalSymlinks(root)
+func agentsMissingSkill(resolveRoot func(string) (string, error), root, home string, roles config.RoleBindings) ([]MissingSkillAgent, error) {
+	resolvedRoot, err := resolveRoot(root)
 	if err != nil {
 		return nil, fmt.Errorf("setup: resolve %s: %w", root, err)
 	}

@@ -2,14 +2,15 @@ package setup
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"slices"
 
 	"github.com/koblas/brief/internal/platform/artifact"
-	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/host"
+	"github.com/koblas/brief/internal/platform/rwfs"
 )
 
 // UninstallRequest is Uninstall's own input: Host selects which agent-host
@@ -79,7 +80,9 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
 	}
 
-	nearest, _, err := config.LocateInRepo(wd)
+	fsys := s.fsRoot()
+
+	nearest, err := locateInRepo(fsys, wd)
 	if err != nil {
 		return Result{}, err
 	}
@@ -111,7 +114,7 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 
 		var present bool
 
-		snippetArt, present, err = planSnippetRemoval(root, h, req.Force)
+		snippetArt, present, err = planSnippetRemoval(fsys, root, h, req.Force)
 		if err != nil {
 			return Result{}, err
 		}
@@ -129,7 +132,7 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 		for _, f := range h.Skills() {
 			path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
-			art, present, err := planPluginRemoval(path, KindSkill, f.Kind, req.Force)
+			art, present, err := planPluginRemoval(fsys, path, KindSkill, f.Kind, req.Force)
 			if err != nil {
 				return Result{}, err
 			}
@@ -149,8 +152,8 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 				home = ""
 			}
 
-			if cfg, _, inspectErr := config.Inspect(nearest); inspectErr == nil {
-				boundAgentArts, err = planBoundAgentRemovals(root, home, cfg.Roles)
+			if cfg, _, inspectErr := inspectConfig(fsys, nearest); inspectErr == nil {
+				boundAgentArts, err = planBoundAgentRemovals(s.resolveRoot, root, home, cfg.Roles)
 				if err != nil {
 					return Result{}, err
 				}
@@ -164,7 +167,7 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 		for _, f := range slices.Backward(h.Agents()) {
 			path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
-			art, present, err := planPluginRemoval(path, KindAgent, f.Kind, req.Force)
+			art, present, err := planPluginRemoval(fsys, path, KindAgent, f.Kind, req.Force)
 			if err != nil {
 				return Result{}, err
 			}
@@ -186,7 +189,7 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 
 			path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 
-			art, present, err := planPluginRemoval(path, kind, f.Kind, req.Force)
+			art, present, err := planPluginRemoval(fsys, path, kind, f.Kind, req.Force)
 			if err != nil {
 				return Result{}, err
 			}
@@ -197,7 +200,7 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 		}
 	}
 
-	configArt, present, err := planConfigRemoval(nearest, req.Force)
+	configArt, present, err := planConfigRemoval(fsys, nearest, req.Force)
 	if err != nil {
 		return Result{}, err
 	}
@@ -210,7 +213,7 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 		return res, nil
 	}
 
-	return applyUninstall(res, root, req.Host, snippetArt, hasSnippet, boundAgentArts)
+	return applyUninstall(fsys, res, root, req.Host, snippetArt, hasSnippet, boundAgentArts)
 }
 
 // planPluginRemoval decides one plugin file's own removal Artifact,
@@ -226,11 +229,11 @@ func (s *Server) Uninstall(_ context.Context, wd string, req UninstallRequest) (
 // true; with force, ActionRemoved with ForceRemovable false — the field is
 // true only while --force could still act on the artifact, never once it
 // already has.
-func planPluginRemoval(path string, kind Kind, renderKind artifact.Kind, force bool) (Artifact, bool, error) {
-	info, err := os.Lstat(path)
+func planPluginRemoval(fsys rwfs.FS, path string, kind Kind, renderKind artifact.Kind, force bool) (Artifact, bool, error) {
+	info, err := fsys.Lstat(fsName(path))
 
 	switch {
-	case os.IsNotExist(err):
+	case errors.Is(err, fs.ErrNotExist):
 		return Artifact{}, false, nil
 	case err != nil:
 		return Artifact{}, false, fmt.Errorf("setup: lstat %s: %w", path, err)
@@ -238,7 +241,7 @@ func planPluginRemoval(path string, kind Kind, renderKind artifact.Kind, force b
 		return Artifact{Kind: kind, Path: path, Action: ActionKept, Detail: "not a regular file"}, true, nil
 	}
 
-	body, err := os.ReadFile(path)
+	body, err := fsys.ReadFile(fsName(path))
 	if err != nil {
 		return Artifact{}, false, fmt.Errorf("setup: read %s: %w", path, err)
 	}
@@ -276,14 +279,14 @@ var pluginPruneDirs = []string{
 // directory still holding any entry (a file brief did not write, or a
 // sibling not yet pruned) is left in place, and a directory that never
 // existed is skipped without error.
-func pruneEmptyPluginDirs(root string) error {
+func pruneEmptyPluginDirs(fsys rwfs.FS, root string) error {
 	for _, rel := range pluginPruneDirs {
 		dir := filepath.Join(root, rel)
 
-		entries, err := os.ReadDir(dir)
+		entries, err := fsys.ReadDir(fsName(dir))
 
 		switch {
-		case os.IsNotExist(err):
+		case errors.Is(err, fs.ErrNotExist):
 			continue
 		case err != nil:
 			return fmt.Errorf("setup: read %s: %w", dir, err)
@@ -291,7 +294,7 @@ func pruneEmptyPluginDirs(root string) error {
 			continue
 		}
 
-		if err := os.Remove(dir); err != nil {
+		if err := fsys.Remove(fsName(dir)); err != nil {
 			return fmt.Errorf("setup: remove %s: %w", dir, err)
 		}
 	}
@@ -312,15 +315,15 @@ func pruneEmptyPluginDirs(root string) error {
 // ForceRemovable true; with Force, ActionRemoved with ForceRemovable
 // false — the field is true only while --force could still act on the
 // artifact, never once it already has.
-func planConfigRemoval(path string, force bool) (Artifact, bool, error) {
+func planConfigRemoval(fsys rwfs.FS, path string, force bool) (Artifact, bool, error) {
 	if path == "" {
 		return Artifact{}, false, nil
 	}
 
-	info, err := os.Lstat(path)
+	info, err := fsys.Lstat(fsName(path))
 
 	switch {
-	case os.IsNotExist(err):
+	case errors.Is(err, fs.ErrNotExist):
 		return Artifact{}, false, nil
 	case err != nil:
 		return Artifact{}, false, fmt.Errorf("setup: lstat %s: %w", path, err)
@@ -328,7 +331,7 @@ func planConfigRemoval(path string, force bool) (Artifact, bool, error) {
 		return Artifact{Kind: KindConfig, Path: path, Action: ActionKept, Detail: "not a regular file"}, true, nil
 	}
 
-	body, err := os.ReadFile(path)
+	body, err := fsys.ReadFile(fsName(path))
 	if err != nil {
 		return Artifact{}, false, fmt.Errorf("setup: read %s: %w", path, err)
 	}
@@ -359,16 +362,16 @@ func planConfigRemoval(path string, force bool) (Artifact, bool, error) {
 // Result.Created. A failure after at least one earlier write already
 // landed is wrapped in ErrPartialWrite; a failure before any write landed
 // is returned as-is.
-func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifact, hasSnippet bool, boundAgentArts []boundAgentArtifact) (Result, error) {
+func applyUninstall(fsys rwfs.FS, res Result, root, hostName string, snippetArt snippetArtifact, hasSnippet bool, boundAgentArts []boundAgentArtifact) (Result, error) {
 	var removedAny bool
 
 	if hasSnippet && snippetArt.Action == ActionRemoved {
-		if err := verifyFileUnchanged(snippetArt.Path, true, snippetArt.existing, "brief uninstall"); err != nil {
+		if err := verifyFileUnchanged(fsys, snippetArt.Path, true, snippetArt.existing, "brief uninstall"); err != nil {
 			return Result{}, err
 		}
 
 		if len(snippetArt.remains) == 0 {
-			if err := os.Remove(snippetArt.Path); err != nil {
+			if err := fsys.Remove(fsName(snippetArt.Path)); err != nil {
 				wrapped := fmt.Errorf("setup: %w", err)
 
 				if removedAny {
@@ -380,7 +383,7 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 
 			res.Removed = append(res.Removed, snippetArt.Path)
 		} else {
-			if err := writeSnippetFile(snippetArt.Path, snippetArt.remains); err != nil {
+			if err := writeSnippetFile(fsys, snippetArt.Path, snippetArt.remains); err != nil {
 				if removedAny {
 					return res, markPartial(err)
 				}
@@ -420,7 +423,7 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 			continue
 		}
 
-		if err := os.Remove(a.Path); err != nil {
+		if err := fsys.Remove(fsName(a.Path)); err != nil {
 			wrapped := fmt.Errorf("setup: %w", err)
 
 			if removedAny {
@@ -435,7 +438,7 @@ func applyUninstall(res Result, root, hostName string, snippetArt snippetArtifac
 	}
 
 	if hostName == HostClaudeCode {
-		if err := pruneEmptyPluginDirs(root); err != nil {
+		if err := pruneEmptyPluginDirs(fsys, root); err != nil {
 			if removedAny {
 				return res, markPartial(err)
 			}

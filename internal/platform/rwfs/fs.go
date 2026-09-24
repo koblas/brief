@@ -24,7 +24,7 @@ import "io/fs"
 // through a path segment that exists but is not a directory, and removing a
 // directory that still has entries.
 //
-//nolint:interfacebloat // contract-tested against two adapters; the read side alone is the standard library's own five-interface composition
+//nolint:interfacebloat // contract-tested (rwfstest.Contract) against every adapter this repository builds; the read side alone is the standard library's own five-interface composition
 type FS interface {
 	fs.FS
 	fs.ReadFileFS

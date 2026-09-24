@@ -11,14 +11,17 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"testing"
+	"testing/fstest"
 
 	"github.com/koblas/brief/internal/doctor"
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/host"
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -442,10 +445,9 @@ func Test_doctor_reports_every_host_row_skip_when_dot_claude_is_a_regular_file(t
 // Test_doctor_too_many_arguments_is_a_usage_error pins that "brief
 // doctor" takes no positional argument.
 func Test_doctor_too_many_arguments_is_a_usage_error(t *testing.T) {
-	wd, self := newDoctorFixture(t)
 	var stdout, stderr bytes.Buffer
 
-	err := run(t.Context(), wd, []string{"doctor", "extra"}, nil, &stdout, &stderr, noBuildInfo, doctorFakeSeams(t, self)...)
+	err := run(t.Context(), "/repo", []string{"doctor", "extra"}, nil, &stdout, &stderr, noBuildInfo)
 
 	require.ErrorIs(t, err, ErrUsage)
 	assert.Equal(t, 2, ExitCode(err))
@@ -453,10 +455,11 @@ func Test_doctor_too_many_arguments_is_a_usage_error(t *testing.T) {
 	assert.Equal(t, "brief doctor: too many arguments; run 'brief doctor'\n", stderr.String())
 }
 
-// Test_doctor_refuses_a_working_directory_that_does_not_exist pins the
-// one refusal runDoctor emits: config.Locate's own nonexistent-startDir
-// guard, checked ahead of Diagnose, the same shape every other command's
-// resolveRoot already refuses with.
+// Test_doctor_refuses_a_working_directory_that_does_not_exist pins the one
+// refusal runDoctor emits on its production path (no withRootFS seam,
+// rootFS nil): locateInRepo's own nonexistent-startDir guard
+// (config.LocateInRepo's first check), checked ahead of Diagnose, the same
+// shape every other command's resolveRoot already refuses with.
 func Test_doctor_refuses_a_working_directory_that_does_not_exist(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	var stdout, stderr bytes.Buffer
@@ -467,4 +470,44 @@ func Test_doctor_refuses_a_working_directory_that_does_not_exist(t *testing.T) {
 	assert.Equal(t, 1, ExitCode(err))
 	assert.Empty(t, stdout.String())
 	assert.Contains(t, stderr.String(), missing)
+}
+
+// Test_doctor_refuses_a_working_directory_that_does_not_exist_on_a_seamed_fsys
+// pins the same refusal on runDoctor's withRootFS branch: locateInRepoFS's
+// own nonexistent-startDir guard, over an rwfs.Mem holding nothing at all —
+// never t.TempDir(), since the check fails before Diagnose (or anything
+// else) ever reads through the fsys.
+func Test_doctor_refuses_a_working_directory_that_does_not_exist_on_a_seamed_fsys(t *testing.T) {
+	missing := "/repo/does-not-exist"
+	mem := rwfs.NewMem(fstest.MapFS{})
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), missing, []string{"doctor"}, nil, &stdout, &stderr, noBuildInfo, withRootFS(mem))
+
+	require.Error(t, err)
+	assert.Equal(t, 1, ExitCode(err))
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), missing)
+}
+
+// Test_doctor_reaches_diagnose_when_the_seamed_wd_exists_on_the_fsys is the
+// control arm for the two refusal tests above: the only variable that
+// changes is whether wd is present on the seamed rwfs.Mem. Present, the
+// pre-check's refusal never fires and runDoctor falls through into
+// srv.Diagnose, which — unlike the pre-check — never refuses and instead
+// prints one row per check to stdout; a refusal never writes stdout at
+// all, so stdout carrying a "root-dir" row (root-dir always runs, and
+// always reports ERROR here since "/repo" has no real feature-root
+// directory to probe) proves Diagnose ran, not the pre-check's own
+// refusal path.
+func Test_doctor_reaches_diagnose_when_the_seamed_wd_exists_on_the_fsys(t *testing.T) {
+	present := "/repo"
+	mem := rwfs.NewMem(fstest.MapFS{"repo": &fstest.MapFile{Mode: fs.ModeDir | 0o755}})
+	var stdout, stderr bytes.Buffer
+
+	err := run(t.Context(), present, []string{"doctor"}, nil, &stdout, &stderr, noBuildInfo, withRootFS(mem))
+
+	require.Error(t, err)
+	assert.Equal(t, 1, ExitCode(err))
+	assert.Contains(t, stdout.String(), "root-dir")
 }

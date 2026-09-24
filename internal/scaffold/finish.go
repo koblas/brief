@@ -158,7 +158,7 @@ func (s *Server) Finish(_ context.Context, feature, step string, handoff, state 
 		}
 	}
 
-	top, root, err := openFeatureDir(featureDirPath, featurePath, feature)
+	top, root, err := s.openFeatureDir(featureDirPath, featurePath, feature)
 	if err != nil {
 		return FinishResult{}, err
 	}

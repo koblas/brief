@@ -2,10 +2,10 @@ package setup_test
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/setup"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,14 +32,15 @@ var errHomeLookup = errors.New("home lookup failed")
 // true and DetectedBy empty; an explicit "none" is never overridden by
 // detection, and reports DetectedBy empty too — it was given, not found;
 // a home() failure is treated the same as no home directory at all, never
-// a refusal.
+// a refusal. detectHost's own root and home reads both go through fsRoot
+// (detect.go), so every case here is fully Mem-backed, including wd —
+// newMemServer's own writableCheck never touches real disk either.
 func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
-	homeWithClaude := t.TempDir()
-	require.NoError(t, os.Mkdir(filepath.Join(homeWithClaude, ".claude"), 0o755))
+	homeWithClaude := fsAbs("home-with-claude")
 
 	cases := []struct {
 		name               string
-		seedRoot           func(t *testing.T, root string)
+		seedRoot           func(t *testing.T, mem *rwfs.Mem, rootKey string)
 		home               setup.Option
 		reqHost            string
 		wantHost           string
@@ -48,9 +49,9 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 	}{
 		{
 			name: "root .claude directory",
-			seedRoot: func(t *testing.T, root string) {
+			seedRoot: func(t *testing.T, mem *rwfs.Mem, rootKey string) {
 				t.Helper()
-				require.NoError(t, os.Mkdir(filepath.Join(root, ".claude"), 0o755))
+				require.NoError(t, mem.Mkdir(rootKey+"/.claude", 0o755))
 			},
 			home:               fixedHome(""),
 			wantHost:           setup.HostClaudeCode,
@@ -59,9 +60,9 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 		},
 		{
 			name: "root CLAUDE.md file",
-			seedRoot: func(t *testing.T, root string) {
+			seedRoot: func(t *testing.T, mem *rwfs.Mem, rootKey string) {
 				t.Helper()
-				require.NoError(t, os.WriteFile(filepath.Join(root, "CLAUDE.md"), []byte("hi"), 0o600))
+				require.NoError(t, mem.WriteFile(rootKey+"/CLAUDE.md", []byte("hi"), 0o600))
 			},
 			home:               fixedHome(""),
 			wantHost:           setup.HostClaudeCode,
@@ -70,7 +71,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 		},
 		{
 			name:               "home .claude directory, root has neither",
-			seedRoot:           func(*testing.T, string) {},
+			seedRoot:           func(*testing.T, *rwfs.Mem, string) {},
 			home:               fixedHome(homeWithClaude),
 			wantHost:           setup.HostClaudeCode,
 			wantNoHostDetected: false,
@@ -78,7 +79,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 		},
 		{
 			name:               "nothing present",
-			seedRoot:           func(*testing.T, string) {},
+			seedRoot:           func(*testing.T, *rwfs.Mem, string) {},
 			home:               fixedHome(""),
 			wantHost:           setup.HostNone,
 			wantNoHostDetected: true,
@@ -86,9 +87,9 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 		},
 		{
 			name: "explicit host none with .claude present",
-			seedRoot: func(t *testing.T, root string) {
+			seedRoot: func(t *testing.T, mem *rwfs.Mem, rootKey string) {
 				t.Helper()
-				require.NoError(t, os.Mkdir(filepath.Join(root, ".claude"), 0o755))
+				require.NoError(t, mem.Mkdir(rootKey+"/.claude", 0o755))
 			},
 			home:               fixedHome(""),
 			reqHost:            setup.HostNone,
@@ -98,7 +99,7 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 		},
 		{
 			name:     "home func returns an error",
-			seedRoot: func(*testing.T, string) {},
+			seedRoot: func(*testing.T, *rwfs.Mem, string) {},
 			home: setup.WithHomeDir(func() (string, error) {
 				return "", errHomeLookup
 			}),
@@ -110,9 +111,12 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd := t.TempDir()
-			c.seedRoot(t, wd)
-			srv := setup.NewServer(c.home)
+			wd := fsAbs("repo")
+			mem := newVirtualMem(wd)
+			require.NoError(t, mem.Mkdir(memKey(homeWithClaude), 0o755))
+			require.NoError(t, mem.Mkdir(memKey(homeWithClaude)+"/.claude", 0o755))
+			c.seedRoot(t, mem, memKey(wd))
+			srv := newMemServer(mem, c.home)
 
 			res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: c.reqHost})
 
@@ -131,12 +135,14 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 // while one beside the located config wins even when wd is a subdirectory
 // of it.
 func Test_init_detection_uses_the_locate_root_not_wd(t *testing.T) {
-	root := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".brief.yaml"), []byte("feature-directory: specs\n"), 0o600))
-	require.NoError(t, os.Mkdir(filepath.Join(root, ".claude"), 0o755))
+	root := fsAbs("repo")
+	mem := newVirtualMem(root)
+	rootKey := memKey(root)
+	require.NoError(t, mem.WriteFile(rootKey+"/.brief.yaml", []byte("feature-directory: specs\n"), 0o600))
+	require.NoError(t, mem.Mkdir(rootKey+"/.claude", 0o755))
+	require.NoError(t, mem.Mkdir(rootKey+"/child", 0o755))
 	child := filepath.Join(root, "child")
-	require.NoError(t, os.Mkdir(child, 0o755))
-	srv := setup.NewServer(fixedHome(""))
+	srv := newMemServer(mem, fixedHome(""))
 
 	res, err := srv.Init(t.Context(), child, setup.InitRequest{})
 

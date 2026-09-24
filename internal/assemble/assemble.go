@@ -11,32 +11,46 @@ import (
 
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/markdown"
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/platform/stepfile"
 )
 
 // Server reads feature directories under a project root, using cfg to
 // name the feature directory, the step-file pattern, the state file and
-// every heading Start extracts.
+// every heading Start extracts. rootFS backs every dirFS this Server opens
+// (WithFS); nil, the default, means every open reads real disk through a
+// real, nested os.Root, exactly as before that option existed.
 type Server struct {
-	cfg  config.Config
-	root string
+	cfg    config.Config
+	root   string
+	rootFS rwfs.FS
 
-	// openRoot opens name as a subdirectory of parent. It defaults to
-	// (*os.Root).OpenRoot; a test overrides it, through export_test.go, to
-	// inject a directory-open failure that does not depend on OS
-	// permission bits or effective uid.
+	// openRoot opens name as a subdirectory of parent, on the production
+	// (os.Root-backed) path only — a WithFS-backed dirFS never reads this
+	// field. It defaults to (*os.Root).OpenRoot; a test overrides it,
+	// through export_test.go, to inject a directory-open failure that does
+	// not depend on OS permission bits or effective uid. osRoot.OpenRoot
+	// (fs.go) reads this field at every depth, so it applies to Start's own
+	// per-feature open as well as Check's and Status's.
 	openRoot func(parent *os.Root, name string) (*os.Root, error)
 }
 
 // NewServer returns a Server rooted at root, using cfg for every path and
-// heading it reads. Both arguments are required positionally: there is no
-// optional dependency here for a functional option to default.
-func NewServer(cfg config.Config, root string) *Server {
-	return &Server{
+// heading it reads. cfg and root are required positionally: there is no
+// optional dependency there for a functional option to default. opts
+// applies over that production default; today WithFS is the only Option.
+func NewServer(cfg config.Config, root string, opts ...Option) *Server {
+	s := &Server{
 		cfg:      cfg,
 		root:     root,
 		openRoot: (*os.Root).OpenRoot,
 	}
+
+	for _, o := range opts {
+		o(s)
+	}
+
+	return s
 }
 
 // FeatureFS pairs one feature's own filesystem — rooted so its top-level
@@ -105,7 +119,7 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
 	featurePath := filepath.Join(featureDirPath, feature)
 
-	topRoot, err := os.OpenRoot(featureDirPath)
+	topRoot, err := s.openFeatureDir(featureDirPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return Brief{}, ErrNoSuchFeature

@@ -1,8 +1,15 @@
 package setup_test
 
+// OS-subject: Init's own --edit-agents write path (bound-agent confinement,
+// Rule 3/Rule 4/Rule 8) always reads and writes through bound_agent.go's own
+// real os.Lstat/os.ReadFile and confinedAgentFile, regardless of the fsRoot
+// seam (fs.go) — see doc.go's own paragraph on why. Several cases here seed
+// a real symlink an rwfs.Mem cannot reproduce faithfully (Mem's own
+// ancestor check reports ENOTDIR where a real filesystem follows one).
 // Black-box: Init's own --edit-agents write path. writeConfigWithRoles,
-// writeMissingSkillAgent and newServerWithHome are missing_skill_test.go's
-// own helpers, shared here since both files live in package setup_test.
+// writeMissingSkillAgent and newServerWithHome are
+// missing_skill_disk_test.go's own helpers, shared here since both files
+// live in package setup_test.
 
 import (
 	"errors"

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/scaffold"
 )
 
@@ -41,8 +43,11 @@ type finishDocument struct {
 
 // runFinish implements "brief finish <feature> <step> --handoff <path>
 // --state <path>"; rest is its positional arguments and handoffPath and
-// statePath its flag values, "" when the flag was not given.
-func runFinish(ctx context.Context, wd string, rest []string, handoffPath, statePath string, stdin io.Reader, out reporter) error {
+// statePath its flag values, "" when the flag was not given. rootFS is nil
+// in production (resolveRoot, scaffold.NewServer and readSource all read
+// real disk); a test's withRootFS runSeam substitutes an rwfs.Mem for all
+// three — a "-" argument still always reads stdin, never rootFS.
+func runFinish(ctx context.Context, wd string, rest []string, handoffPath, statePath string, stdin io.Reader, out reporter, rootFS rwfs.FS) error {
 	switch {
 	case len(rest) == 0:
 		return out.usageError(fmt.Sprintf("brief finish: no feature given; run '%s'", finishInvocation))
@@ -63,22 +68,22 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 		return out.usageError("brief finish: - may be given for at most one of --handoff and --state")
 	}
 
-	handoff, err := readSource(handoffPath, stdin)
+	handoff, err := readSource(handoffPath, stdin, rootFS)
 	if err != nil {
 		return out.refusal(err)
 	}
 
-	state, err := readSource(statePath, stdin)
+	state, err := readSource(statePath, stdin, rootFS)
 	if err != nil {
 		return out.refusal(err)
 	}
 
-	cfg, root, err := resolveRoot(wd)
+	cfg, root, err := resolveRoot(rootFS, wd)
 	if err != nil {
 		return out.refusal(err)
 	}
 
-	srv := scaffold.NewServer(cfg, root)
+	srv := scaffold.NewServer(cfg, root, scaffold.WithFS(rootFS))
 
 	res, err := srv.Finish(ctx, feature, step, handoff, state)
 	if err != nil {
@@ -91,7 +96,7 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 			}
 		}
 
-		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err))
+		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err, rootFS))
 	}
 
 	if out.json {
@@ -149,12 +154,31 @@ func sourceLocator(path string) string {
 }
 
 // readSource returns the bytes at path, or stdin's contents when path is
-// "-".
-func readSource(path string, stdin io.Reader) ([]byte, error) {
+// "-". rootFS is nil in production: path reads through os.ReadFile,
+// exactly as before this seam existed. A test's withRootFS runSeam
+// substitutes an rwfs.Mem instead, read through fsName's own "/"-rooted
+// mapping after path is resolved to absolute the same way os.ReadFile's
+// own relative-path lookup resolves against the process's current
+// directory (filepath.Abs).
+func readSource(path string, stdin io.Reader, rootFS rwfs.FS) ([]byte, error) {
 	if path == "-" {
 		data, err := io.ReadAll(stdin)
 		if err != nil {
 			return nil, fmt.Errorf("read stdin: %w", err)
+		}
+
+		return data, nil
+	}
+
+	if rootFS != nil {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+
+		data, err := rootFS.ReadFile(fsName(abs))
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
 
 		return data, nil

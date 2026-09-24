@@ -1,5 +1,11 @@
 package setup
 
+// OS-subject: every planBoundAgent, planBoundAgentRemoval and
+// confinedAgentFile call here goes straight to real os.Lstat, os.ReadFile
+// and os.OpenRoot, regardless of the fsRoot seam (fs.go) — bound-agent
+// confinement is never routed through it (doc.go). Several cases below seed
+// a real symlink an rwfs.Mem cannot reproduce faithfully.
+//
 // White-box package: addWorkflowSkill and removeWorkflowSkill are
 // unexported, pinned here directly against hand-built frontmatter bytes,
 // independent of planBoundAgents' own file-finding and membership decisions

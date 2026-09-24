@@ -17,17 +17,27 @@ import (
 
 // Server creates feature scaffolds under a project root, using cfg to name
 // the feature directory, the specification and state files, and the
-// headings written into each.
+// headings written into each. rootFS backs every rwfs.FS this Server opens
+// (WithFS); nil, the default, means every open reads and writes real disk,
+// exactly as before that option existed.
 type Server struct {
-	cfg  config.Config
-	root string
+	cfg    config.Config
+	root   string
+	rootFS rwfs.FS
 }
 
 // NewServer returns a Server rooted at root, using cfg for every path and
-// heading it writes. Both arguments are required positionally: there is no
-// optional dependency here for a functional option to default.
-func NewServer(cfg config.Config, root string) *Server {
-	return &Server{cfg: cfg, root: root}
+// heading it writes. cfg and root are required positionally: there is no
+// optional dependency there for a functional option to default. opts
+// applies over that production default; today WithFS is the only Option.
+func NewServer(cfg config.Config, root string, opts ...Option) *Server {
+	s := &Server{cfg: cfg, root: root}
+
+	for _, o := range opts {
+		o(s)
+	}
+
+	return s
 }
 
 // Result is what NewFeature and NewStep return: Feature is the feature
@@ -61,23 +71,25 @@ type Result struct {
 // directory — not even the configured feature directory itself — is
 // created.
 //
-// NewFeature builds the one rwfs.FS this call uses — an OS adapter rooted
-// at the configured feature directory, via rwfs.OpenOS — after
-// os.MkdirAll has ensured that directory exists; MkdirAll itself stays a
-// plain os call rather than going through rwfs, so a symlinked feature
-// directory is created through exactly as many hops as it always was,
-// never more. NewFeatureFS carries every check and write that follows.
+// NewFeature builds the one rwfs.FS this call uses through s.mkdirAll and
+// s.openDir — an OS adapter rooted at the configured feature directory, via
+// rwfs.OpenOS, after os.MkdirAll has ensured that directory exists, in
+// production; a WithFS-backed test substitutes an rwfs.Mem for both, so no
+// real disk is touched. MkdirAll itself stays a plain os call rather than
+// going through rwfs in production, so a symlinked feature directory is
+// created through exactly as many hops as it always was, never more.
+// NewFeatureFS carries every check and write that follows.
 func (s *Server) NewFeature(_ context.Context, name string) (Result, error) {
 	if err := validateFeatureName(name); err != nil {
 		return Result{}, err
 	}
 
 	featureRoot := filepath.Join(s.root, s.cfg.FeatureDirectory)
-	if err := os.MkdirAll(featureRoot, 0o755); err != nil {
+	if err := s.mkdirAll(featureRoot, 0o755); err != nil {
 		return Result{}, fmt.Errorf("scaffold: %w", err)
 	}
 
-	fsys, err := rwfs.OpenOS(featureRoot)
+	fsys, err := s.openDir(featureRoot)
 	if err != nil {
 		return Result{}, fmt.Errorf("scaffold: %w", peelReadErr(err))
 	}
@@ -159,10 +171,11 @@ func (s *Server) NewFeatureFS(fsys rwfs.FS, featureRoot, name string) (Result, e
 // Nothing is created until all five pass; only then is the next step
 // number computed and written.
 //
-// NewStep builds the one rwfs.FS this call uses through openFeatureDir —
+// NewStep builds the one rwfs.FS this call uses through s.openFeatureDir —
 // an OS adapter nested two levels deep, first at the configured feature
-// directory, then at feature's own subdirectory — and delegates every
-// check and write past that point to NewStepFS.
+// directory, then at feature's own subdirectory, in production; a
+// WithFS-backed test substitutes an rwfs.Mem — and delegates every check
+// and write past that point to NewStepFS.
 func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 	featureDirPath := filepath.Join(s.root, s.cfg.FeatureDirectory)
 	featurePath := filepath.Join(featureDirPath, feature)
@@ -177,7 +190,7 @@ func (s *Server) NewStep(_ context.Context, feature string) (Result, error) {
 		}
 	}
 
-	top, root, err := openFeatureDir(featureDirPath, featurePath, feature)
+	top, root, err := s.openFeatureDir(featureDirPath, featurePath, feature)
 	if err != nil {
 		return Result{}, err
 	}
@@ -282,8 +295,9 @@ func noSuchFeatureRefusal(path, feature string) error {
 }
 
 // openFeatureDir opens feature's own directory under featureDirPath,
-// returning both the rwfs.FS the caller must close (top, an OS adapter
-// rooted at the configured feature directory, then root, feature's own
+// returning both the rwfs.FS the caller must close (top, s.openDir's own
+// result, rooted at the configured feature directory — an OS adapter in
+// production, an rwfs.Mem view under WithFS — then root, feature's own
 // subdirectory, nested inside it via top.OpenRoot). It refuses as
 // noSuchFeatureRefusal(featurePath, feature) when feature fails
 // validFeatureArgument, checked before either open, so a traversal attempt
@@ -293,12 +307,12 @@ func noSuchFeatureRefusal(path, feature string) error {
 // directory belongs — is returned wrapped instead, never misreported as
 // "no such feature". NewStep and Finish share this rather than duplicating
 // the two-level open each carries.
-func openFeatureDir(featureDirPath, featurePath, feature string) (rwfs.FS, rwfs.FS, error) {
+func (s *Server) openFeatureDir(featureDirPath, featurePath, feature string) (rwfs.FS, rwfs.FS, error) {
 	if !validFeatureArgument(feature) {
 		return nil, nil, noSuchFeatureRefusal(featurePath, feature)
 	}
 
-	top, err := rwfs.OpenOS(featureDirPath)
+	top, err := s.openDir(featureDirPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, noSuchFeatureRefusal(featurePath, feature)

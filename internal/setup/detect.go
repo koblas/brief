@@ -1,8 +1,9 @@
 package setup
 
 import (
-	"os"
 	"path/filepath"
+
+	"github.com/koblas/brief/internal/platform/rwfs"
 )
 
 // WithHomeDir overrides the function Init calls to find the current user's
@@ -24,18 +25,18 @@ func WithHomeDir(fn func() (string, error)) Option {
 // "~/.claude" — "" when detected is false; it backs Result.DetectedBy,
 // which cli's own next-action line names so a detected install is never
 // silently indistinguishable from an explicit --host claude-code.
-func detectHost(root string, home func() (string, error)) (string, bool, string) {
-	if info, err := os.Stat(filepath.Join(root, ".claude")); err == nil && info.IsDir() {
+func detectHost(fsys rwfs.FS, root string, home func() (string, error)) (string, bool, string) {
+	if info, err := fsys.Stat(fsName(filepath.Join(root, ".claude"))); err == nil && info.IsDir() {
 		return HostClaudeCode, true, ".claude"
 	}
 
-	if _, err := os.Lstat(filepath.Join(root, "CLAUDE.md")); err == nil {
+	if _, err := fsys.Lstat(fsName(filepath.Join(root, "CLAUDE.md"))); err == nil {
 		return HostClaudeCode, true, "CLAUDE.md"
 	}
 
 	if home != nil {
 		if h, err := home(); err == nil && h != "" {
-			if info, err := os.Stat(filepath.Join(h, ".claude")); err == nil && info.IsDir() {
+			if info, err := fsys.Stat(fsName(filepath.Join(h, ".claude"))); err == nil && info.IsDir() {
 				return HostClaudeCode, true, "~/.claude"
 			}
 		}

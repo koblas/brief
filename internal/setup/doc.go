@@ -127,10 +127,55 @@
 // skill file's parent directories, os.Remove for Uninstall's own file and
 // now-empty-directory removals (never RemoveAll) — imports only
 // internal/platform/agentfile, internal/platform/config,
-// internal/platform/artifact, internal/platform/atomicfile and
-// internal/platform/host alongside the standard library, and never
-// internal/scaffold or internal/doctor: those own the write and read paths
-// over a feature's own content, a question setup never asks.
+// internal/platform/artifact, internal/platform/atomicfile,
+// internal/platform/host, internal/platform/repo, internal/platform/rwfs
+// and internal/platform/writable alongside the standard library, and
+// never internal/scaffold or internal/doctor: those own the
+// write and read paths over a feature's own content, a question setup
+// never asks.
+//
+// Every read and write Init and Uninstall perform under a repository
+// root, and the config-location walk above it (locateInRepo,
+// inspectConfig, mirroring internal/doctor's own locateInRepo/inspect),
+// go through (*Server).fsRoot — production diskFS (fs.go), a stateless
+// rwfs.FS reproducing exactly the os.* calls this package always made,
+// deliberately unconfined rather than rwfs.OS's own os.Root confinement:
+// planPluginFile's DryRun planning has a passing test that depends on
+// today's symlink-following read behavior through a ".claude" pointed
+// outside the repository (bound_agent_disk_test.go), and R10's own writability
+// pre-check (checkWritable, still real os.Lstat/writable.Probe,
+// unconfined) does not gate every write a broader confinement would newly
+// refuse (init_disk_test.go pins this with a mutation). A test substitutes
+// an rwfs.Mem via WithFSRoot — internal/cli's own run seam (withSetupOpts)
+// is the one other production caller, so a command-level test can do the
+// same without setup ever knowing the difference.
+//
+// fs_contract_internal_test.go proves diskFS itself satisfies rwfs.FS
+// beyond the package's own var _ rwfs.FS assertion, by running rwfs' own
+// shared contract (internal/platform/rwfs/rwfstest) against it; every row
+// diskFS cannot satisfy — invalid-name validation, *fs.PathError.Path
+// shape, OpenRoot, and two ENOTDIR-vs-other-sentinel cases — is declared
+// through that contract's own Option mechanism and cited in fs.go's own
+// diskFS doc comment, not silently narrowed.
+//
+// detectHost's own three
+// checks — root ".claude", root "CLAUDE.md", and home's own "~/.claude" —
+// all read through this same fsys, so a detection test never touches real
+// disk either.
+// boundAgentTargets' and agentsMissingSkill's own root-resolution
+// (filepath.EvalSymlinks(root), before either walks agentfile bindings) is
+// a separate seam, (*Server).resolveRoot (WithResolveRoot) — planBoundAgent,
+// planBoundAgentRemoval, confinedAgentFile and agentfile.ResolveBinding's
+// own file search all still read and write through real disk regardless of
+// fsRoot or resolveRoot: bound-agent confinement is never routed through
+// this seam. R10's own pre-write call (checkWritable, before apply) is a
+// third, narrower seam, (*Server).writableCheck (WithWritableCheck):
+// checkWritable itself (writable.go) is never changed or routed through
+// fsRoot — every writable_disk_test.go case still builds its Server with
+// plain NewServer() — the seam exists only so an rwfs.Mem-backed test can
+// record which targets a real run would have checked, or skip the
+// real-disk call entirely, rather than asserting a refusal (or its
+// absence) real disk at a fabricated root could never actually produce.
 //
 // Result.AgentsMissingSkill (agentsMissingSkill) is Init's own report of
 // every bare-name planner or implementer binding — never a "brief:*" or

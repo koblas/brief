@@ -1,7 +1,6 @@
 package setup_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -17,18 +16,21 @@ import (
 // into the ancestor's own CLAUDE.md or installing the plugin under the
 // ancestor's own ".claude/". The ancestor CLAUDE.md is proven
 // byte-identical afterward, which is vacuous unless the same run also
-// proves it wrote *something* — the fresh config and plugin at wd.
+// proves it wrote *something* — the fresh config and plugin at wd. The
+// ancestor walk (repo.RootFS, config.LocateWithinFS) only ever stats a
+// ".git" or ".brief.yaml" candidate, so this is Mem-backed, fully virtual.
 func Test_Init_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
-	home := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".brief.yaml"), []byte("feature-directory: home-specs\n"), 0o600))
+	home := fsAbs("home")
+	proj := fsAbs("home", "proj")
+	mem := newVirtualMem(proj)
+
 	claudeBefore := []byte("# Home notes\n")
-	require.NoError(t, os.WriteFile(filepath.Join(home, "CLAUDE.md"), claudeBefore, 0o600))
+	require.NoError(t, mem.WriteFile(memKey(home)+"/.brief.yaml", []byte("feature-directory: home-specs\n"), 0o600))
+	require.NoError(t, mem.WriteFile(memKey(home)+"/CLAUDE.md", claudeBefore, 0o600))
+	require.NoError(t, mem.Mkdir(memKey(proj)+"/.git", 0o755))
 
-	proj := filepath.Join(home, "proj")
-	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".git"), 0o755))
-
-	unrelatedHome := t.TempDir()
-	srv := setup.NewServer(setup.WithHomeDir(func() (string, error) { return unrelatedHome, nil }))
+	unrelatedHome := fsAbs("unrelated-home")
+	srv := newMemServer(mem, setup.WithHomeDir(func() (string, error) { return unrelatedHome, nil }))
 
 	res, err := srv.Init(t.Context(), proj, setup.InitRequest{Host: setup.HostClaudeCode})
 
@@ -37,24 +39,25 @@ func Test_Init_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t
 
 	projConfig := filepath.Join(proj, ".brief.yaml")
 	assert.Contains(t, res.Created, projConfig)
-	assert.FileExists(t, projConfig)
 
 	// init wrote its own CLAUDE.md at proj, never touching the ancestor's.
 	projClaude := filepath.Join(proj, "CLAUDE.md")
 	assert.Contains(t, res.Created, projClaude)
 
-	claudeAfter, readErr := os.ReadFile(filepath.Join(home, "CLAUDE.md"))
-	require.NoError(t, readErr)
-	assert.Equal(t, claudeBefore, claudeAfter)
+	snap := mem.Snapshot()
 
-	homeConfigAfter, readErr := os.ReadFile(filepath.Join(home, ".brief.yaml"))
-	require.NoError(t, readErr)
-	assert.Equal(t, "feature-directory: home-specs\n", string(homeConfigAfter))
+	require.Contains(t, snap, memKey(projConfig))
 
-	assert.DirExists(t, filepath.Join(proj, ".claude", "skills", "brief"))
+	require.Contains(t, snap, memKey(home)+"/CLAUDE.md")
+	assert.Equal(t, claudeBefore, snap[memKey(home)+"/CLAUDE.md"].Data)
 
-	_, statErr := os.Stat(filepath.Join(home, ".claude"))
-	assert.True(t, os.IsNotExist(statErr), "init must never create the ancestor's own .claude/")
+	require.Contains(t, snap, memKey(home)+"/.brief.yaml")
+	assert.Equal(t, "feature-directory: home-specs\n", string(snap[memKey(home)+"/.brief.yaml"].Data))
+
+	require.Contains(t, snap, memKey(proj)+"/.claude/skills/brief")
+	assert.True(t, snap[memKey(proj)+"/.claude/skills/brief"].Mode.IsDir())
+
+	assert.NotContains(t, snap, memKey(home)+"/.claude", "init must never create the ancestor's own .claude/")
 }
 
 // Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root is
@@ -63,13 +66,14 @@ func Test_Init_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t
 // though wd is a subdirectory holding neither a config nor a ".git" of its
 // own.
 func Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root(t *testing.T) {
-	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".brief.yaml"), []byte("feature-directory: specs\n"), 0o600))
+	root := fsAbs("repo")
+	mem := newVirtualMem(root)
+	require.NoError(t, mem.Mkdir(memKey(root)+"/.git", 0o755))
+	require.NoError(t, mem.WriteFile(memKey(root)+"/.brief.yaml", []byte("feature-directory: specs\n"), 0o600))
+	require.NoError(t, mem.Mkdir(memKey(root)+"/sub", 0o755))
 	sub := filepath.Join(root, "sub")
-	require.NoError(t, os.MkdirAll(sub, 0o755))
 
-	srv := newServer(t)
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), sub, setup.InitRequest{Host: setup.HostNone})
 
@@ -77,8 +81,9 @@ func Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root(t *tes
 	assert.Equal(t, root, res.Root)
 
 	featureRoot := filepath.Join(root, "specs")
-	assert.Equal(t, setup.ActionCreated, res.Artifacts[1].Action)
-	assert.Equal(t, featureRoot, res.Artifacts[1].Path)
+	row := findArtifact(t, res, setup.KindFeatureRoot)
+	assert.Equal(t, setup.ActionCreated, row.Action)
+	assert.Equal(t, featureRoot, row.Path)
 }
 
 // Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root
@@ -87,16 +92,17 @@ func Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root(t *tes
 // enclosing git repository root is still adopted and removed, even though
 // wd is a subdirectory holding neither a config nor a ".git" of its own.
 func Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root(t *testing.T) {
-	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
+	root := fsAbs("repo")
+	mem := newVirtualMem(root)
+	require.NoError(t, mem.Mkdir(memKey(root)+"/.git", 0o755))
 
-	srv := newServer(t)
+	srv := newMemServer(mem)
 
 	_, err := srv.Init(t.Context(), root, setup.InitRequest{Host: setup.HostNone})
 	require.NoError(t, err)
 
+	require.NoError(t, mem.Mkdir(memKey(root)+"/sub", 0o755))
 	sub := filepath.Join(root, "sub")
-	require.NoError(t, os.MkdirAll(sub, 0o755))
 
 	res, err := srv.Uninstall(t.Context(), sub, setup.UninstallRequest{Host: setup.HostNone})
 
@@ -108,8 +114,7 @@ func Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root(t
 	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionRemoved}, res.Artifacts[0])
 	assert.Equal(t, []string{configPath}, res.Removed)
 
-	_, statErr := os.Stat(configPath)
-	assert.True(t, os.IsNotExist(statErr))
+	assert.NotContains(t, mem.Snapshot(), memKey(configPath))
 }
 
 // Test_Uninstall_ignores_an_ancestor_config_outside_the_enclosing_git_repository
@@ -118,14 +123,14 @@ func Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root(t
 // repository is never removed, and Uninstall reports nothing installed
 // rather than reaching outside the repository.
 func Test_Uninstall_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
-	home := t.TempDir()
+	home := fsAbs("home")
+	proj := fsAbs("home", "proj")
+	mem := newVirtualMem(proj)
 	homeConfig := filepath.Join(home, ".brief.yaml")
-	require.NoError(t, os.WriteFile(homeConfig, []byte("feature-directory: home-specs\n"), 0o600))
+	require.NoError(t, mem.WriteFile(memKey(homeConfig), []byte("feature-directory: home-specs\n"), 0o600))
+	require.NoError(t, mem.Mkdir(memKey(proj)+"/.git", 0o755))
 
-	proj := filepath.Join(home, "proj")
-	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".git"), 0o755))
-
-	srv := setup.NewServer()
+	srv := newMemServer(mem)
 
 	res, err := srv.Uninstall(t.Context(), proj, setup.UninstallRequest{Host: setup.HostNone})
 
@@ -133,8 +138,7 @@ func Test_Uninstall_ignores_an_ancestor_config_outside_the_enclosing_git_reposit
 	assert.Empty(t, res.Artifacts)
 	assert.Equal(t, proj, res.Root)
 
-	assert.FileExists(t, homeConfig)
-	body, readErr := os.ReadFile(homeConfig)
-	require.NoError(t, readErr)
-	assert.Equal(t, "feature-directory: home-specs\n", string(body))
+	snap := mem.Snapshot()
+	require.Contains(t, snap, memKey(homeConfig))
+	assert.Equal(t, "feature-directory: home-specs\n", string(snap[memKey(homeConfig)].Data))
 }
