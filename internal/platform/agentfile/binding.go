@@ -108,23 +108,32 @@ func ResolveBindingIn(project, user Tree, value string) Binding {
 // project's own ".claude/skills/brief/agents/<agent>.md" — host.PluginDir
 // joined the same way, project-relative — when both are regular files,
 // BindingUnresolved when neither is, including when project carries no FS
-// to check either against.
+// to check either against. agent's own value is joined and path.Clean-ed
+// onto each candidate directory before being checked; a value whose ".."
+// climbs the cleaned result back out of that directory — landing on some
+// other file the project tree happens to hold, rather than escaping the
+// tree outright, which path.Join alone does not catch — is never treated
+// as a match for either candidate, regardless of what sits at the escaped
+// path.
 func resolveBriefBinding(project Tree, agent string) Binding {
 	if project.FS == nil {
 		return Binding{Kind: BindingBrief, State: BindingUnresolved}
 	}
 
+	const overrideDir = ".claude/agents"
+	pluginDir := host.PluginDir + "/agents"
+
 	overrideName := path.Join(".claude", "agents", agent+".md")
 	pluginName := path.Join(host.PluginDir, "agents", agent+".md")
 
 	switch {
-	case fileIsRegularFS(project.FS, overrideName):
+	case withinDir(overrideName, overrideDir) && fileIsRegularFS(project.FS, overrideName):
 		return Binding{
 			Kind: BindingBrief, State: BindingResolved,
 			Path: filepath.Join(project.Dir, filepath.FromSlash(overrideName)),
 			fsys: project.FS, name: overrideName,
 		}
-	case fileIsRegularFS(project.FS, pluginName):
+	case withinDir(pluginName, pluginDir) && fileIsRegularFS(project.FS, pluginName):
 		return Binding{
 			Kind: BindingBrief, State: BindingResolved,
 			Path: filepath.Join(project.Dir, filepath.FromSlash(pluginName)),
@@ -133,6 +142,13 @@ func resolveBriefBinding(project Tree, agent string) Binding {
 	default:
 		return Binding{Kind: BindingBrief, State: BindingUnresolved}
 	}
+}
+
+// withinDir reports whether name, already path.Join-cleaned, still sits
+// inside dir rather than having climbed back out of it through a ".."
+// element in the value that produced it.
+func withinDir(name, dir string) bool {
+	return strings.HasPrefix(name, dir+"/")
 }
 
 // fileIsRegularFS reports whether name exists in fsys and is a regular

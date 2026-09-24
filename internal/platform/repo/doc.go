@@ -13,4 +13,12 @@
 // shared: config already imports repo for LocateInRepo's own boundary, and
 // a shared package for an eight-line path mapping would invert that
 // dependency.
+//
+// The production root FS (os.DirFS("/")) is not evaluated on a Windows
+// volume path ("C:\..."), and rejects, via fs.ValidPath, any path element
+// that is not valid UTF-8 before the underlying stat ever runs: on Linux,
+// where the kernel accepts an arbitrary byte string as a file name, a
+// ".git" sitting at or below an ancestor directory whose own name holds
+// invalid UTF-8 bytes is never seen, so Root falls through to a valid
+// ancestor repository, or reports none.
 package repo

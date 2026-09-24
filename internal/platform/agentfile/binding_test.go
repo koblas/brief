@@ -144,6 +144,48 @@ func Test_resolve_binding_in_classifies_by_prefix(t *testing.T) {
 	})
 }
 
+// Test_resolve_binding_in_refuses_a_traversal_that_escapes_the_agents_directory
+// pins resolveBriefBinding's own doc contract: a "brief:<agent>" value
+// whose cleaned name no longer sits under ".claude/agents" (the override)
+// or host.PluginDir's own "agents" (the plugin path) is never treated as a
+// match, even when a file happens to exist at the escaped location. Two
+// arms, mutated individually: "brief:../../../x" only reaches the plugin
+// guard — path.Join(".claude","agents","../../../x.md") is "../x.md",
+// already refused by fs.ValidPath before the guard runs, so it falls to
+// the plugin case, whose own join lands in-tree at ".claude/x.md"; and
+// "brief:../x" only reaches the override guard, whose join lands at that
+// same ".claude/x.md" directly.
+func Test_resolve_binding_in_refuses_a_traversal_that_escapes_the_agents_directory(t *testing.T) {
+	user := memTree(userDir, map[string]string{})
+
+	t.Run("a value landing outside the plugin agents dir is unresolved even though the file exists", func(t *testing.T) {
+		project := memTree(projectDir, map[string]string{".claude/x.md": briefFile})
+
+		b := agentfile.ResolveBindingIn(project, user, "brief:../../../x")
+
+		assert.Equal(t, agentfile.BindingBrief, b.Kind)
+		assert.Equal(t, agentfile.BindingUnresolved, b.State)
+	})
+
+	t.Run("a value landing outside the project override dir is unresolved even though the file exists", func(t *testing.T) {
+		project := memTree(projectDir, map[string]string{".claude/x.md": briefFile})
+
+		b := agentfile.ResolveBindingIn(project, user, "brief:../x")
+
+		assert.Equal(t, agentfile.BindingBrief, b.Kind)
+		assert.Equal(t, agentfile.BindingUnresolved, b.State)
+	})
+
+	t.Run("control: brief:implementer inside .claude/agents still resolves", func(t *testing.T) {
+		project := memTree(projectDir, map[string]string{".claude/agents/implementer.md": briefFile})
+
+		b := agentfile.ResolveBindingIn(project, user, "brief:implementer")
+
+		require.Equal(t, agentfile.BindingBrief, b.Kind)
+		assert.Equal(t, agentfile.BindingResolved, b.State)
+	})
+}
+
 // Test_lacking_skill_returns_each_definition_without_it pins
 // (Binding).LackingSkill's own single decision point (S06): a bare-name
 // binding filters b.Defs to the ones missing the skill; a "brief:*"

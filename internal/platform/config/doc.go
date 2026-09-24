@@ -24,4 +24,11 @@
 // and the one walk-up every caller shares, so a command refusing an invalid
 // value and a tool reporting every value that fails (doctor) can never
 // drift onto two different checks.
+//
+// The production root FS (os.DirFS("/")) is not evaluated on a Windows
+// volume path ("C:\..."), and rejects, via fs.ValidPath, any path element
+// that is not valid UTF-8 before the underlying stat or open ever runs: on
+// Linux, where the kernel accepts an arbitrary byte string as a file name,
+// a startDir sitting under an ancestor directory whose own name holds
+// invalid UTF-8 bytes refuses here even though the directory exists.
 package config
