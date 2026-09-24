@@ -538,63 +538,62 @@ func Test_diagnose_classifies_env_path(t *testing.T) {
 // otherwise. The brief-workflow skill alone does not count (Rule 1: the
 // skill is not an install signal, since uninstall can leave an edited
 // SKILL.md behind after everything else is removed). The four cases
-// differ in exactly one variable: what, if anything, is installed.
+// differ in exactly one variable: what, if anything, is installed. lookPath
+// always errors here, so checkEnvPath never reaches its own OS-subject
+// identity check (sameFile, resolveSymlinks) — the fixture runs against an
+// in-memory fstest.MapFS rather than disk.
 func Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed(t *testing.T) {
 	cases := []struct {
 		name         string
-		setup        func(t *testing.T, wd string, h host.Host)
+		setup        func(fsys fstest.MapFS, h host.Host)
 		wantSeverity doctor.Severity
 	}{
 		{
 			name: "not on PATH, the plugin is installed",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Plugin(true) {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
 			wantSeverity: doctor.SeverityError,
 		},
 		{
 			name: "not on PATH, only the CLAUDE.md snippet is installed",
-			setup: func(t *testing.T, wd string, _ host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, _ host.Host) {
 				block := append(append([]byte{}, artifact.SnippetBlock("docs/specifications")...), '\n')
-				require.NoError(t, os.WriteFile(filepath.Join(wd, "CLAUDE.md"), block, 0o600))
+				setHostFile(fsys, "CLAUDE.md", block)
 			},
 			wantSeverity: doctor.SeverityError,
 		},
 		{
 			name: "not on PATH, only the brief-workflow skill is installed",
-			setup: func(t *testing.T, wd string, h host.Host) {
-				t.Helper()
-
+			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Skills() {
-					writeHostArtifact(t, wd, f)
+					setHostArtifact(fsys, f)
 				}
 			},
 			wantSeverity: doctor.SeverityWarn,
 		},
 		{
 			name:         "not on PATH, nothing is installed",
-			setup:        func(t *testing.T, _ string, _ host.Host) { t.Helper() },
+			setup:        func(fstest.MapFS, host.Host) {},
 			wantSeverity: doctor.SeverityWarn,
 		},
 	}
 
+	h := claudeCodeHost(t)
+
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd := newHostFixture(t)
-			h := claudeCodeHost(t)
-			c.setup(t, wd, h)
+			fsys := newHostFixtureFS()
+			c.setup(fsys, h)
 
 			srv := doctor.NewServer(
 				doctor.WithLookPath(func(string) (string, error) { return "", os.ErrNotExist }),
 				emptyHomeDir(t),
+				doctor.WithRootFS(fsys),
 			)
-			report := srv.Diagnose(t.Context(), wd)
+			report := srv.Diagnose(t.Context(), fsAbs("repo"))
 
 			check := findCheck(t, report, "env-path")
 			assert.Equal(t, c.wantSeverity, check.Severity)

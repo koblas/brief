@@ -14,12 +14,14 @@ package doctor_test
 // classifyProbeError has to discriminate.
 
 import (
+	"fmt"
 	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/koblas/brief/internal/doctor"
+	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/host"
 	"github.com/stretchr/testify/assert"
@@ -857,4 +859,622 @@ func Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions
 	assert.Equal(t, "reviewer: my-reviewer defined 2 times under .claude/agents (.claude/agents/my-reviewer.md, .claude/agents/team/r.md)", check.Detail)
 	require.NotNil(t, check.Fix)
 	assert.Equal(t, "bind each role to an existing agent in .brief.yaml, or "+runInitWithAgents, *check.Fix)
+}
+
+// homeAgentTree returns a roles test's own home field: an agentfile.Tree
+// over an in-memory fstest.MapFS holding one agent file at relPath (rooted
+// the way agentfile.DirTree roots a real "~/.claude/agents" directory, so
+// relPath is always ".claude/agents/…") whose contents are body.
+func homeAgentTree(relPath, body string) func(t *testing.T) agentfile.Tree {
+	return func(t *testing.T) agentfile.Tree {
+		t.Helper()
+
+		return agentfile.Tree{
+			Dir: fsAbs("home"),
+			FS:  fstest.MapFS{relPath: &fstest.MapFile{Data: []byte(body)}},
+		}
+	}
+}
+
+// setRolesConfig sets "repo/.brief.yaml" in fsys with role bindings for all
+// three positions — a bare "" leaves that position unbound.
+func setRolesConfig(fsys fstest.MapFS, planner, implementer, reviewer string) {
+	body := "progress-heading: \"## Progress\"\n" +
+		"roles:\n" +
+		fmt.Sprintf("  planner: %q\n", planner) +
+		fmt.Sprintf("  implementer: %q\n", implementer) +
+		fmt.Sprintf("  reviewer: %q\n", reviewer)
+
+	setHostFile(fsys, ".brief.yaml", []byte(body))
+}
+
+// homeTreeOption builds the doctor.WithHomeTree option a roles/roles-skill
+// case's own home field selects: home(t) when set, else the zero Tree,
+// searched by nothing — the same "nothing here" a real, empty home
+// directory would produce.
+func homeTreeOption(t *testing.T, home func(t *testing.T) agentfile.Tree) doctor.Option {
+	t.Helper()
+
+	return doctor.WithHomeTree(func() agentfile.Tree {
+		if home != nil {
+			return home(t)
+		}
+
+		return agentfile.Tree{}
+	})
+}
+
+// rolesCase is one row of Test_diagnose_classifies_roles: setup mutates
+// newHostFixtureFS's own bare baseline, home overrides WithHomeTree, and the
+// roles row must carry wantSeverity, with wantDetail a substring of Detail
+// and wantFix the exact Fix.
+type rolesCase struct {
+	name         string
+	setup        func(fsys fstest.MapFS, h host.Host)
+	home         func(t *testing.T) agentfile.Tree
+	wantSeverity doctor.Severity
+	wantDetail   string
+	wantFix      *string
+}
+
+// Test_diagnose_classifies_roles pins roles' own resolution rules (R7,
+// Rule 5): no config, or every binding empty, is SKIP "no roles bound"; an
+// unparseable config is SKIP naming why; a bound "brief:<name>" resolves
+// through the plugin agent file or a project ".claude/agents/<name>.md"
+// override; a bound bare "<name>" resolves through a project or injected
+// home agent file under ".claude/agents/" whose frontmatter "name:"
+// matches; any other "<plugin>:<name>" counts as bound but unverified; any
+// unbound or unresolved position is WARN, never ERROR; everything bound
+// and resolved is OK. Test_diagnose_roles_resolves_by_frontmatter_name
+// covers the frontmatter rule's own nested-layout, shadowing, duplicate
+// and user-level cases; this test's own bare-name fixtures stay flat,
+// named after the bound role, with frontmatter added only so they still
+// resolve.
+func Test_diagnose_classifies_roles(t *testing.T) {
+	h := claudeCodeHost(t)
+	cases := []rolesCase{
+		{
+			name:         "no config anywhere",
+			setup:        func(fsys fstest.MapFS, _ host.Host) { delete(fsys, "repo/.brief.yaml") },
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no roles bound",
+			wantFix:      new(runInitWithAgents),
+		},
+		{
+			name:         "every binding is empty",
+			setup:        func(fstest.MapFS, host.Host) {},
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no roles bound",
+			wantFix:      new(runInitWithAgents),
+		},
+		{
+			name: "the config is unparseable",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostFile(fsys, ".brief.yaml", []byte("progress-heading: [not a scalar\n"))
+			},
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   ".brief.yaml did not parse",
+			wantFix:      nil,
+		},
+		{
+			name: "the planner role is unbound",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "", "brief:implementer", "brief:reviewer")
+				setPluginAgent(fsys, h, "implementer")
+				setPluginAgent(fsys, h, "reviewer")
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "planner unbound",
+			wantFix:      new("bind each role to an existing agent in .brief.yaml, or run 'brief init --with-agents'"),
+		},
+		{
+			name: "brief:reviewer is bound but its plugin agent file was removed",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "brief:reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "reviewer: brief:reviewer not found",
+			wantFix:      new("bind each role to an existing agent in .brief.yaml, or run 'brief init --with-agents'"),
+		},
+		{
+			name: "brief:reviewer's plugin file is gone but a project override exists",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "brief:reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setHostFile(fsys, ".claude/agents/reviewer.md", []byte("custom reviewer\n"))
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "a bare role name resolves via the project's own .claude/agents",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setAgentFrontmatter(fsys, ".claude/agents/my-reviewer.md", "my-reviewer")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "a bare role name resolves only via the injected home",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+			},
+			home:         homeAgentTree(".claude/agents/my-reviewer.md", agentBody("my-reviewer")),
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "a bare role name resolves nowhere",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "reviewer: my-reviewer not found",
+			wantFix:      new("bind each role to an existing agent in .brief.yaml, or run 'brief init --with-agents'"),
+		},
+		{
+			name: "a binding for a different plugin counts as bound but unverified",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "other:reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "not verified: reviewer",
+			wantFix:      nil,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fsys := newHostFixtureFS()
+			c.setup(fsys, h)
+
+			srv := doctor.NewServer(doctor.WithRootFS(fsys), homeTreeOption(t, c.home))
+			report := srv.Diagnose(t.Context(), fsAbs("repo"))
+
+			check := findCheck(t, report, "roles")
+			assert.Equal(t, c.wantSeverity, check.Severity)
+			assert.Contains(t, check.Detail, c.wantDetail)
+			assert.Equal(t, c.wantFix, check.Fix)
+		})
+	}
+}
+
+// rolesFrontmatterCase is one row of
+// Test_diagnose_roles_resolves_by_frontmatter_name: unlike rolesCase,
+// wantDetail is asserted for exact equality, since these cases pin the
+// literal wording of the user-level/not-verified OK suffixes rather than
+// just the presence of a substring.
+type rolesFrontmatterCase struct {
+	name         string
+	setup        func(fsys fstest.MapFS, h host.Host)
+	home         func(t *testing.T) agentfile.Tree
+	wantSeverity doctor.Severity
+	wantDetail   string
+	wantFix      *string
+}
+
+// rolesUnresolvedFix is the WARN fix roles reports whenever any binding is
+// unbound, unresolved or duplicated (host.go's own rolesCheck).
+const rolesUnresolvedFix = "bind each role to an existing agent in .brief.yaml, or " + runInitWithAgents
+
+// Test_diagnose_roles_resolves_by_frontmatter_name pins Rule 5: a bare
+// binding matches frontmatter "name:" anywhere under ".claude/agents/"
+// (nested layout, any filename), a project definition shadows a
+// same-named "~/.claude/agents" one, and a user-level-only resolution adds
+// "; user-level: <role>". Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions
+// pins the duplicate-definition WARN, via (*Server).projectTree.
+func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
+	h := claudeCodeHost(t)
+	cases := []rolesFrontmatterCase{
+		{
+			name: "a nested project agent resolves by frontmatter name, not filename",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "developer", "brief:reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "reviewer")
+				setAgentFrontmatter(fsys, ".claude/agents/developer/Agent.md", "developer")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "a filename match whose frontmatter name differs is not found",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setAgentFrontmatter(fsys, ".claude/agents/my-reviewer.md", "someone-else")
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "reviewer: my-reviewer not found",
+			wantFix:      new(rolesUnresolvedFix),
+		},
+		{
+			name: "a project definition shadows a same-named user definition, no suffix",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setAgentFrontmatter(fsys, ".claude/agents/team/y.md", "my-reviewer")
+			},
+			home:         homeAgentTree(".claude/agents/team/x.md", agentBody("my-reviewer")),
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound",
+			wantFix:      nil,
+		},
+		{
+			name: "control: the same user definition with no project file adds the user-level suffix",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+			},
+			home:         homeAgentTree(".claude/agents/team/x.md", agentBody("my-reviewer")),
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound; user-level: reviewer",
+			wantFix:      nil,
+		},
+		{
+			name: "user-level and not-verified suffixes follow RoleBindings order",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "my-planner", "brief:implementer", "other:reviewer")
+				setPluginAgent(fsys, h, "implementer")
+			},
+			home:         homeAgentTree(".claude/agents/my-planner.md", agentBody("my-planner")),
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer, reviewer bound; user-level: planner; not verified: reviewer",
+			wantFix:      nil,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fsys := newHostFixtureFS()
+			c.setup(fsys, h)
+
+			srv := doctor.NewServer(doctor.WithRootFS(fsys), homeTreeOption(t, c.home))
+			report := srv.Diagnose(t.Context(), fsAbs("repo"))
+
+			check := findCheck(t, report, "roles")
+			assert.Equal(t, c.wantSeverity, check.Severity)
+			assert.Equal(t, c.wantDetail, check.Detail)
+			assert.Equal(t, c.wantFix, check.Fix)
+		})
+	}
+}
+
+// rolesSkillMissingFix is the WARN fix every roles-skill lacking-role case
+// shares.
+const rolesSkillMissingFix = `add "brief-workflow" to the "skills:" list of each agent named, or run 'brief init --edit-agents' for those in the repository`
+
+// blockSkillsFragment, flowSkillsFragment and scalarSkillsFragment are the
+// literal "skills:" YAML fragments a rolesSkillCase setup embeds in an
+// agent file's own frontmatter, each ending in its own trailing newline so
+// a caller can simply concatenate.
+const (
+	blockSkillsFragment  = "skills:\n  - brief-workflow\n"
+	flowSkillsFragment   = "skills: [brief-workflow]\n"
+	scalarSkillsFragment = "skills: brief-workflow\n"
+	omitClaudeMdTrue     = "omitClaudeMd: true\n"
+	omitClaudeMdLoose    = "omitClaudeMd: yes please\n"
+)
+
+// agentBody renders a minimal agent file's own frontmatter: "name:" plus
+// whatever literal "skills:"/"omitClaudeMd:" fragments the caller passes
+// (each already newline-terminated, or "" to omit the key entirely).
+func agentBody(name string, fragments ...string) string {
+	parts := append([]string{"---\nname: " + name + "\n"}, fragments...)
+	parts = append(parts, "---\n\nbody\n")
+
+	return strings.Join(parts, "")
+}
+
+// rolesSkillCase is one row of Test_diagnose_classifies_roles_skill: setup
+// mutates newHostFixtureFS's own bare baseline, home overrides WithHomeTree,
+// and the roles-skill row must carry wantSeverity, wantDetail (exact) and
+// wantFix (exact). wantRolesDetail, when non-empty, also asserts the
+// sibling "roles" row's own exact Detail — the scalar-skills guard's own
+// control, proving a loose decode never drops the agent out of Rule 5
+// resolution.
+type rolesSkillCase struct {
+	name            string
+	setup           func(fsys fstest.MapFS, h host.Host)
+	home            func(t *testing.T) agentfile.Tree
+	noConfig        bool
+	wantSeverity    doctor.Severity
+	wantDetail      string
+	wantFix         *string
+	wantRolesDetail string
+}
+
+// Test_diagnose_classifies_roles_skill pins roles-skill's own resolution
+// rules (S05): only the planner and implementer bindings are considered
+// (product verdict item 1 — reviewer is excluded); no config, an
+// unparseable config, or neither role bound and resolved is SKIP "no
+// bound planner or implementer brief can check", Fix nil; any resolved
+// role whose agent does not preload "brief-workflow" is WARN, one entry
+// per lacking role joined "; ", in planner-then-implementer order, with
+// an omitClaudeMd suffix only on an entry whose own agent sets it;
+// otherwise OK, naming only the roles actually checked (resolved, not
+// bound to another plugin) — "planner, implementer preload brief-workflow"
+// when both, "<role> preloads brief-workflow" when one — plus "; not
+// verified: <role>" per role bound to another plugin: a role the row
+// never verified never appears in the leading clause, whether it is
+// unresolved (the roles row already WARNs it) or bound elsewhere.
+func Test_diagnose_classifies_roles_skill(t *testing.T) {
+	cases := []rolesSkillCase{
+		{
+			name:         "no config anywhere",
+			setup:        func(fsys fstest.MapFS, _ host.Host) { delete(fsys, "repo/.brief.yaml") },
+			noConfig:     true,
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no bound planner or implementer brief can check",
+			wantFix:      nil,
+		},
+		{
+			name: "the config is unparseable",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setHostFile(fsys, ".brief.yaml", []byte("progress-heading: [not a scalar\n"))
+			},
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no bound planner or implementer brief can check",
+			wantFix:      nil,
+		},
+		{
+			name: "planner and implementer unbound, reviewer bound",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "", "", "brief:reviewer")
+				setPluginAgent(fsys, h, "reviewer")
+			},
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no bound planner or implementer brief can check",
+			wantFix:      nil,
+		},
+		{
+			name: "planner and implementer bound but not found",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "my-planner", "my-implementer", "")
+			},
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no bound planner or implementer brief can check",
+			wantFix:      nil,
+		},
+		{
+			name: "planner and implementer are both other-plugin bindings",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "acme:planner", "acme:implementer", "")
+			},
+			wantSeverity: doctor.SeveritySkip,
+			wantDetail:   "no bound planner or implementer brief can check",
+			wantFix:      nil,
+		},
+		{
+			name: "bare names, block-list skills",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "my-planner", "my-implementer", "")
+				setHostFile(fsys, ".claude/agents/my-planner.md", []byte(agentBody("my-planner", blockSkillsFragment)))
+				setHostFile(fsys, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", blockSkillsFragment)))
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow",
+			wantFix:      nil,
+		},
+		{
+			name: "bare names, flow-list skills",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "my-planner", "my-implementer", "")
+				setHostFile(fsys, ".claude/agents/my-planner.md", []byte(agentBody("my-planner", flowSkillsFragment)))
+				setHostFile(fsys, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", flowSkillsFragment)))
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow",
+			wantFix:      nil,
+		},
+		{
+			name: "brief:planner/brief:implementer against rendered plugin agents",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow",
+			wantFix:      nil,
+		},
+		{
+			name: "brief:implementer overridden by a project file with no frontmatter",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setHostFile(fsys, ".claude/agents/implementer.md", []byte("not a claude code agent file\n"))
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "implementer: brief:implementer does not preload brief-workflow",
+			wantFix:      new(rolesSkillMissingFix),
+		},
+	}
+
+	runRolesSkillCases(t, cases)
+}
+
+// Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases
+// continues Test_diagnose_classifies_roles_skill's own table — split into a
+// second function only to keep golangci-lint's maintidx metric, driven by
+// the table literal's own size, under threshold; the two functions pin one
+// rule set (roles-skill's own resolution rules, S05) and share
+// runRolesSkillCases. This half covers the "not verified" suffix (both role
+// names — a hardcoded role literal in rolesSkillOKText must fail here even
+// if it passes the sibling "planner" case), the omitClaudeMd suffix, the
+// reviewer exclusion, user-level resolution, the loose-decode and
+// duplicate-definition guards, and a lone unbound role.
+func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testing.T) {
+	cases := []rolesSkillCase{
+		{
+			name: "planner resolved with the skill, implementer is an other-plugin binding",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "acme:impl", "")
+				setPluginAgent(fsys, h, "planner")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner preloads brief-workflow; not verified: implementer",
+			wantFix:      nil,
+		},
+		{
+			// Mirrors the "planner preloads…; not verified: implementer"
+			// case above with the roles swapped, so the singular branch of
+			// rolesSkillOKText is pinned against both role names, not just
+			// "planner" — a hardcoded "planner" literal would still pass
+			// the sibling case above but fail here.
+			name: "implementer resolved with the skill, planner is an other-plugin binding",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "acme:planner", "brief:implementer", "")
+				setPluginAgent(fsys, h, "implementer")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "implementer preloads brief-workflow; not verified: planner",
+			wantFix:      nil,
+		},
+		{
+			name: "planner and implementer both lack the skill, implementer omits CLAUDE.md",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "my-planner", "my-implementer", "")
+				setHostFile(fsys, ".claude/agents/my-planner.md", []byte(agentBody("my-planner")))
+				setHostFile(fsys, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", omitClaudeMdTrue)))
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail: "planner: my-planner does not preload brief-workflow; " +
+				"implementer: my-implementer does not preload brief-workflow and omits CLAUDE.md, so it never sees brief's instructions",
+			wantFix: new(rolesSkillMissingFix),
+		},
+		{
+			name: "a non-bool omitClaudeMd never adds the suffix",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "", "my-implementer", "")
+				setHostFile(fsys, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", omitClaudeMdLoose)))
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "implementer: my-implementer does not preload brief-workflow",
+			wantFix:      new(rolesSkillMissingFix),
+		},
+		{
+			name: "reviewer lacks the skill but is excluded",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "brief:implementer", "my-reviewer")
+				setPluginAgent(fsys, h, "planner")
+				setPluginAgent(fsys, h, "implementer")
+				setHostFile(fsys, ".claude/agents/my-reviewer.md", []byte(agentBody("my-reviewer")))
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner, implementer preload brief-workflow",
+			wantFix:      nil,
+		},
+		{
+			name: "a user-level-only planner carries the skill",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "my-planner", "", "")
+			},
+			home:         homeAgentTree(".claude/agents/my-planner.md", agentBody("my-planner", blockSkillsFragment)),
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner preloads brief-workflow",
+			wantFix:      nil,
+		},
+		{
+			// Control for the loose-decode contract: a scalar "skills:"
+			// value must not fail findIn's own whole-file decode — if it
+			// did, the implementer would resolve as "not found" and the
+			// roles row's own detail would gain an "implementer: … not
+			// found" problem instead of staying silent about it.
+			name: "scalar skills guards the loose decode",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "", "my-implementer", "")
+				setHostFile(fsys, ".claude/agents/my-implementer.md", []byte(agentBody("my-implementer", scalarSkillsFragment)))
+			},
+			wantSeverity:    doctor.SeverityWarn,
+			wantDetail:      "implementer: my-implementer does not preload brief-workflow",
+			wantFix:         new(rolesSkillMissingFix),
+			wantRolesDetail: "planner unbound; reviewer unbound",
+		},
+		{
+			// Duplicate guard: two project definitions share the same
+			// frontmatter name, sorted second (path order) lacks the
+			// skill — the WARN must appear once for implementer, not
+			// twice.
+			name: "a duplicate definition WARNs once",
+			setup: func(fsys fstest.MapFS, _ host.Host) {
+				setRolesConfig(fsys, "", "dup-implementer", "")
+				setHostFile(fsys, ".claude/agents/aaa.md", []byte(agentBody("dup-implementer", blockSkillsFragment)))
+				setHostFile(fsys, ".claude/agents/zzz.md", []byte(agentBody("dup-implementer")))
+			},
+			wantSeverity: doctor.SeverityWarn,
+			wantDetail:   "implementer: dup-implementer does not preload brief-workflow",
+			wantFix:      new(rolesSkillMissingFix),
+		},
+		{
+			name: "planner resolved with the skill, implementer unbound",
+			setup: func(fsys fstest.MapFS, h host.Host) {
+				setRolesConfig(fsys, "brief:planner", "", "")
+				setPluginAgent(fsys, h, "planner")
+			},
+			wantSeverity: doctor.SeverityOK,
+			wantDetail:   "planner preloads brief-workflow",
+			wantFix:      nil,
+		},
+	}
+
+	runRolesSkillCases(t, cases)
+}
+
+// runRolesSkillCases runs each rolesSkillCase in cases as its own subtest,
+// diagnosing a fresh newHostFixtureFS and asserting roles-skill's own row
+// (and, where wantRolesDetail is set, the sibling roles row) against it —
+// the execution loop Test_diagnose_classifies_roles_skill and
+// Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases both
+// share.
+func runRolesSkillCases(t *testing.T, cases []rolesSkillCase) {
+	t.Helper()
+
+	h := claudeCodeHost(t)
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fsys := newHostFixtureFS()
+			c.setup(fsys, h)
+
+			srv := doctor.NewServer(doctor.WithRootFS(fsys), homeTreeOption(t, c.home))
+			report := srv.Diagnose(t.Context(), fsAbs("repo"))
+
+			check := findCheck(t, report, "roles-skill")
+			assert.Equal(t, c.wantSeverity, check.Severity)
+			assert.Equal(t, c.wantDetail, check.Detail)
+			assert.Equal(t, c.wantFix, check.Fix)
+
+			if c.noConfig {
+				assert.Empty(t, check.Path)
+			} else {
+				assert.Equal(t, fsAbs("repo", ".brief.yaml"), check.Path)
+			}
+
+			if c.wantRolesDetail != "" {
+				roles := findCheck(t, report, "roles")
+				assert.Equal(t, c.wantRolesDetail, roles.Detail)
+			}
+		})
+	}
 }
