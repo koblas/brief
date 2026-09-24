@@ -120,10 +120,10 @@ const devVersion = "(devel)"
 
 // rootFS returns doctor's own production root FS: the "/"-rooted
 // namespace config.LocateWithinFS, config.InspectFS and repo.RootFS
-// already read through for their own OS adapters (Locate/Inspect, Root).
-// Doctor calls only those exported *FS entry points, never fs.Stat/fs.Open
-// directly, so — unlike config and repo — it needs no fsName mapping of
-// its own: each already applies its own internally.
+// already read through for their own OS adapters (Locate/Inspect, Root),
+// and the same namespace host.go's own probes (probeIntegrationFile,
+// scanSnippetCandidateStates, blockingDir) and projectTree read through
+// directly, via fsName's own relative mapping (host.go's own copy).
 func rootFS() fs.FS {
 	return os.DirFS("/")
 }
@@ -308,6 +308,8 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 		absWd = wd
 	}
 
+	fsys := s.rootFS()
+
 	nearest, shadowed, locateErr := s.locateInRepo(absWd)
 
 	root := absWd
@@ -353,20 +355,20 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 		}
 	}
 
-	checks = append(checks, checkEnvGit(s.rootFS(), absWd))
+	checks = append(checks, checkEnvGit(fsys, absWd))
 
 	h, _ := host.Lookup(host.ClaudeCode)
-	snippetStates := scanSnippetCandidateStates(root, h)
-	filesInstalled := anyIntegrationFilePresent(root, h)
+	snippetStates := scanSnippetCandidateStates(fsys, root, h)
+	filesInstalled := anyIntegrationFilePresent(fsys, root, h)
 	integrationInstalled := filesInstalled || snippetBlockFound(snippetStates)
 
 	checks = append(checks,
 		s.checkEnvPath(integrationInstalled),
-		hostPluginCheck(absWd, root, h, filesInstalled),
-		hostHookCheck(absWd, root, h, filesInstalled),
-		hostSkillCheck(absWd, root, h, filesInstalled),
-		hostSnippetCheck(absWd, root, snippetStates, dir, dirKnown),
-		hostAgentsCheck(absWd, root, h),
+		hostPluginCheck(fsys, absWd, root, h, filesInstalled),
+		hostHookCheck(fsys, absWd, root, h, filesInstalled),
+		hostSkillCheck(fsys, absWd, root, h, filesInstalled),
+		hostSnippetCheck(fsys, absWd, root, snippetStates, dir, dirKnown),
+		hostAgentsCheck(fsys, absWd, root, h),
 		rolesCheck,
 		rolesSkillCheck,
 	)

@@ -32,28 +32,41 @@
 // binary's own path, its version, and the home directory a bare role
 // binding resolves against, for a test.
 //
-// Two families of reads are strictly OS-subject and stay that way: the
+// A narrow set of reads is strictly OS-subject and stays that way: the
 // feature root's own existence, directory-ness, readability and
 // writability (root-dir, including its create-and-remove writable.Probe),
-// and the six host-integration files' own permission-error classification
-// (classifyProbeError), env-path's binary identity check (os.SameFile,
-// filepath.EvalSymlinks) and version read (debug/buildinfo.ReadFile), and
-// the home directory lookup (os.UserHomeDir) — none of these can be
-// expressed against an fs.FS without either losing a real permission
-// error's own shape or fabricating one a real filesystem would never
-// produce.
+// env-path's binary identity check (os.SameFile, filepath.EvalSymlinks)
+// and version read (debug/buildinfo.ReadFile), and the home directory
+// lookup (os.UserHomeDir). One further slice is OS-subject only in its
+// *error shape*, not its classification logic: an ancestor path component
+// that is itself a regular file reports ENOTDIR on a real filesystem, the
+// one shape classifyProbeError's own ENOTDIR arm exists to recognize, but
+// an equivalent fstest.MapFS fixture reports plain fs.ErrNotExist for the
+// same shape instead (confirmed against the stdlib directly) — so that one
+// arm, and every chmod-driven permission-denied case alongside it, stays
+// on real disk in host_disk_test.go even though the production code path
+// it exercises is fs.FS-generic. None of these can be expressed against an
+// arbitrary fs.FS without either losing a real permission error's own
+// shape or fabricating one a real filesystem would never produce.
 //
-// The config family (config-file, config-parse, config-values,
-// config-shadow) and env-git instead run through an fs.FS root
-// (*Server).rootFS, defaulting to os.DirFS("/") and passed straight to
-// config.LocateWithinFS, config.InspectFS and repo.RootFS — each already
-// maps an absolute path onto its own root FS internally (fsName), so
-// doctor calls only those exported *FS entry points and keeps no mapping
-// of its own. Rule 5's own user-scope role resolution (roles,
-// roles-skill) runs through agentfile.ResolveBindingIn over an
-// agentfile.Tree — DirTree(root) for the project side, (*Server).userTree()
-// (DirTree(homeDir()) by default) for the user side — so a test can
-// substitute an in-memory Tree without touching disk. Both seams are
-// exposed to this package's own tests only, via export_test.go
-// (WithRootFS, WithHomeTree); production always builds the OS adapter.
+// Every other read in this package — the config family (config-file,
+// config-parse, config-values, config-shadow), env-git, and the six
+// host-integration rows' own probes (probeIntegrationFile,
+// scanSnippetCandidateStates, blockingDir, and (*Server).projectTree for
+// roles' own project-scope tree) — runs through one fs.FS root,
+// (*Server).rootFS, defaulting to os.DirFS("/"). config.LocateWithinFS,
+// config.InspectFS and repo.RootFS each map an absolute path onto that
+// root internally (their own fsName); host.go keeps an identical copy of
+// that mapping for the reads it makes directly (fs.Lstat, fs.ReadFile,
+// fs.Sub), the same duplication internal/platform/config and
+// internal/platform/repo already carry between each other rather than
+// inverting the dependency for an eight-line helper. Rule 5's own
+// user-scope role resolution (roles, roles-skill) runs through
+// agentfile.ResolveBindingIn over an agentfile.Tree — projectTree(root)
+// (fs.Sub of rootFS(), Dir set to root) for the project side,
+// (*Server).userTree() (DirTree(homeDir()) by default) for the user side —
+// so a test can substitute an in-memory Tree, or the whole root fs.FS,
+// without touching disk. Both seams are exposed to this package's own
+// tests only, via export_test.go (WithRootFS, WithHomeTree); production
+// always builds the OS adapter.
 package doctor
