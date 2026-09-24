@@ -1,7 +1,6 @@
 package setup_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -16,8 +15,9 @@ import (
 // once installed, a second Init against the same repository reports both
 // artifacts ActionUnchanged and writes nothing further.
 func Test_a_second_run_reports_every_artifact_unchanged(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 	require.NoError(t, err)
 
@@ -36,11 +36,12 @@ func Test_a_second_run_reports_every_artifact_unchanged(t *testing.T) {
 // (ActionKept) and its own feature-directory value, not Default()'s,
 // governs where the feature root is planned.
 func Test_a_valid_existing_config_is_kept_and_its_own_feature_directory_wins(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
 	original := []byte("feature-directory: specs\n")
-	require.NoError(t, os.WriteFile(configPath, original, 0o600))
-	srv := newServer(t)
+	require.NoError(t, mem.WriteFile(memKey(configPath), original, 0o600))
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 
@@ -50,9 +51,7 @@ func Test_a_valid_existing_config_is_kept_and_its_own_feature_directory_wins(t *
 	assert.Equal(t, setup.Artifact{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated}, res.Artifacts[1])
 	assert.Equal(t, []string{featureRoot}, res.Created)
 
-	body, readErr := os.ReadFile(configPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, original, body)
+	assert.Equal(t, original, mem.Snapshot()[memKey(configPath)].Data)
 }
 
 // Test_an_unparseable_existing_config_refuses_and_changes_nothing pins R3's
@@ -60,11 +59,13 @@ func Test_a_valid_existing_config_is_kept_and_its_own_feature_directory_wins(t *
 // returns a *setup.RefusalError naming the config path, and the tree is
 // byte-identical to before the call — no feature root, no rewrite.
 func Test_an_unparseable_existing_config_refuses_and_changes_nothing(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
 	original := []byte("feature-directory: [unterminated\n")
-	require.NoError(t, os.WriteFile(configPath, original, 0o600))
-	srv := newServer(t)
+	require.NoError(t, mem.WriteFile(memKey(configPath), original, 0o600))
+	before := mem.Snapshot()
+	srv := newMemServer(mem)
 
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 
@@ -72,13 +73,7 @@ func Test_an_unparseable_existing_config_refuses_and_changes_nothing(t *testing.
 	require.ErrorAs(t, err, &refusal)
 	assert.Equal(t, configPath, refusal.Path)
 
-	entries, readErr := os.ReadDir(wd)
-	require.NoError(t, readErr)
-	assert.Len(t, entries, 1)
-
-	body, readErr := os.ReadFile(configPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, original, body)
+	assert.Equal(t, before, mem.Snapshot())
 }
 
 // Test_an_invalid_config_value_refuses_naming_the_key_and_value pins the
@@ -86,10 +81,11 @@ func Test_an_unparseable_existing_config_refuses_and_changes_nothing(t *testing.
 // *config.ValueError via errors.As, naming the offending key and value
 // exactly as violations() decoded them.
 func Test_an_invalid_config_value_refuses_naming_the_key_and_value(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte("handoff-cap-lines: 0\n"), 0o600))
-	srv := newServer(t)
+	require.NoError(t, mem.WriteFile(memKey(configPath), []byte("handoff-cap-lines: 0\n"), 0o600))
+	srv := newMemServer(mem)
 
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 
@@ -107,19 +103,18 @@ func Test_an_invalid_config_value_refuses_naming_the_key_and_value(t *testing.T)
 // fixture Test_an_invalid_config_value_refuses_naming_the_key_and_value
 // refuses on, --force instead rewrites to artifact.ConfigFile() verbatim.
 func Test_force_over_an_invalid_config_rewrites_it_from_defaults(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte("handoff-cap-lines: 0\n"), 0o600))
-	srv := newServer(t)
+	require.NoError(t, mem.WriteFile(memKey(configPath), []byte("handoff-cap-lines: 0\n"), 0o600))
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, Force: true})
 
 	require.NoError(t, err)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindConfig, Path: configPath, Action: setup.ActionCreated, Detail: "rewritten from defaults"}, res.Artifacts[0])
 
-	body, readErr := os.ReadFile(configPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, artifact.ConfigFile(), body)
+	assert.Equal(t, artifact.ConfigFile(), mem.Snapshot()[memKey(configPath)].Data)
 }
 
 // Test_force_over_the_current_render_reports_unchanged pins --force's own
@@ -128,10 +123,11 @@ func Test_force_over_an_invalid_config_rewrites_it_from_defaults(t *testing.T) {
 // alongside it in this fixture — proving the config artifact alone stayed
 // untouched needs it excluded from Created, not an empty Created.
 func Test_force_over_the_current_render_reports_unchanged(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
-	require.NoError(t, os.WriteFile(configPath, artifact.ConfigFile(), 0o600))
-	srv := newServer(t)
+	require.NoError(t, mem.WriteFile(memKey(configPath), artifact.ConfigFile(), 0o600))
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, Force: true})
 
@@ -144,18 +140,18 @@ func Test_force_over_the_current_render_reports_unchanged(t *testing.T) {
 // plan-then-apply: the feature-root refusal is decided before the config
 // file — a fresh install in this fixture — is ever written.
 func Test_a_feature_root_that_is_a_file_refuses_before_writing_the_config(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	featureRoot := filepath.Join(wd, "docs", "specifications")
-	require.NoError(t, os.MkdirAll(filepath.Dir(featureRoot), 0o755))
-	require.NoError(t, os.WriteFile(featureRoot, []byte("not a directory"), 0o600))
-	srv := newServer(t)
+	require.NoError(t, mem.MkdirAll(memKey(filepath.Dir(featureRoot)), 0o755))
+	require.NoError(t, mem.WriteFile(memKey(featureRoot), []byte("not a directory"), 0o600))
+	srv := newMemServer(mem)
 
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone})
 
 	require.ErrorIs(t, err, setup.ErrNotADirectory)
 
-	_, statErr := os.Stat(filepath.Join(wd, ".brief.yaml"))
-	assert.True(t, os.IsNotExist(statErr))
+	assert.NotContains(t, mem.Snapshot(), memKey(filepath.Join(wd, ".brief.yaml")))
 }
 
 // Test_force_with_the_config_path_as_a_directory_reports_a_partial_write
@@ -167,20 +163,22 @@ func Test_a_feature_root_that_is_a_file_refuses_before_writing_the_config(t *tes
 // zero value, so a caller can still report what actually landed: the
 // feature root's own artifact and Created entry, both present.
 func Test_force_with_the_config_path_as_a_directory_reports_a_partial_write(t *testing.T) {
-	wd := t.TempDir()
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
 	configPath := filepath.Join(wd, ".brief.yaml")
-	require.NoError(t, os.Mkdir(configPath, 0o755))
-	srv := newServer(t)
+	require.NoError(t, mem.Mkdir(memKey(configPath), 0o755))
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, Force: true})
 
 	require.ErrorIs(t, err, setup.ErrPartialWrite)
 
-	info, statErr := os.Stat(filepath.Join(wd, "docs", "specifications"))
-	require.NoError(t, statErr)
-	assert.True(t, info.IsDir())
-
+	snap := mem.Snapshot()
 	featureRoot := filepath.Join(wd, "docs", "specifications")
+	info, ok := snap[memKey(featureRoot)]
+	require.True(t, ok)
+	assert.True(t, info.Mode.IsDir())
+
 	assert.Contains(t, res.Created, featureRoot)
 	require.Len(t, res.Artifacts, 2)
 	assert.Equal(t, setup.Artifact{Kind: setup.KindFeatureRoot, Path: featureRoot, Action: setup.ActionCreated}, res.Artifacts[1])
@@ -188,11 +186,12 @@ func Test_force_with_the_config_path_as_a_directory_reports_a_partial_write(t *t
 
 // Test_dry_run_returns_the_plan_and_writes_nothing pins R9: DryRun reports
 // the identical plan a real run would apply — both artifacts ActionCreated
-// in this fresh-repo fixture — and the working directory carries no new
-// entry afterward.
+// in this fresh-repo fixture — and mem carries no new entry afterward.
 func Test_dry_run_returns_the_plan_and_writes_nothing(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	before := mem.Snapshot()
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostNone, DryRun: true})
 
@@ -203,17 +202,16 @@ func Test_dry_run_returns_the_plan_and_writes_nothing(t *testing.T) {
 	assert.Equal(t, setup.ActionCreated, res.Artifacts[0].Action)
 	assert.Equal(t, setup.ActionCreated, res.Artifacts[1].Action)
 
-	entries, readErr := os.ReadDir(wd)
-	require.NoError(t, readErr)
-	assert.Empty(t, entries)
+	assert.Equal(t, before, mem.Snapshot())
 }
 
 // Test_an_unknown_host_reports_ErrUnknownHost pins the usage-error branch
 // cli classifies before any refusal rendering: a host outside Hosts()
 // never reaches planning at all.
 func Test_an_unknown_host_reports_ErrUnknownHost(t *testing.T) {
-	wd := t.TempDir()
-	srv := newServer(t)
+	wd := fsAbs("repo")
+	mem := newVirtualMem(wd)
+	srv := newMemServer(mem)
 
 	_, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: "bogus"})
 
@@ -225,11 +223,12 @@ func Test_an_unknown_host_reports_ErrUnknownHost(t *testing.T) {
 // walking up from wd decides the root every path is planned against, not
 // wd itself.
 func Test_operates_in_the_directory_of_a_config_found_in_an_ancestor(t *testing.T) {
-	parent := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(parent, ".brief.yaml"), []byte("feature-directory: specs\n"), 0o600))
+	parent := fsAbs("repo")
+	mem := newVirtualMem(parent)
+	require.NoError(t, mem.WriteFile(memKey(parent)+"/.brief.yaml", []byte("feature-directory: specs\n"), 0o600))
+	require.NoError(t, mem.Mkdir(memKey(parent)+"/child", 0o755))
 	child := filepath.Join(parent, "child")
-	require.NoError(t, os.Mkdir(child, 0o755))
-	srv := newServer(t)
+	srv := newMemServer(mem)
 
 	res, err := srv.Init(t.Context(), child, setup.InitRequest{Host: setup.HostNone})
 
