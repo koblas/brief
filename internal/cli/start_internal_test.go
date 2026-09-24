@@ -80,6 +80,28 @@ func Test_start_refuses_a_specification_with_no_progress_heading_mem(t *testing.
 	assert.Contains(t, lines[0], "## BDD Acceptance Progress")
 }
 
+// Test_start_refuses_a_feature_with_no_specification_file_mem is the
+// missing-specification half of assemble's own specFault: a feature
+// directory that exists but carries no specification.md at all refuses,
+// naming that file — the ErrNotExist branch specFault takes before ever
+// reaching the no-progress-heading branch
+// Test_start_refuses_a_specification_with_no_progress_heading_mem covers.
+func Test_start_refuses_a_feature_with_no_specification_file_mem(t *testing.T) {
+	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
+	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"), featureDir)
+	tree.file(filepath.Join(featureDir, "STATE.md"), "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+
+	stdout, stderr, err := runStartMem(t, tree, []string{"start", "demo"})
+
+	assert.Equal(t, 1, ExitCode(err))
+	assert.Empty(t, stdout)
+
+	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], filepath.Join("docs", "specifications", "demo", "specification.md"))
+	assert.Contains(t, lines[0], "specification.md not found")
+}
+
 func Test_start_names_an_absent_acceptance_heading_and_still_prints_the_brief_mem(t *testing.T) {
 	baselineStdout, _, baselineErr := runStartMem(t, newMemStartFixture("open"), []string{"start", "demo"})
 	require.NoError(t, baselineErr)
