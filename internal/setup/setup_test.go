@@ -28,10 +28,11 @@ func newServer(t *testing.T) *setup.Server {
 // Mem-backed rather than disk. This HostNone run has only two rows, so it
 // is not the package's own full-row-order pin (R11's whole order — plugin
 // files, skill, agents, bound-agent, snippet, config — needs a
-// HostClaudeCode --with-agents run instead; internal/cli's own
-// Test_init_for_claude_code_installs_the_plugin_and_says_where_to_start_claude_code
-// already pins the claude-code order end to end via whole stdout, on real
-// disk).
+// HostClaudeCode --with-agents run instead; agents_test.go's own
+// Test_init_with_agents_writes_three_agents_and_a_config_binding_them is
+// that pin, and plugin_test.go's own
+// Test_init_for_claude_code_writes_the_plugin_after_the_feature_root_and_before_the_config
+// pins the plugin files' own sub-order through res.Created).
 func Test_init_creates_the_config_and_feature_root_in_a_fresh_repo(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
