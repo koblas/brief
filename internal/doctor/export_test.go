@@ -7,11 +7,13 @@ import (
 )
 
 // WithRootFS overrides the production root FS (os.DirFS("/")) that
-// (*Server).locateInRepo, (*Server).inspect and checkEnvGit read through —
-// exported only so this package's own external tests (doctor_test,
-// host_test) can substitute a fstest.MapFS. export_test.go is excluded
-// from production builds, so this is never part of the public Option
-// surface WithHomeDir and its siblings are.
+// (*Server).locateInRepo, (*Server).inspect, (*Server).projectTree,
+// checkEnvGit and host.go's own probes (probeIntegrationFile,
+// scanSnippetCandidateStates, blockingDir) read through — exported only so
+// this package's own external tests (doctor_test, host_test) can
+// substitute a fstest.MapFS. export_test.go is excluded from production
+// builds, so this is never part of the public Option surface WithHomeDir
+// and its siblings are.
 func WithRootFS(fsys fs.FS) Option {
 	return func(s *Server) { s.rootFS = func() fs.FS { return fsys } }
 }

@@ -5,13 +5,19 @@ package doctor_test
 // shape classifyProbeError has to discriminate — a chmod'd file or
 // directory (present-but-unreadable, at both the Lstat and the ReadFile
 // call), or an ancestor path component that is itself a regular file
-// (ENOTDIR) — or a roles resolution scenario asserted for exact wording
-// (Test_diagnose_classifies_roles, Test_diagnose_roles_resolves_by_frontmatter_name,
-// Test_diagnose_classifies_roles_skill and its own duplicate-cases
-// sibling). host_test.go holds every case whose own subject is the
+// (ENOTDIR). host_test.go holds every case whose own subject is the
 // classification rule itself (missing, current, older, edited,
 // not-a-regular-file, marker states, and the roles duplicate-definition
 // WARN), run against an in-memory fstest.MapFS instead.
+//
+// The roles and roles-skill tables in this file
+// (Test_diagnose_classifies_roles, Test_diagnose_roles_resolves_by_frontmatter_name,
+// Test_diagnose_classifies_roles_skill and its own duplicate-cases
+// sibling) are not themselves OS-subject — nothing in their own subject
+// needs a real permission error or ENOTDIR — and (*Server).projectTree
+// gives their project-side tree the same fs.FS seam WithRootFS already
+// exercises. They stay on disk because converting them was outside this
+// change's own scope, not because they resist it.
 
 import (
 	"fmt"

@@ -22,7 +22,9 @@ package doctor
 //     OriginOlder arm is reachable only by calling hostSkillRow directly
 //     with a synthetic integrationFileState carrying artifact.OriginOlder,
 //     mirroring originRow's own case above. Every other arm is covered
-//     black-box, in host_test.go's Test_diagnose_classifies_host_skill.
+//     black-box: host_test.go's Test_diagnose_classifies_host_skill covers
+//     the MapFS-reachable arms, host_disk_test.go's
+//     Test_diagnose_classifies_host_skill_unreadable the chmod'd one.
 //   - nonRegularKind's own default (neither-symlink-nor-directory) arm needs
 //     a mode a black-box fixture cannot portably construct: os.Symlink and
 //     os.Mkdir work on every platform this project targets, but a named
