@@ -678,19 +678,15 @@ func hostSnippetCheck(wd, root string, states []snippetCandidateState, dir strin
 	}
 }
 
-// resolveRoleBinding resolves home (R7) and classifies value (a
-// config.RoleBindings field) against root via agentfile.ResolveBinding —
-// the binding-classification logic setup's own missing-skill report reuses
+// resolveRoleBinding classifies value (a config.RoleBindings field) against
+// root and s.userTree() (R7) via agentfile.ResolveBindingIn — the
+// binding-classification logic setup's own missing-skill report reuses
 // (agentfile.Binding, Rule 5). doctor stays the caller here rather than
 // agentfile itself resolving home, since only doctor carries s.homeDir's
-// own injectable seam (setup.WithHomeDir mirrors it independently).
+// (and, for a test, s.homeTree's) own injectable seam (setup.WithHomeDir
+// mirrors the homeDir one independently).
 func (s *Server) resolveRoleBinding(root, value string) agentfile.Binding {
-	home, err := s.homeDir()
-	if err != nil {
-		home = ""
-	}
-
-	return agentfile.ResolveBinding(root, home, value)
+	return agentfile.ResolveBindingIn(agentfile.DirTree(root), s.userTree(), value)
 }
 
 // roleBinding names one role position alongside its own configured value,

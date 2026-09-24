@@ -6,13 +6,33 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/koblas/brief/internal/doctor"
+	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/platform/artifact"
 	"github.com/koblas/brief/internal/platform/host"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// homeAgentTree returns a doctor test's own home field: an agentfile.Tree
+// over an in-memory fstest.MapFS holding one agent file at relPath (rooted
+// the way agentfile.DirTree roots a real "~/.claude/agents" directory, so
+// relPath is always ".claude/agents/…") whose contents are body — the
+// MapFS-backed twin of writeAgentFrontmatter/writeHostFile for the user
+// scope, so Rule 5's own user-side resolution is pinned without touching
+// disk.
+func homeAgentTree(relPath, body string) func(t *testing.T) agentfile.Tree {
+	return func(t *testing.T) agentfile.Tree {
+		t.Helper()
+
+		return agentfile.Tree{
+			Dir: fsAbs("home"),
+			FS:  fstest.MapFS{relPath: &fstest.MapFile{Data: []byte(body)}},
+		}
+	}
+}
 
 // newHostFixture builds a wd with a valid ".brief.yaml" (unbound roles) and
 // its default feature root, but no Claude Code integration installed — the
@@ -1404,13 +1424,14 @@ func writePluginAgent(t *testing.T, wd, role string) {
 }
 
 // rolesCase is one row of Test_diagnose_classifies_roles: setup mutates
-// newHostFixture's own bare baseline, home overrides WithHomeDir (an empty
-// temp dir when nil), and the roles row must carry wantSeverity, with
-// wantDetail a substring of Detail and wantFix the exact Fix.
+// newHostFixture's own bare baseline, home overrides WithHomeTree (the
+// zero Tree, searched by nothing, when nil), and the roles row must carry
+// wantSeverity, with wantDetail a substring of Detail and wantFix the
+// exact Fix.
 type rolesCase struct {
 	name         string
 	setup        func(t *testing.T, wd string)
-	home         func(t *testing.T) string
+	home         func(t *testing.T) agentfile.Tree
 	wantSeverity doctor.Severity
 	wantDetail   string
 	wantFix      *string
@@ -1518,13 +1539,7 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 				writePluginAgent(t, wd, "planner")
 				writePluginAgent(t, wd, "implementer")
 			},
-			home: func(t *testing.T) string {
-				t.Helper()
-				home := t.TempDir()
-				require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "agents"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "agents", "my-reviewer.md"), []byte("---\nname: my-reviewer\n---\n\ncustom reviewer\n"), 0o600))
-				return home
-			},
+			home:         homeAgentTree(".claude/agents/my-reviewer.md", agentBody("my-reviewer")),
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound",
 			wantFix:      nil,
@@ -1560,12 +1575,13 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 			wd := newHostFixture(t)
 			c.setup(t, wd)
 
-			home := t.TempDir()
-			if c.home != nil {
-				home = c.home(t)
-			}
+			srv := doctor.NewServer(doctor.WithHomeTree(func() agentfile.Tree {
+				if c.home != nil {
+					return c.home(t)
+				}
 
-			srv := doctor.NewServer(doctor.WithHomeDir(func() (string, error) { return home, nil }))
+				return agentfile.Tree{}
+			}))
 			report := srv.Diagnose(t.Context(), wd)
 
 			check := findCheck(t, report, "roles")
@@ -1584,7 +1600,7 @@ func Test_diagnose_classifies_roles(t *testing.T) {
 type rolesFrontmatterCase struct {
 	name         string
 	setup        func(t *testing.T, wd string)
-	home         func(t *testing.T) string
+	home         func(t *testing.T) agentfile.Tree
 	wantSeverity doctor.Severity
 	wantDetail   string
 	wantFix      *string
@@ -1647,12 +1663,7 @@ func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 				writePluginAgent(t, wd, "implementer")
 				writeAgentFrontmatter(t, wd, ".claude/agents/team/y.md", "my-reviewer")
 			},
-			home: func(t *testing.T) string {
-				t.Helper()
-				home := t.TempDir()
-				writeAgentFrontmatter(t, home, ".claude/agents/team/x.md", "my-reviewer")
-				return home
-			},
+			home:         homeAgentTree(".claude/agents/team/x.md", agentBody("my-reviewer")),
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound",
 			wantFix:      nil,
@@ -1665,12 +1676,7 @@ func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 				writePluginAgent(t, wd, "planner")
 				writePluginAgent(t, wd, "implementer")
 			},
-			home: func(t *testing.T) string {
-				t.Helper()
-				home := t.TempDir()
-				writeAgentFrontmatter(t, home, ".claude/agents/team/x.md", "my-reviewer")
-				return home
-			},
+			home:         homeAgentTree(".claude/agents/team/x.md", agentBody("my-reviewer")),
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound; user-level: reviewer",
 			wantFix:      nil,
@@ -1696,12 +1702,7 @@ func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 				writeRolesConfig(t, wd, "my-planner", "brief:implementer", "other:reviewer")
 				writePluginAgent(t, wd, "implementer")
 			},
-			home: func(t *testing.T) string {
-				t.Helper()
-				home := t.TempDir()
-				writeAgentFrontmatter(t, home, ".claude/agents/my-planner.md", "my-planner")
-				return home
-			},
+			home:         homeAgentTree(".claude/agents/my-planner.md", agentBody("my-planner")),
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner, implementer, reviewer bound; user-level: planner; not verified: reviewer",
 			wantFix:      nil,
@@ -1713,12 +1714,13 @@ func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 			wd := newHostFixture(t)
 			c.setup(t, wd)
 
-			home := t.TempDir()
-			if c.home != nil {
-				home = c.home(t)
-			}
+			srv := doctor.NewServer(doctor.WithHomeTree(func() agentfile.Tree {
+				if c.home != nil {
+					return c.home(t)
+				}
 
-			srv := doctor.NewServer(doctor.WithHomeDir(func() (string, error) { return home, nil }))
+				return agentfile.Tree{}
+			}))
 			report := srv.Diagnose(t.Context(), wd)
 
 			check := findCheck(t, report, "roles")
@@ -1765,7 +1767,7 @@ func agentBody(name string, fragments ...string) string {
 type rolesSkillCase struct {
 	name            string
 	setup           func(t *testing.T, wd string)
-	home            func(t *testing.T) string
+	home            func(t *testing.T) agentfile.Tree
 	noConfig        bool
 	wantSeverity    doctor.Severity
 	wantDetail      string
@@ -1978,13 +1980,7 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 				t.Helper()
 				writeRolesConfig(t, wd, "my-planner", "", "")
 			},
-			home: func(t *testing.T) string {
-				t.Helper()
-				home := t.TempDir()
-				require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "agents"), 0o755))
-				require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "agents", "my-planner.md"), []byte(agentBody("my-planner", blockSkillsFragment)), 0o600))
-				return home
-			},
+			home:         homeAgentTree(".claude/agents/my-planner.md", agentBody("my-planner", blockSkillsFragment)),
 			wantSeverity: doctor.SeverityOK,
 			wantDetail:   "planner preloads brief-workflow",
 			wantFix:      nil,
@@ -2052,12 +2048,13 @@ func runRolesSkillCases(t *testing.T, cases []rolesSkillCase) {
 			wd := newHostFixture(t)
 			c.setup(t, wd)
 
-			home := t.TempDir()
-			if c.home != nil {
-				home = c.home(t)
-			}
+			srv := doctor.NewServer(doctor.WithHomeTree(func() agentfile.Tree {
+				if c.home != nil {
+					return c.home(t)
+				}
 
-			srv := doctor.NewServer(doctor.WithHomeDir(func() (string, error) { return home, nil }))
+				return agentfile.Tree{}
+			}))
 			report := srv.Diagnose(t.Context(), wd)
 
 			check := findCheck(t, report, "roles-skill")

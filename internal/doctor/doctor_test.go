@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	"github.com/koblas/brief/internal/doctor"
 	"github.com/koblas/brief/internal/platform/artifact"
@@ -65,17 +66,17 @@ func writeHostFile(t *testing.T, wd, relPath string, body []byte) {
 	require.NoError(t, os.WriteFile(path, body, 0o600))
 }
 
-// emptyHomeDir returns a doctor.Option pointing WithHomeDir at a fresh,
-// empty temp directory — every test in this file that builds a Server
-// directly (bypassing NewServer's own os.UserHomeDir default) injects this,
-// so a bare-name role binding never resolves against the developer's own
-// real "~/.claude/agents".
+// emptyHomeDir returns a doctor.Option pointing WithHomeDir at "" — every
+// test in this file that builds a Server directly (bypassing NewServer's
+// own os.UserHomeDir default) injects this, so a bare-name role binding
+// never resolves against the developer's own real "~/.claude/agents". An
+// empty home resolves to agentfile's own zero Tree (DirTree("")), which
+// FindIn never searches — the same "nothing here" result a real, empty
+// temp directory would produce, without touching disk.
 func emptyHomeDir(t *testing.T) doctor.Option {
 	t.Helper()
 
-	dir := t.TempDir()
-
-	return doctor.WithHomeDir(func() (string, error) { return dir, nil })
+	return doctor.WithHomeDir(func() (string, error) { return "", nil })
 }
 
 // findCheck returns the first Check in report carrying id, failing the
@@ -325,22 +326,36 @@ func Test_diagnose_reports_one_config_values_row_per_violation_in_field_order(t 
 	assert.Contains(t, rows[1].Detail, "handoff-cap-lines")
 }
 
+// fsAbs joins slash-separated segments under "/", the way every
+// WithRootFS-backed test names an absolute path its fstest.MapFS fixture
+// is keyed against — config.LocateWithinFS, config.InspectFS and
+// repo.RootFS each strip the leading "/" internally (fsName) to get the
+// fs.FS-relative name back. Identical to config's and repo's own fsAbs
+// test helper, duplicated for the same reason those packages duplicate
+// fsName from each other.
+func fsAbs(elem ...string) string {
+	return filepath.FromSlash("/" + filepath.ToSlash(filepath.Join(elem...)))
+}
+
 // Test_diagnose_names_shadowed_ancestor_configs_in_config_shadow_detail
 // pins that a farther ancestor ".brief.yaml" — shadowed by the nearer one
 // Resolve/Inspect actually read — is still named, so a repository is
 // never left wondering which of two configs is in effect. config-shadow
-// itself stays OK: a shadowed ancestor is not a fault.
+// itself stays OK: a shadowed ancestor is not a fault. This is a pure
+// config/env-git walk over WithRootFS's own fstest.MapFS: root-dir keeps
+// reading real disk regardless (root-dir is never fs.FS-backed — see
+// checks.go), so this test asserts nothing about it, and its fabricated
+// root ("/repo/...") is never expected to exist there.
 func Test_diagnose_names_shadowed_ancestor_configs_in_config_shadow_detail(t *testing.T) {
-	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o755))
-	rootConfig := filepath.Join(root, ".brief.yaml")
-	require.NoError(t, os.WriteFile(rootConfig, []byte("progress-heading: \"## Root\"\n"), 0o600))
-	wd := filepath.Join(root, "near")
-	require.NoError(t, os.MkdirAll(filepath.Join(wd, "docs", "specifications"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: \"## Near\"\n"), 0o600))
+	fsys := fstest.MapFS{
+		"repo/.git/HEAD":        &fstest.MapFile{Data: []byte("ref: refs/heads/main\n")},
+		"repo/.brief.yaml":      &fstest.MapFile{Data: []byte("progress-heading: \"## Root\"\n")},
+		"repo/near/.brief.yaml": &fstest.MapFile{Data: []byte("progress-heading: \"## Near\"\n")},
+	}
+	rootConfig := fsAbs("repo", ".brief.yaml")
 
-	srv := doctor.NewServer(emptyHomeDir(t))
-	report := srv.Diagnose(t.Context(), wd)
+	srv := doctor.NewServer(emptyHomeDir(t), doctor.WithRootFS(fsys))
+	report := srv.Diagnose(t.Context(), fsAbs("repo", "near"))
 
 	check := findCheck(t, report, "config-shadow")
 	assert.Equal(t, doctor.SeverityOK, check.Severity)
@@ -352,14 +367,17 @@ func Test_diagnose_names_shadowed_ancestor_configs_in_config_shadow_detail(t *te
 // above the nearest enclosing git repository is never reported as this
 // repository's own config-file row — the family reports exactly as it
 // would for no config at all, matching the root init would actually write
-// to.
+// to. Same WithRootFS/MapFS shape as the shadow test above; root-dir is
+// unasserted for the same reason.
 func Test_diagnose_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
-	home := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".brief.yaml"), []byte("progress-heading: \"## Home\"\n"), 0o600))
-	proj := filepath.Join(home, "proj")
-	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".git"), 0o755))
+	fsys := fstest.MapFS{
+		"home/.brief.yaml":    &fstest.MapFile{Data: []byte("progress-heading: \"## Home\"\n")},
+		"home/proj/.git/HEAD": &fstest.MapFile{Data: []byte("ref: refs/heads/main\n")},
+		"home/proj/marker":    &fstest.MapFile{Data: []byte("x")},
+	}
+	proj := fsAbs("home", "proj")
 
-	srv := doctor.NewServer(emptyHomeDir(t))
+	srv := doctor.NewServer(emptyHomeDir(t), doctor.WithRootFS(fsys))
 	report := srv.Diagnose(t.Context(), proj)
 
 	check := findCheck(t, report, "config-file")

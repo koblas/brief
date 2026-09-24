@@ -2,12 +2,17 @@ package doctor
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 
+	"github.com/koblas/brief/internal/platform/agentfile"
 	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/host"
+	"github.com/koblas/brief/internal/platform/repo"
 )
 
 // Severity is a Check's urgency.
@@ -113,17 +118,30 @@ func (r Report) Counts() Counts {
 // actually the same build.
 const devVersion = "(devel)"
 
+// rootFS returns doctor's own production root FS: the "/"-rooted
+// namespace config.LocateWithinFS, config.InspectFS and repo.RootFS
+// already read through for their own OS adapters (Locate/Inspect, Root).
+// Doctor calls only those exported *FS entry points, never fs.Stat/fs.Open
+// directly, so — unlike config and repo — it needs no fsName mapping of
+// its own: each already applies its own internally.
+func rootFS() fs.FS {
+	return os.DirFS("/")
+}
+
 // Server diagnoses one repository's setup for brief. Its environment
 // seams default to the real PATH lookup, the real running binary's own
-// path, a debug/buildinfo.ReadFile adapter, and os.UserHomeDir; a test
-// overrides them with WithLookPath, WithExecutable, WithBinaryVersion and
-// WithHomeDir.
+// path, a debug/buildinfo.ReadFile adapter, os.UserHomeDir, and the
+// production root FS (rootFS); a test overrides them with WithLookPath,
+// WithExecutable, WithBinaryVersion, WithHomeDir, and the package-private
+// seams export_test.go exposes for its own fs.FS-backed tests.
 type Server struct {
 	lookPath      func(string) (string, error)
 	executable    func() (string, error)
 	binaryVersion func(string) (string, bool)
 	version       string
 	homeDir       func() (string, error)
+	rootFS        func() fs.FS
+	homeTree      func() agentfile.Tree
 }
 
 // Option configures a Server built by NewServer.
@@ -172,7 +190,7 @@ func WithHomeDir(fn func() (string, error)) Option {
 // defaults: exec.LookPath, os.Executable, an adapter over
 // debug/buildinfo.ReadFile, devVersion for the running version (a caller
 // that never calls WithVersion is, correctly, always reported as running an
-// unknown build), and os.UserHomeDir.
+// unknown build), os.UserHomeDir, and the production root FS.
 func NewServer(opts ...Option) *Server {
 	s := &Server{
 		lookPath:      exec.LookPath,
@@ -180,6 +198,7 @@ func NewServer(opts ...Option) *Server {
 		binaryVersion: readBinaryVersion,
 		version:       devVersion,
 		homeDir:       os.UserHomeDir,
+		rootFS:        rootFS,
 	}
 
 	for _, o := range opts {
@@ -187,6 +206,70 @@ func NewServer(opts ...Option) *Server {
 	}
 
 	return s
+}
+
+// userTree returns the agentfile.Tree a bare-name role binding's own Rule 5
+// search runs against for the user scope: s.homeTree() when a test
+// injected one (export_test.go's WithHomeTree), else agentfile.DirTree
+// over s.homeDir() — a home lookup error or an empty result yields the
+// zero Tree, so that scope is never searched (WithHomeDir's own contract).
+func (s *Server) userTree() agentfile.Tree {
+	if s.homeTree != nil {
+		return s.homeTree()
+	}
+
+	home, err := s.homeDir()
+	if err != nil {
+		home = ""
+	}
+
+	return agentfile.DirTree(home)
+}
+
+// locateInRepo is config.LocateInRepo's own fs.FS-backed twin: the walk and
+// the git-repository boundary both run against s.rootFS() rather than the
+// production-only root FS config.LocateInRepo and repo.Root hardcode
+// internally, so a test can substitute a fstest.MapFS for both. It
+// reproduces config.LocateWithin's own "resolve config:" wrap verbatim;
+// Diagnose only branches on whether the returned error is nil, so the wrap
+// affects nothing observable today, but keeping it means a caller reading
+// the error text is never surprised by two adapters disagreeing.
+func (s *Server) locateInRepo(absWd string) (string, []string, error) {
+	fsys := s.rootFS()
+
+	boundary := ""
+	if root, ok := repo.RootFS(fsys, absWd); ok {
+		boundary = root
+	}
+
+	nearest, shadowed, err := config.LocateWithinFS(fsys, absWd, boundary)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve config: %w", err)
+	}
+
+	return nearest, shadowed, nil
+}
+
+// inspect is config.Inspect's own fs.FS-backed twin, run against
+// s.rootFS(): abs is already absolute, so unlike Inspect this never calls
+// filepath.Abs itself. It reproduces Inspect's own error wrap verbatim —
+// an *InvalidConfigError wrapped by config.Inspect (%w, "resolve config:
+// %w") errors.AsType still reaches, unaffected by the wrap either way,
+// since parseErrorDetail unwraps to it directly; any other failure (a
+// config file that cannot be opened) keeps the same "resolve config: <abs>:
+// <cause>" text Inspect itself would produce, so config-parse's Detail
+// never depends on which adapter ran.
+func (s *Server) inspect(abs string) (config.Config, []*config.ValueError, error) {
+	cfg, violations, err := config.InspectFS(s.rootFS(), abs)
+	if err != nil {
+		if invalidCfg, ok := errors.AsType[*config.InvalidConfigError](err); ok {
+			return config.Config{}, nil, fmt.Errorf("resolve config: %w", invalidCfg)
+		}
+
+		return config.Config{}, nil, fmt.Errorf("resolve config: %s: %w", abs, err)
+	}
+
+	return cfg, violations, nil
 }
 
 // Diagnose reports wd's setup health: config-file, config-parse,
@@ -225,7 +308,7 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 		absWd = wd
 	}
 
-	nearest, shadowed, locateErr := config.LocateInRepo(absWd)
+	nearest, shadowed, locateErr := s.locateInRepo(absWd)
 
 	root := absWd
 	if locateErr == nil && nearest != "" {
@@ -248,7 +331,7 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 		rolesCheck = rolesCheckNoConfig()
 		rolesSkillCheck = rolesSkillCheckNoConfig()
 	default:
-		cfg, violations, inspectErr := config.Inspect(nearest)
+		cfg, violations, inspectErr := s.inspect(nearest)
 		if inspectErr != nil {
 			checks = append(checks, unparseableConfigChecks(nearest, shadowed, inspectErr)...)
 			checks = append(checks, Check{ID: "root-dir", Severity: SeveritySkip, Detail: rootDirUnknownDetail})
@@ -270,7 +353,7 @@ func (s *Server) Diagnose(ctx context.Context, wd string) Report {
 		}
 	}
 
-	checks = append(checks, checkEnvGit(absWd))
+	checks = append(checks, checkEnvGit(s.rootFS(), absWd))
 
 	h, _ := host.Lookup(host.ClaudeCode)
 	snippetStates := scanSnippetCandidateStates(root, h)
