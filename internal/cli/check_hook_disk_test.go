@@ -1,3 +1,12 @@
+// check --hook's own scenarios stay on real disk: runCheckHook's opt-in
+// gate (config.LocateInRepo) and its own edited-path resolution
+// (assemble's FeatureContaining, real os.Lstat/filepath.EvalSymlinks) have
+// no seam, so every scenario that reaches either reads a real repository
+// tree. Test_check_hook_usage_errors and
+// Test_check_hook_with_json_reports_the_usage_error_as_json are the
+// exception: both usage errors return before runCheckHook ever reads wd,
+// so they use a fabricated path instead of t.TempDir().
+
 package cli_test
 
 import (
@@ -274,7 +283,11 @@ func Test_check_hook_usage_errors(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			wd := t.TempDir()
+			// Neither case ever reads wd: both usage errors return before
+			// runCheckHook's own opt-in gate (config.LocateInRepo) runs, so
+			// a fabricated path proves that as much as a real directory
+			// would.
+			wd := "/repo"
 
 			var stdout, stderr bytes.Buffer
 			err := cli.Run(t.Context(), wd, c.args, strings.NewReader(c.stdin), &stdout, &stderr)
@@ -380,7 +393,10 @@ func Test_check_hook_honours_a_config_at_the_enclosing_git_repository_root(t *te
 }
 
 func Test_check_hook_with_json_reports_the_usage_error_as_json(t *testing.T) {
-	wd := t.TempDir()
+	// This usage error returns before runCheckHook ever reads wd (it is
+	// checked ahead of the host lookup and the opt-in gate), so a
+	// fabricated path proves that as much as a real directory would.
+	wd := "/repo"
 
 	var stdout, stderr bytes.Buffer
 	err := cli.Run(t.Context(), wd, []string{"check", "--hook", "claude-code", "--json"}, strings.NewReader(""), &stdout, &stderr)

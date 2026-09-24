@@ -1,9 +1,9 @@
 // check's plain scenarios — every one, except the one symlink case — run
 // against an rwfs.Mem through withRootFS, reaching run() directly since
 // that seam is unexported. check_disk_test.go keeps its own symlink case
-// plus every helper this file and check_hook_test.go/json_refusal_test.go
+// plus every helper this file and check_hook_disk_test.go/json_refusal_test.go
 // still call. check --hook itself stays entirely on disk
-// (check_hook_test.go): runCheckHook's own FeatureContaining resolves
+// (check_hook_disk_test.go): runCheckHook's own FeatureContaining resolves
 // through real os.Lstat/filepath.EvalSymlinks with no seam.
 
 package cli

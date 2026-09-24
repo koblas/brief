@@ -1,6 +1,6 @@
 // Every plain check scenario runs against rwfs.Mem in check_internal_test.go.
 // This file keeps its own symlink case (real containment: a symlink entry
-// in the feature root, never followed) plus every helper check_hook_test.go
+// in the feature root, never followed) plus every helper check_hook_disk_test.go
 // and json_refusal_test.go still call.
 
 package cli_test
