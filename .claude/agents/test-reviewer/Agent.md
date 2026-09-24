@@ -17,6 +17,16 @@ Strict test quality reviewer for project following Clean Architecture and TDD.
 
 ## Review procedure
 
+**Start from the coverage report, not from reading.** Your prompt normally carries
+`.claude/scripts/uncovered-diff.py` output for the range — use it; do not re-run the suite.
+Only when it is missing, run `uncovered-diff.py <base of the range you were given>` yourself.
+Every run it lists is added production code no test executes — each is a finding (MAJOR by the
+shared contract, "untested change"). Runs in its "declared unreachable" section carry the
+developer's `// unreachable:` reason: judge the reason; a branch you can reach with a
+constructible input is a MAJOR, not an exemption. That mechanical pass replaces hunting for untested branches by eye;
+spend the reading budget on what coverage cannot see: assertions that prove nothing, missing
+control arms, corner cases a covered line still gets wrong.
+
 For each test file under review:
 
 1. **Read the file.**

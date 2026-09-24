@@ -83,6 +83,15 @@ is closed or still open. Findings STATE.md already records as deferred are out o
 Name the files. A reviewer told only "focus on `internal/`" reads the package; one handed six
 paths reads six diffs.
 
+**Run the coverage gate once, before spawning, and paste its output into every prompt:**
+`.claude/scripts/uncovered-diff.py <range base>`. Uncovered added lines are an untested-change
+finding no reviewer needs to rediscover by reading; handing every reviewer the same list stops
+three of them paying to find it separately. Its rows are grouped per run with the enclosing
+function, which is also the cheapest form to paste. If it exits 1 (anything outside the
+"declared unreachable" section), send it back to the developer before spending a review
+round at all. Also paste `.claude/scripts/test-stats.py --base <range base> --changed` so
+reviewers read the test-count deltas instead of recounting.
+
 Do NOT review code yourself — only orchestrate.
 
 Spawn fails with `Agent type '<name>' not found` → agent was added after session start, roster
