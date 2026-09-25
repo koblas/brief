@@ -1,9 +1,5 @@
-// This file reaches the unexported newRootCommand only to register two
-// commands production never registers — one visible, one hidden — so the
-// "expected one of:" derivation can be proven against a tree that differs
-// from production's own. A black-box test cannot do that: Run always
-// builds production's own tree. Every other cli behavior stays covered by
-// the black-box cli_test files.
+// White-box: reaches the unexported newRootCommand to register commands
+// production never registers, so a black-box test's fixed tree cannot.
 
 package cli
 
@@ -17,12 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTreeWithExtraCommands builds production's own command tree via
-// newRootCommand, then adds one extra visible command ("extra") and one
-// extra command ("hiddenextra") whose Hidden field is hiddenExtraHidden —
-// the only field that varies between the two tests below. It passes a
-// non-nil readBuildInfo only to satisfy newRootCommand's signature: none of
-// this file's tests dispatch "--version".
+// newTreeWithExtraCommands adds one visible command ("extra") and one
+// command ("hiddenextra") whose Hidden field is hiddenExtraHidden.
 func newTreeWithExtraCommands(t *testing.T, hiddenExtraHidden bool) (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 
@@ -50,19 +42,8 @@ func newTreeWithExtraCommands(t *testing.T, hiddenExtraHidden bool) (*cobra.Comm
 	return root, stdout, stderr
 }
 
-// Test_bool_flag_rewrite_does_not_apply_to_a_non_bool_flag pins
-// boolFlagParseMessage's type guard: an invalid value for "extra"'s Int
-// flag "count" reaches the root FlagErrorFunc frame as pflag's own raw
-// strconv.ParseInt wording, unrewritten — proving the rewrite the
-// "status --help=x --json" row of
-// Test_json_mode_usage_error_message_is_the_text_mode_line
-// (json_usage_test.go) pins for a real bool flag is scoped to bool-typed
-// flags, not every flag pflag rejects a value for.
-//
-// Mutation-verified: dropping boolFlagParseMessage's
-// "invalid.GetFlag().Value.Type() != \"bool\"" guard reds this test — the
-// int-flag error would be rewritten into the bool wording, naming a value
-// of "want true or false" for a flag that takes neither.
+// An invalid value for a non-bool flag reaches the error frame as pflag's
+// raw wording, unrewritten by boolFlagParseMessage's bool-only rewrite.
 func Test_bool_flag_rewrite_does_not_apply_to_a_non_bool_flag(t *testing.T) {
 	root, stdout, stderr := newTreeWithExtraCommands(t, true)
 	root.SetArgs([]string{"extra", "--count=notanumber"})
@@ -75,11 +56,8 @@ func Test_bool_flag_rewrite_does_not_apply_to_a_non_bool_flag(t *testing.T) {
 	assert.NotContains(t, stderr.String(), "want true or false")
 }
 
-// Test_expected_command_list_names_every_visible_registered_command pins
-// R7 at all three call sites that name an "expected one of:" list: a
-// tree holding a command production does not register must list it too,
-// and must never list a hidden one — proving the list is derived from the
-// tree, not the retired expectedCommands literal.
+// A tree holding a command production does not register must list it in
+// every "expected one of:" site too, and never list a hidden one.
 func Test_expected_command_list_names_every_visible_registered_command(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -117,12 +95,8 @@ func Test_expected_command_list_names_every_visible_registered_command(t *testin
 	}
 }
 
-// Test_expected_command_list_includes_a_command_once_it_is_not_hidden is
-// the control arm for the negative claim above: with "hiddenextra"'s
-// Hidden field flipped to false — the only field that differs from the
-// tree in the table above — its name must appear in the list. Without
-// this, a filter that always drops "hiddenextra" by name would pass the
-// negative assertion above for the wrong reason.
+// Control arm: with Hidden flipped to false, "hiddenextra" must appear in
+// the list.
 func Test_expected_command_list_includes_a_command_once_it_is_not_hidden(t *testing.T) {
 	root, stdout, stderr := newTreeWithExtraCommands(t, false)
 	root.SetArgs([]string{"bogus"})

@@ -11,10 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_finish_reports_the_absolute_handoff_and_state_paths_changed_true_and_next
-// pins FinishResult's shape on a first, writing finish against
-// newFinishFixtureFS: STEP-03 is the lowest-numbered step still open once
-// STEP-02 is counted done, so it is Next — depends-on is never consulted.
 func Test_finish_reports_the_absolute_handoff_and_state_paths_changed_true_and_next(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 
@@ -31,9 +27,6 @@ func Test_finish_reports_the_absolute_handoff_and_state_paths_changed_true_and_n
 	assert.Empty(t, res.Dropped)
 }
 
-// Test_finish_no_op_reports_changed_false_and_still_names_next proves the
-// R11 no-op returns the populated result rather than a zero FinishResult:
-// Changed flips to false, but Next is still computed.
 func Test_finish_no_op_reports_changed_false_and_still_names_next(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 
@@ -46,13 +39,10 @@ func Test_finish_no_op_reports_changed_false_and_still_names_next(t *testing.T) 
 	require.NoError(t, err)
 	assert.False(t, second.Changed)
 	assert.Equal(t, scaffold.FinishNext{ID: "STEP-03", Title: "STEP-03", Path: filepath.Join(testFeaturePath, "STEP-03.md")}, second.Next)
-	assert.NotNil(t, second.Dropped, "the R11 no-op must still report a non-nil empty Dropped")
+	assert.NotNil(t, second.Dropped, "re-finishing with identical inputs must still report a non-nil empty Dropped")
 	assert.Empty(t, second.Dropped)
 }
 
-// Test_finish_next_is_empty_when_every_other_step_is_done builds a
-// two-step feature — STEP-01 already done, STEP-02 the step under test —
-// so finishing STEP-02 leaves nothing open.
 func Test_finish_next_is_empty_when_every_other_step_is_done(t *testing.T) {
 	cfg := fixtureConfig()
 	pattern, patternErr := stepfilePattern(cfg)
@@ -81,11 +71,6 @@ func Test_finish_next_is_empty_when_every_other_step_is_done(t *testing.T) {
 	assert.Equal(t, scaffold.FinishNext{}, res.Next)
 }
 
-// Test_finish_names_a_sibling_with_unparseable_frontmatter_as_next builds a
-// two-step feature whose second step's frontmatter does not parse — the
-// same defect siblingFrontmatter tolerates for checkStepDependencies — and
-// finishes the first: the unparseable sibling counts as not done, so it is
-// named Next.
 func Test_finish_names_a_sibling_with_unparseable_frontmatter_as_next(t *testing.T) {
 	cfg := fixtureConfig()
 	pattern, patternErr := stepfilePattern(cfg)

@@ -8,10 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_a_config_binding_the_reviewer_role_decodes pins the third role
-// position (R7 as amended): "roles.reviewer" is a known key that decodes
-// onto RoleBindings.Reviewer with no violation, the same as planner and
-// implementer.
 func Test_a_config_binding_the_reviewer_role_decodes(t *testing.T) {
 	fsys := inspectFixture("roles:\n  reviewer: brief:reviewer\n")
 
@@ -63,11 +59,8 @@ func Test_the_default_profile_names_the_handoff_file_suffix(t *testing.T) {
 	assert.Equal(t, "-HANDOFF.md", cfg.HandoffFileSuffix)
 }
 
-// Test_the_shipped_profile_passes_validation writes every key explicitly
-// set to Default()'s own value: a config file naming every key at its
-// shipped value must decode and validate identically to no config file at
-// all. init writes a commented config whose effective values are these
-// defaults, so R3's "converges" promise relies on this holding.
+// Every key is set explicitly to Default()'s own value, so this must
+// decode and validate identically to no config file at all.
 func Test_the_shipped_profile_passes_validation(t *testing.T) {
 	fsys := inspectFixture(`feature-directory: docs/specifications
 step-file-pattern: "SCENARIO-%02d.md"
@@ -94,11 +87,8 @@ default-output-budget-bytes: 8192
 	assert.Equal(t, config.Default(), cfg)
 }
 
-// Test_Resolve_accepts_a_config_that_sets_every_validated_key_to_a_valid_non_default_value
-// is validate's control arm: every rule
-// Test_Resolve_refuses_an_invalid_config_value exercises (resolve_test.go)
-// has a legitimate, non-default value here that must satisfy it — proving
-// the rules refuse only the bad input, not configuration in general.
+// Control arm for the invalid-value tests in resolve_test.go: every rule
+// checked there has a legitimate, non-default value here that must satisfy it.
 func Test_Resolve_accepts_a_config_that_sets_every_validated_key_to_a_valid_non_default_value(t *testing.T) {
 	fsys := inspectFixture(`step-file-pattern: "STEP-%03d.md"
 specification-file: SPEC.md

@@ -62,10 +62,7 @@ type doctorCountsJSON struct {
 
 // doctorCheckJSON is one doctorDocument "checks" row: id, severity, path,
 // detail and fix exactly as doctor.Check carries them, raw and never
-// flattened — doctor --json builds from Diagnose's own un-relativized
-// checks (R6), and detail is never passed through flattenOneLine the way
-// the text table's own cell is. Path is nil (JSON null) when
-// doctor.Check.Path is "".
+// flattened. Path is nil when doctor.Check.Path is "".
 type doctorCheckJSON struct {
 	ID       string  `json:"id"`
 	Severity string  `json:"severity"`
@@ -74,11 +71,11 @@ type doctorCheckJSON struct {
 	Fix      *string `json:"fix"`
 }
 
-// doctorDocument is doctor's --json success document: the common header
-// first, then counts, then one row per check, in Diagnose's own fixed
-// order — no "data" wrapper (R2). Checks render as this document's
-// payload even when counts.error is greater than zero (R4): doctor --json
-// never renders an ERROR-carrying run as an error document.
+// doctorDocument is doctor's --json success document: the common header,
+// then counts, then one row per check in Diagnose's fixed order, no
+// "data" wrapper. Checks render as this document's payload even when
+// counts.error is greater than zero: doctor --json never renders an
+// ERROR-carrying run as an error document.
 type doctorDocument struct {
 	jsonHeader
 
@@ -87,10 +84,10 @@ type doctorDocument struct {
 }
 
 // doctorChecksJSON maps checks to doctorDocument's "checks" array: a
-// sized, non-nil slice so zero checks encode as "[]" rather than "null"
-// (R9's empty discriminator, in JSON form) — never reachable in practice,
-// since Diagnose always returns at least the config family, but held to
-// the same convention as checkFeatures and statusFeatures.
+// sized, non-nil slice so zero checks encode as "[]" rather than "null" —
+// never reachable in practice, since Diagnose always returns at least the
+// config family, but held to the same convention as checkFeatures and
+// statusFeatures.
 func doctorChecksJSON(checks []doctor.Check) []doctorCheckJSON {
 	out := make([]doctorCheckJSON, 0, len(checks))
 
@@ -107,11 +104,10 @@ func doctorChecksJSON(checks []doctor.Check) []doctorCheckJSON {
 	return out
 }
 
-// doctorRow renders one Check as R13's text-mode line, minus the trailing
-// newline: SEVERITY, id, path and detail, joined by exactly two spaces,
-// no column padding. path is displayPath(wd, c.Path) when set, "-" when
-// c.Path is "". A non-nil Fix renders as "; fix: <fix>" appended to
-// detail.
+// doctorRow renders one Check as a text-mode line (no trailing newline):
+// SEVERITY, id, path and detail, joined by exactly two spaces, no column
+// padding. path is "-" when c.Path is "". A non-nil Fix renders as
+// "; fix: <fix>" appended to detail.
 func doctorRow(wd string, c doctor.Check) string {
 	path := "-"
 	if c.Path != "" {
@@ -140,17 +136,13 @@ func doctorSummary(counts doctor.Counts) string {
 
 // runDoctor implements "brief doctor [--json]"; rest is its positional
 // arguments, flags already parsed away, and must be empty. It never calls
-// resolveRoot: an invalid or unparseable ".brief.yaml" is reported as
-// rows (R13), never a refusal. Its own config-location pre-check — a
+// resolveRoot: an invalid or unparseable ".brief.yaml" is reported as a
+// row, never a refusal. Its own config-location pre-check — a
 // nonexistent-startDir guard unreachable when wd comes from os.Getwd — is
 // the one refusal runDoctor emits; every other setup fault becomes a
-// Check. rootFS is nil in production (the pre-check runs against real
-// disk, config.LocateInRepo); a test's withRootFS seam substitutes an
-// rwfs.Mem, read through locateInRepoFS instead, so the pre-check and
-// Diagnose itself (via extraOpts' own doctor.WithRootFS) agree on one
-// fixture. extraOpts are appended after runDoctor's own doctor.WithVersion,
-// so a caller (a test) can override any seam, including the version, by
-// supplying it again.
+// Check. extraOpts are appended after runDoctor's own doctor.WithVersion,
+// so a caller can override any seam, including the version, by supplying
+// it again.
 func runDoctor(ctx context.Context, wd string, rest []string, readBuildInfo func() (*debug.BuildInfo, bool), out reporter, rootFS fs.FS, extraOpts ...doctor.Option) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief doctor: too many arguments; run '%s'", doctorInvocation))
@@ -176,9 +168,8 @@ func runDoctor(ctx context.Context, wd string, rest []string, readBuildInfo func
 		runErr = errDoctorFindings
 	}
 
-	// R1/R6: --json is decided here, before any text-mode line is
-	// written, so it writes zero stderr bytes and sees Diagnose's own
-	// absolute paths.
+	// Decided before any text-mode line is written, so a --json run
+	// writes zero stderr bytes and sees Diagnose's own absolute paths.
 	if out.json {
 		doc := doctorDocument{
 			jsonHeader: out.headerFor(ExitCode(runErr)),
@@ -211,13 +202,9 @@ func locateInRepo(wd string) error {
 	return err
 }
 
-// locateInRepoFS is locateInRepo's own fsys-backed twin, mirroring
-// internal/doctor's own (*Server).locateInRepo and internal/setup's own
-// locateInRepo: the walk and the git-repository boundary both run against
-// fsys rather than config.LocateInRepo's and repo.Root's own hardcoded
-// "/"-rooted namespace, so a withRootFS-backed test can substitute an
-// rwfs.Mem. It reproduces config.LocateWithin's own "resolve config:" wrap
-// verbatim.
+// locateInRepoFS is locateInRepo's fsys-backed twin: the walk and the
+// git-repository boundary both run against fsys instead of the real
+// filesystem, so a withRootFS-backed test can substitute an rwfs.Mem.
 func locateInRepoFS(fsys fs.FS, wd string) error {
 	abs, err := filepath.Abs(wd)
 	if err != nil {

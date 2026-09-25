@@ -1,17 +1,7 @@
-// This file reaches the unexported run directly to inject a runSeam: the
-// rwfs.Mem-backed cases below substitute setup.WithFSRoot (plus
-// WithResolveRoot, WithHomeDir and WithWritableCheck) via newMemSetupSeam
-// (mem_internal_test.go) so host detection (R8) and the plain install path never
-// touch real disk or the developer's own "~/.claude". init's bound-agent
-// and missing-workflow-skill tests stay in
-// init_bound_agent_internal_test.go: bound_agent.go's own confinedAgentFile
-// always reads and writes real agent files through real disk regardless of
-// setup.WithFSRoot (internal/setup's own doc.go), so no rwfs.Mem fixture
-// can stand in for one. This file also calls missingSkillHeader and
-// missingSkillLines directly, unexported: both are pure functions of a
-// []setup.MissingSkillAgent, and their own combined four-group rendering
-// is pinned against hand-built rows rather than through real agent files
-// on disk.
+// White-box: reaches run directly to inject a runSeam substituting rwfs.Mem
+// (newMemSetupSeam) so host detection and the plain install path never touch
+// real disk. Bound-agent and missing-workflow-skill tests needing a real
+// agent file stay in init_bound_agent_internal_test.go.
 
 package cli
 
@@ -29,11 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_init_without_host_detects_the_host_from_the_tree pins R8's
-// detection rule at the cli boundary: nothing present resolves to
-// HostNone with the R8 stderr line replacing the next action; a root
-// "CLAUDE.md" resolves to claude-code and installs the plugin; under
-// --json a detected-none run leaves stderr empty and reports "host":"none".
 func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 	t.Run("nothing present detects none", func(t *testing.T) {
 		wd := fsAbs("repo")
@@ -115,10 +100,6 @@ func Test_init_without_host_detects_the_host_from_the_tree(t *testing.T) {
 	})
 }
 
-// Test_init_with_agents_follows_the_detected_host pins --with-agents
-// against a detected (rather than explicit) host: nothing detected still
-// refuses ErrAgentsNeedHost's own usage error with the tree left empty; a
-// detected claude-code root installs the three agents.
 func Test_init_with_agents_follows_the_detected_host(t *testing.T) {
 	t.Run("nothing detected refuses", func(t *testing.T) {
 		wd := fsAbs("repo")
@@ -149,10 +130,6 @@ func Test_init_with_agents_follows_the_detected_host(t *testing.T) {
 	})
 }
 
-// Test_init_edit_agents_requires_claude_code pins the exit-2 refusal when
-// the resolved host is not claude-code, whether explicit or detected. This
-// refusal fires before Init ever reads a bound agent file, so it needs no
-// real disk.
 func Test_init_edit_agents_requires_claude_code(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -169,29 +146,10 @@ func Test_init_edit_agents_requires_claude_code(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-// Test_missing_skill_lines_group_order pins missingSkillHeader and
-// missingSkillLines' own combined rendering across the four-group order
-// (Surface & Copy) every Reach combination must sort by: fixable, then a
-// project row setup.planBoundAgent itself cannot reach — not regular, an
-// uneditable "skills:" shape — combined, then an escaping project row,
-// then every user-level row. The group-1/2, group-2/3 and group-3/4 cases
-// below each pin one adjacent transition; since the render order is a
-// fixed sequence of passes, those three adjacent transitions together
-// already pin every non-adjacent one too (a group-1/3 case adds nothing a
-// group-1/2 and group-2/3 pair does not already catch — confirmed by
-// swapping the fixable and escaped passes, which reddens both). Within the
-// combined not-regular/uneditable group, rows keep agents' own relative
-// order rather than being resorted by Reach — the two same-group cases
-// below each put one of each Reach in both role orders, so a rewrite that
-// splits the group into two Reach-ordered passes reddens exactly one of
-// the two, whichever order the split renders first. wd is a fixed string;
-// missingSkillHeader and missingSkillLines never touch the filesystem, so
-// every Reach combination can be pinned directly without constructing real
-// agent files. headerSuffixed and headerPlain are missingSkillHeaderLine
-// and missingSkillHeaderLinePlain's own unprefixed counterparts (both
-// defined in init_bound_agent_internal_test.go, same package) — missingSkillHeader itself
-// renders without the "brief init: " prefix runInit prepends — so a direct
-// call can be compared against them as-is.
+// Pins the four-group render order every Reach combination must sort by:
+// fixable, then not-regular/uneditable combined, then escaping, then
+// user-level. Within the combined group, rows keep their relative order
+// rather than being resorted by Reach.
 func Test_missing_skill_lines_group_order(t *testing.T) {
 	const wd = "/repo"
 
@@ -261,20 +219,9 @@ func Test_missing_skill_lines_group_order(t *testing.T) {
 	}
 }
 
-// Test_missing_skill_lines_treats_a_scope_project_row_carrying_reach_none_as_fixable
-// pins missingSkillFixable's own defensive fallback: setup's own
-// agentsMissingSkill can never actually hand cli a ScopeProject row
-// carrying setup.ReachNone — the value every ScopeUser row legitimately
-// carries, and the zero value any other broken invariant would leave
-// behind too — since an internal error aborts the whole report rather
-// than emitting a row missingSkillReach never classified. missingSkillLines
-// must not silently drop such a row if that invariant is ever broken —
-// every other group's own filter excludes it too, so a row landing in none
-// of them vanishes from the report entirely. Rendering it in the fixable
-// group reuses that group's own existing line format, no new copy. The
-// control proves the fallback is scoped to ScopeProject alone: the
-// identical Reach value on a ScopeUser row — setup's own legitimate case —
-// still renders user-level, not fixable.
+// A ScopeProject row should never carry ReachNone in production, but
+// missingSkillLines must not silently drop one if that invariant breaks; the
+// control proves the fallback is scoped to ScopeProject alone.
 func Test_missing_skill_lines_treats_a_scope_project_row_carrying_reach_none_as_fixable(t *testing.T) {
 	const wd = "/repo"
 
@@ -295,11 +242,6 @@ func Test_missing_skill_lines_treats_a_scope_project_row_carrying_reach_none_as_
 	})
 }
 
-// Test_init_reports_created_then_unchanged pins R2/R3/R11's happy path: a
-// fresh repository's first "brief init --host none" reports both artifacts
-// created, with the feature root's row carrying a trailing "/", and the
-// "installed" next-action line on stderr; a second, identical run reports
-// both "unchanged" and the "already installed" next-action line, exit 0.
 func Test_init_reports_created_then_unchanged(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -328,10 +270,8 @@ func Test_init_reports_created_then_unchanged(t *testing.T) {
 	assert.Equal(t, "brief init: already installed; nothing changed\n", stderr.String())
 }
 
-// Test_init_keeps_a_valid_existing_config_and_reports_it pins R6's "edited
-// locally" branch: a config that decodes without violation but differs
-// from the shipped render is reported "kept", and the feature root it
-// names — not Default()'s — is what gets created.
+// A config that decodes without violation but differs from the shipped
+// render is reported "kept", and the feature root it names is created.
 func Test_init_keeps_a_valid_existing_config_and_reports_it(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -345,10 +285,6 @@ func Test_init_keeps_a_valid_existing_config_and_reports_it(t *testing.T) {
 	assert.Equal(t, "brief init: installed config and feature root; run 'brief new feature <name>'\n", stderr.String())
 }
 
-// Test_init_refuses_an_unparseable_config_leaving_the_tree_untouched pins
-// R3's refusal branch: exit 1, a stderr line naming the "(no files
-// changed)" promise, and the working directory carrying exactly the one
-// file that was already there.
 func Test_init_refuses_an_unparseable_config_leaving_the_tree_untouched(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -367,11 +303,8 @@ func Test_init_refuses_an_unparseable_config_leaving_the_tree_untouched(t *testi
 	assert.Len(t, entries, 1)
 }
 
-// Test_the_directory_probe_sees_new_entries_on_a_successful_init is the
-// control arm for the refusal test above: the identical directory-listing
-// probe, against a fresh repository instead of the refusing fixture, does
-// grow a second entry — proving the probe is capable of catching a write,
-// not merely one that happens to see none.
+// Control arm for the refusal test above: proves the directory-listing
+// probe is capable of catching a write, not merely one that sees none.
 func Test_the_directory_probe_sees_new_entries_on_a_successful_init(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -386,9 +319,6 @@ func Test_the_directory_probe_sees_new_entries_on_a_successful_init(t *testing.T
 	assert.Len(t, entries, 2)
 }
 
-// Test_init_refuses_an_invalid_config_value_naming_the_key_value_and_force_fix
-// pins the STATE.md open debt this scenario closes: the stderr line names
-// the offending key, its value, and 'brief init --force' as the fix.
 func Test_init_refuses_an_invalid_config_value_naming_the_key_value_and_force_fix(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -402,9 +332,6 @@ func Test_init_refuses_an_invalid_config_value_naming_the_key_value_and_force_fi
 	assert.Contains(t, stderr.String(), "brief init --force")
 }
 
-// Test_init_force_rewrites_an_existing_config_from_defaults pins --force's
-// own report shape: "created", detail "rewritten from defaults", against
-// the same fixture the refusal tests above refuse on.
 func Test_init_force_rewrites_an_existing_config_from_defaults(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -417,9 +344,6 @@ func Test_init_force_rewrites_an_existing_config_from_defaults(t *testing.T) {
 	assert.Equal(t, "created .brief.yaml (rewritten from defaults)\ncreated docs/specifications/\n", stdout.String())
 }
 
-// Test_init_dry_run_prints_the_plan_and_writes_nothing pins R9: the same
-// rows a real run would print, the dry-run stderr line, and an unchanged
-// working directory.
 func Test_init_dry_run_prints_the_plan_and_writes_nothing(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -436,10 +360,6 @@ func Test_init_dry_run_prints_the_plan_and_writes_nothing(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-// Test_init_refuses_an_unknown_host pins R8's usage-error branch: exit 2,
-// naming the given value, the accepted list, and --print as the by-hand
-// route. "bogus" is used rather than "claude-code" — S03 does not accept
-// it yet.
 func Test_init_refuses_an_unknown_host(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -452,9 +372,6 @@ func Test_init_refuses_an_unknown_host(t *testing.T) {
 	assert.Equal(t, `brief init: unknown host "bogus"; expected one of: claude-code, none; run 'brief init --print' to wire it by hand`+"\n", stderr.String())
 }
 
-// Test_init_refuses_a_stray_positional_argument pins the usage-error
-// branch for an argument init takes none of — checked before wd is ever
-// read, so it needs no fixture at all.
 func Test_init_refuses_a_stray_positional_argument(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -464,11 +381,6 @@ func Test_init_refuses_a_stray_positional_argument(t *testing.T) {
 	assert.Contains(t, stderr.String(), "too many arguments")
 }
 
-// Test_init_for_claude_code_installs_the_plugin_and_says_where_to_start_claude_code
-// pins the user-visible contract for a fresh repository: all six rows in
-// order, the claude-code next-action line naming "this directory" since
-// the install root is wd itself, and every plugin file's bytes equal to
-// its own artifact render.
 func Test_init_for_claude_code_installs_the_plugin_and_says_where_to_start_claude_code(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -494,11 +406,6 @@ func Test_init_for_claude_code_installs_the_plugin_and_says_where_to_start_claud
 	assert.Equal(t, artifact.PluginManifest(), manifest)
 }
 
-// Test_init_from_a_subdirectory_names_the_install_root_in_the_next_action
-// pins the root ≠ wd form: run from a child directory of a repository
-// already configured at the parent, the next-action line names the
-// parent, relative to wd, in both places the root=wd control arm above
-// says "this directory"/"here".
 func Test_init_from_a_subdirectory_names_the_install_root_in_the_next_action(t *testing.T) {
 	parent := fsAbs("repo")
 	mem := newVirtualMem(parent)
@@ -513,8 +420,6 @@ func Test_init_from_a_subdirectory_names_the_install_root_in_the_next_action(t *
 	assert.Equal(t, "brief init: installed for claude-code in ..; start Claude Code in .. (or run /reload-plugins in a session already there), then 'brief new feature <name>'\n", stderr.String())
 }
 
-// Test_init_no_hook_omits_the_hook_row pins --no-hook: the same five rows
-// minus hooks.json, and no hooks.json file on disk.
 func Test_init_no_hook_omits_the_hook_row(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -536,10 +441,6 @@ func Test_init_no_hook_omits_the_hook_row(t *testing.T) {
 	assert.ErrorIs(t, statErr, fs.ErrNotExist)
 }
 
-// Test_no_hook_with_host_none_is_accepted_and_changes_nothing pins
-// --no-hook's own no-op under --host none: no plugin was ever planned, so
-// --no-hook has nothing to omit, and init still installs just the config
-// and feature root.
 func Test_no_hook_with_host_none_is_accepted_and_changes_nothing(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -551,11 +452,9 @@ func Test_no_hook_with_host_none_is_accepted_and_changes_nothing(t *testing.T) {
 	assert.Equal(t, "created .brief.yaml\ncreated docs/specifications/\n", stdout.String())
 }
 
-// Test_init_rerunning_for_claude_code_reports_unchanged_and_edited_files_kept
-// pins convergence and "edited locally" together: a second run reports
-// every row "unchanged" except the finish skill, edited between runs,
-// reported "kept (edited locally)" — even under --force, which only ever
-// rewrites the config.
+// A second run reports every row "unchanged" except the finish skill,
+// edited between runs, reported "kept (edited locally)" — even under
+// --force, which only ever rewrites the config.
 func Test_init_rerunning_for_claude_code_reports_unchanged_and_edited_files_kept(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -585,13 +484,9 @@ func Test_init_rerunning_for_claude_code_reports_unchanged_and_edited_files_kept
 	assert.Equal(t, "brief init: already installed; nothing changed\n", stderr.String())
 }
 
-// Test_init_merging_only_the_snippet_reports_installed_not_nothing_changed
-// pins the trap a merge-only run is exposed to: every other artifact
-// already converged (unchanged), only the CLAUDE.md block needs replacing
-// (it was brief-written for a different feature directory) — the
-// next-action line must still say "installed", not "already installed;
-// nothing changed", so initNextAction has to treat ActionMerged as a
-// change alongside ActionCreated.
+// Every other artifact already converged (unchanged); only the CLAUDE.md
+// block needs replacing, but the next-action line must still say
+// "installed", not "already installed; nothing changed".
 func Test_init_merging_only_the_snippet_reports_installed_not_nothing_changed(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -624,12 +519,8 @@ func Test_init_merging_only_the_snippet_reports_installed_not_nothing_changed(t 
 	assert.Equal(t, artifact.SnippetBlock("docs/specifications"), body)
 }
 
-// Test_init_over_an_install_without_the_workflow_skill_creates_only_it pins
-// the upgrade path every current adopter hits: a repository already
-// carrying every other claude-code artifact but no brief-workflow skill
-// (the pre-S01 shape) reruns to print exactly one "created" row, and stderr
-// still reads the ordinary "installed for claude-code; …" line —
-// initNextAction is kind-generic, not skill-specific.
+// A repository already carrying every other claude-code artifact but no
+// brief-workflow skill reruns to print exactly one "created" row.
 func Test_init_over_an_install_without_the_workflow_skill_creates_only_it(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -658,12 +549,6 @@ func Test_init_over_an_install_without_the_workflow_skill_creates_only_it(t *tes
 	assert.Equal(t, "brief init: installed for claude-code; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'\n", stderr.String())
 }
 
-// Test_init_with_agents_installs_three_agents_and_binds_roles pins the
-// fresh-repository happy path for --with-agents: ten rows in order, the
-// three agents created under "agents/", the config's own bytes equal
-// artifact.ConfigFileWithRoles(), and the ordinary "installed for
-// claude-code" next-action line — no roles hint, since this run authored
-// the bindings itself.
 func Test_init_with_agents_installs_three_agents_and_binds_roles(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -692,10 +577,8 @@ func Test_init_with_agents_installs_three_agents_and_binds_roles(t *testing.T) {
 	assert.Equal(t, artifact.ConfigFileWithRoles(), body)
 }
 
-// Test_init_with_agents_reports_an_older_agent_as_merged_updated pins R11's
-// stdout row for Rule 6's upgrade path: a planner file holding the
-// pre-SCENARIO-02 bytes is reported "merged … (updated)", exit 0, and its
-// bytes are rewritten to today's own render.
+// A planner file holding older bytes is reported "merged … (updated)" and
+// rewritten to today's render.
 func Test_init_with_agents_reports_an_older_agent_as_merged_updated(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -726,12 +609,6 @@ func Test_init_with_agents_reports_an_older_agent_as_merged_updated(t *testing.T
 	assert.Equal(t, artifact.AgentPlanner(), body)
 }
 
-// Test_init_with_agents_over_an_existing_config_prints_the_roles_lines_to_add
-// pins R7's stderr hint, exact copy: the config is never edited, and the
-// hint block — "was not edited" line, then "roles:" and the three bare
-// "  <role>: brief:<role>" lines, no "brief init: " prefix on those since
-// they are meant to be pasted verbatim into .brief.yaml — lands before the
-// ordinary next-action line.
 func Test_init_with_agents_over_an_existing_config_prints_the_roles_lines_to_add(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -756,11 +633,6 @@ func Test_init_with_agents_over_an_existing_config_prints_the_roles_lines_to_add
 	assert.Equal(t, original, body)
 }
 
-// Test_init_with_agents_and_host_none_is_a_usage_error pins the
-// flag-combination rule (checked on the resolved host): an explicit
-// "--host none" alongside "--with-agents" refuses, exit 2, tree unchanged.
-// A bare "--with-agents" (host resolved by detection) is
-// Test_init_with_agents_follows_the_detected_host, above.
 func Test_init_with_agents_and_host_none_is_a_usage_error(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -777,9 +649,6 @@ func Test_init_with_agents_and_host_none_is_a_usage_error(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-// Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file pins
-// the "not a regular file" row: a directory already occupying the
-// manifest's own path is kept, never followed, never written.
 func Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -793,9 +662,6 @@ func Test_init_keeps_a_plugin_path_that_is_a_directory_instead_of_a_file(t *test
 	assert.Contains(t, stdout.String(), "kept .claude/skills/brief/.claude-plugin/plugin.json (not a regular file)\n")
 }
 
-// Test_init_dry_run_with_print_is_a_usage_error pins R9's own
-// flag-combination rule, checked before setup ever runs, in either flag
-// order: exit 2, the exact stderr line, stdout empty, tree unchanged.
 func Test_init_dry_run_with_print_is_a_usage_error(t *testing.T) {
 	cases := []struct {
 		name string
@@ -824,13 +690,6 @@ func Test_init_dry_run_with_print_is_a_usage_error(t *testing.T) {
 	}
 }
 
-// Test_init_print_writes_bodies_to_stdout_and_nothing_to_disk pins R9's
-// own text-mode shape: a fresh claude-code install prints one
-// "# <path> (create)" header plus body per artifact, blank-line
-// separated, none after the last, the exact stderr line, exit 0, and an
-// unchanged tree; a CLAUDE.md merge case reports "(merge)"; an
-// already-installed tree reports empty stdout and the "already installed"
-// stderr line instead.
 func Test_init_print_writes_bodies_to_stdout_and_nothing_to_disk(t *testing.T) {
 	t.Run("fresh install", func(t *testing.T) {
 		wd := fsAbs("repo")

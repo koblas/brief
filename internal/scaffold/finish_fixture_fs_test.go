@@ -13,19 +13,14 @@ import (
 )
 
 // testFeaturePath is the absolute-looking OS directory every Mem-backed
-// finish fixture in this package is rooted at — the assemble.FeatureFS
-// convention (internal/assemble/fs_test.go's testFeaturePath). Nothing
-// reads it from disk: it only proves a Result/FinishResult/RefusalError
-// path is featurePath joined with the file's own name inside the fixture's
-// rwfs.Mem, the same way a real feature directory would produce it.
+// finish fixture in this package is rooted at. Nothing reads it from
+// disk: it only proves a returned path is featurePath joined with the
+// file's own name inside the fixture's rwfs.Mem.
 const testFeaturePath = "/repo/specs/widgets"
 
-// finishFixtureFS is newFinishFixture's in-memory counterpart: the same
-// "widgets" feature content (three step files, a state file and a
-// specification carrying a progress entry for each step), built on an
-// rwfs.Mem instead of t.TempDir(), plus the pattern/handoffPattern
-// FinishFS needs and the handoff/state bytes a happy-path
-// FinishFS("widgets", "STEP-02", ...) call supplies.
+// finishFixtureFS is newFinishFixture's in-memory counterpart, built on an
+// rwfs.Mem instead of t.TempDir(), plus the pattern/handoffPattern FinishFS
+// needs and the handoff/state bytes a happy-path call supplies.
 type finishFixtureFS struct {
 	mem            *rwfs.Mem
 	cfg            config.Config
@@ -36,30 +31,26 @@ type finishFixtureFS struct {
 }
 
 // stepPath returns the absolute-looking path of one of the fixture's step
-// files, for assertions against a RefusalError.Path, an err.Error() or a
-// Result path — finishFixture.stepPath's Mem counterpart.
+// files, for assertions against a RefusalError.Path or a returned path.
 func (fx finishFixtureFS) stepPath(name string) string {
 	return filepath.Join(testFeaturePath, name)
 }
 
 // handoffName returns the fixture's target step's handoff file's name,
-// relative to fx.mem — the name a direct fx.mem.ReadFile/WriteFile call
-// takes, as opposed to handoffPath's absolute, assertion-facing form.
+// relative to fx.mem, as opposed to handoffPath's absolute form.
 func (fx finishFixtureFS) handoffName() string {
 	return "STEP-02" + fx.cfg.HandoffFileSuffix
 }
 
 // handoffPath returns the path of the fixture's target step's handoff
 // file, deriving the name by literal string concatenation rather than
-// through stepfile.CompileHandoff, matching finishFixture.handoffPath.
+// through stepfile.CompileHandoff.
 func (fx finishFixtureFS) handoffPath() string {
 	return filepath.Join(testFeaturePath, fx.handoffName())
 }
 
 // finish runs FinishFS against the fixture's own rwfs.Mem, feature
-// "widgets" — the Mem counterpart of calling
-// scaffold.NewServer(fx.cfg, fx.root).Finish(ctx, "widgets", step, ...)
-// against a disk fixture.
+// "widgets".
 func (fx finishFixtureFS) finish(t *testing.T, step string, handoff, state []byte) (scaffold.FinishResult, error) {
 	t.Helper()
 
@@ -75,8 +66,7 @@ func stepfilePattern(cfg config.Config) (stepfile.Pattern, error) {
 }
 
 // stepfileHandoffPattern compiles cfg's own handoff-file pattern against
-// pattern, the counterpart of stepfilePattern for a test's own bespoke
-// fixture.
+// pattern.
 func stepfileHandoffPattern(cfg config.Config, pattern stepfile.Pattern) (stepfile.HandoffPattern, error) {
 	return stepfile.CompileHandoff(pattern, cfg.HandoffFileSuffix, cfg.StateFile, cfg.SpecificationFile)
 }
@@ -84,8 +74,7 @@ func stepfileHandoffPattern(cfg config.Config, pattern stepfile.Pattern) (stepfi
 // newFinishFixtureFS builds newFinishFixture's exact "widgets" feature
 // content on an rwfs.Mem: three step files (STEP-01 done, STEP-02 the
 // target, STEP-03 untouched), a state file and a specification carrying a
-// progress entry for each step, using fixtureConfig so every field this
-// package reads differs from config.Default().
+// progress entry for each step.
 func newFinishFixtureFS(t *testing.T) finishFixtureFS {
 	t.Helper()
 
@@ -152,8 +141,7 @@ func newFinishFixtureFS(t *testing.T) finishFixtureFS {
 
 // putStepFS replaces fx's own name entry (a step file, "STEP-02.md" in
 // every caller so far) with body, for a test that needs the fixture's
-// target step to carry content newFinishFixtureFS did not seed — the Mem
-// counterpart of os.WriteFile(fx.stepPath(name), ...).
+// target step to carry content newFinishFixtureFS did not seed.
 func putStepFS(t *testing.T, fx finishFixtureFS, name, body string) {
 	t.Helper()
 
@@ -162,8 +150,7 @@ func putStepFS(t *testing.T, fx finishFixtureFS, name, body string) {
 
 // newFinishedFixtureFS builds newFinishFixtureFS's "widgets" feature and
 // runs one FinishFS call with its handoff and state, so every test built
-// against it opens on a step that is already done — the Mem counterpart of
-// newFinishedFixture.
+// against it opens on a step that is already done.
 func newFinishedFixtureFS(t *testing.T) finishFixtureFS {
 	t.Helper()
 

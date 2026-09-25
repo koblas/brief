@@ -43,13 +43,11 @@ const uninstallForceFlagUsage = "remove files edited locally instead of keeping 
 const leftInPlaceTail = "; the feature root and its contents were left in place"
 
 // uninstallDocument is uninstall's --json success document: the common
-// header first, then the request's own host and dry_run, every path this
-// call removed (absolute, never nil, empty under --dry-run or when nothing
-// was installed), created always empty (uninstall never creates a file),
-// modified naming every path this call rewrote in place rather than
-// deleted — the CLAUDE.md block's own strip that leaves the file
-// non-empty, and a bound agent's own "skills:" edit (Rule 8) — then one
-// row per artifact in setup.Result's own order.
+// header, the request's host and dry_run, every path removed (absolute,
+// never nil, empty under --dry-run), created (always empty — uninstall
+// never creates a file), modified (every path rewritten in place rather
+// than deleted, such as a bound agent's "skills:" edit), and one row per
+// artifact.
 type uninstallDocument struct {
 	jsonHeader
 
@@ -61,29 +59,11 @@ type uninstallDocument struct {
 	Artifacts []artifactJSON `json:"artifacts"`
 }
 
-// uninstallNextAction renders uninstall's own stderr next-action line,
-// minus the "brief uninstall: " prefix: R11's stderr contract. The
-// discriminator, dry run or not, is not which host was requested but what
-// the plan (already computed by the time this runs, dry run or real) holds:
-// any artifact outside KindConfig reporting setup.ActionRemoved — a
-// plugin, hook, snippet or agent file — means a host integration really
-// was, or under dry run would be, removed, so the line names it
-// (installLabel, right after "brief's" rather than trailing "for
-// claude-code", which read awkwardly). A lone KindConfig ActionRemoved —
-// the shape a default-host uninstall leaves after an earlier "init --host
-// none" — never claims a host install that was never there; it names
-// "brief's config" instead. Failing both, any artifact ActionKept with
-// ForceRemovable true is counted and named, since --force can remove
-// those (setup's own typed field, not Detail's free text: planPluginRemoval,
-// planConfigRemoval and planSnippetRemoval set it only on an edited file —
-// never on a non-regular one, which --force cannot remove either). Zero
-// artifacts falls back to
-// "nothing installed"; a non-empty plan with nothing removed and nothing
-// force-removable falls back to plain "nothing removed" — both still carry
-// host's own " for <host>" suffix (withHostSuffix), dropped only for
-// setup.HostNone. Dry run rephrases each branch as a promise about what
-// rerunning without --dry-run would do, rather than a report of what this
-// call did — this call, dry run or not, removed nothing itself.
+// uninstallNextAction renders uninstall's stderr next-action line, minus
+// the "brief uninstall: " prefix. It reports what the already-computed
+// plan holds, not which host was requested, and rephrases every branch as
+// a promise (dry run) or a report (real run) of what rerunning without
+// --dry-run would do or already did.
 func uninstallNextAction(host string, dryRun bool, artifacts []setup.Artifact) string {
 	var hostRemoved, configRemoved bool
 
@@ -91,10 +71,15 @@ func uninstallNextAction(host string, dryRun bool, artifacts []setup.Artifact) s
 
 	for _, a := range artifacts {
 		switch {
+		// A lone KindConfig removal is the shape a default-host uninstall
+		// leaves after an earlier "init --host none"; it never claims a
+		// host install that was never there.
 		case a.Action == setup.ActionRemoved && a.Kind == setup.KindConfig:
 			configRemoved = true
 		case a.Action == setup.ActionRemoved:
 			hostRemoved = true
+		// ForceRemovable is set only on a file edited locally, never on a
+		// non-regular one, which --force cannot remove either.
 		case a.Action == setup.ActionKept && a.ForceRemovable:
 			editedKept++
 		}
@@ -153,11 +138,9 @@ func withHostSuffix(base, host string) string {
 
 // runUninstall implements "brief uninstall [--host <name>] [--dry-run]
 // [--force] [--json]"; rest is its positional arguments, flags already
-// parsed away and must be empty. host is "" when --host was not given,
-// defaulted to setup.HostClaudeCode here: uninstall's own plan for
-// claude-code is a superset of none's, so an omitted --host removes
-// everything brief installed. extraSetupOpts threads a test's own
-// setup.WithHomeDir override (withSetupOpts) to setup.NewServer.
+// parsed away and must be empty. An empty host defaults to
+// setup.HostClaudeCode, whose plan is a superset of none's, so an omitted
+// --host removes everything brief installed.
 func runUninstall(ctx context.Context, wd string, rest []string, host string, dryRun, force bool, out reporter, extraSetupOpts ...setup.Option) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief uninstall: too many arguments; run '%s'", uninstallInvocation))

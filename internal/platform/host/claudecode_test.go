@@ -77,11 +77,6 @@ func Test_claude_code_writes_the_summary_as_post_tool_use_additional_context(t *
 	assert.Equal(t, summary, doc.HookSpecificOutput.AdditionalContext)
 }
 
-// Test_claude_code_plugin_layout_lists_every_file_and_drops_only_the_hook_without_it
-// pins Plugin's own contract: every file lives under host.PluginDir, the
-// hook file (and only the hook file) carries Hook true, withHook false
-// drops exactly that one entry and leaves the other three untouched, and
-// the files carry the artifact.Kind their own render belongs to.
 func Test_claude_code_plugin_layout_lists_every_file_and_drops_only_the_hook_without_it(t *testing.T) {
 	h := newClaudeCode(t)
 
@@ -106,11 +101,6 @@ func Test_claude_code_plugin_layout_lists_every_file_and_drops_only_the_hook_wit
 	assert.Equal(t, artifact.KindClaudeHooks, withHook[3].Kind)
 }
 
-// Test_claude_code_lists_three_agent_files pins Agents' own contract (R4,
-// R7): three files under host.PluginDir + "/agents/", planner then
-// implementer then reviewer, each carrying its own artifact.Kind and never
-// Hook true — the same file list --with-agents plans and, reversed,
-// Uninstall always plans for removal.
 func Test_claude_code_lists_three_agent_files(t *testing.T) {
 	h := newClaudeCode(t)
 
@@ -129,13 +119,6 @@ func Test_claude_code_lists_three_agent_files(t *testing.T) {
 	}
 }
 
-// Test_claude_code_lists_the_workflow_skill_outside_the_plugin_directory
-// pins Skills' own contract (Rule 1/Rule 2): one File at
-// host.WorkflowSkillDir + "/SKILL.md", kind artifact.KindSkillWorkflow, not
-// Hook, and not living under host.PluginDir — the workflow skill is a
-// standalone project skill, never an entry inside the "brief" plugin — and
-// a fresh copy per call, mirroring Plugin's and Agents' own contract, so a
-// caller mutating one returned slice never affects a later call.
 func Test_claude_code_lists_the_workflow_skill_outside_the_plugin_directory(t *testing.T) {
 	h := newClaudeCode(t)
 
@@ -152,11 +135,6 @@ func Test_claude_code_lists_the_workflow_skill_outside_the_plugin_directory(t *t
 	assert.Equal(t, host.WorkflowSkillDir+"/SKILL.md", second[0].RelPath)
 }
 
-// Test_claude_code_lists_its_instruction_files_in_priority_order pins
-// InstructionFiles's own contract (R5): the repository-root CLAUDE.md
-// first, ".claude/CLAUDE.md" second — the order setup's own location rule
-// tries them in — and no filesystem access: the same two relative paths
-// come back regardless of what does or does not exist on disk.
 func Test_claude_code_lists_its_instruction_files_in_priority_order(t *testing.T) {
 	h := newClaudeCode(t)
 

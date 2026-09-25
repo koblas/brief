@@ -23,18 +23,8 @@ func fixedHome(home string) setup.Option {
 // os.UserHomeDir failure would.
 var errHomeLookup = errors.New("home lookup failed")
 
-// Test_init_detects_claude_code_from_the_install_root_or_home pins R8's
-// detection rule (InitRequest.Host == ""): a root ".claude" directory, a
-// root "CLAUDE.md" entry of any type, or an injected home's own ".claude"
-// directory all resolve to HostClaudeCode with Result.NoHostDetected false
-// and Result.DetectedBy naming the signal (".claude", "CLAUDE.md", or
-// "~/.claude"); nothing anywhere resolves to HostNone with NoHostDetected
-// true and DetectedBy empty; an explicit "none" is never overridden by
-// detection, and reports DetectedBy empty too — it was given, not found;
-// a home() failure is treated the same as no home directory at all, never
-// a refusal. detectHost's own root and home reads both go through fsRoot
-// (detect.go), so every case here is fully Mem-backed, including wd —
-// newMemServer's own writableCheck never touches real disk either.
+// detectHost's root and home reads both go through fsRoot, so every case
+// here is fully Mem-backed.
 func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 	homeWithClaude := fsAbs("home-with-claude")
 
@@ -128,12 +118,6 @@ func Test_init_detects_claude_code_from_the_install_root_or_home(t *testing.T) {
 	}
 }
 
-// Test_init_detection_uses_the_locate_root_not_wd pins that detection is
-// keyed on config.Locate's own root, not the working directory Init was
-// called with: a ".claude" directory sitting only beside the working
-// directory itself — never above the located root — must not be found,
-// while one beside the located config wins even when wd is a subdirectory
-// of it.
 func Test_init_detection_uses_the_locate_root_not_wd(t *testing.T) {
 	root := fsAbs("repo")
 	mem := newVirtualMem(root)

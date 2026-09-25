@@ -10,17 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// projectDir and userDir are the Dirs memTree roots its in-memory trees
-// at. Nothing reads them from disk; they only prove every Definition.Path
-// is the Tree's own Dir joined with the file's path inside FS.
+// projectDir and userDir are the Dirs memTree roots its in-memory trees at.
 var (
 	projectDir = filepath.FromSlash("/repo")
 	userDir    = filepath.FromSlash("/home/me")
 )
 
-// memTree returns a Tree over an in-memory FS holding files — each key a
-// slash-separated path inside the tree, each value that file's contents —
-// rooted at dir.
+// memTree returns a Tree over an in-memory FS holding files (key: path,
+// value: contents), rooted at dir.
 func memTree(dir string, files map[string]string) agentfile.Tree {
 	fsys := fstest.MapFS{}
 	for name, body := range files {
@@ -110,7 +107,7 @@ func Test_find_in_prefers_project_definitions_over_user_level(t *testing.T) {
 
 func Test_find_in_returns_every_project_duplicate_sorted_by_path(t *testing.T) {
 	project := memTree(projectDir, map[string]string{
-		".claude/agents/team/r.md":       "---\nname: my-reviewer\n---\n\nsecond\n",
+		".claude/agents/team/r.md":      "---\nname: my-reviewer\n---\n\nsecond\n",
 		".claude/agents/my-reviewer.md": "---\nname: my-reviewer\n---\n\nfirst\n",
 	})
 
@@ -121,10 +118,6 @@ func Test_find_in_returns_every_project_duplicate_sorted_by_path(t *testing.T) {
 	assert.Equal(t, at(projectDir, ".claude/agents/team/r.md"), defs[1].Path)
 }
 
-// Test_find_in_decodes_skills_and_omit_claude_md pins Frontmatter's own
-// Skills and OmitClaudeMd fields, and the loose-decode contract: a value in
-// an unexpected shape falls back to that field's zero value and never drops
-// the agent out of resolution.
 func Test_find_in_decodes_skills_and_omit_claude_md(t *testing.T) {
 	tests := []struct {
 		name             string

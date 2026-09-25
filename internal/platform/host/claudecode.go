@@ -13,17 +13,17 @@ import (
 const ClaudeCode = "claude-code"
 
 // PluginDir is the path, relative to a repository's install root, every
-// claude-code skills-directory plugin file lives under (R4).
+// claude-code skills-directory plugin file lives under.
 const PluginDir = ".claude/skills/brief"
 
 // WorkflowSkillDir is the path, relative to a repository's install root,
 // the brief-workflow skill lives under — a standalone project skill,
-// outside PluginDir, so an agent preloads it by its own bare name
-// "brief-workflow" (Rule 2).
+// outside PluginDir, so an agent preloads it by its bare name
+// "brief-workflow".
 const WorkflowSkillDir = ".claude/skills/brief-workflow"
 
-// claudeCodePluginFiles lists claudeCode's own Plugin(true) files, in
-// install order: the manifest, the start skill, the finish skill, then the
+// claudeCodePluginFiles lists claudeCode's Plugin(true) files, in install
+// order: the manifest, the start skill, the finish skill, then the
 // PostToolUse hook wiring last.
 var claudeCodePluginFiles = []File{
 	{RelPath: PluginDir + "/.claude-plugin/plugin.json", Kind: artifact.KindPluginManifest},
@@ -67,9 +67,9 @@ func (claudeCode) HookPath(r io.Reader) (string, error) {
 	return payload.ToolInput.FilePath, nil
 }
 
-// hookSpecificOutput is claudeCode's hook-context response's own nested
-// object: the PostToolUse event name, fixed, and the text that reaches the
-// model as context.
+// hookSpecificOutput is claudeCode's hook-context response's nested object:
+// the PostToolUse event name, fixed, and the text that reaches the model as
+// context.
 type hookSpecificOutput struct {
 	HookEventName     string `json:"hookEventName"`
 	AdditionalContext string `json:"additionalContext"`
@@ -121,7 +121,7 @@ func (claudeCode) Plugin(withHook bool) []File {
 	return append([]File(nil), files...)
 }
 
-// claudeCodeAgentFiles lists claudeCode's own Agents, in install order:
+// claudeCodeAgentFiles lists claudeCode's Agents, in install order:
 // planner, implementer, reviewer.
 var claudeCodeAgentFiles = []File{
 	{RelPath: PluginDir + "/agents/planner.md", Kind: artifact.KindAgentPlanner},
@@ -134,8 +134,8 @@ func (claudeCode) Agents() []File {
 	return append([]File(nil), claudeCodeAgentFiles...)
 }
 
-// claudeCodeSkillFiles lists claudeCode's own Skills: the one
-// brief-workflow SKILL.md file, outside PluginDir.
+// claudeCodeSkillFiles lists claudeCode's Skills: the one brief-workflow
+// SKILL.md file, outside PluginDir.
 var claudeCodeSkillFiles = []File{
 	{RelPath: WorkflowSkillDir + "/SKILL.md", Kind: artifact.KindSkillWorkflow},
 }
@@ -145,7 +145,7 @@ func (claudeCode) Skills() []File {
 	return append([]File(nil), claudeCodeSkillFiles...)
 }
 
-// claudeCodeInstructionFiles lists claudeCode's own InstructionFiles, in
+// claudeCodeInstructionFiles lists claudeCode's InstructionFiles, in
 // priority order: the repository-root CLAUDE.md, then ".claude/CLAUDE.md".
 var claudeCodeInstructionFiles = []string{"CLAUDE.md", ".claude/CLAUDE.md"}
 

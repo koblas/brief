@@ -1,15 +1,10 @@
 package setup_test
 
-// OS-subject: Init's own --edit-agents write path (bound-agent confinement,
-// Rule 3/Rule 4/Rule 8) always reads and writes through bound_agent.go's own
-// real os.Lstat/os.ReadFile and confinedAgentFile, regardless of the fsRoot
-// seam (fs.go) — see doc.go's own paragraph on why. Several cases here seed
-// a real symlink an rwfs.Mem cannot reproduce faithfully (Mem's own
-// ancestor check reports ENOTDIR where a real filesystem follows one).
-// Black-box: Init's own --edit-agents write path. writeConfigWithRoles,
-// writeMissingSkillAgent and newServerWithHome are
-// missing_skill_disk_test.go's own helpers, shared here since both files
-// live in package setup_test.
+// Init's --edit-agents write path always reads and writes through
+// bound_agent.go's real os.Lstat/os.ReadFile; several cases here seed a
+// real symlink an rwfs.Mem cannot reproduce faithfully. writeConfigWithRoles,
+// writeMissingSkillAgent and newServerWithHome are shared from
+// missing_skill_disk_test.go.
 
 import (
 	"errors"
@@ -61,11 +56,6 @@ func missingSkillPaths(res setup.Result) []string {
 	return out
 }
 
-// Test_init_edit_agents_adds_the_skill_to_bound_project_agents pins the
-// happy path: a bare implementer bound to a nested project agent file gets
-// a merged bound-agent row, its bytes are edited to carry the skill, its
-// mode is preserved, its path lands in Result.Modified, and it drops out of
-// AgentsMissingSkill.
 func Test_init_edit_agents_adds_the_skill_to_bound_project_agents(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -96,10 +86,6 @@ func Test_init_edit_agents_adds_the_skill_to_bound_project_agents(t *testing.T) 
 	assert.Empty(t, res.AgentsMissingSkill)
 }
 
-// Test_init_edit_agents_orders_bound_agent_rows pins the row order Surface
-// & Copy rules: config, feature-root, plugin…, hook, skill, agent×3,
-// bound-agent, snippet — the bound-agent row lands after every agent row
-// and before the snippet.
 func Test_init_edit_agents_orders_bound_agent_rows(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -142,10 +128,8 @@ func Test_init_edit_agents_orders_bound_agent_rows(t *testing.T) {
 	assert.Less(t, boundIdx, snippetIdx)
 }
 
-// Test_init_edit_agents_rows_for_unchanged_and_kept_shapes pins the
-// unchanged and kept rows, and the invariant tying AgentsMissingSkill to
-// whether a row actually merged: a path is listed after the run iff it was
-// lacking before and its own row is not "merged".
+// A path is listed after the run iff it was lacking before and its row is
+// not "merged".
 func Test_init_edit_agents_rows_for_unchanged_and_kept_shapes(t *testing.T) {
 	t.Run("already listed reports unchanged and stays byte-identical", func(t *testing.T) {
 		wd := t.TempDir()
@@ -240,20 +224,11 @@ func contains(list []string, want string) bool {
 	return false
 }
 
-// Test_init_edit_agents_leaves_non_targets_alone pins every case
-// --edit-agents must never touch: a user-level binding, a "brief:*" or
-// other-plugin binding, the reviewer role, a symlinked leaf, and an agent
-// reached only through a ".claude" symlinked outside the repository. Each
-// carries a control arm proving the identical fixture, minus the one
-// property under test, IS edited.
 func Test_init_edit_agents_leaves_non_targets_alone(t *testing.T) {
 	t.Run("a user-level binding is left alone; the identical agent at project scope is merged (control)", func(t *testing.T) {
 		wd := t.TempDir()
-		// home nests under wd on purpose: it isolates the ScopeProject
-		// filter from planBoundAgent's own containment check (Rule 3's
-		// other guard), which would otherwise also exclude a sibling-tempdir
-		// home the same way a real "~/.claude" always does — this subtest
-		// pins the ScopeProject filter specifically, not containment.
+		// home nests under wd, isolating the ScopeProject filter from the
+		// containment check, which this subtest is not pinning.
 		home := filepath.Join(wd, "home")
 		writeConfigWithRoles(t, wd, "", "developer", "")
 
@@ -380,12 +355,8 @@ func Test_init_edit_agents_leaves_non_targets_alone(t *testing.T) {
 
 		require.NoError(t, os.Symlink(outsideClaude, filepath.Join(wd, ".claude")))
 
-		// DryRun: a real run would also need to create the plugin/skill
-		// files under the symlinked ".claude" for the first time, which
-		// trips R10's own writability pre-check (Lstat never resolves a
-		// symlink at the exact path it is asked to check) — an unrelated
-		// concern this subtest is not proving. Planning itself — what this
-		// subtest pins — runs identically either way.
+		// DryRun avoids tripping the writability pre-check on the symlinked
+		// ".claude", unrelated to what this subtest proves.
 		srv := newServerWithHome(t, home)
 		res, err := srv.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode, EditAgents: true, DryRun: true})
 		require.NoError(t, err)
@@ -415,15 +386,8 @@ func Test_init_edit_agents_leaves_non_targets_alone(t *testing.T) {
 	})
 }
 
-// Test_init_edit_agents_falls_back_when_the_text_edit_cannot_be_verified
-// pins the shared post-edit gate (boundAgentEditVerified): addWorkflowSkill
-// is a surgical text scan, not a YAML parser, and each case here is a shape
-// it misjudges — its own output either duplicates the "skills:" key or
-// folds an unrelated line onto the inserted one. The gate catches every
-// one by re-decoding the edit and comparing it against the original
-// Skills plus brief-workflow; a mismatch falls back to the same
-// ActionKept row and detail an unrecognized shape gets, and the file is
-// never written.
+// addWorkflowSkill is a surgical text scan, not a YAML parser; each case
+// here is a shape it misjudges, caught by re-decoding the edit afterward.
 func Test_init_edit_agents_falls_back_when_the_text_edit_cannot_be_verified(t *testing.T) {
 	cases := []struct {
 		name string
@@ -469,10 +433,6 @@ func Test_init_edit_agents_falls_back_when_the_text_edit_cannot_be_verified(t *t
 	}
 }
 
-// Test_init_edit_agents_edits_a_shared_agent_once pins the dedupe rule:
-// planner and implementer both bound to the same agent produce exactly one
-// merged row, no ErrConcurrentEdit self-collision, and the skill inserted
-// once.
 func Test_init_edit_agents_edits_a_shared_agent_once(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -501,10 +461,6 @@ func Test_init_edit_agents_edits_a_shared_agent_once(t *testing.T) {
 	assert.Empty(t, res.AgentsMissingSkill)
 }
 
-// Test_init_edit_agents_dry_run_and_print_write_nothing pins DryRun and
-// Print: the same rows as a real run, nothing written, AgentsMissingSkill
-// already excludes the planned-edit path and still lists an other-shape
-// one.
 func Test_init_edit_agents_dry_run_and_print_write_nothing(t *testing.T) {
 	newFixture := func(t *testing.T) (wd, home, mergePath, otherPath string) {
 		t.Helper()
@@ -569,9 +525,6 @@ func Test_init_edit_agents_dry_run_and_print_write_nothing(t *testing.T) {
 	})
 }
 
-// Test_init_edit_agents_refuses_without_claude_code pins ErrEditAgentsNeedHost:
-// an explicit HostNone and a detection that finds nothing both refuse it,
-// and ErrAgentsNeedHost wins when --with-agents is also set.
 func Test_init_edit_agents_refuses_without_claude_code(t *testing.T) {
 	t.Run("explicit HostNone", func(t *testing.T) {
 		wd := t.TempDir()
@@ -608,10 +561,6 @@ func Test_init_edit_agents_refuses_without_claude_code(t *testing.T) {
 	})
 }
 
-// Test_init_edit_agents_joins_the_writability_precheck pins R10: an
-// unwritable agents directory refuses ErrUnwritable naming it, and neither
-// the config nor the agent file is written. Skipped under root, which
-// ignores directory write permission.
 func Test_init_edit_agents_joins_the_writability_precheck(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory write permission")

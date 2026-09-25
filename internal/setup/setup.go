@@ -19,17 +19,13 @@ import (
 	"github.com/koblas/brief/internal/platform/rwfs"
 )
 
-// configFileName is the config file Init writes and looks for — the same
-// name internal/platform/config resolves.
+// configFileName is the config file Init writes and looks for.
 const configFileName = ".brief.yaml"
 
-// HostNone is one host InitRequest.Host accepts: no agent-host integration
-// is installed, only the config and the feature root.
+// HostNone means no agent-host integration is installed — only the config and feature root.
 const HostNone = "none"
 
-// HostClaudeCode is the other host InitRequest.Host accepts: a Claude Code
-// skills-directory plugin (host.ClaudeCode) is installed alongside the
-// config and the feature root.
+// HostClaudeCode installs a Claude Code skills-directory plugin alongside the config and feature root.
 const HostClaudeCode = host.ClaudeCode
 
 // Hosts returns every host InitRequest.Host and UninstallRequest.Host
@@ -53,21 +49,13 @@ const (
 	KindPlugin Kind = "plugin"
 	// KindHook is a host's hook wiring file.
 	KindHook Kind = "hook"
-	// KindAgent is one of a host's three role-agent files, installed only
-	// under InitRequest.WithAgents; Uninstall always plans their removal
-	// regardless of any flag Init was run with.
+	// KindAgent is one of a host's three role-agent files, installed only under InitRequest.WithAgents.
 	KindAgent Kind = "agent"
-	// KindSkill is the brief-workflow skill file (host.Host.Skills),
-	// installed on every claude-code install, with or without WithAgents —
-	// unlike KindAgent, it lives outside host.PluginDir.
+	// KindSkill is the brief-workflow skill file, installed on every claude-code install.
 	KindSkill Kind = "skill"
-	// KindSnippet is the CLAUDE.md instruction block (R5).
+	// KindSnippet is the CLAUDE.md instruction block.
 	KindSnippet Kind = "snippet"
-	// KindBoundAgent is a repository agent file InitRequest.EditAgents
-	// edited, or found already satisfying or unable to satisfy, Rule 4's
-	// own "skills:" edit — a bare-name planner or implementer binding's own
-	// ScopeProject agentfile.Definition, never a "brief:*" binding, another
-	// plugin's, or one under "~/.claude".
+	// KindBoundAgent is a repository agent file InitRequest.EditAgents edited, or tried to, to add the workflow skill.
 	KindBoundAgent Kind = "bound-agent"
 )
 
@@ -75,46 +63,22 @@ const (
 type Action string
 
 const (
-	// ActionCreated marks an artifact that did not exist and was written,
-	// or, for the config file under --force, one rewritten from defaults.
+	// ActionCreated marks an artifact that did not exist and was written, or, for the config file under --force, one rewritten from defaults.
 	ActionCreated Action = "created"
-	// ActionUnchanged marks an artifact whose bytes, or whose existence as
-	// a directory, already matched what Init would have written.
+	// ActionUnchanged marks an artifact whose bytes already matched what Init would have written.
 	ActionUnchanged Action = "unchanged"
-	// ActionKept marks an existing, valid config file left as it was
-	// because its bytes differ from Init's own render — a repository
-	// owner's local edit — or, for Uninstall, any artifact left on disk
-	// rather than removed.
+	// ActionKept marks an artifact left unwritten because it was edited locally, or, for Uninstall, any artifact left on disk.
 	ActionKept Action = "kept"
 	// ActionRemoved marks an artifact Uninstall deleted.
 	ActionRemoved Action = "removed"
-	// ActionMerged marks either of two rewrites in place: the CLAUDE.md
-	// instruction block appended to an existing file that carried none, or
-	// replaced because its bytes were a brief-written render other than
-	// today's own (an older release, or the same release rendered for a
-	// different feature directory); or a whole plugin, skill or agent file
-	// whose bytes are artifact.OriginOlder — Rule 6 — replaced wholesale
-	// with today's own render, detail "updated".
+	// ActionMerged marks a rewrite in place: the CLAUDE.md block merged into an existing file, or a plugin, skill or agent file replaced wholesale with today's render.
 	ActionMerged Action = "merged"
 )
 
-// Server plans and applies brief's own install write path. homeDir backs
-// detectHost's own home-directory check (WithHomeDir); fsRoot backs every
-// read and write Init and Uninstall perform under the repository root, and
-// the config-location walk above it (WithFSRoot); resolveRoot backs
-// boundAgentTargets' and agentsMissingSkill's own EvalSymlinks(root) call
-// (WithResolveRoot) — never the bound-agent file reads and writes
-// themselves, which stay on real disk through bound_agent.go's own
-// confinedAgentFile regardless of fsRoot or resolveRoot. writableCheck
-// backs R10's own pre-write call in Init (WithWritableCheck): its default,
-// checkWritable (writable.go), is never itself routed through fsRoot — it
-// walks real disk via os.Lstat and internal/platform/writable.Probe
-// regardless, since production always uses the default and a
-// *_disk_test.go file pins it directly — this seam exists only so a
-// Mem-backed test can record which targets a real run would have checked,
-// or skip the real-disk call entirely, without a hybrid fixture asserting
-// a refusal (or its absence) production could never actually produce
-// against a real, unconverted R10.
+// Server plans and applies brief's install write path. homeDir, fsRoot,
+// resolveRoot and writableCheck are injected seams so a test can substitute
+// an in-memory filesystem and skip real-disk checks; production uses
+// NewServer's defaults throughout.
 type Server struct {
 	homeDir       func() (string, error)
 	fsRoot        func() rwfs.FS
@@ -125,45 +89,30 @@ type Server struct {
 // Option configures a Server built by NewServer.
 type Option func(*Server)
 
-// WithFSRoot overrides the production fsRoot (diskFS, the real, unconfined
-// "/"-rooted filesystem) that every read and write Init and Uninstall
-// perform under a repository root, and the config-location walk above it,
-// go through. internal/cli's own run seam (withSetupOpts) is the one
-// production caller that ever supplies a non-default fsys, so a
-// command-level test can substitute an rwfs.Mem without setup ever knowing
-// the difference. It never affects bound_agent.go's own confinedAgentFile,
-// which always reads and writes through real disk regardless (see fs.go's
-// own diskFS doc comment).
+// WithFSRoot overrides the filesystem every read and write under a
+// repository root goes through, so a test can substitute an rwfs.Mem. It
+// never affects the confined bound-agent file reads and writes
+// (bound_agent.go), which always use real disk.
 func WithFSRoot(fsys rwfs.FS) Option {
 	return func(s *Server) { s.fsRoot = func() rwfs.FS { return fsys } }
 }
 
-// WithResolveRoot overrides the production resolveRoot
-// (filepath.EvalSymlinks) that boundAgentTargets and agentsMissingSkill
-// call on root before either walks agentfile bindings. A WithFSRoot-backed
-// command-level test injects an identity function here too, since root
-// names no real directory for EvalSymlinks to resolve against an
-// rwfs.Mem. Never affects bound_agent.go's own confinedAgentFile.
+// WithResolveRoot overrides the resolveRoot used to symlink-resolve root
+// before walking agent bindings. Never affects bound-agent file reads and
+// writes, which stay on real disk regardless.
 func WithResolveRoot(fn func(string) (string, error)) Option {
 	return func(s *Server) { s.resolveRoot = fn }
 }
 
-// WithWritableCheck overrides the production writableCheck (checkWritable,
-// real os.Lstat plus internal/platform/writable.Probe) that Init runs
-// before applying. A WithFSRoot-backed command-level test not itself
-// exercising R10 overrides this too, so real disk is never consulted about
-// a target that only exists on the injected rwfs.Mem — checkWritable
-// itself (writable.go) is never changed by this seam; every
-// writable_disk_test.go and init_disk_test.go R10 case still builds its
-// Server with plain NewServer(), never this option.
+// WithWritableCheck overrides the pre-apply writability check Init runs
+// before applying, so a WithFSRoot-backed test doesn't consult real disk.
 func WithWritableCheck(fn func([]string) error) Option {
 	return func(s *Server) { s.writableCheck = fn }
 }
 
-// NewServer returns a Server ready to call Init on, homeDir defaulted to
-// os.UserHomeDir, fsRoot to diskFS (the real, unconfined "/"-rooted
-// filesystem), resolveRoot to filepath.EvalSymlinks, and writableCheck to
-// checkWritable.
+// NewServer returns a Server with production defaults: homeDir
+// os.UserHomeDir, fsRoot the real disk filesystem, resolveRoot
+// filepath.EvalSymlinks, and writableCheck checkWritable.
 func NewServer(opts ...Option) *Server {
 	s := &Server{
 		homeDir:       os.UserHomeDir,
@@ -179,12 +128,8 @@ func NewServer(opts ...Option) *Server {
 	return s
 }
 
-// locateInRepo is config.LocateInRepo's own fsys-backed twin, mirroring
-// internal/doctor's own (*Server).locateInRepo: the walk and the
-// git-repository boundary both run against fsys rather than
-// config.LocateInRepo's and repo.Root's own hardcoded "/"-rooted namespace,
-// so a test can substitute an rwfs.Mem for both. It reproduces
-// config.LocateWithin's own "resolve config:" wrap verbatim.
+// locateInRepo is config.LocateInRepo's fsys-backed twin: a config found
+// above the nearest enclosing git repository is treated as not found.
 func locateInRepo(fsys fs.FS, wd string) (string, error) {
 	abs, err := filepath.Abs(wd)
 	if err != nil {
@@ -204,10 +149,8 @@ func locateInRepo(fsys fs.FS, wd string) (string, error) {
 	return nearest, nil
 }
 
-// inspectConfig is config.Inspect's own fsys-backed twin, mirroring
-// internal/doctor's own (*Server).inspect: abs is already absolute, so
-// unlike config.Inspect this never calls filepath.Abs itself. It reproduces
-// config.Inspect's own error wrap verbatim.
+// inspectConfig is config.Inspect's fsys-backed twin; abs is already
+// absolute, so unlike config.Inspect this never calls filepath.Abs.
 func inspectConfig(fsys fs.FS, abs string) (config.Config, []*config.ValueError, error) {
 	cfg, violations, err := config.InspectFS(fsys, abs)
 	if err != nil {
@@ -221,13 +164,10 @@ func inspectConfig(fsys fs.FS, abs string) (config.Config, []*config.ValueError,
 	return cfg, violations, nil
 }
 
-// writeThrough replaces name's bytes under fsys, rebuilding the exact
-// "setup: open %s: %w" (an os.OpenRoot(dir) failure, diskFS.WriteFile's own
-// Op "open") or "setup: write %s: %w" (anything else) text planning and
-// apply produced before this seam existed, from the returned error's own
-// *fs.PathError.Op and .Err — never from its own .Path, which is
-// fsys-relative rather than the absolute display path the caller already
-// has.
+// writeThrough replaces name's bytes under fsys, wrapping an open failure
+// as "setup: open %s" and any other failure as "setup: write %s", using
+// path (the caller's absolute display path) rather than the fsys-relative
+// error path.
 func writeThrough(fsys rwfs.FS, name, path string, body []byte) error {
 	err := fsys.WriteFile(name, body, 0o644)
 	if err == nil {
@@ -245,56 +185,31 @@ func writeThrough(fsys rwfs.FS, name, path string, body []byte) error {
 	return fmt.Errorf("setup: write %s: %w", path, err)
 }
 
-// InitRequest is Init's own input: Host selects the agent-host integration
-// (Hosts); "" means detect (R8, detectHost) rather than refuse —
-// Result.NoHostDetected reports whether detection found nothing, the only
-// way a caller distinguishes that from an explicit Host: HostNone. NoHook
-// omits a claude-code host's hook wiring file entirely (no
-// plan, no row) while leaving any other plugin file untouched, WithAgents
-// installs the three role-agent files (host.Host.Agents) and, only when
-// this run also creates the config file, binds every role to them (R7) —
-// like NoHook, false plans no agent row at all, never reading or writing
-// them; it is refused as ErrAgentsNeedHost unless Host is
-// HostClaudeCode. EditAgents plans and, for a real run, applies
-// planBoundAgents (Rule 3, Rule 4): every bare-name planner or implementer
-// binding's own ScopeProject agentfile.Definition gets a KindBoundAgent
-// row and, when its own "skills:" shape allows it, its frontmatter edited
-// to add artifact.WorkflowSkillName — it is refused as
-// ErrEditAgentsNeedHost, checked after ErrAgentsNeedHost, unless Host is
-// HostClaudeCode. DryRun computes the same plan without writing anything,
-// and Force rewrites an existing config from defaults — the bound variant
-// under WithAgents — rather than keeping or refusing it; it never rewrites
-// an edited plugin or agent file, only the config. Print computes the same
-// plan and writes nothing either, like DryRun, but additionally skips the
-// writability pre-check (checkWritable): Result.Print is populated either
-// way, but only a real run — neither DryRun nor Print — ever runs the
-// check or writes anything.
+// InitRequest is Init's input. Host selects the agent-host integration;
+// "" detects one instead of refusing. WithAgents and EditAgents each
+// require a resolved HostClaudeCode. DryRun and Print both compute the
+// plan without writing; Force rewrites an existing config from defaults.
 type InitRequest struct {
-	Host       string
-	NoHook     bool
+	Host string
+	// NoHook omits a claude-code host's hook wiring file entirely.
+	NoHook bool
+	// WithAgents installs the three role-agent files and, only when this
+	// run also creates the config, binds every role to them.
 	WithAgents bool
+	// EditAgents edits every bare-name planner or implementer binding's
+	// agent file to add the workflow skill, where its "skills:" shape allows it.
 	EditAgents bool
 	DryRun     bool
 	Force      bool
-	Print      bool
+	// Print additionally skips the pre-apply writability check.
+	Print bool
 }
 
 // Artifact is one thing Init installs, or Init or Uninstall found already
-// installed: Kind and Path identify it, Action reports what happened, and
-// Detail carries an optional parenthetical ("edited locally", "rewritten
-// from defaults"), empty when there is nothing to add. ForceRemovable is
-// true exactly on an Uninstall-side ActionKept artifact that --force would
-// turn into ActionRemoved (an edited file — planPluginRemoval,
-// planConfigRemoval, planSnippetRemoval's own OriginEdited/OriginOlder
-// arm) — false on every other Action, including that same edited file once
-// --force has already removed it, and on a non-regular file (never
-// followed or removed regardless of --force). It is unused, always false,
-// on every Init-side artifact. This is the typed distinction cli's own
-// uninstallNextAction counts on, rather than matching Detail's own free
-// text: install-side and removal-side kept detail wording are free to
-// differ (planSnippet's own longer "add the block by hand" versus
-// planSnippetRemoval's plain "not a regular file") without silently
-// breaking that count.
+// installed. Kind and Path identify it, Action reports what happened, and
+// Detail carries an optional note. ForceRemovable is true only for an
+// Uninstall-side ActionKept artifact that --force would turn into
+// ActionRemoved; it is always false on an Init-side artifact.
 type Artifact struct {
 	Kind           Kind
 	Path           string
@@ -304,108 +219,41 @@ type Artifact struct {
 }
 
 // Result is what Init and Uninstall both return: Host and DryRun echo the
-// request, Root is the absolute install root both operated against —
-// config.LocateInRepo's directory, or wd when no config was found, or when
-// the config found lies above the nearest enclosing git repository (R3) —
-// Artifacts lists what was found and what happened to it — for Init, the
-// config file, the feature root, then a claude-code host's own plugin
-// manifest, start skill, finish skill, hook wiring, the brief-workflow
-// skill, and, under WithAgents, the three role-agent files, then the
-// CLAUDE.md block last, the fixed order R11's stdout rows render in; for
-// Uninstall, the CLAUDE.md block first, then one KindBoundAgent row per
-// planBoundAgentRemovals target (Rule 8, planned only when the
-// brief-workflow skill's own row is not itself ActionKept), then a
-// claude-code host's own agent files (reviewer, implementer, planner —
-// always planned, independent of any flag Init was run with), the
-// brief-workflow skill, and plugin files (hook, finish skill, start skill,
-// manifest), then the config file last, so a partial uninstall never
-// removes the repository's opt-in marker before everything else. Created
-// names every path Init wrote that did not exist before; Modified names
-// every path either command rewrote in place — Init's own CLAUDE.md merge
-// or replace, an ActionMerged plugin, skill or agent file Init upgrades
-// from an OriginOlder render (Rule 6), Uninstall's own CLAUDE.md block
-// strip that leaves the file non-empty, and Uninstall's own bound-agent
-// "skills:" edit (Rule 8) — a bound-agent row is ActionRemoved but never
-// appears in Removed, since the file itself is rewritten, not deleted;
-// Removed names
-// every path Uninstall actually deleted — both absolute, in the order each
-// command touched them. A pruned, now-empty plugin directory is never in
-// any of the three. RolesToAdd is Init's own hint (R7): empty unless
-// WithAgents and the config was not written this run, in which case it
-// lists a "roles:" header line plus one "  <role>: brief:<role>" line for
-// every role the kept or unchanged config still leaves unbound — a role
-// already bound to anything, brief's own agent or the adopter's own, is
-// never listed. No slice is ever nil; Created, Modified and Removed are
-// empty under DryRun; RolesToAdd is populated even under DryRun.
-// NoHostDetected is true only when InitRequest.Host was "" and detectHost
-// found nothing — the one signal a caller needs to render R8's
-// no-host-detected line instead of the ordinary next action; it is always
-// false when Host was given explicitly, HostNone included. DetectedBy names
-// the signal detectHost found — ".claude", "CLAUDE.md", or "~/.claude" —
-// only when Host was "" and detection succeeded; it is "" both when Host
-// was given explicitly and when NoHostDetected is true, so a caller can
-// tell "the caller chose claude-code" from "brief guessed it, and here is
-// why" without also checking NoHostDetected. Print is R9's own
-// pending-artifact set (printArtifacts), never nil, populated regardless of
-// DryRun or Print. AgentsMissingSkill is Init's own report (agentsMissingSkill):
-// every bare-name planner or implementer binding, from this run's own
-// post-plan config.Roles, whose resolved agent does not preload the
-// brief-workflow skill — populated only when the resolved Host is
-// HostClaudeCode, regardless of DryRun or Print, empty and non-nil
-// otherwise, including on every Uninstall Result.
+// request, Root is the absolute install root, and Artifacts lists every
+// managed file, in the fixed order each command's stdout rows render in,
+// and what happened to it. Created, Modified and Removed name the paths
+// actually written or deleted, in that same order; no slice is ever nil.
 type Result struct {
-	Host               string
-	DryRun             bool
-	Root               string
-	Artifacts          []Artifact
-	Created            []string
-	Modified           []string
-	Removed            []string
-	RolesToAdd         []string
-	NoHostDetected     bool
-	DetectedBy         string
-	Print              []PrintArtifact
+	Host      string
+	DryRun    bool
+	Root      string
+	Artifacts []Artifact
+	Created   []string
+	Modified  []string
+	Removed   []string
+	// RolesToAdd is Init's hint: empty unless WithAgents left a role
+	// unbound in a config not written this run, else a "roles:" header
+	// plus one line per unbound role. Populated even under DryRun.
+	RolesToAdd []string
+	// NoHostDetected is true only when Host was "" and detection found nothing.
+	NoHostDetected bool
+	// DetectedBy names the signal that resolved an empty Host (".claude",
+	// "CLAUDE.md", or "~/.claude"); "" when Host was given explicitly or NoHostDetected is true.
+	DetectedBy string
+	// Print is the pending-artifact set, always populated.
+	Print []PrintArtifact
+	// AgentsMissingSkill lists bindings whose resolved agent lacks the
+	// workflow skill. Populated only for a HostClaudeCode Init.
 	AgentsMissingSkill []MissingSkillAgent
 }
 
-// Init plans then, unless req.DryRun, applies brief's own install: the
-// config file, the feature root the kept or freshly written config names,
-// and, for req.Host == HostClaudeCode, that host's own skills-directory
-// plugin files (host.Host.Plugin), the brief-workflow skill
-// (host.Host.Skills) — written on every claude-code install, with or
-// without req.WithAgents — under req.WithAgents its three role-agent files
-// (host.Host.Agents, R7) — with a config this same call creates or
-// --force-rewrites bound to them (artifact.AgentBindings) — and its
-// CLAUDE.md instruction block (R5, planSnippet) — independent of
-// req.NoHook, which only ever omits the hook file. Every refusal — an
-// unknown host, req.WithAgents without a resolved HostClaudeCode
-// (ErrAgentsNeedHost), an invalid existing config, a feature root that
-// exists as something other than a directory, a CLAUDE.md marker defect —
-// is decided during planning, before any artifact is touched; DryRun
-// therefore returns exactly the plan a real run would apply, including any
-// refusal, and writes nothing either way. Result.RolesToAdd is computed
-// even under DryRun.
-//
-// The install root is config.LocateInRepo's own directory (R3): a found
-// config is adopted only when it sits at or below the nearest enclosing git
-// repository, walked from wd; one found above that boundary — a HOME-level
-// config, say — is treated as though none existed, and Init writes a fresh
-// one at wd instead of adopting or merging into a repository elsewhere on
-// disk. With no enclosing git repository anywhere above wd, Init keeps its
-// own plain ancestor walk, unbounded, exactly as before this rule existed.
-//
-// Applying writes the feature root, then every plugin, skill and agent
-// file reporting ActionCreated or ActionMerged (Rule 6's OriginOlder
-// upgrade, guarded by verifyFileUnchanged against a concurrent edit), then
-// the CLAUDE.md block, then the config file last, so the config file — the
-// repository's opt-in marker — never appears before everything else has
-// landed. A plugin, skill or agent file already present and unedited
-// (ActionUnchanged) or edited locally (ActionKept) is never rewritten,
-// --force included: R3's --force only ever rewrites the config from
-// defaults (the bound variant under req.WithAgents); the same holds for a
-// CLAUDE.md block reporting ActionKept. A failure after at least one
-// earlier write already landed is wrapped in ErrPartialWrite; a failure
-// before anything was written is returned as-is.
+// Init plans then, unless req.DryRun or req.Print, applies brief's
+// install: the config file, the feature root, and for a resolved
+// HostClaudeCode that host's plugin, skill and agent files plus its
+// CLAUDE.md block. Every refusal is decided during planning, before any
+// artifact is touched, so DryRun returns exactly the plan a real run would
+// apply. A write failure after an earlier write already landed is wrapped
+// in ErrPartialWrite.
 func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, error) {
 	if req.Host != "" && !validHost(req.Host) {
 		return Result{}, fmt.Errorf("%q: %w", req.Host, ErrUnknownHost)
@@ -571,13 +419,9 @@ func (s *Server) Init(_ context.Context, wd string, req InitRequest) (Result, er
 	return apply(fsys, res, featureArt, writeArts, boundAgentArts, snippetArt, hasSnippet, configArt, configBody)
 }
 
-// rolesToAdd renders Result.RolesToAdd (R7): empty unless withAgents and
-// the config was not written this run (configAction != ActionCreated —
-// bindings are only ever written into a config Init creates in the same
-// run), else a "roles:" header line plus one "  <role>: brief:<role>" line
-// for every role current leaves unbound (empty), in RoleBindings' own
-// field order (planner, implementer, reviewer) — a role already bound to
-// anything, brief's own agent or the adopter's own, is never listed.
+// rolesToAdd renders Result.RolesToAdd: empty unless withAgents and the
+// config was not created this run, else a "roles:" header plus one line
+// per role current leaves unbound.
 func rolesToAdd(withAgents bool, configAction Action, current config.RoleBindings) []string {
 	if !withAgents || configAction == ActionCreated {
 		return []string{}
@@ -604,22 +448,10 @@ func rolesToAdd(withAgents bool, configAction Action, current config.RoleBinding
 	return append([]string{"roles:"}, lines...)
 }
 
-// apply writes featureArt, then every pluginArts entry reporting
-// ActionCreated or ActionMerged (plugin files, then the brief-workflow
-// skill, then, under WithAgents, the three agent files — all share this one
-// list and its own write order) — an ActionMerged entry (an OriginOlder
-// render Rule 6 upgrades) re-reads its own path immediately before writing
-// (verifyFileUnchanged) and refuses ErrConcurrentEdit rather than
-// overwriting a file changed since planning — then every boundAgentArts
-// entry reporting ActionMerged (guarded by verifyBoundAgentUnchanged, then
-// ba.agentFile().write, which preserves the file's own mode), then
-// snippetArt (when hasSnippet, and it reports ActionCreated or
-// ActionMerged), then configArt last with configBody as its bytes — the
-// plain ConfigFile() or, under WithAgents, ConfigFileWithRoles() — into
-// res's own Created or Modified list — Created for ActionCreated, Modified
-// for ActionMerged, since a merge rewrites bytes an existing file already
-// held. A write failure is wrapped in ErrPartialWrite iff at least one
-// earlier write already landed in this same call.
+// apply writes featureArt, then pluginArts, boundAgentArts, snippetArt and
+// configArt in that order, verifying each rewrite against a concurrent
+// edit immediately before overwriting it. A write failure after an earlier
+// write already landed in this call is wrapped in ErrPartialWrite.
 func apply(
 	fsys rwfs.FS, res Result, featureArt Artifact, pluginArts []pluginArtifact, boundAgentArts []boundAgentArtifact,
 	snippetArt snippetArtifact, hasSnippet bool, configArt Artifact, configBody []byte,
@@ -737,17 +569,9 @@ func apply(
 	return res, nil
 }
 
-// pluginArtifact pairs one plugin file's Artifact with the artifact.Kind
-// its Render/Recognize digest list is checked against — a different
-// vocabulary from Artifact.Kind's own setup-level Kind (KindPlugin or
-// KindHook), kept out of Artifact itself since nothing outside this
-// package ever needs it — and, for an ActionMerged row (an OriginOlder
-// file being upgraded), the bytes planning actually read from disk:
-// apply's own write-path guard (verifyFileUnchanged, reused) re-reads
-// the path immediately before writing and refuses ErrConcurrentEdit unless
-// it still matches existing, the same read-modify-write protection the
-// CLAUDE.md merge already has. Nil for every Action other than
-// ActionMerged.
+// pluginArtifact pairs one plugin file's Artifact with its artifact.Kind
+// and, for an ActionMerged row, the bytes planning read from disk so apply
+// can guard the rewrite against a concurrent edit.
 type pluginArtifact struct {
 	Artifact
 
@@ -781,9 +605,7 @@ func planPluginFiles(fsys rwfs.FS, root string, h host.Host, withHook bool) ([]p
 }
 
 // planAgentFiles plans every file h.Agents() lists, each joined under
-// root, in that same order (planner, implementer, reviewer) — mirroring
-// planPluginFiles, but every entry is tagged KindAgent rather than
-// KindPlugin or KindHook: Agents carries no hook file of its own.
+// root, tagged KindAgent.
 func planAgentFiles(fsys rwfs.FS, root string, h host.Host) ([]pluginArtifact, error) {
 	files := h.Agents()
 	out := make([]pluginArtifact, 0, len(files))
@@ -803,9 +625,7 @@ func planAgentFiles(fsys rwfs.FS, root string, h host.Host) ([]pluginArtifact, e
 }
 
 // planSkillFiles plans every file h.Skills() lists, each joined under
-// root, in that same order — mirroring planPluginFiles and planAgentFiles,
-// but every entry is tagged KindSkill: unlike Agents, Skills is planned on
-// every claude-code install, with or without WithAgents.
+// root, tagged KindSkill.
 func planSkillFiles(fsys rwfs.FS, root string, h host.Host) ([]pluginArtifact, error) {
 	files := h.Skills()
 	out := make([]pluginArtifact, 0, len(files))
@@ -824,27 +644,14 @@ func planSkillFiles(fsys rwfs.FS, root string, h host.Host) ([]pluginArtifact, e
 	return out, nil
 }
 
-// planPluginFile decides one plugin file's own Artifact and, for an
-// OriginOlder file, the bytes planning read (returned separately so
-// planPluginFiles can carry them on pluginArtifact.existing) — mirroring
-// planConfigRemoval's own Lstat-first shape: missing reports ActionCreated;
-// a path that exists but is not a regular file (a directory, a symlink)
-// reports ActionKept, detail "not a regular file", never followed; a
-// regular file whose bytes are artifact.Recognize's OriginCurrent for
-// renderKind reports ActionUnchanged; OriginOlder — an earlier release's
-// own render, Rule 6 — reports ActionMerged, detail "updated", the file's
-// own bytes returned alongside so apply can guard the rewrite against a
-// concurrent edit; any other bytes (OriginEdited) report ActionKept, detail
-// "edited locally" — Init never rewrites an edited plugin file the way
-// --force rewrites the config. An ENOTDIR Lstat — an ancestor component
-// exists as something other than a directory — is treated the same as
-// "does not exist yet": os.IsNotExist never matches it, but the path still
-// is not there, and the pre-write check (checkWritable) is what refuses on
-// that blocking ancestor, not planning.
+// planPluginFile decides one plugin file's Artifact by comparing its disk
+// bytes against renderKind's known renders, returning the bytes read too
+// for an ActionMerged row so apply can guard the rewrite.
 func planPluginFile(fsys rwfs.FS, path string, kind Kind, renderKind artifact.Kind) (Artifact, []byte, error) {
 	info, err := fsys.Lstat(fsName(path))
 
 	switch {
+	// An ENOTDIR ancestor is treated as "not there yet"; checkWritable refuses it later.
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR):
 		return Artifact{Kind: kind, Path: path, Action: ActionCreated}, nil, nil
 	case err != nil:
@@ -885,30 +692,8 @@ func writePluginFile(fsys rwfs.FS, path string, body []byte) error {
 	return writeThrough(fsys, fsName(path), path, body)
 }
 
-// planConfig decides the config file's own Artifact and, when it can be
-// trusted, the Config governing the feature root and Result.RolesToAdd: a
-// fresh path (nothing found) always reports ActionCreated against
-// config.Default() (Roles bound to artifact.AgentBindings() under
-// withAgents — the config this call reports ActionCreated for is always
-// the one apply writes). Under --force, the target is the desired render
-// alone — ConfigFile(), or ConfigFileWithRoles() under withAgents — and
-// only an exact byte match against it (configFileCurrent) is
-// ActionUnchanged; any other content, invalid, unparseable, or unreadable
-// for any other reason (a directory at that path, say), reports
-// ActionCreated, detail "rewritten from defaults" — never refusing on the
-// old file's content, since --force's own promise is to rewrite it; the
-// write attempt itself, not this planning step, is where an unreadable
-// path's own failure surfaces. Without --force, an existing file
-// recognized as any current KindConfig render (artifact.Recognize's
-// OriginCurrent — the plain render or the bound one, either) is
-// ActionUnchanged, its own bytes decoded (decodeCurrentConfig) so a bound
-// file's own Roles are never reported unbound; otherwise it is decoded
-// with config.Inspect — a decode failure or any R1 violation refuses,
-// naming the first one in Config's own field order — and a config with
-// none is ActionKept, detail "edited locally", governing the feature root
-// and RolesToAdd with its own decoded values. --with-agents never edits an
-// existing config either way (R7): only the nearest == "" branch above,
-// and --force's own rewrite, ever report ActionCreated.
+// planConfig decides the config file's Artifact and, when it can be
+// trusted, the Config governing the feature root and Result.RolesToAdd.
 func planConfig(fsys rwfs.FS, nearest, root string, force, withAgents bool) (Artifact, config.Config, error) {
 	if nearest == "" {
 		path := filepath.Join(root, configFileName)
@@ -926,6 +711,8 @@ func planConfig(fsys rwfs.FS, nearest, root string, force, withAgents bool) (Art
 		desired = artifact.ConfigFileWithRoles()
 	}
 
+	// --force never refuses on the old file's content; an unreadable path
+	// surfaces at the write attempt, not here.
 	if force {
 		if configFileCurrent(fsys, nearest, desired) {
 			cfg, err := decodeCurrentConfig(fsys, nearest)
@@ -970,14 +757,9 @@ func planConfig(fsys rwfs.FS, nearest, root string, force, withAgents bool) (Art
 	return Artifact{Kind: KindConfig, Path: nearest, Action: ActionKept, Detail: "edited locally"}, cfg, nil
 }
 
-// configFileCurrent reports whether path's own bytes already equal
-// desired exactly, false for any read failure — a directory at path, a
-// permission error, or a genuinely different render all take the same
-// "not current" branch here. Unlike the non-force branch's own
-// artifact.Recognize check, this is an exact match against desired alone,
-// never "any known current render": under --force --with-agents a config
-// holding the plain render is not current — it must be rewritten to the
-// bound one — even though artifact.Recognize would call it OriginCurrent.
+// configFileCurrent reports whether path's bytes exactly equal desired,
+// false on any read failure. Unlike artifact.Recognize, this requires an
+// exact match — under --force --with-agents a plain render is not current.
 func configFileCurrent(fsys rwfs.FS, path string, desired []byte) bool {
 	existing, err := fsys.ReadFile(fsName(path))
 	if err != nil {
@@ -987,13 +769,8 @@ func configFileCurrent(fsys rwfs.FS, path string, desired []byte) bool {
 	return bytes.Equal(existing, desired)
 }
 
-// decodeCurrentConfig decodes nearest — already known to hold one of this
-// package's own compiled-in KindConfig renders (artifact.Recognize's
-// OriginCurrent) — into its Config. A decode failure or R1 violation here
-// would mean a compiled-in render itself stopped decoding cleanly, not a
-// condition a caller can fix; it is still reported as a *RefusalError
-// (configRefusal) rather than panicking, so a defect here fails loudly
-// instead of silently reporting every role unbound.
+// decodeCurrentConfig decodes nearest, already known to hold a current
+// KindConfig render, into its Config.
 func decodeCurrentConfig(fsys rwfs.FS, nearest string) (config.Config, error) {
 	cfg, violations, err := inspectConfig(fsys, nearest)
 	if err != nil {
@@ -1007,12 +784,8 @@ func decodeCurrentConfig(fsys rwfs.FS, nearest string) (config.Config, error) {
 	return cfg, nil
 }
 
-// configRefusal builds the *RefusalError an invalid or unparseable existing
-// config reports: Problem recovers the underlying *config.ValueError or
-// decode failure's own text via errors.AsType[*config.InvalidConfigError],
-// and Fix always points at --force, the only way init rewrites an existing
-// file. err is wrapped unchanged, so errors.Is(result, config.ErrInvalidConfig)
-// still holds.
+// configRefusal builds the *RefusalError an invalid or unparseable
+// existing config reports, Fix always pointing at --force.
 func configRefusal(path string, err error) error {
 	problem := err.Error()
 	if invalidCfg, ok := errors.AsType[*config.InvalidConfigError](err); ok {
@@ -1051,10 +824,7 @@ func planFeatureRoot(fsys rwfs.FS, path string) (Artifact, error) {
 	}
 }
 
-// writeConfigFile atomically replaces name — an absolute path — with body,
-// through fsys's own WriteFile (diskFS's own body: internal/platform/
-// atomicfile, so a reader never observes a truncated or half-renamed
-// config file).
+// writeConfigFile atomically replaces name with body.
 func writeConfigFile(fsys rwfs.FS, name string, body []byte) error {
 	return writeThrough(fsys, fsName(name), name, body)
 }
@@ -1064,10 +834,8 @@ func validHost(host string) bool {
 	return slices.Contains(Hosts(), host)
 }
 
-// flattenOneLine collapses s to a single line: embedded newlines and runs
-// of whitespace become one space each — yaml.v3 reports an unknown-key
-// failure as "yaml: unmarshal errors:\n  line N: …", and a RefusalError's
-// Problem is always one line.
+// flattenOneLine collapses s to a single line, since a RefusalError's
+// Problem must be one line.
 func flattenOneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }

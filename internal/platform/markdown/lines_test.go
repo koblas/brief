@@ -7,11 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Test_CountLines covers the whole contract in one table: the unit is
-// "lines", a trailing newline terminates the last line rather than opening
-// a new one, and a CRLF body counts the same as an LF one. Each case is a
-// single input and a single expected count, so a table states the rule more
-// plainly than seven near-identical functions did.
 func Test_CountLines(t *testing.T) {
 	cases := []struct {
 		name string

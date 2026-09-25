@@ -1,12 +1,5 @@
-// This file reaches the unexported run directly to inject newMemSetupSeam
-// (mem_internal_test.go), the same rwfs.Mem seam init_internal_test.go
-// uses. init_json_test.go's own two error-document cases
-// (Test_init_json_refusal_reports_files_changed_false,
-// Test_init_json_unknown_host_fix_agrees_with_the_message) stay black-box:
-// they decode through decodeErrorDocument/decodeUsageErrorDocument
-// (json_refusal_test.go, json_usage_test.go), shared package cli_test
-// helpers this white-box package cannot import without duplicating their
-// full key-set assertions.
+// White-box: reaches run directly to inject newMemSetupSeam, the same
+// rwfs.Mem seam init_internal_test.go uses.
 
 package cli
 
@@ -21,11 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_init_json_is_one_exact_document pins initDocument's key order for a
-// fresh repository's first run: created lists the feature root then the
-// config file — apply's own write order — while artifacts lists the config
-// then the feature root — R11's stdout row order — and every path is
-// absolute.
+// created lists the feature root then the config file (apply's write
+// order), while artifacts lists the config then the feature root (the
+// stdout row order); every path is absolute.
 func Test_init_json_is_one_exact_document(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -47,13 +38,8 @@ func Test_init_json_is_one_exact_document(t *testing.T) {
 	assert.Equal(t, want, stdout.String())
 }
 
-// Test_init_json_for_claude_code_carries_plugin_and_hook_kinds pins the
-// JSON "kind" vocabulary (R11): "plugin" for the manifest and both skills,
-// "hook" for hooks.json, "skill" for the brief-workflow skill, "snippet"
-// for CLAUDE.md, "host" echoing "claude-code", and every created path
-// listed in write order (feature root, then the four plugin files, the
-// brief-workflow skill, then CLAUDE.md, config last) — files only, never a
-// directory.
+// created lists every path in write order: feature root, then the four
+// plugin files, the brief-workflow skill, then CLAUDE.md, config last.
 func Test_init_json_for_claude_code_carries_plugin_and_hook_kinds(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -101,11 +87,6 @@ func Test_init_json_for_claude_code_carries_plugin_and_hook_kinds(t *testing.T) 
 	assert.Equal(t, "snippet", kindByPath[claudeMD])
 }
 
-// Test_init_with_agents_json_reports_agent_rows_and_roles_to_add pins
-// R11's JSON vocabulary for --with-agents: "kind":"agent" for the three
-// role-agent files, and "roles_to_add" empty — this run authored the
-// bindings itself, so there is nothing left to add — with stderr staying
-// empty exactly as every other --json success does.
 func Test_init_with_agents_json_reports_agent_rows_and_roles_to_add(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -137,9 +118,6 @@ func Test_init_with_agents_json_reports_agent_rows_and_roles_to_add(t *testing.T
 	assert.Equal(t, "agent", kindByPath[filepath.Join(base, "reviewer.md")])
 }
 
-// Test_init_dry_run_json_reports_empty_created_and_modified pins R9's JSON
-// shape: dry_run true, both created and modified "[]" (never null), and
-// nothing written.
 func Test_init_dry_run_json_reports_empty_created_and_modified(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -170,11 +148,6 @@ func Test_init_dry_run_json_reports_empty_created_and_modified(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-// Test_init_print_json_is_one_exact_document pins R9's own --print --json
-// shape: the common header, then artifacts alone — no host, dry_run,
-// created, modified or roles_to_add — every path absolute, action
-// "create", body the plain config render, and stderr empty exactly as
-// every other success.
 func Test_init_print_json_is_one_exact_document(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -194,9 +167,6 @@ func Test_init_print_json_is_one_exact_document(t *testing.T) {
 	assert.NotContains(t, doc, "created")
 	assert.NotContains(t, doc, "modified")
 	assert.NotContains(t, doc, "roles_to_add")
-	// Green on arrival: --print --json never computed agents_missing_skill
-	// before this field existed either. Kept as a regression pin, matching
-	// the roles_to_add precedent right above.
 	assert.NotContains(t, doc, "agents_missing_skill")
 
 	var artifacts []struct {

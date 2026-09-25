@@ -125,13 +125,9 @@ func (o *OS) MkdirAll(name string, perm fs.FileMode) error {
 
 // WriteFile replaces name's content atomically via
 // internal/platform/atomicfile. See rwfs.FS for the contract, including how
-// perm is treated differently on create than on replace.
-//
-// atomicfile's own error wraps the temp sibling's name, not name itself
-// (Create's failure) or nothing at all identifiable (Close's rename
-// failure). Every path below is re-wrapped in a *fs.PathError naming name,
-// so a caller sees the name it passed regardless of which internal step
-// failed.
+// perm is treated differently on create than on replace. Every error is
+// re-wrapped in a *fs.PathError naming name, regardless of which internal
+// step failed.
 func (o *OS) WriteFile(name string, data []byte, perm fs.FileMode) error {
 	if !fs.ValidPath(name) {
 		return &fs.PathError{Op: "writefile", Path: name, Err: fs.ErrInvalid}
@@ -195,15 +191,8 @@ func (o *OS) OpenRoot(name string) (FS, error) {
 }
 
 // classifyOpenRootErr normalizes os.Root.OpenRoot's raw failure for name
-// into the sentinel rwfs.FS promises. os.Root itself reports a missing name
-// with an error already wrapping fs.ErrNotExist; the case this exists for is
-// "name, once any symlink in it is followed, is not a directory", which
-// os.Root reports as a bare, unwrapped error string rather than
-// syscall.ENOTDIR — confirmed against go1.27.1's os/root_unix.go newRoot.
-// root.Stat follows a symlink the same way OpenRoot itself does, and fails
-// the same way OpenRoot does when a symlink resolves outside the root, so a
-// failed Stat here leaves err unclassified rather than misreporting an
-// escape as ENOTDIR.
+// into the sentinel rwfs.FS promises, reporting syscall.ENOTDIR when name,
+// once any symlink in it is followed, is not a directory.
 func classifyOpenRootErr(root *os.Root, name string, err error) error {
 	if errors.Is(err, fs.ErrNotExist) {
 		return err

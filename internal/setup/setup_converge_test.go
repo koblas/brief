@@ -11,9 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_a_second_run_reports_every_artifact_unchanged pins R3's convergence:
-// once installed, a second Init against the same repository reports both
-// artifacts ActionUnchanged and writes nothing further.
 func Test_a_second_run_reports_every_artifact_unchanged(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -30,11 +27,6 @@ func Test_a_second_run_reports_every_artifact_unchanged(t *testing.T) {
 	assert.Equal(t, setup.ActionUnchanged, findArtifact(t, res, setup.KindFeatureRoot).Action)
 }
 
-// Test_a_valid_existing_config_is_kept_and_its_own_feature_directory_wins
-// pins R6's "edited locally" branch: a config whose bytes decode without
-// violation but differ from artifact.ConfigFile() is left untouched
-// (ActionKept) and its own feature-directory value, not Default()'s,
-// governs where the feature root is planned.
 func Test_a_valid_existing_config_is_kept_and_its_own_feature_directory_wins(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -54,10 +46,6 @@ func Test_a_valid_existing_config_is_kept_and_its_own_feature_directory_wins(t *
 	assert.Equal(t, original, mem.Snapshot()[memKey(configPath)].Data)
 }
 
-// Test_an_unparseable_existing_config_refuses_and_changes_nothing pins R3's
-// refusal branch for a config config.Inspect cannot decode at all: Init
-// returns a *setup.RefusalError naming the config path, and the tree is
-// byte-identical to before the call — no feature root, no rewrite.
 func Test_an_unparseable_existing_config_refuses_and_changes_nothing(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -76,10 +64,6 @@ func Test_an_unparseable_existing_config_refuses_and_changes_nothing(t *testing.
 	assert.Equal(t, before, mem.Snapshot())
 }
 
-// Test_an_invalid_config_value_refuses_naming_the_key_and_value pins the
-// STATE.md open debt S03 closes: the refusal's chain reaches a
-// *config.ValueError via errors.As, naming the offending key and value
-// exactly as violations() decoded them.
 func Test_an_invalid_config_value_refuses_naming_the_key_and_value(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -98,10 +82,6 @@ func Test_an_invalid_config_value_refuses_naming_the_key_and_value(t *testing.T)
 	assert.Equal(t, 0, valueErr.Value)
 }
 
-// Test_force_over_an_invalid_config_rewrites_it_from_defaults pins R3's
-// promise that --force never refuses on the old config's content: the same
-// fixture Test_an_invalid_config_value_refuses_naming_the_key_and_value
-// refuses on, --force instead rewrites to artifact.ConfigFile() verbatim.
 func Test_force_over_an_invalid_config_rewrites_it_from_defaults(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -117,11 +97,8 @@ func Test_force_over_an_invalid_config_rewrites_it_from_defaults(t *testing.T) {
 	assert.Equal(t, artifact.ConfigFile(), mem.Snapshot()[memKey(configPath)].Data)
 }
 
-// Test_force_over_the_current_render_reports_unchanged pins --force's own
-// no-op: bytes already equal to artifact.ConfigFile() report
-// ActionUnchanged rather than being rewritten. The feature root is created
-// alongside it in this fixture — proving the config artifact alone stayed
-// untouched needs it excluded from Created, not an empty Created.
+// The feature root is also created in this fixture, so proving the config
+// alone stayed untouched needs it excluded from Created, not an empty one.
 func Test_force_over_the_current_render_reports_unchanged(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -136,9 +113,6 @@ func Test_force_over_the_current_render_reports_unchanged(t *testing.T) {
 	assert.NotContains(t, res.Created, configPath)
 }
 
-// Test_a_feature_root_that_is_a_file_refuses_before_writing_the_config pins
-// plan-then-apply: the feature-root refusal is decided before the config
-// file — a fresh install in this fixture — is ever written.
 func Test_a_feature_root_that_is_a_file_refuses_before_writing_the_config(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -154,14 +128,8 @@ func Test_a_feature_root_that_is_a_file_refuses_before_writing_the_config(t *tes
 	assert.NotContains(t, mem.Snapshot(), memKey(filepath.Join(wd, ".brief.yaml")))
 }
 
-// Test_force_with_the_config_path_as_a_directory_reports_a_partial_write
-// pins the apply-order guarantee: the feature root, planned ActionCreated
-// in this fixture, lands before the config write is attempted and fails —
-// ".brief.yaml" is itself a directory, so nothing can be renamed over it —
-// so the returned error wraps setup.ErrPartialWrite rather than reporting
-// as if nothing were written. The returned Result is populated, not the
-// zero value, so a caller can still report what actually landed: the
-// feature root's own artifact and Created entry, both present.
+// The returned Result is populated, not the zero value, so a caller can
+// still see what landed before the partial-write failure.
 func Test_force_with_the_config_path_as_a_directory_reports_a_partial_write(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -186,9 +154,6 @@ func Test_force_with_the_config_path_as_a_directory_reports_a_partial_write(t *t
 	}, res.Artifacts)
 }
 
-// Test_dry_run_returns_the_plan_and_writes_nothing pins R9: DryRun reports
-// the identical plan a real run would apply — both artifacts ActionCreated
-// in this fresh-repo fixture — and mem carries no new entry afterward.
 func Test_dry_run_returns_the_plan_and_writes_nothing(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -207,9 +172,6 @@ func Test_dry_run_returns_the_plan_and_writes_nothing(t *testing.T) {
 	assert.Equal(t, before, mem.Snapshot())
 }
 
-// Test_an_unknown_host_reports_ErrUnknownHost pins the usage-error branch
-// cli classifies before any refusal rendering: a host outside Hosts()
-// never reaches planning at all.
 func Test_an_unknown_host_reports_ErrUnknownHost(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -220,10 +182,6 @@ func Test_an_unknown_host_reports_ErrUnknownHost(t *testing.T) {
 	assert.ErrorIs(t, err, setup.ErrUnknownHost)
 }
 
-// Test_operates_in_the_directory_of_a_config_found_in_an_ancestor pins the
-// binding decision that init shares resolveRoot's own rule: a config found
-// walking up from wd decides the root every path is planned against, not
-// wd itself.
 func Test_operates_in_the_directory_of_a_config_found_in_an_ancestor(t *testing.T) {
 	parent := fsAbs("repo")
 	mem := newVirtualMem(parent)

@@ -24,13 +24,9 @@ func jsonKeys(t *testing.T, doc map[string]json.RawMessage) []string {
 	return keys
 }
 
-// decodeUsageErrorDocument asserts stdout holds exactly one --json usage-
-// error document matching R1/R2/R3's shape for a usage error (schema 1,
-// ok false, exit_code 2, error.kind "usage", error.path/line/problem
-// null, the exact key set of both the document and its error object, and
-// error.files_changed matching wantFilesChanged) for wantCommand, and
-// returns the document's own error.message and error.fix for the
-// caller's own message- or fix-specific assertion.
+// decodeUsageErrorDocument asserts stdout holds exactly one --json
+// usage-error document for wantCommand and wantFilesChanged, and returns
+// its error.message and error.fix.
 func decodeUsageErrorDocument(t *testing.T, stdout []byte, wantCommand string, wantFilesChanged *bool) (string, string) {
 	t.Helper()
 
@@ -81,10 +77,6 @@ func decodeUsageErrorDocument(t *testing.T, stdout []byte, wantCommand string, w
 	return message, fix
 }
 
-// Test_json_mode_renders_a_usage_error_as_one_document is the golden-bytes
-// proof of R1/R2/R3's shape, key order pinned: "status --json --bogus"
-// strips "--json" (status registers none of its own), fails pflag.Parse
-// on "--bogus", and renders through the root FlagErrorFunc frame.
 func Test_json_mode_renders_a_usage_error_as_one_document(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -101,23 +93,13 @@ func Test_json_mode_renders_a_usage_error_as_one_document(t *testing.T) {
 		`"path":null,"line":null,"problem":null,` +
 		`"fix":"run 'brief status'","files_changed":null}}` + "\n"
 
-	// assert.Equal, not assert.JSONEq: this golden pins byte-exact output,
-	// key order included, not JSON-semantic equality.
+	// assert.Equal, not assert.JSONEq: this golden pins byte-exact key order.
 	assert.Equal(t, want, stdout.String())
 }
 
-// Test_json_mode_usage_error_message_is_the_text_mode_line is SCENARIO-01's
-// own matrix across every usage path whose text-mode line already carries
-// its own "; run '<hint>'" clause: for each row, the same argv without
-// "--json" is run first to capture the exact text-mode stderr line
-// (trailing newline trimmed), which the --json run's error.message must
-// equal, and error.fix must be exactly that line's own trailing "run
-// '...'" clause — proving fix is derived from the line, not a literal
-// copied from production. The rows whose text-mode line carries no run
-// hint are Test_json_mode_usage_error_fix_falls_back_when_its_message_has_no_run_hint's
-// own table, not this one's: mixing the two into one table would need a
-// per-row branch to pick the fix assertion, which the project's table
-// rules forbid.
+// Covers only rows whose text-mode line already carries its own trailing
+// "; run '<hint>'" clause; a row with no run hint belongs in the
+// fallback table below instead.
 func Test_json_mode_usage_error_message_is_the_text_mode_line(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -169,17 +151,8 @@ func Test_json_mode_usage_error_message_is_the_text_mode_line(t *testing.T) {
 	}
 }
 
-// Test_json_mode_usage_error_fix_stops_at_the_quote_when_the_line_has_trailing_prose
-// pins a third shape neither table above covers: "new feature"'s own
-// empty-name and whitespace-name lines both carry "; run '<hint>'"
-// followed by more prose ("... with a non-empty name" / "... with a name
-// containing no whitespace"), so usageFix's own strings.HasSuffix(msg, "'")
-// guard fails — the line does not end in a quote — and it falls back to
-// the leaf's invocation annotation rather than slicing everything after
-// "; run '". That fallback happens to equal the hint the line itself
-// names, since "new feature" is a leaf and its own invocation IS
-// newFeatureInvocation, so error.fix is exactly that clause, a strict
-// substring of error.message — not "run '<hint>' with a non-empty name".
+// Covers lines whose "; run '<hint>'" clause is followed by more prose,
+// so the trailing quote it usually stops at is absent.
 func Test_json_mode_usage_error_fix_stops_at_the_quote_when_the_line_has_trailing_prose(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -215,13 +188,6 @@ func Test_json_mode_usage_error_fix_stops_at_the_quote_when_the_line_has_trailin
 	}
 }
 
-// Test_json_mode_usage_error_fix_falls_back_when_its_message_has_no_run_hint
-// is SCENARIO-01's table for the rows whose text-mode line carries no
-// "; run '<hint>'" clause of its own — "no command given; expected one
-// of: …", "unknown type …", "unknown command …", "unknown shell …" — so
-// error.fix falls back to the per-level literal: a leaf's own invocation
-// annotation, "brief new --help" for "new", or "brief help <command>" for
-// the help stub.
 func Test_json_mode_usage_error_fix_falls_back_when_its_message_has_no_run_hint(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -268,10 +234,6 @@ func Test_json_mode_usage_error_fix_falls_back_when_its_message_has_no_run_hint(
 	}
 }
 
-// Test_json_after_double_dash_is_a_positional proves the "--" boundary
-// R5 draws: a "--json" token at or after "--" is an ordinary positional,
-// never json mode; a bare "--json" before "--" still turns json mode on,
-// even though "--" (and anything after it) is untouched by the scan.
 func Test_json_after_double_dash_is_a_positional(t *testing.T) {
 	t.Run("a positional --json after -- stays text", func(t *testing.T) {
 		wd := t.TempDir()
@@ -312,15 +274,8 @@ func Test_json_after_double_dash_is_a_positional(t *testing.T) {
 	})
 }
 
-// Test_json_with_a_value_is_a_text_usage_error is SCENARIO-01's R5 table:
-// "--json=<v>", any value including an explicit empty one, is always a
-// text usage error, whichever command it names and even alongside a bare
-// "--json", since this check runs before dispatch and wins over every
-// other usage error on the line — including SCENARIO-12's "--version" arm,
-// which never even sees out.json: "--version --json=x" reports the same
-// bare "--json" value error as any other command. The last row is the "--"
-// control arm: once "--json=x" is itself a positional, it is an ordinary
-// "too many arguments" line, never the takes-no-value one.
+// The last row is the "--" control arm: once "--json=x" is itself a
+// positional, it is an ordinary "too many arguments" line.
 func Test_json_with_a_value_is_a_text_usage_error(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -353,16 +308,8 @@ func Test_json_with_a_value_is_a_text_usage_error(t *testing.T) {
 	}
 }
 
-// Test_version_with_json_relaxes_the_sole_argument_rule pins R5's
-// consequence of stripping "--json" ahead of dispatch entirely: once
-// "--json" is gone from argv, "--version" is root's only remaining
-// argument in either order, so it succeeds rather than reporting "takes
-// no arguments" — and SCENARIO-12 gives that success its own JSON
-// document rather than the plain text line. version is asserted against
-// the value a plain "brief --version" (run in this same test binary, so
-// both share whatever debug.ReadBuildInfo reports here) prints, its
-// "brief " prefix trimmed — a captured value, not a literal, since a go
-// test binary's own build info is not a released tag.
+// wantVersion is captured from a plain "brief --version" run in this same
+// test binary, not a literal: a go test binary's build info is no tag.
 func Test_version_with_json_relaxes_the_sole_argument_rule(t *testing.T) {
 	wd := t.TempDir()
 	var textStdout, textStderr bytes.Buffer

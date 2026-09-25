@@ -16,10 +16,9 @@ import (
 //go:embed files
 var files embed.FS
 
-// mustReadFile returns name's own bytes from files, joining with path (not
-// filepath): embed.FS paths are always slash-separated. name is always one of
-// this package's own fixed paths, so a missing file is a build-time
-// packaging bug, not a runtime condition a caller can act on.
+// mustReadFile returns name's bytes from files, joining with path (not
+// filepath, since embed.FS paths are slash-separated). A missing file is a
+// build-time packaging bug, not a runtime condition a caller can act on.
 func mustReadFile(name string) []byte {
 	body, err := files.ReadFile(path.Join("files", name))
 	if err != nil {

@@ -1,11 +1,7 @@
 // These Check scenarios stay on real disk: a step file symlinked outside
-// its feature root (os.Root's own containment refusal), a symlinked or
-// unreadable feature directory at the top-level adapter Check builds
-// around one feature's own name, the openRoot test-injection seam, and the
-// dual all-features/named-feature dispatch Check itself owns — none of
-// which CheckFS, sitting one level below that adapter, ever reads through.
-// CheckFS's own content rules are pinned against fstest.MapFS in
-// check_test.go.
+// its feature root, a symlinked or unreadable feature directory, and the
+// dual all-features/named-feature dispatch Check itself owns. CheckFS's
+// own content rules are pinned against fstest.MapFS in check_test.go.
 package assemble_test
 
 import (
@@ -52,12 +48,9 @@ func checkWriteHandoff(t *testing.T, cfg config.Config, featureDir, id, body str
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, id+cfg.HandoffFileSuffix), []byte(body), 0o600))
 }
 
-// diskRuleCase is one row of
-// Test_check_assigns_each_producer_its_stable_rule_id_disk's table: setup
-// builds the smallest real-disk fixture (or Server override) that trips
-// exactly one of Check's OS-adapter producers and returns the Server plus
-// the feature argument to check; wantRule is that producer's own stable
-// Rule. check_test.go's own table covers every content producer.
+// diskRuleCase is one row of the table below: setup builds the smallest
+// real-disk fixture that trips exactly one of Check's OS-adapter
+// producers and returns the Server plus the feature argument to check.
 type diskRuleCase struct {
 	name     string
 	setup    func(t *testing.T) (*assemble.Server, string)
@@ -116,10 +109,8 @@ func diskRuleCaseFeatureUnreadable(t *testing.T) (*assemble.Server, string) {
 	return srv, "demo"
 }
 
-// Test_check_assigns_each_producer_its_stable_rule_id_disk is R8's
-// OS-adapter half: the three producers check_test.go's own MapFS table
-// cannot reach, since each concerns the os.Root containment chain Check
-// builds around one feature's own name, not CheckFS's content rules.
+// The OS-adapter half of the rule-id table: three producers
+// check_test.go's own MapFS table cannot reach.
 func Test_check_assigns_each_producer_its_stable_rule_id_disk(t *testing.T) {
 	cases := []diskRuleCase{
 		{name: "step unreadable", setup: diskRuleCaseStepUnreadable, wantRule: assemble.RuleStepUnreadable},
@@ -140,11 +131,8 @@ func Test_check_assigns_each_producer_its_stable_rule_id_disk(t *testing.T) {
 	}
 }
 
-// Test_check_stamps_an_in_flight_ordinary_feature_finding_with_its_name_path_and_in_flight
-// pins Finding.Feature/FeaturePath/InFlight for an ordinary (non
-// feature-level) finding on a feature still in flight, through both the
-// all-features scan and the named-feature path — Check's own dual
-// dispatch, one level above anything CheckFS reads.
+// Pins Finding.Feature/FeaturePath/InFlight through both the all-features
+// scan and the named-feature path.
 func Test_check_stamps_an_in_flight_ordinary_feature_finding_with_its_name_path_and_in_flight(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -170,9 +158,7 @@ func Test_check_stamps_an_in_flight_ordinary_feature_finding_with_its_name_path_
 	assert.True(t, namedFinding.InFlight)
 }
 
-// Test_check_stamps_a_complete_ordinary_feature_finding_with_its_name_path_and_in_flight
-// is the complete-feature counterpart: InFlight is false when every step
-// reads as done, through both entry paths.
+// Complete-feature counterpart: InFlight is false through both entry paths.
 func Test_check_stamps_a_complete_ordinary_feature_finding_with_its_name_path_and_in_flight(t *testing.T) {
 	cfg := fixtureConfig()
 	cfg.HandoffCapLines = 10
@@ -200,10 +186,8 @@ func Test_check_stamps_a_complete_ordinary_feature_finding_with_its_name_path_an
 	assert.False(t, namedFinding.InFlight)
 }
 
-// Test_check_stamps_a_symlinked_feature_finding_with_its_own_name_path_and_in_flight_true
-// pins the same three fields for symlinkFeatureFinding, which never passes
-// through CheckFS's own stamping loop — the trap a new feature-level
-// producer must not repeat.
+// Pins the same three fields for symlinkFeatureFinding, which never
+// passes through CheckFS's own stamping loop.
 func Test_check_stamps_a_symlinked_feature_finding_with_its_own_name_path_and_in_flight_true(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -232,9 +216,7 @@ func Test_check_stamps_a_symlinked_feature_finding_with_its_own_name_path_and_in
 	assert.True(t, namedFinding.InFlight)
 }
 
-// Test_check_stamps_an_unreadable_feature_finding_with_its_own_name_path_and_in_flight_true
-// is unreadableFeatureFinding's counterpart to the symlink test above — the
-// same trap, the other feature-level producer.
+// unreadableFeatureFinding's counterpart to the symlink test above.
 func Test_check_stamps_an_unreadable_feature_finding_with_its_own_name_path_and_in_flight_true(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -293,10 +275,8 @@ func Test_check_refuses_an_unknown_named_feature(t *testing.T) {
 	assert.Nil(t, findings)
 }
 
-// Test_check_checks_only_the_named_feature is the scoping half of the
-// contract: a malformed sibling feature must not contribute findings when
-// only one feature is named — a claim about which directories Check's own
-// enumeration reads, not about CheckFS's content rules.
+// A malformed sibling feature must not contribute findings when only one
+// feature is named.
 func Test_check_checks_only_the_named_feature(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -315,12 +295,8 @@ func Test_check_checks_only_the_named_feature(t *testing.T) {
 	assert.Empty(t, findings)
 }
 
-// Test_check_refuses_a_named_feature_when_the_feature_root_does_not_exist
-// is the named-feature half of the root-missing case: Check("") degrades a
-// missing feature-directory root to zero features (nil, nil), but a named
-// feature obviously has no directory when the root holding it does not
-// exist either, so it must refuse with ErrNoSuchFeature rather than share
-// the empty-repository degrade.
+// Named-feature half of the root-missing case: Check("") degrades a
+// missing root to zero features, but a named feature must refuse instead.
 func Test_check_refuses_a_named_feature_when_the_feature_root_does_not_exist(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -332,11 +308,8 @@ func Test_check_refuses_a_named_feature_when_the_feature_root_does_not_exist(t *
 	assert.Nil(t, findings)
 }
 
-// Test_check_refuses_a_named_feature_that_is_a_regular_file pins the third
-// leg of the same precedence chain: a name that exists under the feature
-// directory but is a regular file, not a directory, is not a feature
-// either — ErrNoSuchFeature, the same as a name with no entry at all,
-// never an "unreadable" Finding.
+// A regular file where a feature directory belongs is ErrNoSuchFeature,
+// the same as a name with no entry at all, never an "unreadable" Finding.
 func Test_check_refuses_a_named_feature_that_is_a_regular_file(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -350,12 +323,8 @@ func Test_check_refuses_a_named_feature_that_is_a_regular_file(t *testing.T) {
 	assert.Nil(t, findings)
 }
 
-// Test_check_reports_an_unreadable_feature_directory_in_the_all_features_scan
-// is C3's companion: a feature directory that exists but cannot be opened
-// as its own root must contribute a Finding naming it, not silently zero
-// findings — the exact backstop failure R18 gives Check to prevent. The
-// injected failure is a fake open, not chmod: root bypasses permission
-// checks, so this must reproduce identically under any CI identity.
+// A feature directory that exists but cannot be opened as its own root
+// must contribute a Finding naming it, not silently zero findings.
 func Test_check_reports_an_unreadable_feature_directory_in_the_all_features_scan(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -380,10 +349,8 @@ func Test_check_reports_an_unreadable_feature_directory_in_the_all_features_scan
 	assert.Equal(t, assemble.SeverityError, f.Severity)
 }
 
-// Test_check_reports_an_unreadable_named_feature_directory is the
-// named-feature counterpart: naming the same unreadable feature directly
-// must report the same Finding, not collapse it into ErrNoSuchFeature —
-// the directory plainly exists, it just could not be opened.
+// Named-feature counterpart: must report the same Finding, not collapse
+// into ErrNoSuchFeature.
 func Test_check_reports_an_unreadable_named_feature_directory(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -408,12 +375,8 @@ func Test_check_reports_an_unreadable_named_feature_directory(t *testing.T) {
 	assert.Equal(t, assemble.SeverityError, f.Severity)
 }
 
-// Test_check_refuses_a_feature_argument_containing_a_path_separator pins
-// validFeatureArgument's rejection of a multi-component feature name: "."
-// and ".." would otherwise reopen the feature-directory root itself (or
-// its parent) as if it were a feature, and a multi-component argument
-// would reach a nested directory no "brief new" or "brief finish" call
-// ever named — none of those are a feature this configuration knows about.
+// "." and ".." would otherwise reopen the feature-directory root itself
+// (or its parent) as if it were a feature.
 func Test_check_refuses_a_feature_argument_containing_a_path_separator(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -421,12 +384,7 @@ func Test_check_refuses_a_feature_argument_containing_a_path_separator(t *testin
 
 	srv := assemble.NewServer(cfg, root)
 
-	// "a/b" is deliberately absent: os.Root.Lstat rejects it as ErrNotExist
-	// against this empty fixture whether or not the separator guard ran, so
-	// it would not discriminate the guard from its absence. Each entry below
-	// does: "." reopens the feature root itself and would succeed without the
-	// guard, and the two escaping forms resolve to a path-escape error
-	// distinct from ErrNotExist.
+	// Each case below would succeed without the guard, unlike a bare "a/b".
 	for _, feature := range []string{".", "..", "demo/../.."} {
 		findings, err := srv.Check(t.Context(), feature)
 		require.ErrorIsf(t, err, assemble.ErrNoSuchFeature, "feature %q", feature)
@@ -434,13 +392,8 @@ func Test_check_refuses_a_feature_argument_containing_a_path_separator(t *testin
 	}
 }
 
-// Test_check_is_reachable_for_a_feature_name_containing_a_backslash pins
-// validFeatureArgument to POSIX path-separator rules: a backslash is a
-// legal filename character on POSIX, not a separator, so a feature
-// genuinely named with one must remain checkable rather than being
-// rejected as though it were a multi-component argument. os.IsPathSeparator
-// is what makes this platform-correct rather than hardcoding the POSIX
-// answer, so no build guard is needed here.
+// A backslash is a legal POSIX filename character, not a separator, so a
+// feature genuinely named with one must remain checkable.
 func Test_check_is_reachable_for_a_feature_name_containing_a_backslash(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -455,10 +408,8 @@ func Test_check_is_reachable_for_a_feature_name_containing_a_backslash(t *testin
 	assert.Empty(t, findings)
 }
 
-// Test_check_marks_a_symlinked_feature_directory_rather_than_following_it
-// pins Check's symlink stance to Status's: mark, never follow. The target
-// is a conforming feature, proving the Finding fires because brief never
-// follows the link, not because anything about the target is malformed.
+// The target is a conforming feature, proving the Finding fires because
+// brief never follows the link, not because the target is malformed.
 func Test_check_marks_a_symlinked_feature_directory_rather_than_following_it(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -482,9 +433,8 @@ func Test_check_marks_a_symlinked_feature_directory_rather_than_following_it(t *
 	assert.Equal(t, assemble.SeverityError, f.Severity)
 }
 
-// Test_check_marks_a_named_symlinked_feature_directory_rather_than_following_it
-// is the named-feature half of the same stance: naming the symlink
-// directly must not follow it either.
+// Named-feature half of the same stance: naming the symlink directly
+// must not follow it either.
 func Test_check_marks_a_named_symlinked_feature_directory_rather_than_following_it(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()

@@ -10,9 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_Probe_reports_true_for_a_writable_directory pins the happy path: an
-// ordinary temp directory can be written to, and Probe leaves no trace of
-// its own probe file behind.
 func Test_Probe_reports_true_for_a_writable_directory(t *testing.T) {
 	dir := t.TempDir()
 
@@ -23,9 +20,7 @@ func Test_Probe_reports_true_for_a_writable_directory(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-// Test_Probe_reports_false_for_an_unwritable_directory pins the negative
-// path via a read-only directory. Skipped under root, which ignores
-// directory write permission.
+// Skipped under root, which ignores directory write permission.
 func Test_Probe_reports_false_for_an_unwritable_directory(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory write permission")
@@ -38,9 +33,6 @@ func Test_Probe_reports_false_for_an_unwritable_directory(t *testing.T) {
 	assert.False(t, writable.Probe(dir))
 }
 
-// Test_Probe_reports_false_for_a_path_that_is_not_a_directory covers a
-// regular file: os.CreateTemp inside it fails the same way as an
-// unwritable directory would.
 func Test_Probe_reports_false_for_a_path_that_is_not_a_directory(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "not-a-dir")

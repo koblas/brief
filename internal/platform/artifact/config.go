@@ -37,15 +37,13 @@ var configFieldDocs = map[string]string{
 	"reviewer":                    "The agent bound to the reviewer role.",
 }
 
-// configFileKeyPrefix matches a YAML line's own key, ignoring its leading
-// indentation, so each line can be looked up in configFieldDocs.
+// configFileKeyChars are the characters a YAML key may contain, used to
+// extract a line's key ignoring its leading indentation.
 const configFileKeyChars = "abcdefghijklmnopqrstuvwxyz0123456789-"
 
 // configFileLiveKeys names the YAML keys ConfigFileWithRoles leaves live
-// (uncommented) rather than commented the way every other key stays:
-// "roles:" and its three children. No other key is ever live in a render
-// this package produces — R2's "every key present but commented" still
-// holds for the rest of the file.
+// (uncommented) rather than commented: "roles:" and its three children.
+// Every other key stays commented in every render this package produces.
 var configFileLiveKeys = map[string]bool{
 	"roles":       true,
 	"planner":     true,
@@ -55,25 +53,20 @@ var configFileLiveKeys = map[string]bool{
 
 // ConfigFile renders the ".brief.yaml" brief's init writes: config.Default()
 // marshalled with a 2-space indent, every line commented, and a "# " doc
-// line inserted directly above each one — every key present but none of
-// them live (R2). Uncommenting (stripping one leading "#" from every line
-// not beginning "# ") reproduces exactly the marshalled bytes, so the
-// result decodes to config.Default() with no violations; the render itself,
-// left exactly as written, decodes as an empty file (every line is a
-// comment), which also resolves to config.Default() — see
-// Test_config_file_resolves_to_the_shipped_defaults. The bytes are
-// deterministic: no version, no date, no map (Config carries none).
+// line inserted directly above each one. Uncommenting reproduces exactly
+// the marshalled bytes, so the result decodes to config.Default(); left as
+// written, every line is a comment, which also resolves to
+// config.Default(). The bytes are deterministic: no version, no date.
 func ConfigFile() []byte {
 	return renderConfigFile(config.Default(), false)
 }
 
 // ConfigFileWithRoles renders the ".brief.yaml" "init --with-agents"
-// writes when it creates a fresh config in the same run (R7): the same
-// bytes as ConfigFile, except "roles:" and its three children are left
-// live rather than commented, bound to AgentBindings() — every other key
-// stays commented, unchanged from ConfigFile's own render. Bindings are
-// written only into a config init creates in this same run; an existing
-// config is never rewritten this way.
+// writes when it creates a fresh config in the same run: the same bytes as
+// ConfigFile, except "roles:" and its three children are left live rather
+// than commented, bound to AgentBindings(). Bindings are written only into
+// a config init creates in this same run; an existing config is never
+// rewritten this way.
 func ConfigFileWithRoles() []byte {
 	cfg := config.Default()
 	cfg.Roles = AgentBindings()
@@ -82,10 +75,8 @@ func ConfigFileWithRoles() []byte {
 }
 
 // AgentBindings names the plugin agent bound to each of brief's three
-// roles when "init --with-agents" installs them: a plugin agent's own
-// address is "<plugin>:<name>" (code.claude.com/docs/en/sub-agents), and
-// PluginManifest names the plugin "brief", so the three bindings are
-// "brief:planner", "brief:implementer" and "brief:reviewer".
+// roles when "init --with-agents" installs them: "brief:planner",
+// "brief:implementer" and "brief:reviewer".
 func AgentBindings() config.RoleBindings {
 	return config.RoleBindings{
 		Planner:     "brief:planner",
@@ -94,12 +85,10 @@ func AgentBindings() config.RoleBindings {
 	}
 }
 
-// renderConfigFile marshals cfg with a 2-space indent and comments every
-// line with a "# " doc line inserted directly above each one carrying a
-// configFieldDocs entry, the shared implementation behind ConfigFile and
-// ConfigFileWithRoles. liveRoles leaves configFileLiveKeys' own lines
-// uncommented instead — ConfigFileWithRoles' own "roles:" section — while
-// every other line is commented exactly as ConfigFile always renders it.
+// renderConfigFile marshals cfg with a 2-space indent, comments every
+// line, and inserts a "# " doc line above each one carrying a
+// configFieldDocs entry. liveRoles leaves configFileLiveKeys' lines
+// uncommented instead.
 func renderConfigFile(cfg config.Config, liveRoles bool) []byte {
 	var buf bytes.Buffer
 
@@ -141,11 +130,9 @@ func renderConfigFile(cfg config.Config, liveRoles bool) []byte {
 	return []byte(out.String())
 }
 
-// configFileLineKey extracts line's own YAML key — the run of lower-case
+// configFileLineKey extracts line's YAML key — the run of lower-case
 // letters, digits and hyphens before its first ":" — ignoring leading
-// indentation. It returns "" for a line with no such key (never produced by
-// config.Default()'s own encoding, but safe: configFieldDocs simply has no
-// entry for "").
+// indentation. It returns "" for a line with no such key.
 func configFileLineKey(line string) string {
 	trimmed := strings.TrimLeft(line, " ")
 

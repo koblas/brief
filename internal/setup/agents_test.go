@@ -30,14 +30,6 @@ func agentFilePaths(root string) agentPaths {
 	}
 }
 
-// Test_init_with_agents_writes_three_agents_and_a_config_binding_them pins
-// the fresh-repository happy path: eleven rows in order (config, feature
-// root, the four plugin files, the brief-workflow skill, the three agents,
-// then the snippet), each agent ActionCreated with KindAgent, the config's
-// own bytes equal artifact.ConfigFileWithRoles(), the three agent files'
-// own bytes equal their own render, and RolesToAdd is empty — the config
-// this run wrote already binds every role. This is the package's own
-// full-row-order pin for a --with-agents Init.
 func Test_init_with_agents_writes_three_agents_and_a_config_binding_them(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -78,10 +70,6 @@ func Test_init_with_agents_writes_three_agents_and_a_config_binding_them(t *test
 	assert.Equal(t, artifact.AgentReviewer(), snap[memKey(paths.Reviewer)].Data)
 }
 
-// Test_rerunning_init_with_agents_reports_every_agent_unchanged pins R3's
-// convergence for the three agent files: a second, identical run reports
-// every one of the eleven artifacts ActionUnchanged and writes nothing
-// further.
 func Test_rerunning_init_with_agents_reports_every_agent_unchanged(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -120,10 +108,6 @@ func Test_rerunning_init_with_agents_reports_every_agent_unchanged(t *testing.T)
 	assert.Equal(t, []string{}, res.RolesToAdd)
 }
 
-// Test_init_keeps_an_unrecognized_agent_file_even_under_force pins R7's
-// last sentence: an agents/<role>.md file whose bytes match no known
-// render is the adopter's own customisation, kept even under --force,
-// mirroring a plugin file's own "edited locally" branch exactly.
 func Test_init_keeps_an_unrecognized_agent_file_even_under_force(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -145,12 +129,6 @@ func Test_init_keeps_an_unrecognized_agent_file_even_under_force(t *testing.T) {
 	assert.Equal(t, edited, mem.Snapshot()[memKey(planner)].Data)
 }
 
-// Test_init_with_agents_never_edits_an_existing_config pins R7's core
-// promise by table: a config already present before this run — whether it
-// is the plain unbound render or a validly edited one — is never rewritten
-// by --with-agents; its bytes are byte-identical before and after, and
-// RolesToAdd lists the "roles:" header plus all three unbound roles
-// (neither fixture binds any of them).
 func Test_init_with_agents_never_edits_an_existing_config(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -188,10 +166,6 @@ func Test_init_with_agents_never_edits_an_existing_config(t *testing.T) {
 	}
 }
 
-// Test_roles_to_add_lists_only_unbound_roles pins the "never shadows an
-// existing binding" rule (R15): a config that already binds one role to
-// the adopter's own agent and a second to brief's own agent lists only the
-// third, still-unbound role; a config binding all three lists nothing.
 func Test_roles_to_add_lists_only_unbound_roles(t *testing.T) {
 	cases := []struct {
 		name string
@@ -225,15 +199,8 @@ func Test_roles_to_add_lists_only_unbound_roles(t *testing.T) {
 	}
 }
 
-// Test_roles_to_add_lines_parse_into_brief_bindings is the control arm for
-// the stderr/JSON hint itself: appending RolesToAdd's own lines to a
-// config carrying no "roles:" key at all and decoding the result
-// (config.Inspect, which always reads real disk — internal/platform/config
-// has no fsys seam of its own) must yield exactly artifact.AgentBindings(),
-// with no violation — proving the advice the hint prints actually works.
-// Init's own run is Mem-backed; only this last verification step touches a
-// second, unrelated real file, since config.Inspect is what is under test
-// here, not setup's own planning.
+// Init runs against the in-memory store; the final config.Inspect check
+// uses a real file instead, since config.Inspect always reads disk.
 func Test_roles_to_add_lines_parse_into_brief_bindings(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -261,10 +228,6 @@ func Test_roles_to_add_lines_parse_into_brief_bindings(t *testing.T) {
 	assert.Equal(t, artifact.AgentBindings(), cfg.Roles)
 }
 
-// Test_init_with_agents_on_a_bound_config_reports_it_unchanged_with_nothing_to_add
-// pins the fully-converged case: a config already carrying today's own
-// bound render (ConfigFileWithRoles) reports ActionUnchanged, never
-// rewritten, and RolesToAdd is empty — every role is already bound.
 func Test_init_with_agents_on_a_bound_config_reports_it_unchanged_with_nothing_to_add(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -281,11 +244,6 @@ func Test_init_with_agents_on_a_bound_config_reports_it_unchanged_with_nothing_t
 	assert.Equal(t, artifact.ConfigFileWithRoles(), mem.Snapshot()[memKey(configPath)].Data)
 }
 
-// Test_force_init_with_agents_rewrites_a_plain_config_to_the_bound_variant
-// pins --force --with-agents' own target: a config holding exactly the
-// plain render (a recognized, but unbound, current render — never
-// rewritten without --force) is rewritten to ConfigFileWithRoles() under
-// --force, reported ActionCreated, detail "rewritten from defaults".
 func Test_force_init_with_agents_rewrites_a_plain_config_to_the_bound_variant(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -301,12 +259,6 @@ func Test_force_init_with_agents_rewrites_a_plain_config_to_the_bound_variant(t 
 	assert.Equal(t, artifact.ConfigFileWithRoles(), mem.Snapshot()[memKey(configPath)].Data)
 }
 
-// Test_init_without_agents_leaves_installed_agents_alone pins the "no
-// flag, no plan, no row" rule (mirroring --no-hook): against a repository
-// that already has the three agent files installed, a plain "init
-// --host claude-code" plans no agent row at all and never reads or writes
-// them, while the control arm — the identical fixture, rerun with
-// WithAgents — still reports all three.
 func Test_init_without_agents_leaves_installed_agents_alone(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -333,10 +285,6 @@ func Test_init_without_agents_leaves_installed_agents_alone(t *testing.T) {
 	assert.Equal(t, 3, agentCount)
 }
 
-// Test_init_with_agents_for_host_none_refuses_and_writes_nothing pins the
-// flag-combination rule: --with-agents is checked against the resolved
-// host, so --host none (or the still-unresolved bare default before S09)
-// refuses with setup.ErrAgentsNeedHost and changes nothing.
 func Test_init_with_agents_for_host_none_refuses_and_writes_nothing(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -349,24 +297,13 @@ func Test_init_with_agents_for_host_none_refuses_and_writes_nothing(t *testing.T
 	assert.Equal(t, before, mem.Snapshot())
 }
 
-// olderPlannerBytes, olderImplementerBytes are the pre-SCENARIO-02 planner
-// and implementer renders, captured mechanically (%q dump) before agents.go
-// changed — the same literal artifact's own agents_test.go pins against
-// Recognize, copied here since setup_test cannot import an unexported
-// artifact fixture.
+// olderPlannerBytes and olderImplementerBytes are agent renders that predate
+// the current format, used to exercise the upgrade path.
 const (
 	olderPlannerBytes     = "---\nname: planner\ndescription: Turn a feature's specification into ordered scenario plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's specification into ordered scenario plans: run `brief new step <feature>` for the next scenario, then fill its plan file. Never write production or test code.\n"
 	olderImplementerBytes = "---\nname: implementer\ndescription: Implement a feature's next open step, from brief start through brief finish.\n---\n\nRun `brief start <feature>` and implement its next open step, working from its output rather than reading the specification or earlier steps whole. Close the step with `brief finish <feature> <step> --handoff <path> --state <path>`.\n"
 )
 
-// Test_init_with_agents_upgrades_an_older_agent_file pins Rule 6 at Init's
-// own write path: a planner or implementer file holding the pre-SCENARIO-02
-// bytes is upgraded — ActionMerged, detail "updated", bytes rewritten to
-// today's own ruled render, path in Result.Modified — the generic
-// OriginOlder branch planPluginFile/apply share with every plugin Kind.
-// The control rows pin the two branches that must NOT move: an edited file
-// stays ActionKept "edited locally", untouched, and today's own current
-// render stays ActionUnchanged, untouched.
 func Test_init_with_agents_upgrades_an_older_agent_file(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -432,12 +369,6 @@ func Test_init_with_agents_upgrades_an_older_agent_file(t *testing.T) {
 	}
 }
 
-// Test_init_with_agents_dry_run_and_print_show_an_older_agent_upgrade pins
-// R9 for an ActionMerged agent row: --dry-run reports the merged row and
-// leaves the bytes byte-identical to the older bytes it seeded; --print
-// emits a PrintMerge PrintArtifact carrying today's own full render as its
-// Body, mirroring the snippet's own bare-block precedent, and also writes
-// nothing.
 func Test_init_with_agents_dry_run_and_print_show_an_older_agent_upgrade(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -477,12 +408,6 @@ func Test_init_with_agents_dry_run_and_print_show_an_older_agent_upgrade(t *test
 	assert.Equal(t, before, mem.Snapshot())
 }
 
-// Test_init_without_agents_leaves_an_older_agent_file_alone pins the same
-// "no flag, no plan, no row" rule this file already pins for an
-// unrecognized agent file: a planner holding the pre-SCENARIO-02 bytes is
-// never read or rewritten by a plain "init --host claude-code" (no
-// --with-agents) — no KindAgent row at all — and its bytes stay
-// byte-identical.
 func Test_init_without_agents_leaves_an_older_agent_file_alone(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -503,10 +428,6 @@ func Test_init_without_agents_leaves_an_older_agent_file_alone(t *testing.T) {
 	assert.Equal(t, []byte(olderPlannerBytes), mem.Snapshot()[memKey(planner)].Data)
 }
 
-// Test_init_with_agents_dry_run_writes_nothing_but_reports_roles_to_add
-// pins R9 for --with-agents: the same eleven rows a real run would report,
-// RolesToAdd still populated against the pre-existing config the fixture
-// seeds, and nothing written.
 func Test_init_with_agents_dry_run_writes_nothing_but_reports_roles_to_add(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)

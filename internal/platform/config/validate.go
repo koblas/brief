@@ -13,15 +13,12 @@ type headingField struct {
 	value string
 }
 
-// violations reports every value in cfg that fails an R1 rule, as
-// *ValueError, in Config's own field-declaration order — doctor's
-// config-values check renders one row per element, and Resolve reports
-// only its first element. It returns nil when every rule is satisfied.
-// feature-directory carries no rule here: it is a path, and Default()
-// ships one containing a separator. The handoff-file-suffix rule needs a
-// successfully compiled step pattern; when step-file-pattern itself fails,
-// that rule is skipped rather than run against a zero-value pattern, so a
-// bad pattern never cascades into a second, bogus row.
+// violations reports every value in cfg that fails its own rule, as
+// *ValueError, in field-declaration order; nil when every rule is
+// satisfied. feature-directory carries no rule: it is a path, and
+// Default() ships one containing a separator. The handoff-file-suffix rule
+// is skipped when step-file-pattern itself fails to compile, rather than
+// run against a zero-value pattern.
 func violations(cfg Config) []*ValueError {
 	var errs []*ValueError
 
@@ -88,9 +85,7 @@ func violations(cfg Config) []*ValueError {
 	return errs
 }
 
-// validateStepPattern compiles pattern with stepfile.Compile and returns
-// a *ValueError wrapping the stepfile failure when it cannot be used to
-// name or recognize step files.
+// validateStepPattern wraps a stepfile.Compile failure as a *ValueError.
 func validateStepPattern(pattern string) (stepfile.Pattern, *ValueError) {
 	step, err := stepfile.Compile(pattern)
 	if err != nil {
@@ -105,10 +100,8 @@ func validateStepPattern(pattern string) (stepfile.Pattern, *ValueError) {
 	return step, nil
 }
 
-// validateHandoffSuffix compiles suffix against step with
-// stepfile.CompileHandoff and returns a *ValueError wrapping the stepfile
-// failure when suffix cannot name step's handoff file without colliding
-// with the step, state or specification files.
+// validateHandoffSuffix wraps a stepfile.CompileHandoff failure as a
+// *ValueError.
 func validateHandoffSuffix(step stepfile.Pattern, suffix, stateFile, specificationFile string) *ValueError {
 	if _, err := stepfile.CompileHandoff(step, suffix, stateFile, specificationFile); err != nil {
 		return &ValueError{
@@ -123,9 +116,8 @@ func validateHandoffSuffix(step stepfile.Pattern, suffix, stateFile, specificati
 	return nil
 }
 
-// validateFileName refuses value for key unless it is a plain file name:
-// not empty, not "." or "..", and containing no path separator ("/" or
-// "\").
+// validateFileName refuses value unless it is a plain file name: not empty,
+// not "." or "..", no path separator.
 func validateFileName(key, value string) *ValueError {
 	if value == "" || value == "." || value == ".." || strings.ContainsAny(value, `/\`) {
 		return &ValueError{Key: key, Value: value, Reason: "must be a plain file name with no path separator"}
@@ -134,10 +126,8 @@ func validateFileName(key, value string) *ValueError {
 	return nil
 }
 
-// validateHeading refuses value for key when it is blank after
-// strings.TrimSpace, or when it exactly matches a heading already seen —
-// naming the earlier key the collision is against. On success it appends
-// {key, value} to seen so a later heading can be checked against it.
+// validateHeading refuses value when it is blank, or matches a heading
+// already seen in seen — naming the earlier key it collides with.
 func validateHeading(seen *[]headingField, key, value string) *ValueError {
 	if strings.TrimSpace(value) == "" {
 		return &ValueError{Key: key, Value: value, Reason: "must not be empty"}

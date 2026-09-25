@@ -12,9 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// startHelp is "brief start --help"'s exact stdout: a generated Usage
-// line, start's prose verbatim, its trailing JSON paragraph, and pflag's
-// own flag table for -h/--help and --json — nothing else.
+// startHelp is "brief start --help"'s exact stdout.
 const startHelp = `Usage:
   brief start [--json] <feature>
 
@@ -43,9 +41,6 @@ Flags:
       --json   print one JSON document on stdout
 `
 
-// Test_prints_start_help_as_usage_line_prose_and_flag_table pins R6 for one
-// leaf: the generated Usage line, start's prose verbatim, and a Flags
-// table — nothing else on stdout, nothing on stderr, exit 0.
 func Test_prints_start_help_as_usage_line_prose_and_flag_table(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -58,12 +53,7 @@ func Test_prints_start_help_as_usage_line_prose_and_flag_table(t *testing.T) {
 }
 
 // rootHelp is root's exact stdout for "brief --help", "brief -h" and
-// "brief help": the one-sentence description, one row per available
-// command (new's two children in new's place, in registration order),
-// finish's, check's, init's and uninstall's own overlong rows each wrapped
-// to their own line, and the two trailers —
-// "Run 'brief <command> --help' for details." then, as the render's last
-// line, "Run 'brief --version' to print the installed version." (R7).
+// "brief help".
 const rootHelp = `brief manages feature specifications as files in your repository.
 
 Usage:
@@ -87,12 +77,7 @@ Run 'brief <command> --help' for details.
 Run 'brief --version' to print the installed version.
 `
 
-// newHelp is "brief new --help"'s exact stdout: new's group body, listing
-// its two children's rows (copied from rootHelp's own "new feature"/"new
-// step" rows, same cmdRow padding), and the "new"-scoped trailer naming
-// "new"'s own commandNounAnnotation, "type", rather than root's "command"
-// — no Usage line and no Flags table, since new's own UseLine is rendered
-// nowhere.
+// newHelp is "brief new --help"'s exact stdout.
 const newHelp = `Scaffolds a new feature, or the next step of an existing feature.
 
 Usage:
@@ -102,9 +87,6 @@ Usage:
 Run 'brief new <type> --help' for details.
 `
 
-// Test_prints_new_help_listing_its_two_types pins SCENARIO-10: "new
-// --help", "new -h" and "help new" all render newHelp byte-identical, exit
-// 0, stderr empty.
 func Test_prints_new_help_listing_its_two_types(t *testing.T) {
 	tests := []struct {
 		name string
@@ -129,17 +111,9 @@ func Test_prints_new_help_listing_its_two_types(t *testing.T) {
 	}
 }
 
-// Test_new_help_flag_is_help_only_as_the_sole_argument pins that runNew's
-// "-h"/"--help" routing to cmd.Help() fires only when that flag is new's
-// one and only argument. A "-h"/"--help" alongside another argument, in
-// either order, reports that flag as taking no arguments, naming it
-// exactly as typed and pointing at "brief help new <type>" — matching
-// runRoot's own wording for the same shape. Any other dash-prefixed
-// argument, alone or first, gets pflag's own unknown-flag/unknown-shorthand
-// wording and points at "brief new <type> --help" instead. A bare "new
-// --help feature" does NOT reach feature's own help: cobra's Find has not
-// yet registered new's help flag when it walks this argv, so it treats
-// "feature" as --help's value and dispatch never leaves new.
+// "-h"/"--help" routes to cmd.Help() only when it is new's one and only
+// argument; alongside another argument it reports taking no arguments
+// instead.
 func Test_new_help_flag_is_help_only_as_the_sole_argument(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -187,10 +161,6 @@ func Test_new_help_flag_is_help_only_as_the_sole_argument(t *testing.T) {
 	}
 }
 
-// Test_prints_the_root_help_with_one_line_per_command pins R6/R7/R8 for
-// root: "brief --help" produces rootHelp exactly — trailers included — and
-// "brief -h", "brief -hh" and "brief help" are byte-identical to it — every
-// root-help path renders through the same cmd.Help() call.
 func Test_prints_the_root_help_with_one_line_per_command(t *testing.T) {
 	tests := []struct {
 		name string
@@ -216,12 +186,6 @@ func Test_prints_the_root_help_with_one_line_per_command(t *testing.T) {
 	}
 }
 
-// Test_every_command_help_has_a_usage_line_and_a_flag_table is a
-// structural sweep across every leaf: a generated Usage line naming the
-// command's own path, a Flags table with -h/--help, and none of cobra's
-// extra sections. It does not, by itself, prove those sections are
-// reachable on a tree this small — see the mutation checks pinning that
-// separately.
 func Test_every_command_help_has_a_usage_line_and_a_flag_table(t *testing.T) {
 	tests := []struct {
 		name string
@@ -260,12 +224,9 @@ func Test_every_command_help_has_a_usage_line_and_a_flag_table(t *testing.T) {
 	}
 }
 
-// Test_help_topic_prints_the_same_bytes_as_the_command_help_flag pins R8:
-// "brief help <path…>" renders exactly what "brief <path…> --help" renders,
-// for every leaf in the tree — both exit nil, both write nothing to
-// stderr, and the two stdouts are byte-identical. The "--help" capture
-// must also be non-empty, so a mutation making both sides render empty
-// cannot pass this table by symmetry alone.
+// "brief help <path…>" must render exactly what "brief <path…> --help"
+// renders; the "--help" capture must also be non-empty, so a mutation
+// making both sides render empty cannot pass by symmetry alone.
 func Test_help_topic_prints_the_same_bytes_as_the_command_help_flag(t *testing.T) {
 	tests := []struct {
 		name string
@@ -306,10 +267,8 @@ func Test_help_topic_prints_the_same_bytes_as_the_command_help_flag(t *testing.T
 	}
 }
 
-// Test_help_start_prints_the_literal_start_help anchors R8 against the
-// literal startHelp golden, not just against a live "--help" capture: a
-// mutation that moves both sides of the comparison identically cannot pass
-// this assertion.
+// Anchors against the literal startHelp golden, not just a live "--help"
+// capture, so a mutation moving both sides identically cannot pass.
 func Test_help_start_prints_the_literal_start_help(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -321,15 +280,9 @@ func Test_help_start_prints_the_literal_start_help(t *testing.T) {
 	assert.Equal(t, startHelp, stdout.String())
 }
 
-// Test_help_with_an_unresolved_topic_is_a_one_line_usage_error pins
-// SCENARIO-09: a help topic is accepted only when Find's residual is
-// empty and the resolved target is root or IsAvailableCommand. Anything
-// else — extra positionals, a flag after the topic, or a hidden command
-// like "help" itself — is a usage error naming the whole topic as typed,
-// never just the unresolved residual. A dash-prefixed topic never reaches
-// Find at all: see Test_help_flag_as_the_topic_argument_takes_no_arguments
-// and Test_help_reports_a_non_help_dash_prefixed_topic_as_an_unknown_flag
-// for those two shapes.
+// A help topic is accepted only when Find's residual is empty and the
+// resolved target is root or IsAvailableCommand; anything else is a usage
+// error naming the whole topic as typed, never just the unresolved residual.
 func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -378,13 +331,8 @@ func Test_help_with_an_unresolved_topic_is_a_one_line_usage_error(t *testing.T) 
 	}
 }
 
-// Test_help_flag_as_the_topic_argument_takes_no_arguments pins that "brief
-// help" checks its first argument for "-h"/"--help" before ever calling
-// Find: a sole "-h"/"--help" is its own case (see
-// Test_help_flag_as_the_sole_argument_prints_the_help_stubs_own_usage), but
-// that flag alongside another argument is never valid — reported as taking
-// no arguments, naming whichever spelling was typed, the same wording
-// runRoot and runNew report for the same shape.
+// "brief help" checks its first argument for "-h"/"--help" before ever
+// calling Find; that flag alongside another argument is never valid.
 func Test_help_flag_as_the_topic_argument_takes_no_arguments(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -413,12 +361,7 @@ func Test_help_flag_as_the_topic_argument_takes_no_arguments(t *testing.T) {
 	}
 }
 
-// helpHelp is "brief help -h"'s exact stdout: the help stub's own generated
-// Usage line ("brief help [command]", no "[flags]" suffix since
-// newHelpCommand sets DisableFlagsInUseLine), its own Long prose plus its
-// trailing JSON paragraph, and a Flags table with the auto-registered
-// -h/--help and --json — the same leaf shape every other command's own
-// "--help" renders.
+// helpHelp is "brief help -h"'s exact stdout.
 const helpHelp = `Usage:
   brief help [command]
 
@@ -435,14 +378,8 @@ Flags:
       --json   print one JSON document on stdout
 `
 
-// Test_help_flag_as_the_sole_argument_prints_the_help_stubs_own_usage pins
-// that "-h", "--help" and the all-'h' cluster "-hh", each as help's one and
-// only argument, print the help stub's own usage rather than erroring: a
-// bare "brief help" already answers "help me use help" by printing root's
-// own help, so asking "brief help" for help on "--help" is that exact
-// sole-argument case, not the "takes no arguments" wording
-// Test_help_flag_as_the_topic_argument_takes_no_arguments pins for the
-// flag alongside another argument.
+// "-h", "--help" and the all-'h' cluster "-hh", each as help's one and only
+// argument, print the help stub's own usage rather than erroring.
 func Test_help_flag_as_the_sole_argument_prints_the_help_stubs_own_usage(t *testing.T) {
 	tests := []struct {
 		name string
@@ -468,11 +405,8 @@ func Test_help_flag_as_the_sole_argument_prints_the_help_stubs_own_usage(t *test
 	}
 }
 
-// Test_help_reports_a_non_help_dash_prefixed_topic_as_an_unknown_flag pins
-// that a dash-prefixed topic other than "-h"/"--help" is reported in
-// pflag's own unknown-flag/unknown-shorthand wording, the same as runRoot
-// and runNew report the same shape — never routed through Find, which
-// would otherwise stop at root and quote the whole residual instead.
+// A dash-prefixed topic other than "-h"/"--help" is reported in pflag's own
+// unknown-flag wording, never routed through Find.
 func Test_help_reports_a_non_help_dash_prefixed_topic_as_an_unknown_flag(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -506,19 +440,14 @@ func Test_help_reports_a_non_help_dash_prefixed_topic_as_an_unknown_flag(t *test
 	}
 }
 
-// dropReportingParagraph is the ruled drop-reporting paragraph
-// specification.md's "Surface & Copy" section adds to finishLong, its own
-// paragraph between the flag-body prose and the JSON paragraph.
+// dropReportingParagraph is finishLong's own paragraph between the
+// flag-body prose and the JSON paragraph.
 const dropReportingParagraph = `Each entry under the four state headings that is missing from the new
 body is listed on stdout as a WARN finding (rule dropped-debt under the
 open-debts heading, dropped-entry otherwise); its line is in the file as
 it was before replacement. Removal is reported, never refused; a
 reworded entry counts as removed. Exit status stays 0.`
 
-// Test_finish_help_documents_drop_reporting_before_the_json_paragraph pins
-// SCENARIO-10: finishLong carries dropReportingParagraph verbatim, as its
-// own paragraph, positioned after the flag-body prose and before the JSON
-// paragraph — not folded into either.
 func Test_finish_help_documents_drop_reporting_before_the_json_paragraph(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -538,12 +467,7 @@ func Test_finish_help_documents_drop_reporting_before_the_json_paragraph(t *test
 	assert.Less(t, dropIdx, jsonIdx, "drop-reporting paragraph must appear before the JSON paragraph")
 }
 
-// finishHelp is "brief finish --help"'s exact stdout: --handoff and
-// --state show their value as "path" (from the backquoted varname in each
-// flag's usage string), not pflag's default "string", each usage string's
-// own embedded newline wraps it to the description column — every line at
-// or under 80 columns — and pflag's own sort order puts --json between
-// --help and --state.
+// finishHelp is "brief finish --help"'s exact stdout.
 const finishHelp = `Usage:
   brief finish <feature> <step> --handoff <path> --state <path>
 
@@ -574,10 +498,6 @@ Flags:
                        section may be empty
 `
 
-// Test_prints_finish_flag_prose_in_its_flag_table pins finishHelp
-// byte-identical, so a mutation that reflows the wrap points or drops a
-// word from either flag's prose is caught, not just a substring survival
-// check.
 func Test_prints_finish_flag_prose_in_its_flag_table(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -589,26 +509,10 @@ func Test_prints_finish_flag_prose_in_its_flag_table(t *testing.T) {
 	assert.Equal(t, finishHelp, stdout.String())
 }
 
-// Test_every_leaf_help_line_fits_in_80_columns sweeps every leaf's "--help"
-// output — the commands that render a Flags table, the surface MAJOR 1
-// fixed — for wrapped prose and a pflag flag table long enough for one
-// leaf's flags to overrun 80 columns unless its usage string carries its
-// own embedded wrap points, the way jsonFlagUsage and
-// handoffFlagUsage/stateFlagUsage do. The generated Usage line itself is
-// exempt, keyed by position — the one content line immediately after the
-// literal "Usage:" line, never by a "  brief " prefix match, which would
-// also exempt any wrapped continuation line or table row that happens to
-// start the same way: it renders cmd.Use verbatim, cobra offers no wrap
-// point for it (Use must stay one line — Name() and argument parsing both
-// split on its first space), and R14 pins init's own Use to its full
-// accepted-flag syntax, which runs past 80 columns; root's own cmdRow
-// already tolerates that same string unwrapped. Root and "new" are out of
-// scope here: their cmdList rows are fixed-column-padded, not wrapped to a
-// terminal width, an existing and separately reviewed layout (rootHelp,
-// newHelp) this fix does not touch. The help stub's own sole-argument "-h"
-// render is a leaf shape too, covered here alongside the rest.
-// require.NotEmpty on stdout guards the loop below from passing vacuously
-// against an empty or truncated render.
+// The generated Usage line is exempt by position (the line right after the
+// literal "Usage:" line): cobra offers no wrap point for cmd.Use, and
+// init's own Use runs past 80 columns unwrapped. Root and "new" are out of
+// scope: their rows are fixed-column-padded, not wrapped to a terminal width.
 func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 	tests := []struct {
 		name string
@@ -649,13 +553,7 @@ func Test_every_leaf_help_line_fits_in_80_columns(t *testing.T) {
 }
 
 // genericPlaceholderCase is one row of
-// Test_host_and_hook_flags_render_a_generic_table_placeholder: args is the
-// "--help" invocation, flagRow is the exact Flags table row (name, value
-// placeholder, and first line of usage) that row must render, and
-// concreteValue is the one accepted flag value pflag's own UnquoteUsage
-// bug (see hostFlagUsage's own doc comment) would substitute as the table
-// placeholder in its place, were the usage string's backquoted word that
-// value instead of a generic one.
+// Test_host_and_hook_flags_render_a_generic_table_placeholder.
 type genericPlaceholderCase struct {
 	name          string
 	args          []string
@@ -663,24 +561,10 @@ type genericPlaceholderCase struct {
 	concreteValue string
 }
 
-// Test_host_and_hook_flags_render_a_generic_table_placeholder pins the
-// rendered Flags table row for init's, uninstall's and check's own
-// `name`/`host`-placeholder flags: pflag's UnquoteUsage renders a usage
-// string's own backquoted word as that flag's table placeholder verbatim,
-// so backquoting one of the accepted values instead of a generic word
-// renders that value as the placeholder for every value, the trap
-// hostFlagUsage's own doc comment names. Each case asserts the ruled row
-// byte-exact and, as the control arm, that the concrete-value placeholder
-// a reverted usage string would render is absent — each concreteValue
-// carries enough of the row's own trailing usage text to stay unique to
-// that reverted rendering; a bare "--host none" alone also occurs,
-// unrelated to this bug, in --no-hook's own "(no effect with --host none)"
-// parenthetical, and would fail this assertion regardless of which usage
-// string init's --host flag carries. Mutation-verified per case:
-// backquoting the case's own concrete value instead of the generic word in
-// its flag's usage constant (hostFlagUsage, uninstallHostFlagUsage,
-// hookFlagUsage) reddens exactly that case, on both the byte-exact flagRow
-// assertion and the concreteValue control, restored after.
+// pflag's UnquoteUsage renders a usage string's own backquoted word as that
+// flag's table placeholder verbatim, so backquoting an accepted value
+// instead of a generic word would leak that value as the placeholder for
+// every value; each case also asserts that reverted rendering is absent.
 func Test_host_and_hook_flags_render_a_generic_table_placeholder(t *testing.T) {
 	tests := []genericPlaceholderCase{
 		{
@@ -719,16 +603,12 @@ func Test_host_and_hook_flags_render_a_generic_table_placeholder(t *testing.T) {
 	}
 }
 
-// jsonFlagRowRE matches the ruled --json row every JSON-capable leaf's
-// Flags table must carry, whitespace-tolerant between the flag name and
-// its usage so a column-width change elsewhere in the table can never
-// spuriously break this assertion.
+// jsonFlagRowRE matches the --json row every JSON-capable leaf's Flags
+// table must carry, whitespace-tolerant so a column-width change elsewhere
+// in the table can never spuriously break this assertion.
 var jsonFlagRowRE = regexp.MustCompile(`(?m)^\s*--json\s+print one JSON document on stdout\s*$`)
 
-// Test_every_command_help_lists_the_json_flag_row pins SCENARIO-14: every
-// JSON-capable leaf's own "--help" carries one --json row with the ruled
-// usage line. completion is the control arm: R11 forbids advertising
-// --json there, so its own "--help" must not mention "--json" at all.
+// completion is the control arm: --json is not advertised there.
 func Test_every_command_help_lists_the_json_flag_row(t *testing.T) {
 	tests := []struct {
 		name string
@@ -770,21 +650,15 @@ func Test_every_command_help_lists_the_json_flag_row(t *testing.T) {
 }
 
 // jsonParagraphMarker is the first line of every JSON-capable command's
-// own JSON paragraph — jsonParagraphHeaderClause's own first wrapped line
-// in production — copied here as a literal so this test can slice a
-// command's own field-key sentence out of the rest of its prose without
-// reaching into cli's unexported symbols.
+// own JSON paragraph.
 const jsonParagraphMarker = "With --json, this command writes one JSON document on stdout: the common header"
 
-// headerJSONKeys are the header keys every --json document carries,
-// dropped before checking a document's own top-level fields against its
-// help text: they are never named in a command's own JSON paragraph, only
-// jsonParagraphMarker's shared header clause covers them.
+// headerJSONKeys are the header keys every --json document carries, never
+// named in a command's own JSON paragraph.
 var headerJSONKeys = map[string]bool{"schema": true, "command": true, "ok": true, "exit_code": true}
 
-// wholeWordPresent reports whether word appears in text as a whole word:
-// not as a substring of a longer word (so "feature" does not match inside
-// "features", and "step" does not match inside a longer identifier).
+// wholeWordPresent reports whether word appears in text as a whole word, not
+// as a substring of a longer word.
 func wholeWordPresent(t *testing.T, text, word string) bool {
 	t.Helper()
 
@@ -794,11 +668,7 @@ func wholeWordPresent(t *testing.T, text, word string) bool {
 }
 
 // jsonFieldsCase is one row of
-// Test_every_command_help_names_its_json_documents_top_level_fields: run
-// produces the command's own --json stdout and error, plus the same
-// command's own "--help" text to check the fields against; wantExit is
-// this row's own expected ExitCode, since check --json exits 1 on this
-// fixture's own ERROR finding (R4) while every other row exits 0.
+// Test_every_command_help_names_its_json_documents_top_level_fields.
 type jsonFieldsCase struct {
 	name     string
 	run      func(t *testing.T) (jsonStdout []byte, helpText string, err error)
@@ -806,8 +676,7 @@ type jsonFieldsCase struct {
 }
 
 // runJSONAndHelp runs jsonArgs and helpArgs against the same wd, in that
-// order, and returns jsonArgs' own stdout/error and helpArgs' own stdout —
-// the shared shape every jsonFieldsCase.run in the table below builds on.
+// order, returning jsonArgs' stdout/error and helpArgs' stdout.
 func runJSONAndHelp(t *testing.T, wd string, jsonArgs, helpArgs []string) ([]byte, string, error) {
 	t.Helper()
 
@@ -822,11 +691,9 @@ func runJSONAndHelp(t *testing.T, wd string, jsonArgs, helpArgs []string) ([]byt
 	return jsonStdout.Bytes(), helpStdout.String(), err
 }
 
-// Test_every_command_help_names_its_json_documents_top_level_fields pins
-// SCENARIO-14's own key-coverage clause: each command's own JSON
-// paragraph, in its "--help" text, names every one of that command's own
-// top-level --json fields (the live document's own keys, header keys
-// dropped, never a literal list) as a whole word.
+// Each command's JSON paragraph must name every one of that command's own
+// top-level --json fields (the live document's keys, header keys dropped)
+// as a whole word.
 func Test_every_command_help_names_its_json_documents_top_level_fields(t *testing.T) {
 	tests := []jsonFieldsCase{
 		{
@@ -974,17 +841,12 @@ func Test_every_command_help_names_its_json_documents_top_level_fields(t *testin
 }
 
 // normalizeWhitespace collapses every run of whitespace in s to a single
-// space, so a hand-wrapped Long string's own line breaks never defeat a
-// Contains check against a sentence copied from specification.md as one
-// unbroken line.
+// space, so a hand-wrapped string's line breaks never defeat a Contains
+// check against a sentence given as one unbroken line.
 func normalizeWhitespace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// Test_init_help_names_the_brief_workflow_skill pins the ruled sentence
-// specification.md's "Surface & Copy" section adds to initLong, right
-// after the --with-agents sentence: whitespace-normalized, since initLong
-// hand-wraps its own prose.
 func Test_init_help_names_the_brief_workflow_skill(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -1003,9 +865,6 @@ func Test_init_help_names_the_brief_workflow_skill(t *testing.T) {
 	assert.True(t, wholeWordPresent(t, stdout.String(), "agents_missing_skill"))
 }
 
-// Test_init_help_names_edit_agents pins the ruled "--edit-agents" flag help
-// and the initLong sentence Surface & Copy adds for it (S07):
-// whitespace-normalized, since both hand-wrap.
 func Test_init_help_names_edit_agents(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -1026,11 +885,6 @@ func Test_init_help_names_edit_agents(t *testing.T) {
 	assert.Contains(t, stdout.String(), "--edit-agents")
 }
 
-// Test_uninstall_help_names_the_bound_agent_skill_removal pins the ruled
-// sentence specification.md's "Surface & Copy" section adds to
-// uninstallLong, right after the "...unless --force." sentence and before
-// "The feature root...": whitespace-normalized, since uninstallLong
-// hand-wraps its own prose.
 func Test_uninstall_help_names_the_bound_agent_skill_removal(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -1044,11 +898,8 @@ func Test_uninstall_help_names_the_bound_agent_skill_removal(t *testing.T) {
 	assert.Contains(t, normalizeWhitespace(stdout.String()), sentence)
 }
 
-// Test_uninstall_help_names_the_workflow_skill_directory pins the
-// product-vision fix round's own correction: uninstallLong's opening
-// sentence must say the "brief-workflow" skill directory is removed
-// alongside the plugin — the original wording named only the plugin,
-// never disclosing that the skill itself goes too.
+// uninstallLong's opening sentence must say the "brief-workflow" skill
+// directory is removed alongside the plugin, not just the plugin.
 func Test_uninstall_help_names_the_workflow_skill_directory(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -1062,12 +913,8 @@ func Test_uninstall_help_names_the_workflow_skill_directory(t *testing.T) {
 	assert.Contains(t, normalizeWhitespace(stdout.String()), pluginAndSkillSentence)
 }
 
-// Test_uninstall_help_left_in_place_clause_names_briefs_own_directories
-// pins the product-vision fix round's own correction to uninstallLong's
-// closing "left in place" clause: it must speak of brief's own directories
-// generally, not just "the plugin's own directory", since the
-// "brief-workflow" skill directory is a sibling the opening sentence now
-// names too (Test_uninstall_help_names_the_workflow_skill_directory).
+// uninstallLong's closing "left in place" clause must speak of brief's own
+// directories generally, not just "the plugin's own directory".
 func Test_uninstall_help_left_in_place_clause_names_briefs_own_directories(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -1085,11 +932,8 @@ func Test_uninstall_help_left_in_place_clause_names_briefs_own_directories(t *te
 	assert.NotContains(t, normalized, "above the plugin's own directory")
 }
 
-// Test_doctor_help_names_role_resolution_and_the_brief_workflow_skill pins
-// the ruled sentence specification.md's "Surface & Copy" section gives
-// doctorLong (S05), replacing the old roles clause: whitespace-normalized,
-// since doctorLong hand-wraps its own prose. The stale "reading
-// ~/.claude/agents" wording it replaces must be gone.
+// The stale "reading ~/.claude/agents" wording doctorLong once carried
+// must be gone.
 func Test_doctor_help_names_role_resolution_and_the_brief_workflow_skill(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -1106,10 +950,8 @@ func Test_doctor_help_names_role_resolution_and_the_brief_workflow_skill(t *test
 	assert.NotContains(t, normalized, `reading "~/.claude/agents"`)
 }
 
-// Test_status_and_check_help_say_the_text_layout_may_change pins the
-// exact sentence status, check and doctor's own Long end with, after
-// their JSON paragraph; start and finish are the control arm, since no
-// other command carries it.
+// start and finish are the control arm: no other command carries this
+// sentence.
 func Test_status_and_check_help_say_the_text_layout_may_change(t *testing.T) {
 	const sentence = "For scripts, use --json; the text layout may change."
 

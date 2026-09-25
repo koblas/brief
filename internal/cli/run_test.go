@@ -124,11 +124,6 @@ func Test_returns_a_usage_error_when_no_command_is_given(t *testing.T) {
 	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check, init, doctor, uninstall", oneLine(t, &stderr))
 }
 
-// Test_returns_a_usage_error_when_the_command_is_unknown pins R7's "no Did
-// you mean" clause: a one-edit near-miss of a real command name gets the
-// same one-line error as an unrelated typo, never a cobra suggestion —
-// DisableSuggestions already makes this so, so that row is green on
-// arrival.
 func Test_returns_a_usage_error_when_the_command_is_unknown(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -270,11 +265,8 @@ func Test_prints_usage_to_stdout_when_help_is_requested_for_the_subcommand(t *te
 	assert.NotEmpty(t, stdout.String())
 }
 
-// Test_returns_a_usage_error_when_args_are_nil guards the cobra port's
-// os.Args fallback: cobra's *Command reads os.Args[1:] itself when
-// SetArgs receives a nil slice, which would parse the test binary's own
-// flags instead of brief's. Run must always hand cobra a non-nil copy, so
-// a nil args slice here still reaches the ordinary no-command usage error.
+// A nil args slice must not fall through to cobra's own os.Args[1:]
+// fallback, which would parse the test binary's flags instead of brief's.
 func Test_returns_a_usage_error_when_args_are_nil(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -286,8 +278,6 @@ func Test_returns_a_usage_error_when_args_are_nil(t *testing.T) {
 	assert.Equal(t, "brief: no command given; expected one of: new, start, finish, status, check, init, doctor, uninstall", oneLine(t, &stderr))
 }
 
-// Test_prints_root_usage_and_a_nil_error_for_brief_help pins today's
-// dispatch: "brief help" with no topic prints the root usage text, exit 0.
 func Test_prints_root_usage_and_a_nil_error_for_brief_help(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -299,16 +289,9 @@ func Test_prints_root_usage_and_a_nil_error_for_brief_help(t *testing.T) {
 	assert.NotEmpty(t, stdout.String())
 }
 
-// Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments
-// pins that root's "-h"/"--help" routing to cmd.Help() applies only when
-// it is the sole argument, matching runNew's own sole-argument rule
-// (new.go's runNew) and the help stub's own -h/--help rule: any trailing
-// argument alongside "-h"/"--help" is reported as that flag taking no
-// arguments, naming it exactly as typed and pointing at "brief help
-// <command>" — never as an unknown command naming "-h"/"--help" itself. The
-// "--help --version" row pins that the first argument alone decides which
-// flag's error fires (R8): "--version" trailing after "--help" never
-// classifies as the version flag's own trailing-argument error.
+// The "--help --version" row pins that the first argument alone decides
+// which flag's error fires: "--version" trailing after "--help" never
+// classifies as the version flag's own error.
 func Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -352,10 +335,8 @@ func Test_reports_a_help_flag_with_trailing_arguments_as_taking_no_arguments(t *
 	}
 }
 
-// Test_still_prints_root_help_for_a_bare_help_flag is the control arm for
-// the table above: "--help"/"-h" alone, with no trailing argument, still
-// routes to root help — nil error, exit 0, non-empty stdout — proving the
-// rejection above is about trailing arguments, not about the flag itself.
+// Control for the table above: "--help"/"-h" alone, with no trailing
+// argument, still routes to root help.
 func Test_still_prints_root_help_for_a_bare_help_flag(t *testing.T) {
 	tests := []struct {
 		name string
@@ -380,11 +361,6 @@ func Test_still_prints_root_help_for_a_bare_help_flag(t *testing.T) {
 	}
 }
 
-// Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag
-// pins that "-x" at the root is reported the way pflag itself would report
-// an undefined shorthand flag on a leaf — root disables cobra's flag
-// parsing and so never reaches that frame itself — pointing at "brief
-// <command> --help" rather than naming a bogus command.
 func Test_returns_a_usage_error_when_the_root_command_is_a_single_dash_flag(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -410,11 +386,6 @@ func Test_returns_a_usage_error_when_the_new_type_is_a_single_dash_flag(t *testi
 	assert.Equal(t, "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'", oneLine(t, &stderr))
 }
 
-// Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root
-// pins the double-dash shape of the same rule, using a plausible-looking
-// flag ("--bogus") that brief does not define, to prove the wording is
-// generic rather than specific to any one bogus name. "--version" is not
-// used here since it is now its own argKind (see version_internal_test.go).
 func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -426,8 +397,6 @@ func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_at_the_root(t *t
 	assert.Equal(t, "brief: unknown flag: --bogus; run 'brief <command> --help'", oneLine(t, &stderr))
 }
 
-// Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new is
-// the "new" shape of the same rule.
 func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -439,13 +408,9 @@ func Test_returns_a_usage_error_for_an_unknown_double_dash_flag_under_new(t *tes
 	assert.Equal(t, "brief new: unknown flag: --bogus; run 'brief new <type> --help'", oneLine(t, &stderr))
 }
 
-// Test_version_flag_through_Run_prints_one_brief_line_to_stdout pins
-// cli.Run's public "--version" surface end to end: exit 0, empty stderr, and
-// one exact stdout line. A go test binary's own debug.ReadBuildInfo reports
-// Main.Version as "(devel)", which prints the same bytes as the fallback for
-// a missing build info, so this test cannot tell the real reader from a
-// stub; the pass-through and fallback rules are pinned against fake readers
-// in version_internal_test.go.
+// A go test binary's debug.ReadBuildInfo reports "(devel)", the same
+// bytes as the missing-build-info fallback, so this cannot tell them
+// apart; both rules are pinned against fake readers in version_internal_test.go.
 func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -457,35 +422,9 @@ func Test_version_flag_through_Run_prints_one_brief_line_to_stdout(t *testing.T)
 	assert.Equal(t, "brief (devel)\n", stdout.String())
 }
 
-// Test_reports_a_version_flag_with_trailing_arguments_as_taking_no_arguments
-// pins that root's "--version" sole-argument handling (see
-// version_internal_test.go) applies only when it is the sole argument: any
-// trailing argument alongside "--version" is reported as that flag taking
-// no arguments, pointing at "brief --version" — never as the unknown-flag
-// wording argVersionFlag's msg would otherwise carry (R4).
-//
-// The three rows are one behavior — any trailing argument, whatever its
-// shape — not three independent rules: "extra" is the specification's own
-// example, and "--help"/"--version" pin that args[1] is never classified
-// at all (R8), a shape no mutation in this arm can discriminate. No
-// mutation reddens one row without reddening all three. "--version
-// --json" is no longer a member of this family: run's own scanJSONFlag
-// strips "--json" ahead of dispatch entirely (R5), so it relaxes the
-// sole-argument rule instead of tripping it — see
-// Test_version_with_json_relaxes_the_sole_argument_rule
-// (json_usage_test.go).
-//
-// Mutation-verified, restored byte-identical after each: widening the
-// argVersionFlag arm's guard from "len(args) == 1" to "len(args) >= 1"
-// reddens every row here (nil error, version printed instead of the usage
-// error) plus json_usage_test.go's "--version extra --json" and "--json
-// --version extra" rows (Test_json_mode_usage_error_message_is_the_text_mode_line),
-// while that table's "--version=x --json" row — a value, not a trailing
-// argument — stays green, proving the guard and the value check are
-// independent; changing that arm's run hint from "brief --version" to "brief
-// help <command>" reddens every row here on the hint text while the sibling
-// table's "--help --version" control row (R8) stays green, proving the two
-// arms report independently.
+// "--version --json" is not a member of this family: scanJSONFlag strips
+// "--json" ahead of dispatch, relaxing the sole-argument rule instead of
+// tripping it (see Test_version_with_json_relaxes_the_sole_argument_rule).
 func Test_reports_a_version_flag_with_trailing_arguments_as_taking_no_arguments(t *testing.T) {
 	tests := []struct {
 		name string
@@ -511,30 +450,9 @@ func Test_reports_a_version_flag_with_trailing_arguments_as_taking_no_arguments(
 	}
 }
 
-// Test_reports_a_version_flag_with_a_value_as_taking_no_value pins that a
-// value attached to "--version" is reported as that flag taking no value,
-// naming the flag itself rather than "--version"'s own unknown-flag wording
-// — and that this fires before any trailing argument is even looked at
-// (R8): "--version=x extra" and "--version= --version" both report the
-// value error, never the trailing-argument error the sibling table above
-// pins.
-//
-// The four rows are one message family — every shape of "a value on
-// --version" reports the identical stderr line — but not one discriminator:
-// "x" and "" (an explicit empty value) pin the value check itself, while
-// the "extra"/"--version" rows additionally pin that a trailing argument
-// never overrides it (R8), as the second mutation below confirms by
-// reddening only that pair.
-//
-// Mutation-verified, restored byte-identical after each: dropping
-// classifyDashArg's "--version=" prefix branch reddens all four rows
-// (classification falls back to today's unknown-flag wording); routing
-// root's argVersionFlagWithValue arm to takesNoArgumentsMessage whenever
-// len(args) > 1 reddens only the two rows with a second argument
-// ("--version=x extra", "--version= --version"), proving the value check
-// runs before any trailing-argument check; changing takesNoValueMessage's
-// wording reddens all four rows, since root's argVersionFlagWithValue arm
-// is that helper's only other caller besides argHelpFlagWithValue.
+// The value check fires before any trailing argument is looked at:
+// "--version=x extra" and "--version= --version" both report the value
+// error, never the trailing-argument error the table above pins.
 func Test_reports_a_version_flag_with_a_value_as_taking_no_value(t *testing.T) {
 	tests := []struct {
 		name string
@@ -561,15 +479,9 @@ func Test_reports_a_version_flag_with_a_value_as_taking_no_value(t *testing.T) {
 	}
 }
 
-// Test_treats_a_bare_dash_as_a_plain_unknown_command is the control arm
-// for classifyDashArg's argNotFlag case: a standalone "-" is pflag's own
-// convention for stdin, never a flag (parseArgs treats len(s) == 1 the
-// same as no "-" prefix at all), so it keeps the ordinary
-// unknown-command/unknown-type wording rather than the flag-shaped wording
-// above.
-//
-// Mutation-verified: making classifyDashArg return argUnknownFlag for "-"
-// reds all three rows, the help row included.
+// A standalone "-" is pflag's own convention for stdin, never a flag, so
+// it keeps the ordinary unknown-command wording rather than the
+// flag-shaped wording the table above pins.
 func Test_treats_a_bare_dash_as_a_plain_unknown_command(t *testing.T) {
 	tests := []struct {
 		name    string

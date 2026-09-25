@@ -1,18 +1,11 @@
 package setup_test
 
-// OS-subject: Uninstall's own bound-agent rows (Rule 8) always read and
-// write through bound_agent.go's own real os.Lstat/os.ReadFile and
-// confinedAgentFile, regardless of the fsRoot seam (fs.go) — see doc.go.
-//
-// Black-box: Uninstall's own bound-agent removal path (Rule 8). Every test
-// in this file starts from a real claude-code install — the config, plugin,
-// skill and snippet files a bound-agent row's own row-order and skill-kept
-// gate depend on — via installClaudeCode, then writes one bound-agent
-// fixture and calls Uninstall directly. findBoundAgentRow and
-// assertNoBoundAgentRow are bound_agent_disk_test.go's own helpers, shared
-// here since both files live in package setup_test; writeConfigWithRoles,
-// writeMissingSkillAgent and newServerWithHome are
-// missing_skill_disk_test.go's.
+// Uninstall's bound-agent rows always read and write through
+// bound_agent.go's real os.Lstat/os.ReadFile. Every test here starts from a
+// real claude-code install via installClaudeCode, then writes one
+// bound-agent fixture and calls Uninstall directly. findBoundAgentRow,
+// assertNoBoundAgentRow, writeConfigWithRoles, writeMissingSkillAgent and
+// newServerWithHome are shared helpers from sibling files in this package.
 
 import (
 	"io/fs"
@@ -26,15 +19,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// installClaudeCode writes a config binding planner/implementer/reviewer
-// (writeConfigWithRoles' own convention) before running a real claude-code
-// Init against it, mirroring bound_agent_test.go's own fixture order: Init
-// sees the pre-existing, valid config and keeps it (ActionKept, "edited
-// locally"), governed by its own decoded roles, while still installing the
-// plugin, the brief-workflow skill and the CLAUDE.md snippet — the real
-// files this file's own row-order and skill-kept-gate assertions need
-// present. withAgents also installs the three role-agent files (KindAgent),
-// needed only by the row-order test.
+// installClaudeCode writes a config binding planner/implementer/reviewer,
+// then runs a real claude-code Init against it. withAgents also installs
+// the three role-agent files, needed only by the row-order test.
 func installClaudeCode(t *testing.T, wd, home, planner, implementer, reviewer string, withAgents bool) *setup.Server {
 	t.Helper()
 
@@ -47,13 +34,6 @@ func installClaudeCode(t *testing.T, wd, home, planner, implementer, reviewer st
 	return srv
 }
 
-// Test_uninstall_removes_brief_workflow_from_bound_project_agents pins the
-// removal itself across every originating shape addWorkflowSkill can
-// produce: a single-item flow list (what a "no key" original shape becomes
-// once merged), a non-empty block list, and a flow list carrying another
-// entry besides — the row is removed/bound-agent/"brief-workflow from
-// skills", the file's own permission bits survive, and its path lands in
-// Modified, never in Removed.
 func Test_uninstall_removes_brief_workflow_from_bound_project_agents(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -108,10 +88,6 @@ func Test_uninstall_removes_brief_workflow_from_bound_project_agents(t *testing.
 	}
 }
 
-// Test_uninstall_orders_bound_agent_rows_after_the_snippet pins the row
-// order Surface & Copy rules: snippet, then bound-agent rows
-// (implementer before planner — the strict reversal of init's own
-// planner-first walk), then the agent rows.
 func Test_uninstall_orders_bound_agent_rows_after_the_snippet(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -155,13 +131,6 @@ func Test_uninstall_orders_bound_agent_rows_after_the_snippet(t *testing.T) {
 	assert.Less(t, plannerIdx, agentIdx)
 }
 
-// Test_uninstall_keeps_bound_agent_entries_while_the_skill_is_kept pins
-// Rule 8's own gate: any KindSkill row reporting ActionKept — edited
-// without --force, or not a regular file even with --force — keeps every
-// bound agent's own entry too, no row at all. The control arm proves the
-// gate, not something else, decides it: the identical fixture with --force
-// against a still-regular, edited SKILL.md opens the gate and removes the
-// entry; so does one with no SKILL.md at all.
 func Test_uninstall_keeps_bound_agent_entries_while_the_skill_is_kept(t *testing.T) {
 	const body = "---\nname: developer\nskills: [brief-workflow]\n---\n\nbody\n"
 	const unedited = "---\nname: developer\n---\n\nbody\n"
@@ -240,11 +209,8 @@ func Test_uninstall_keeps_bound_agent_entries_while_the_skill_is_kept(t *testing
 	})
 }
 
-// Test_uninstall_leaves_non_targets_alone pins every case Uninstall must
-// never touch: the baseline (a bare-name project agent listing
-// brief-workflow in a flow list) gets a removed row; every other case
-// changes exactly one variable from that baseline and asserts no
-// bound-agent row and byte-identical agent bytes.
+// Every subtest but the baseline changes exactly one variable from it and
+// asserts no bound-agent row and byte-identical agent bytes.
 func Test_uninstall_leaves_non_targets_alone(t *testing.T) {
 	const baselineBody = "---\nname: developer\nskills: [other, brief-workflow]\n---\n\nbody\n"
 
@@ -445,17 +411,8 @@ func Test_uninstall_leaves_non_targets_alone(t *testing.T) {
 	})
 }
 
-// Test_uninstall_leaves_bound_agent_untouched_when_the_removal_cannot_be_verified
-// pins the shared post-edit gate (boundAgentRemovalVerified), removal's own
-// side of the same check Test_init_edit_agents_falls_back_when_the_text_edit_cannot_be_verified
-// pins for addWorkflowSkill: removeWorkflowSkill is a surgical text scan
-// too, and each case here is a shape it misjudges — a comma inside a
-// quoted item splits the naive comma-join, or a duplicate entry leaves one
-// instance behind after removing only the first. The gate catches every
-// one by re-decoding the edit and confirming the skill is gone and every
-// other entry survived unchanged; a mismatch contributes no row at all —
-// the same "no row for a shape it can't edit" rule an unremovable shape
-// gets — and the file is never written.
+// removeWorkflowSkill is a surgical text scan; each case here is a shape it
+// misjudges, caught by re-decoding the edit and confirming it afterward.
 func Test_uninstall_leaves_bound_agent_untouched_when_the_removal_cannot_be_verified(t *testing.T) {
 	cases := []struct {
 		name string
@@ -496,9 +453,6 @@ func Test_uninstall_leaves_bound_agent_untouched_when_the_removal_cannot_be_veri
 	}
 }
 
-// Test_uninstall_edits_a_shared_bound_agent_once pins the dedupe rule:
-// planner and implementer both bound to the same agent produce exactly one
-// removed row, not two, and the skill is stripped once.
 func Test_uninstall_edits_a_shared_bound_agent_once(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -524,9 +478,6 @@ func Test_uninstall_edits_a_shared_bound_agent_once(t *testing.T) {
 	assert.Equal(t, "---\nname: developer\n---\n\nbody\n", string(after))
 }
 
-// Test_uninstall_dry_run_plans_bound_agent_rows_and_writes_nothing pins
-// DryRun: the same removed row, Modified stays empty, and the file on disk
-// is untouched.
 func Test_uninstall_dry_run_plans_bound_agent_rows_and_writes_nothing(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()

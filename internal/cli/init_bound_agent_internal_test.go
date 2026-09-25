@@ -1,19 +1,8 @@
-// OS-subject: every case in this file reads or writes a real bound agent
-// file — a repository ".claude/agents/*.md" file --edit-agents edits in
-// place, or a "~/.claude/agents/*.md" a bare-name role binding resolves
-// against — none of which can move onto init_internal_test.go's own
-// rwfs.Mem seam: internal/setup's own bound_agent.go (confinedAgentFile)
-// always reads and writes those files through real disk, regardless of
-// setup.WithFSRoot (internal/setup/doc.go's own EditAgents section states
-// this directly).
-//
-// White-box package: this file reaches the unexported run directly so a
-// bound-agent role can be resolved against an injected, empty home
-// directory — through cli.Run a bare "planner"/"developer" binding would
-// also search the developer's own "~/.claude/agents", making these tests
-// depend on the machine they happen to run on — and to reach
-// missingSkillHeaderLine/missingSkillHeaderLinePlain/installedNextActionLine,
-// which init_internal_test.go's own pure-function tests share.
+// OS-subject: bound_agent.go always reads and writes agent files through
+// real disk regardless of setup.WithFSRoot, so these cases cannot move onto
+// init_internal_test.go's rwfs.Mem seam. White-box: reaches run directly so
+// a bare role binding resolves against an injected, empty home directory
+// instead of the developer's own "~/.claude/agents".
 
 package cli
 
@@ -31,8 +20,7 @@ import (
 )
 
 // emptyHomeSeam returns a runSeam pinning setup.WithHomeDir to a fresh,
-// empty t.TempDir() — a home directory that exists but carries no
-// ".claude" of its own, so detection never finds anything through it.
+// empty t.TempDir() carrying no ".claude" of its own.
 func emptyHomeSeam(t *testing.T) runSeam {
 	t.Helper()
 
@@ -41,36 +29,24 @@ func emptyHomeSeam(t *testing.T) runSeam {
 	return withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
 }
 
-// missingSkillHeaderLine is the exact stderr header init's own missing-skill
-// block renders (Surface & Copy) when at least one listed agent is one
-// "--edit-agents" could still reach and this run did not already pass it,
-// including the "brief init: " prefix.
+// missingSkillHeaderLine is the exact stderr header rendered when at least
+// one listed agent is one --edit-agents could still reach.
 const missingSkillHeaderLine = `brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each, or rerun with --edit-agents:`
 
-// missingSkillHeaderLinePlain is missingSkillHeaderLine's own counterpart
-// (Surface & Copy) rendered instead whenever suggesting "--edit-agents"
-// could not help: this run already passed it, or every listed agent
-// already carries its own "edit by hand" annotation.
+// missingSkillHeaderLinePlain is rendered instead when suggesting
+// --edit-agents could not help.
 const missingSkillHeaderLinePlain = `brief init: bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each:`
 
 // installedNextActionLine is the exact stderr next-action line an explicit
 // "--host claude-code" run reports once at least one artifact changed and
-// root == wd — no detection clause, since the host was given explicitly.
+// root == wd.
 const installedNextActionLine = "brief init: installed for claude-code; start Claude Code in this directory " +
 	"(or run /reload-plugins in a session already here), then 'brief new feature <name>'"
 
-// Test_init_lists_bound_agents_missing_the_workflow_skill pins S06's own
-// stderr block: a home-level "planner" agent and a project, nested
-// ".claude/agents/developer/Agent.md" bound as implementer, neither
-// carrying the skill. The project row renders first, then the user row —
-// display groups project-scope rows ahead of user-scope ones, distinct
-// from Result.AgentsMissingSkill's own role-major order (setup's own
-// missing_skill_test.go pins that order directly). Neither agent file is
-// touched, and a --dry-run sub-case reports the identical block. The
-// "--edit-agents" sub-case merges the fixable project row and re-checks
-// the header itself: once this run already carries the flag, the header
-// never suggests it again, even though a listed row (the user-level one)
-// remains — missingSkillHeaderLinePlain, not missingSkillHeaderLine.
+// Display groups project-scope rows ahead of user-scope ones. The
+// --edit-agents sub-case merges the fixable project row and re-checks the
+// header: once this run already carries the flag, it never suggests it
+// again even though the user-level row remains.
 func Test_init_lists_bound_agents_missing_the_workflow_skill(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -166,13 +142,9 @@ func Test_init_lists_bound_agents_missing_the_workflow_skill(t *testing.T) {
 }
 
 // nothingToEditLine is --edit-agents' own exit-0 "nothing to edit" stderr
-// line (Surface & Copy), including the "brief init: " prefix.
+// line.
 const nothingToEditLine = `brief init: --edit-agents: no planner or implementer bound to an agent under .claude/agents; nothing to edit`
 
-// Test_init_edit_agents_says_nothing_to_edit pins the nothing-to-edit line:
-// no bare planner or implementer bound at all, and a bare binding that only
-// resolves at user scope, both trigger it, in text mode only, placed after
-// roles_to_add and before the missing-skill block.
 func Test_init_edit_agents_says_nothing_to_edit(t *testing.T) {
 	t.Run("no bare planner or implementer bound", func(t *testing.T) {
 		wd := t.TempDir()
@@ -221,16 +193,9 @@ func Test_init_edit_agents_says_nothing_to_edit(t *testing.T) {
 	})
 }
 
-// Test_init_missing_skill_header_omits_edit_agents_suggestion_when_it_cannot_help
-// pins missingSkillHeader's own conditional suffix (product-vision fix
-// round): ", or rerun with --edit-agents:" is appended only when this run
-// did not already carry the flag AND at least one listed agent is one
-// "--edit-agents" could still reach — a bare-name project binding, not
-// escaping the repository. Two ways that condition fails, both getting the
-// plain header: no "--edit-agents" was given, but the only lacking agent
-// is user-level (which the flag could never reach); "--edit-agents" was
-// given and already tried its one bound agent, which it could not edit (an
-// unrecognized "skills:" shape, left "kept").
+// ", or rerun with --edit-agents:" is appended only when this run did not
+// already carry the flag AND at least one listed agent is one --edit-agents
+// could still reach.
 func Test_init_missing_skill_header_omits_edit_agents_suggestion_when_it_cannot_help(t *testing.T) {
 	t.Run("no --edit-agents given, only a user-level agent remains", func(t *testing.T) {
 		wd := t.TempDir()
@@ -280,13 +245,9 @@ func Test_init_missing_skill_header_omits_edit_agents_suggestion_when_it_cannot_
 	})
 }
 
-// Test_init_missing_skill_lists_an_escaping_bound_agent_separately pins the
-// third missing-skill row shape (product-vision fix round): a bound
-// implementer resolved only through a ".claude" symlinked outside the
-// repository is listed with "; outside the repository, edit by hand" —
-// distinct from a real project row and from a user-level one — and its
-// presence alone (no in-repository row) still keeps the header plain, since
-// "--edit-agents" cannot reach it either.
+// A bound implementer resolved only through a ".claude" symlinked outside
+// the repository is listed "; outside the repository, edit by hand", and
+// keeps the header plain since --edit-agents cannot reach it either.
 func Test_init_missing_skill_lists_an_escaping_bound_agent_separately(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -303,12 +264,7 @@ func Test_init_missing_skill_lists_an_escaping_bound_agent_separately(t *testing
 	seam := withSetupOpts(setup.WithHomeDir(func() (string, error) { return home, nil }))
 	var stdout, stderr bytes.Buffer
 
-	// --dry-run: a real run would also need to create the plugin/skill
-	// files under the symlinked ".claude" for the first time, which trips
-	// R10's own writability pre-check (Lstat never resolves a symlink at
-	// the exact path it is asked to check) — an unrelated concern this
-	// test is not proving; the missing-skill report itself is computed
-	// identically either way (bound_agent_test.go's own precedent).
+	// --dry-run: a real run would also trip the writability pre-check on the symlinked ".claude", unrelated to this test.
 	err := run(t.Context(), wd, []string{"init", "--host", "claude-code", "--dry-run"}, nil, &stdout, &stderr, noBuildInfo, seam)
 
 	require.NoError(t, err)
@@ -319,18 +275,10 @@ func Test_init_missing_skill_lists_an_escaping_bound_agent_separately(t *testing
 		stderr.String())
 }
 
-// Test_init_missing_skill_lists_a_not_regular_leaf_separately pins the
-// fourth missing-skill row shape (REVIEW fix round, MAJOR 1): a bound
-// implementer resolved to a symlinked leaf whose own target still resolves
-// inside the repository does not escape it (Rule 3's own escape test never
-// fires — the leaf's own resolved path stays under root) but is still
-// unreachable by "--edit-agents": planBoundAgent Lstats the leaf itself and
-// never reads through a non-regular file. Alone, it is listed "; not a
-// regular file, edit by hand" and keeps the header plain, since
-// "--edit-agents" cannot reach it either. The control proves the symlink
-// itself is what disqualifies the row, not its bytes: the identical
-// frontmatter written as a plain regular file instead resolves fixable,
-// plain row format, header suffixed.
+// A bound implementer resolved to a symlinked leaf whose target still
+// resolves inside the repository is listed "; not a regular file, edit by
+// hand". The control proves the symlink itself disqualifies the row: the
+// identical frontmatter as a plain regular file resolves fixable instead.
 func Test_init_missing_skill_lists_a_not_regular_leaf_separately(t *testing.T) {
 	body := []byte("---\nname: developer\n---\n\nbody\n")
 
@@ -380,14 +328,9 @@ func Test_init_missing_skill_lists_a_not_regular_leaf_separately(t *testing.T) {
 	})
 }
 
-// Test_init_missing_skill_lists_an_uneditable_shape_without_edit_agents pins
-// the fifth missing-skill row shape (REVIEW fix round, MAJOR 1): a bound
-// implementer whose own "skills:" frontmatter is a scalar addWorkflowSkill
-// cannot edit is listed "; skills: is not a list brief can edit, edit by
-// hand" even when "--edit-agents" was never given on this run — a row's own
-// reach is decided by its shape (setup.planBoundAgent's own verdict), never
-// by whether an edit was attempted, so the header never dangles a flag that
-// could not help it either way.
+// A row's reach is decided by its shape, never by whether an edit was
+// attempted, so a bound agent with an unrecognized "skills:" shape is
+// listed uneditable even when --edit-agents was never given.
 func Test_init_missing_skill_lists_an_uneditable_shape_without_edit_agents(t *testing.T) {
 	wd := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(
@@ -410,10 +353,6 @@ func Test_init_missing_skill_lists_an_uneditable_shape_without_edit_agents(t *te
 		stderr.String())
 }
 
-// Test_init_edit_agents_dry_run_and_print pins --dry-run and --print's own
-// rendering: the same merged row and an unwritten file under --dry-run, the
-// merge header and only the inserted line under --print with no CR
-// surviving from a CRLF fixture, and the merge body under --print --json.
 func Test_init_edit_agents_dry_run_and_print(t *testing.T) {
 	newFixture := func(t *testing.T, crlf bool) (string, runSeam, string) {
 		t.Helper()
@@ -495,9 +434,6 @@ func Test_init_edit_agents_dry_run_and_print(t *testing.T) {
 	})
 }
 
-// Test_init_edit_agents_json pins "--edit-agents --json": a "bound-agent"
-// artifact row action "merged", the path listed in "modified", and the
-// merged path excluded from "agents_missing_skill".
 func Test_init_edit_agents_json(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -546,9 +482,6 @@ func Test_init_edit_agents_json(t *testing.T) {
 	}
 }
 
-// Test_init_prints_roles_to_add_before_the_missing_skill_block pins R7's
-// stderr order (Surface & Copy): the "roles_to_add" block, then the
-// missing-skill block, then the next-action line — never the reverse.
 func Test_init_prints_roles_to_add_before_the_missing_skill_block(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -577,11 +510,6 @@ func Test_init_prints_roles_to_add_before_the_missing_skill_block(t *testing.T) 
 		installedNextActionLine+"\n", stderr.String())
 }
 
-// Test_init_json_lists_agents_missing_the_skill pins "agents_missing_skill"
-// --json's own item shape (S06): exactly the keys role, agent, path
-// (absolute) and scope, in that order, values "project"/"user", stderr
-// empty — the same fixture Test_init_lists_bound_agents_missing_the_workflow_skill
-// uses.
 func Test_init_json_lists_agents_missing_the_skill(t *testing.T) {
 	wd := t.TempDir()
 	home := t.TempDir()
@@ -650,10 +578,8 @@ func Test_init_json_lists_agents_missing_the_skill(t *testing.T) {
 	assert.Equal(t, []string{"role", "agent", "path", "scope"}, rawKeys)
 }
 
-// extractFirstObjectKeys decodes doc[field]'s own first array element as an
-// ordered list of its own JSON object keys, via json.Decoder's own token
-// stream — the one way to observe encoding/json's own field order without
-// relying on a Go struct's field order to prove it.
+// extractFirstObjectKeys decodes doc[field]'s first array element as an
+// ordered list of JSON object keys, via json.Decoder's token stream.
 func extractFirstObjectKeys(t *testing.T, doc []byte, field string) []string {
 	t.Helper()
 

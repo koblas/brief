@@ -76,11 +76,8 @@ type checkCountsJSON struct {
 
 // checkFindingJSON is one checkFeatureJSON row's "findings" member:
 // severity, rule, path and detail exactly as assemble.Finding carries
-// them, raw and never flattened — check --json builds from the
-// un-relativized findings Check returned (R6), and detail is never passed
-// through flattenTabwriterField the way the text table's own cell is.
-// Line is nil (JSON null) when Finding.Line == 0 (a whole-file finding),
-// else the integer.
+// them, raw and never flattened. Line is nil for a whole-file finding
+// (Finding.Line == 0), else the integer.
 type checkFindingJSON struct {
 	Severity string `json:"severity"`
 	Rule     string `json:"rule"`
@@ -99,11 +96,11 @@ type checkFeatureJSON struct {
 	Findings []checkFindingJSON `json:"findings"`
 }
 
-// checkDocument is check's --json success document: the common header
-// first, then counts, then one row per feature with findings — no "data"
-// wrapper (R2). Findings render as this document's payload even when
-// counts.error is greater than zero (R4): check --json never renders an
-// ERROR-carrying run as an error document.
+// checkDocument is check's --json success document: the common header,
+// then counts, then one row per feature with findings, no "data" wrapper.
+// Findings render as this document's payload even when counts.error is
+// greater than zero: check --json never renders an ERROR-carrying run as
+// an error document.
 type checkDocument struct {
 	jsonHeader
 
@@ -112,8 +109,7 @@ type checkDocument struct {
 }
 
 // checkFeatures maps groups to checkDocument's "features" array: a sized,
-// non-nil slice so zero groups encode as "[]" rather than "null" (R9's
-// empty discriminator, in JSON form).
+// non-nil slice so zero groups encode as "[]" rather than "null".
 func checkFeatures(groups []assemble.FeatureFindings) []checkFeatureJSON {
 	out := make([]checkFeatureJSON, 0, len(groups))
 
@@ -166,9 +162,7 @@ func countFindings(groups []assemble.FeatureFindings) (int, int) {
 // positional arguments, flags already parsed away. hookHost is "" unless
 // --hook was given, in which case it dispatches to runCheckHook instead of
 // checking by feature argument; stdin backs --hook's own payload read (no
-// other check path reads it). rootFS is nil in production (resolveRoot and
-// assemble.NewServer both read real disk); a test's withRootFS runSeam
-// substitutes an rwfs.Mem for both — runCheckHook never receives it, since
+// other check path reads it). runCheckHook never receives rootFS, since
 // --hook stays real-disk-only regardless (see its own doc comment).
 func runCheck(ctx context.Context, wd string, rest []string, hookHost string, stdin io.Reader, out reporter, rootFS rwfs.FS) error {
 	if hookHost != "" {
@@ -205,9 +199,9 @@ func runCheck(ctx context.Context, wd string, rest []string, hookHost string, st
 		runErr = errCheckFindings
 	}
 
-	// R1/R6: --json is decided here, before either the no-findings notice
-	// or displayFindings' relativized copy, so it writes zero stderr bytes
-	// and sees Check's own absolute paths.
+	// Decided before either the no-findings notice or displayFindings'
+	// relativized copy, so a --json run writes zero stderr bytes and sees
+	// Check's own absolute paths.
 	if out.json {
 		doc := checkDocument{
 			jsonHeader: out.headerFor(ExitCode(runErr)),
@@ -242,44 +236,31 @@ func runCheck(ctx context.Context, wd string, rest []string, hookHost string, st
 }
 
 // errMalformedHookPayload marks a "check --hook" run whose stdin payload
-// could not be parsed inside an opted-in repository (R12): exit 1, a
-// PostToolUse hook's own non-blocking failure, never usage-error's exit 2 —
-// the payload is host-supplied, not user-typed, so a malformed one is a
+// could not be parsed inside an opted-in repository: exit 1, a PostToolUse
+// hook's own non-blocking failure, never usage-error's exit 2 — the
+// payload is host-supplied, not user-typed, so a malformed one is a
 // runtime fault rather than a misuse of the CLI.
 var errMalformedHookPayload = errors.New("brief check: malformed hook payload on stdin")
 
-// runCheckHook implements "brief check --hook <host>" (R12): rest must be
-// empty (a feature argument and --hook are mutually exclusive) and
-// out.json must be false (--hook and --json are mutually exclusive). It
-// reads one hook-event payload from stdin through host, resolves the
-// edited path against wd when relative, and checks only the feature
-// assemble.(*Server).FeatureContaining reports for it.
+// runCheckHook implements "brief check --hook <host>": rest must be empty
+// and out.json must be false. It reads one hook-event payload from stdin
+// through host, resolves the edited path against wd when relative, and
+// checks only the feature assemble.(*Server).FeatureContaining reports
+// for it. A feature with at least one ERROR finding writes one hook-context
+// document (host.WriteHookContext) to stdout, exit 0; every other outcome
+// — no opted-in config above wd, a malformed payload, a path outside any
+// feature directory, or no ERROR findings — is silent or a plain refusal,
+// never check's own findings table.
 //
-// The opt-in gate — config.LocateInRepo's own nearest result, not
-// resolveRoot/config.Resolve — runs before the payload is even parsed: a
-// repository with no ".brief.yaml" anywhere above wd (or one found only
-// above the nearest enclosing git repository, R3) is silent, exit 0, for
-// any stdin whatsoever, valid or not — Resolve alone would silently check
-// an unopted-in repository by falling back to its own defaults, and
-// parsing first would report a malformed payload even for a repository
-// that never opted in. Only once the gate passes is the payload parsed; a
-// malformed one there is errMalformedHookPayload, exit 1, one stderr line.
-// An invalid existing config still refuses through resolveRoot, exit 1,
-// the same as every other command. A path FeatureContaining reports as
-// outside the feature directory is silent, exit 0.
-//
-// A feature with at least one ERROR finding writes one JSON document —
-// host.WriteHookContext's own hook-context protocol, naming the feature's
-// own directory (relative to wd) and its ERROR count — to stdout and
-// returns nil (exit 0); stdout on this path never carries check's own
-// findings table. A feature with no findings, or WARN findings only, is
-// silent, exit 0.
+// The opt-in gate (config.LocateInRepo's nearest result, not
+// resolveRoot/config.Resolve) runs before the payload is even parsed, so
+// an unopted-in repository never reports a malformed payload for stdin it
+// was never going to check.
 //
 // Unlike every other command in this package, runCheckHook takes no
-// rootFS: FeatureContaining resolves the edited path's containing feature
-// through os.Lstat and filepath.EvalSymlinks (internal/assemble/
-// features.go), neither of which any seam replaces, so a --hook run always
-// reads real disk regardless of a caller's own withRootFS runSeam.
+// rootFS: FeatureContaining resolves the edited path through os.Lstat and
+// filepath.EvalSymlinks, neither of which any seam replaces, so a --hook
+// run always reads real disk.
 func runCheckHook(ctx context.Context, wd string, rest []string, hookHost string, stdin io.Reader, out reporter) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief check: --hook takes no feature argument; run '%s'", checkHookInvocation))
@@ -348,8 +329,8 @@ func runCheckHook(ctx context.Context, wd string, rest []string, hookHost string
 }
 
 // displayFindings returns a copy of groups with every Finding.Path
-// relativized to wd (R6) through displayPath — a copy of both the group
-// slice and each group's own findings slice, never a mutation of groups'
+// relativized to wd through displayPath — a copy of both the group slice
+// and each group's own findings slice, never a mutation of groups'
 // backing arrays: check --json builds its own document from the
 // un-relativized findings Check returned, and must see them unchanged.
 func displayFindings(wd string, groups []assemble.FeatureFindings) []assemble.FeatureFindings {

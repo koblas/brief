@@ -11,11 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_RenderJSON_writes_every_field_of_a_brief_with_an_open_step round-trips
-// a fully populated Brief through RenderJSON and back into a fresh
-// assemble.Brief, and asserts the decoded value equals the original —
-// proving every exported field survives the wire format under its
-// documented tag.
+// Round-trips a fully populated Brief through RenderJSON and back,
+// proving every exported field survives the wire format.
 func Test_RenderJSON_writes_every_field_of_a_brief_with_an_open_step(t *testing.T) {
 	b := assemble.Brief{
 		Done: 2,
@@ -42,13 +39,8 @@ func Test_RenderJSON_writes_every_field_of_a_brief_with_an_open_step(t *testing.
 	assert.Equal(t, b, got)
 }
 
-// Test_RenderJSON_marshals_a_nil_step_as_null asserts the raw bytes carry
-// "step":null for a Brief with no open step — the completion discriminator
-// a structured caller keys off. Unmarshalling would collapse null and
-// absent into the same Go zero value, so the claim is made on the bytes
-// themselves. The control arm proves the same assertion would fail for a
-// Brief that does carry an open step, where the same byte range reads
-// "step":{ instead.
+// Asserts the raw bytes, not unmarshalled output: unmarshalling would
+// collapse null and absent into the same Go zero value.
 func Test_RenderJSON_marshals_a_nil_step_as_null(t *testing.T) {
 	nilStep := assemble.Brief{Done: 5, Open: 0}
 	var out bytes.Buffer
@@ -63,10 +55,8 @@ func Test_RenderJSON_marshals_a_nil_step_as_null(t *testing.T) {
 	assert.Contains(t, controlOut.String(), `"step":{`)
 }
 
-// Test_RenderJSON_keeps_the_zero_counts_a_caller_needs asserts the raw
-// bytes carry "done":0 and "open":0 for a Brief with no steps at all, so a
-// caller can tell an empty feature apart from a completed one — both share
-// "step":null, and only the counts distinguish them.
+// An empty feature and a completed one both share "step":null; only the
+// counts distinguish them.
 func Test_RenderJSON_keeps_the_zero_counts_a_caller_needs(t *testing.T) {
 	b := assemble.Brief{Done: 0, Open: 0}
 
@@ -77,10 +67,7 @@ func Test_RenderJSON_keeps_the_zero_counts_a_caller_needs(t *testing.T) {
 	assert.Contains(t, out.String(), `"open":0`)
 }
 
-// Test_RenderJSON_marshals_absent_shortfalls_as_null asserts the raw bytes
-// carry "shortfalls":null when Brief.Shortfalls is nil, and an array when
-// it is populated — the same null-vs-absent claim as the step field,
-// pinned on bytes for the same reason.
+// Same null-vs-absent claim as the step field, pinned on bytes.
 func Test_RenderJSON_marshals_absent_shortfalls_as_null(t *testing.T) {
 	none := assemble.Brief{}
 	var out bytes.Buffer
@@ -95,11 +82,8 @@ func Test_RenderJSON_marshals_absent_shortfalls_as_null(t *testing.T) {
 	assert.Contains(t, someOut.String(), `"shortfalls":[{`)
 }
 
-// Test_RenderJSON_keeps_a_section_RenderText_omits asserts RenderJSON
-// carries an absent-heading section RenderText leaves out entirely: the
-// raw bytes hold "found":false for it, a claim unmarshalling can't make
-// since a decoded, omitted "found" key reads as false either way. Through
-// RenderText the same Brief omits the section's heading altogether.
+// RenderJSON carries an absent-heading section RenderText leaves out
+// entirely.
 func Test_RenderJSON_keeps_a_section_RenderText_omits(t *testing.T) {
 	b := assemble.Brief{
 		Step: &assemble.Step{ID: "STEP-01", Title: "STEP-01 Title"},
@@ -117,10 +101,8 @@ func Test_RenderJSON_keeps_a_section_RenderText_omits(t *testing.T) {
 	assert.NotContains(t, textOut.String(), "## Absent Fixture")
 }
 
-// Test_RenderJSON_leaves_angle_brackets_and_ampersands_unescaped asserts a
-// section body's angle brackets and ampersand reach the wire unrewritten —
-// a plain json.Marshal would rewrite them to their \uNNNN escapes because
-// Go's encoder defaults to HTML-safe escaping.
+// A plain json.Marshal would rewrite these to \uNNNN escapes, since Go's
+// encoder defaults to HTML-safe escaping.
 func Test_RenderJSON_leaves_angle_brackets_and_ampersands_unescaped(t *testing.T) {
 	b := assemble.Brief{
 		Step: &assemble.Step{
@@ -221,15 +203,8 @@ func Test_RenderText_writes_nothing_when_there_is_no_next_step(t *testing.T) {
 	assert.Empty(t, out.String())
 }
 
-// Test_RenderStatusText_prints_a_table_with_header_and_aligned_columns pins
-// the exact bytes of the status table across every row shape in one golden:
-// an in-progress row (NEXT "<id>  <title>"), a complete row ("(complete)"),
-// a zero-step row (DONE "0/0", NEXT "-"), an in-progress row with an empty
-// title (NEXT is the id alone, no trailing spaces), and a malformed row
-// (DONE/BLOCKED "-", NEXT "(malformed, see below)") carrying the longest
-// feature name, placed last — proving column width is computed from every
-// row, not only the ones rendered before it, and that RenderStatusText
-// preserves row order rather than sorting the malformed row elsewhere.
+// One golden across every row shape, the longest feature name placed
+// last, proving column width is computed from every row.
 func Test_RenderStatusText_prints_a_table_with_header_and_aligned_columns(t *testing.T) {
 	rows := []assemble.FeatureStatus{
 		{Name: "alpha", Done: 1, Total: 3, Blocked: 0, Next: &assemble.NextStep{ID: "SCENARIO-02", Title: "Open the door"}},
@@ -257,12 +232,8 @@ func Test_RenderStatusText_prints_a_table_with_header_and_aligned_columns(t *tes
 	}
 }
 
-// Test_RenderStatusText_shows_the_id_alone_when_the_title_equals_it pins the
-// cheap-optional dedup: a freshly scaffolded step file opens with "# <id>"
-// as its only heading, so NEXT must not double the id ("SCENARIO-01
-// SCENARIO-01") — the empty-title case (Test_RenderStatusText_prints_a_
-// table_with_header_and_aligned_columns's own "epsilon" row) already
-// collapses to the id alone; this is the other trigger for that same cell.
+// A freshly scaffolded step file opens with "# <id>" as its only heading,
+// so NEXT must not double the id.
 func Test_RenderStatusText_shows_the_id_alone_when_the_title_equals_it(t *testing.T) {
 	rows := []assemble.FeatureStatus{
 		{Name: "alpha", Done: 0, Total: 1, Blocked: 0, Next: &assemble.NextStep{ID: "SCENARIO-01", Title: "SCENARIO-01"}},
@@ -278,9 +249,7 @@ func Test_RenderStatusText_shows_the_id_alone_when_the_title_equals_it(t *testin
 		out.String())
 }
 
-// Test_RenderStatusText_writes_nothing_for_an_empty_slice is R9's render-side
-// half: zero features means zero bytes, not a bare header — "brief status |
-// wc -l" of 0 must still mean no features.
+// Zero features means zero bytes, not a bare header.
 func Test_RenderStatusText_writes_nothing_for_an_empty_slice(t *testing.T) {
 	var out bytes.Buffer
 	err := assemble.RenderStatusText(&out, nil)
@@ -289,13 +258,7 @@ func Test_RenderStatusText_writes_nothing_for_an_empty_slice(t *testing.T) {
 	assert.Empty(t, out.String())
 }
 
-// Test_RenderStatusText_flattens_a_tab_or_newline_in_the_feature_name_or_title
-// pins that a tab or newline embedded in a feature name or a step title is
-// rewritten to a single space before the table is built — either would
-// otherwise be read by text/tabwriter as a cell or line terminator and
-// corrupt the table's own column alignment. Both the name and the title
-// carry one, so a fix that flattens only one of the two fields still
-// reddens this test.
+// Both fields carry a tab or newline, so flattening only one still fails.
 func Test_RenderStatusText_flattens_a_tab_or_newline_in_the_feature_name_or_title(t *testing.T) {
 	rows := []assemble.FeatureStatus{
 		{Name: "a\tb", Done: 0, Total: 1, Blocked: 0, Next: &assemble.NextStep{ID: "SCENARIO-01", Title: "Open\nthe door"}},
@@ -311,10 +274,6 @@ func Test_RenderStatusText_flattens_a_tab_or_newline_in_the_feature_name_or_titl
 		out.String())
 }
 
-// Test_RenderFindings_writes_a_group_header_and_its_indented_findings pins
-// the grouped shape SCENARIO-08 ships: "<name>  (in flight|complete)" then
-// each finding as "  <SEVERITY>  <path>[:<line>]  <detail>", two-space
-// indented, the ":<line>" suffix present only when Line > 0.
 func Test_RenderFindings_writes_a_group_header_and_its_indented_findings(t *testing.T) {
 	groups := []assemble.FeatureFindings{
 		{
@@ -336,9 +295,7 @@ func Test_RenderFindings_writes_a_group_header_and_its_indented_findings(t *test
 		out.String())
 }
 
-// Test_RenderFindings_labels_a_complete_feature_s_header_from_InFlight pins
-// the header's other arm: "(complete)" when InFlight is false — from
-// InFlight, never recomputed from severity.
+// "(complete)" is read from InFlight, never recomputed from severity.
 func Test_RenderFindings_labels_a_complete_feature_s_header_from_InFlight(t *testing.T) {
 	groups := []assemble.FeatureFindings{
 		{
@@ -355,9 +312,6 @@ func Test_RenderFindings_labels_a_complete_feature_s_header_from_InFlight(t *tes
 	assert.Contains(t, out.String(), "demo  (complete)\n")
 }
 
-// Test_RenderFindings_separates_groups_with_exactly_one_blank_line pins the
-// blank-line rule: one blank line between groups, none before the first,
-// none after the last.
 func Test_RenderFindings_separates_groups_with_exactly_one_blank_line(t *testing.T) {
 	groups := []assemble.FeatureFindings{
 		{
@@ -382,9 +336,6 @@ func Test_RenderFindings_separates_groups_with_exactly_one_blank_line(t *testing
 		out.String())
 }
 
-// Test_RenderFindings_flattens_a_tab_or_newline_in_the_detail pins the same
-// tabwriter-safety stance RenderStatusText already takes: a tab or newline
-// embedded in Detail is flattened to a single space.
 func Test_RenderFindings_flattens_a_tab_or_newline_in_the_detail(t *testing.T) {
 	groups := []assemble.FeatureFindings{
 		{
@@ -401,9 +352,7 @@ func Test_RenderFindings_flattens_a_tab_or_newline_in_the_detail(t *testing.T) {
 	assert.Contains(t, out.String(), "  a b c\n")
 }
 
-// Test_RenderFindings_flattens_a_tab_or_newline_in_the_group_name pins the
-// same stance for the group header's own Name, symmetric with Detail above:
-// RenderStatusText already flattens a feature row's Name the same way.
+// Symmetric with Detail above, for the group header's own Name.
 func Test_RenderFindings_flattens_a_tab_or_newline_in_the_group_name(t *testing.T) {
 	groups := []assemble.FeatureFindings{
 		{
@@ -420,9 +369,8 @@ func Test_RenderFindings_flattens_a_tab_or_newline_in_the_group_name(t *testing.
 	assert.Contains(t, out.String(), "de mo x  (in flight)\n")
 }
 
-// Test_RenderFindings_writes_nothing_for_an_empty_slice is the SCENARIO-10
-// shape's render-side half: a conforming tree's Check result renders as
-// zero bytes, never a header or a "no findings" banner.
+// A conforming tree's Check result renders as zero bytes, never a header
+// or a "no findings" banner.
 func Test_RenderFindings_writes_nothing_for_an_empty_slice(t *testing.T) {
 	var out bytes.Buffer
 	require.NoError(t, assemble.RenderFindings(&out, nil))

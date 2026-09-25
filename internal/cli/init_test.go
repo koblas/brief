@@ -1,14 +1,7 @@
-// OS-subject: Test_init_refuses_an_unwritable_target_and_prints_the_manual_output's
-// two cases chmod a real directory unwritable, or shape a real ENOTDIR
-// from an ancestor segment that is a regular file — internal/doctor's own
-// doc.go notes the same ENOTDIR-vs-fstest.MapFS divergence for an
-// identical reason (fstest.MapFS reports plain fs.ErrNotExist for that
-// shape instead). The two partial-write cases stay here too, kept
-// conservatively alongside R10's own fixtures rather than verified against
-// rwfs.Mem's own directory-collision error shape, which this pass did not
-// check. Every other init scenario in this package moved to
-// init_internal_test.go (rwfs.Mem) or init_bound_agent_internal_test.go (a
-// real bound agent file, OS-subject for a different reason).
+// OS-subject: cases here chmod a real directory unwritable or shape a real
+// ENOTDIR from an ancestor segment that is a regular file, neither
+// reproducible against rwfs.Mem. Every other init scenario moved to
+// init_internal_test.go or init_bound_agent_internal_test.go.
 
 package cli_test
 
@@ -24,11 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_init_refuses_an_unwritable_target_and_prints_the_manual_output pins
-// R10 at the CLI boundary: the exact stderr refusal line, stdout
-// byte-equal to a --print run captured on the same tree beforehand, exit
-// 1, and a byte-identical tree; the chmod case is skipped under root. The
-// portable fixture uses an explicit --host claude-code — a bare "init"
+// The portable fixture uses an explicit --host claude-code: a bare "init"
 // would also trip host detection on the same ".claude/skills" path.
 func Test_init_refuses_an_unwritable_target_and_prints_the_manual_output(t *testing.T) {
 	t.Run("a regular file blocks a plugin directory ancestor", func(t *testing.T) {
@@ -82,12 +71,9 @@ func Test_init_refuses_an_unwritable_target_and_prints_the_manual_output(t *test
 	})
 }
 
-// Test_init_partial_write_prints_the_rows_that_landed pins the partial-write
-// case (setup.ErrPartialWrite): apply's own write order lands the feature
-// root before the config write — a directory at ".brief.yaml" — fails, so
-// text mode prints the feature root's own "created" row on stdout, the same
-// row a successful run would, before the refusal line on stderr; the config
-// row, which never landed, is never printed.
+// apply's write order lands the feature root before the config write fails,
+// so text mode prints the feature root's "created" row; the config row,
+// which never landed, is never printed.
 func Test_init_partial_write_prints_the_rows_that_landed(t *testing.T) {
 	wd := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(wd, ".brief.yaml"), 0o755))
@@ -105,12 +91,8 @@ func Test_init_partial_write_prints_the_rows_that_landed(t *testing.T) {
 	assert.True(t, info.IsDir())
 }
 
-// Test_init_partial_write_with_json is
-// Test_init_partial_write_prints_the_rows_that_landed's own --json sibling:
-// the same partial write reports the standard error document — files_changed
-// true, since the feature root did land, and no "artifacts" field, the same
-// contract a partial write's text mode observes by printing landed rows
-// instead.
+// --json sibling of the test above: files_changed true, since the feature
+// root did land, and no "artifacts" field.
 func Test_init_partial_write_with_json(t *testing.T) {
 	wd := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(wd, ".brief.yaml"), 0o755))

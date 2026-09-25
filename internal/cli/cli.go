@@ -246,9 +246,9 @@ const commandNounAnnotation = "commandNoun"
 // writesFilesAnnotation is the cobra.Command.Annotations key marking a
 // command whose successful run can modify the tree — "new", "new
 // feature", "new step", "finish" and "init" — so filesChangedFor knows
-// R3's files_changed is false (not null) on a usage error or a refusal
-// that changed nothing for one of these, true when at least one write
-// landed before the failure, and null for every other command.
+// files_changed is false (not null) on a usage error or a refusal that
+// changed nothing for one of these, true when at least one write landed
+// before the failure, and null for every other command.
 const writesFilesAnnotation = "writesFiles"
 
 // jsonFlagUsage is every JSON-capable command's own --json flag's usage
@@ -259,10 +259,9 @@ const jsonFlagUsage = "print one JSON document on stdout"
 
 // addJSONFlag registers --json, with jsonFlagUsage's ruled wording, on fs
 // — the one call every JSON-capable leaf's addFlags makes, so the flag
-// renders identically in every Flags table and every help-index entry
-// (S13 reads flags from pflag). leafCommand itself does not call this:
-// completion is built through it, and R11 forbids advertising --json
-// there.
+// renders identically in every Flags table and every help-index entry.
+// leafCommand itself does not call this: completion is built through it,
+// and never advertises --json.
 func addJSONFlag(fs *pflag.FlagSet) {
 	fs.Bool("json", false, jsonFlagUsage)
 }
@@ -365,10 +364,10 @@ const printFlagUsage = "print each pending file to stdout instead of\nwriting it
 
 // noHookFlagUsage is init's --no-hook flag's usage string. Unlike
 // --with-agents, --no-hook is never refused under --host none — with no
-// plugin to omit a hook from, it is a documented no-op there, since
-// InitRequest.Host == "" may still resolve to claude-code (R8's own
-// detection), and a fixed value the caller cannot predict in advance is a
-// poor thing to make a usage error turn on.
+// plugin to omit a hook from, it is a documented no-op there, since an
+// empty InitRequest.Host may still resolve to claude-code by detection,
+// and a value the caller cannot predict in advance is a poor thing to
+// make a usage error turn on.
 const noHookFlagUsage = "install the plugin without its PostToolUse hook\n(no effect with --host none)"
 
 // withAgentsFlagUsage is init's --with-agents flag's usage string. Its
@@ -379,15 +378,12 @@ const noHookFlagUsage = "install the plugin without its PostToolUse hook\n(no ef
 // scraper.
 const withAgentsFlagUsage = "install the three role agents (the resolved\nhost must be claude-code)"
 
-// editAgentsFlagUsage is init's --edit-agents flag's usage string (Surface
-// & Copy's own words, verbatim). Its value is double-quoted, never
-// backticked — pflag turns a backticked word into a placeholder, which
-// "skills:" and "brief-workflow" must never become. Wrapped across three
-// lines rather than Surface & Copy's own two — like every other multi-line
-// flag usage in this file, the embedded newlines are pflag's own wrapping
-// cue (see handoffFlagUsage), not part of the ruled copy itself; two lines
-// alone pushes the second past the 80-column budget once pflag indents it
-// under "--edit-agents"'s own column.
+// editAgentsFlagUsage is init's --edit-agents flag's usage string. Its
+// value is double-quoted, never backticked — pflag turns a backticked
+// word into a placeholder, which "skills:" and "brief-workflow" must
+// never become. Wrapped across three lines: two alone pushes the second
+// past the 80-column budget once pflag indents it under
+// "--edit-agents"'s own column.
 const editAgentsFlagUsage = "add \"brief-workflow\" to the \"skills:\" list of the planner\n" +
 	"and implementer agents bound in .brief.yaml\n(repository files only)"
 
@@ -469,8 +465,7 @@ func resolveRunSeams(seams []runSeam) runSeams {
 // never calls os.Getwd. stdin backs "-" arguments on commands that read one
 // (finish's --handoff/--state) and check --hook's own payload read;
 // commands that read neither never read it. Run delegates to run, passing
-// debug.ReadBuildInfo as the source
-// "--version" reads.
+// debug.ReadBuildInfo as the source "--version" reads.
 func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	return run(ctx, wd, args, stdin, stdout, stderr, debug.ReadBuildInfo)
 }
@@ -490,16 +485,16 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 // every existing call site compiles unchanged, since a trailing variadic
 // is optional.
 //
-// R5's --json detection runs here, ahead of cobra entirely: scanJSONFlag
-// scans args for an exact "--json" token before the first "--", strips
-// every one it finds, and reports whether a "--json=<v>" token was seen.
-// The stripped args are all cobra, and every command below it, ever sees
-// — "--json" never reaches pflag, so a leaf that also registers it (only
+// --json detection runs here, ahead of cobra entirely: scanJSONFlag scans
+// args for an exact "--json" token before the first "--", strips every
+// one it finds, and reports whether a "--json=<v>" token was seen. The
+// stripped args are all cobra, and every command below it, ever sees —
+// "--json" never reaches pflag, so a leaf that also registers it (only
 // "start" does, for its help table) never has to read its value. A
-// "--json=<v>" token is always a text usage error (R5), reported here
-// before ExecuteContext ever runs so it wins over every other usage error
-// on the line; root.InitDefaultHelpCmd registers the help stub as a real
-// child so root.Find can resolve "help" the same way ExecuteContext's own
+// "--json=<v>" token is always a text usage error, reported here before
+// ExecuteContext ever runs so it wins over every other usage error on the
+// line; root.InitDefaultHelpCmd registers the help stub as a real child
+// so root.Find can resolve "help" the same way ExecuteContext's own
 // dispatch would.
 func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool), seams ...runSeam) error {
 	strippedArgs, jsonMode, hasJSONValue := scanJSONFlag(args)
@@ -924,11 +919,11 @@ func leafCommand(use, short, invocation, help string, addFlags func(*pflag.FlagS
 // trailing argument is even looked at: "--version=x extra" reports the
 // value error, not the trailing-argument one.
 //
-// A sole "--version" under out.json (R5's stripping already puts
-// "--version" and "--json" in either order into this same len(args)==1
-// arm) writes versionDocument instead of versionLine's text line before
-// returning; the value and trailing-argument arms above stay text-only
-// errors in both modes (out.usageError renders those itself).
+// A sole "--version" under out.json (scanJSONFlag's stripping already
+// puts "--version" and "--json" in either order into this same
+// len(args)==1 arm) writes versionDocument instead of versionLine's text
+// line before returning; the value and trailing-argument arms above stay
+// text-only errors in both modes (out.usageError renders those itself).
 func runRoot(cmd *cobra.Command, args []string, out reporter, readBuildInfo func() (*debug.BuildInfo, bool)) error {
 	if len(args) == 0 {
 		return out.usageError("brief: no command given; expected one of: " + expectedCommandList(cmd))

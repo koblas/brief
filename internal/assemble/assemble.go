@@ -26,12 +26,9 @@ type Server struct {
 	rootFS rwfs.FS
 
 	// openRoot opens name as a subdirectory of parent, on the production
-	// (os.Root-backed) path only — a WithFS-backed dirFS never reads this
-	// field. It defaults to (*os.Root).OpenRoot; a test overrides it,
-	// through export_test.go, to inject a directory-open failure that does
-	// not depend on OS permission bits or effective uid. osRoot.OpenRoot
-	// (fs.go) reads this field at every depth, so it applies to Start's own
-	// per-feature open as well as Check's and Status's.
+	// (os.Root-backed) path only. Defaults to (*os.Root).OpenRoot; a test
+	// overrides it (export_test.go) to inject an open failure that does not
+	// depend on OS permission bits or effective uid.
 	openRoot func(parent *os.Root, name string) (*os.Root, error)
 }
 
@@ -53,13 +50,10 @@ func NewServer(cfg config.Config, root string, opts ...Option) *Server {
 	return s
 }
 
-// FeatureFS pairs one feature's own filesystem — rooted so its top-level
-// entries are the feature's own files, never a parent directory — with the
-// absolute OS directory it is rooted at. Path is the prefix every
-// RefusalError, Finding, Problem and Shortfall path StartFS, CheckFS and
-// StatusFS produce is joined onto, so a caller can always reach the same
-// file directly, whether FS is backed by an *os.Root (Start, Check, Status)
-// or an in-memory fstest.MapFS (a test).
+// FeatureFS pairs one feature's own filesystem, rooted so its top-level
+// entries are the feature's own files, with the absolute OS directory it
+// is rooted at. Path is the prefix every RefusalError, Finding, Problem
+// and Shortfall path is joined onto.
 type FeatureFS struct {
 	FS   fs.FS
 	Path string
@@ -76,42 +70,16 @@ type stepEntry struct {
 // Start reads feature's directory and returns everything an implementer
 // needs to begin its next open step: the next open step's id, title,
 // acceptance criteria and checklist, the done/open counts across every
-// step file, and every section of the feature's state file. "Next" is the
-// lowest-numbered step file whose frontmatter status is not "done";
-// depends-on is parsed but ignored for ordering. Start returns
-// ErrNoSuchFeature when feature has no directory. It returns a
-// *RefusalError, wrapping ErrMalformedFeature, when the feature's
-// specification is missing, unreadable, carries an unclosed fenced code
-// block, or has no configured progress heading; when its state file is
-// missing, unreadable or carries an unclosed fence; or when the briefed
-// step's frontmatter carries no "id:" or its checklist heading is absent.
-// A step file whose frontmatter is absent or does not parse also returns a
-// *RefusalError, wrapping whatever sentinel readSteps produced. Checks run
-// in that order — specification, then state file, then step files, then
-// the briefed step — and the first failure wins, so Start never returns a
-// Brief that silently omits inherited context or a malformed next step.
-// An absent acceptance heading in the briefed step, or an absent heading
-// in the state file, does not refuse: it is appended to Brief.Shortfalls
-// instead, one entry per absent heading, acceptance first then the state
-// headings in cfg.StateHeadings.Ordered() order. Start reads only; it
-// writes nothing to disk.
-//
-// feature is checked by validFeatureArgument before either directory ever
-// opens — the same well-formedness check Check applies to a named feature,
-// guarded there by its own `feature != ""` since Check's empty argument
-// means "every feature", not a feature named "" — so a traversal attempt
-// ("../x"), a path-separator name, or an empty string refuses as
-// ErrNoSuchFeature without depending on os.Root.OpenRoot's own error shape
-// for the two to be distinguishable. This is not the guard that catches a
-// genuinely absent feature — Check's is its checkNamedFeature Lstat,
-// Start's is the errors.Is(err, fs.ErrNotExist) check on either OpenRoot
-// call below. Once past validFeatureArgument, only a genuinely absent
-// directory (errors.Is(err, fs.ErrNotExist), on either the configured
-// feature root or feature's own subdirectory) is ErrNoSuchFeature; any
-// other open failure — permission denied, or a regular file where a
-// directory belongs — is a generic wrapped error instead, never
-// misreported as "no such feature".
+// step file, and every section of the feature's state file. Start returns
+// ErrNoSuchFeature when feature has no directory, and a *RefusalError
+// wrapping ErrMalformedFeature when the feature's structure is malformed
+// (see the package doc). An absent acceptance heading in the briefed step,
+// or an absent state-file heading, does not refuse: it is appended to
+// Brief.Shortfalls instead. Start reads only; it writes nothing to disk.
 func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
+	// feature is validated before either directory opens, so a traversal
+	// attempt ("../x"), a path-separator name, or an empty string refuses
+	// as ErrNoSuchFeature without depending on OpenRoot's own error shape.
 	if !validFeatureArgument(feature) {
 		return Brief{}, ErrNoSuchFeature
 	}
@@ -143,14 +111,9 @@ func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 }
 
 // StartFS is Start's core: fsys is one feature's own filesystem, already
-// opened and confined — Start builds fsys.FS from an *os.Root nested inside
-// the configured feature directory, so a step file symlinked outside it is
-// never reachable — and fsys.Path is the absolute OS directory Start opened,
-// the prefix every RefusalError and Shortfall path StartFS produces is
-// joined onto. Start is StartFS preceded by validFeatureArgument and the
-// os.Root containment chain that turns an absent feature into
-// ErrNoSuchFeature; StartFS itself assumes fsys already names a real,
-// contained feature directory and never returns that sentinel.
+// opened and confined, so a step file symlinked outside it is never
+// reachable. Unlike Start, it assumes fsys already names a real, contained
+// feature directory and never returns ErrNoSuchFeature.
 func (s *Server) StartFS(fsys FeatureFS) (Brief, error) {
 	if err := s.checkSpecification(fsys); err != nil {
 		return Brief{}, err
@@ -242,14 +205,9 @@ func (s *Server) StartFS(fsys FeatureFS) (Brief, error) {
 	return brief, nil
 }
 
-// checkSpecification reads feature's specification through root and
-// refuses with a *RefusalError, wrapping ErrMalformedFeature, when it is
-// absent, unreadable, carries an unclosed fenced code block, or has no
-// line matching cfg.ProgressHeading — the model's rule (see doc.go) that a
-// feature's progress list lives in its specification, and that omission is
-// undetectable rather than nameable once a fence swallows it. Absent gets
-// its own imperative rather than reusing the unreadable case's "make it
-// readable": a file that does not exist cannot be made readable.
+// checkSpecification refuses with a *RefusalError wrapping
+// ErrMalformedFeature when feature's specification is absent, unreadable,
+// carries an unclosed fenced code block, or has no cfg.ProgressHeading section.
 func (s *Server) checkSpecification(fsys FeatureFS) error {
 	_, refusal := s.specFault(fsys)
 	if refusal != nil {
@@ -259,13 +217,9 @@ func (s *Server) checkSpecification(fsys FeatureFS) error {
 	return nil
 }
 
-// specFault is checkSpecification's classifier: it reads feature's
-// specification through fsys.FS and returns the Rule and *RefusalError for
-// the first of absent, unreadable, an unclosed fenced code block, or a
-// missing cfg.ProgressHeading section it finds — checkSpecification wraps
-// its *RefusalError unchanged as its own return, and Check's
-// checkSpecFindings reuses the Rule to stamp the Finding it renders from
-// the same refusal. It returns ("", nil) when the specification conforms.
+// specFault is checkSpecification's classifier, also reused by Check to
+// stamp its own Finding with the same Rule. It returns ("", nil) when the
+// specification conforms.
 func (s *Server) specFault(fsys FeatureFS) (Rule, *RefusalError) {
 	specPath := filepath.Join(fsys.Path, s.cfg.SpecificationFile)
 
@@ -305,15 +259,10 @@ func (s *Server) specFault(fsys FeatureFS) (Rule, *RefusalError) {
 	return "", nil
 }
 
-// readStateFile reads feature's state file through fsys.FS and refuses with
-// a *RefusalError, wrapping ErrMalformedFeature, when it is absent,
-// unreadable, or carries an unclosed fenced code block. stateSections
-// below finds each configured heading's section by scanning forward for a
-// terminator, the same way Section always has; an open fence makes that
-// scan run to end of file, so every heading after the fence opens sits
-// inside it and reads as absent — R10's "the worst this tool could
-// produce": a brief that looks complete while silently omitting every
-// inherited section. Refusing here means Start never returns that shape.
+// readStateFile reads feature's state file and refuses with a
+// *RefusalError wrapping ErrMalformedFeature when it is absent, unreadable,
+// or carries an unclosed fenced code block — an open fence would otherwise
+// make every heading after it read as silently absent.
 func (s *Server) readStateFile(fsys FeatureFS) ([]byte, error) {
 	statePath := filepath.Join(fsys.Path, s.cfg.StateFile)
 
@@ -335,9 +284,8 @@ func (s *Server) readStateFile(fsys FeatureFS) ([]byte, error) {
 	return stateBytes, nil
 }
 
-// readSteps reads and parses the frontmatter of every entry dirEntries
-// recognizes as a step file by pattern, returning them sorted by step
-// number — numeric order, never directory or lexicographic order.
+// readSteps parses the frontmatter of every entry dirEntries recognizes as
+// a step file, sorted by step number.
 func readSteps(fsys fs.FS, pattern stepfile.Pattern, dirEntries []os.DirEntry) ([]stepEntry, error) {
 	var steps []stepEntry
 
@@ -369,18 +317,16 @@ func readSteps(fsys fs.FS, pattern stepfile.Pattern, dirEntries []os.DirEntry) (
 	return steps, nil
 }
 
-// stepFromEntry extracts a Step's title, acceptance criteria and
-// checklist from e's parsed body — never the whole file, so a "#"
-// character inside a YAML frontmatter value is never read as a heading —
-// using cfg's configured headings.
+// stepFromEntry extracts a Step's title, acceptance criteria and checklist
+// from e's parsed body, using cfg's configured headings.
 func stepFromEntry(e stepEntry, cfg config.Config) *Step {
+	// e.rest, never the whole file: a "#" inside a YAML frontmatter value
+	// must never be read as a heading.
 	body := string(e.rest)
 
-	// ok is discarded deliberately: unlike Acceptance and Checklist, Step
-	// carries no Found flag for Title, so a step file with no "# " line
-	// renders as an empty title rather than a distinguishable "missing"
-	// state — every step file this package reads is expected to open with
-	// one, since stepSkeleton always writes it.
+	// ok discarded: Step carries no Found flag for Title, so a step file
+	// with no "# " line renders as an empty title, not a distinguishable
+	// "missing" state.
 	title, _ := markdown.Title(body)
 	acceptance, acceptanceFound := markdown.Section(body, cfg.AcceptanceHeading)
 	checklist, checklistFound := markdown.Section(body, cfg.ChecklistHeading)
@@ -394,8 +340,7 @@ func stepFromEntry(e stepEntry, cfg config.Config) *Step {
 }
 
 // stateSections returns one Section per cfg.StateHeadings entry, in
-// configured order, with each body extracted from body — empty when the
-// heading is not present in it.
+// configured order, each body extracted from body.
 func stateSections(body string, cfg config.Config) []Section {
 	headings := cfg.StateHeadings.Ordered()
 	sections := make([]Section, 0, len(headings))

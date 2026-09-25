@@ -16,12 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_uninstall_reports_a_remove_failure_without_partial_write pins the
-// single-artifact failure path: an unwritable parent directory makes
-// os.Remove fail, and because the config is the only artifact this release
-// plans, nothing was ever removed before that failure — so the returned
-// error does not wrap ErrPartialWrite, and the file survives. Skipped under
-// root, which ignores directory write permission.
 func Test_uninstall_reports_a_remove_failure_without_partial_write(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory write permission")
@@ -44,13 +38,6 @@ func Test_uninstall_reports_a_remove_failure_without_partial_write(t *testing.T)
 	assert.NoError(t, statErr)
 }
 
-// Test_uninstall_reports_the_populated_result_on_a_partial_write pins the
-// multi-artifact failure path: the CLAUDE.md block (removedAny's own first
-// write) is removed before the agents directory — made unwritable — blocks
-// the next removal, so the returned error wraps ErrPartialWrite and the
-// returned Result is populated, not the zero value: it still names the
-// CLAUDE.md removal that actually landed. Skipped under root, which
-// ignores directory write permission.
 func Test_uninstall_reports_the_populated_result_on_a_partial_write(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory write permission")

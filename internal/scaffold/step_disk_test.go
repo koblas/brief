@@ -12,17 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_reports_a_specification_write_that_cannot_be_committed_on_new_step
-// covers NewStep's own specification write, which shares replaceString
-// with Finish: a directory planted at the specification's own temp
-// sibling blocks atomicfile's rename outright, the same real-filesystem
-// mechanism Finish's own three blocked writes exercise in
-// finish_disk_test.go — rwfs.Mem's WriteFile is a single in-memory
-// assignment with no temp file or rename to block, so this case has no
-// Mem equivalent. The step file is written before the specification
-// (scaffold.go's NewStep doc), so the failure this induces is expected to
-// leave an orphan step file behind — visible and repairable — rather than
-// losing it.
+// A directory planted at the specification's own temp sibling blocks
+// atomicfile's rename, a real-filesystem mechanism rwfs.Mem has no
+// equivalent for. The step file is written first, so the failure this
+// induces is expected to leave an orphan step file behind.
 func Test_reports_a_specification_write_that_cannot_be_committed_on_new_step(t *testing.T) {
 	root := t.TempDir()
 	cfg := fixtureConfig()
@@ -43,11 +36,6 @@ func Test_reports_a_specification_write_that_cannot_be_committed_on_new_step(t *
 		"the step file lands before the specification write, so it must survive the specification write's failure")
 }
 
-// Test_refuses_an_unknown_feature pins openFeatureDir's own
-// ErrNoSuchFeature for NewStep, the same way
-// Test_refuses_an_unknown_feature_on_finish does for Finish: "widgets" has
-// no directory at all, decided entirely by the entry point's open chain
-// before NewStepFS is ever reached.
 func Test_refuses_an_unknown_feature(t *testing.T) {
 	root := t.TempDir()
 	cfg := fixtureConfig()
@@ -70,9 +58,6 @@ func Test_refuses_a_feature_name_that_escapes_the_feature_root(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(root, "escaped"))
 }
 
-// Test_refuses_an_empty_feature_argument pins that an empty feature
-// argument is refused the same way a traversal attempt is —
-// validFeatureArgument rejects it before openFeatureDir's first open.
 func Test_refuses_an_empty_feature_argument(t *testing.T) {
 	root := t.TempDir()
 	cfg := fixtureConfig()
@@ -84,12 +69,9 @@ func Test_refuses_an_empty_feature_argument(t *testing.T) {
 	require.ErrorIs(t, err, scaffold.ErrNoSuchFeature)
 }
 
-// Test_refuses_an_invalid_step_file_pattern_and_writes_nothing stays on
-// disk: stepfile.Compile runs inside the NewStep entry point itself,
-// before openFeatureDir or any filesystem call, the same way
-// validateFeatureName does for NewFeature — there is no FS-taking core to
-// redirect this onto rwfs.Mem for, only the real entry point, and its own
-// "writes nothing" claim is a claim about the real feature directory.
+// Stays on disk: stepfile.Compile runs inside the NewStep entry point
+// itself, before any filesystem call, so its "writes nothing" claim is a
+// claim about the real feature directory.
 func Test_refuses_an_invalid_step_file_pattern_and_writes_nothing(t *testing.T) {
 	root := t.TempDir()
 	cfg := fixtureConfig()

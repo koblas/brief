@@ -9,10 +9,7 @@ import (
 )
 
 // newDoctorJSONFixture writes a valid ".brief.yaml", its default feature
-// root and a ".git" directory under wd — a repository doctor reports
-// clean of every ERROR: config-file through root-dir and env-git are all
-// OK, leaving only env-path's own severity (OK or WARN, never ERROR
-// without a seam to control it) undetermined by this fixture.
+// root and a ".git" directory under wd — a repository doctor reports clean.
 func newDoctorJSONFixture(t *testing.T) string {
 	t.Helper()
 

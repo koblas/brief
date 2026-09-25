@@ -12,24 +12,20 @@ import (
 )
 
 // NextStep names the lowest-numbered not-done step a FeatureStatus row
-// reports: ID is pattern.ID(n) — the same token scaffold.findStepFile
-// resolves for "brief finish" — Title is markdown.Title of the step body
-// after frontmatter (empty when the step file has no "# " heading), and
-// Path is the step file's own absolute path.
+// reports: ID is pattern.ID(n), Title is the step body's heading after
+// frontmatter (empty when there is none), and Path is the step file's
+// absolute path.
 type NextStep struct {
 	ID    string
 	Title string
 	Path  string
 }
 
-// FeatureStatus is one feature's status line: its directory name, its own
-// absolute directory path, how many of its step files are done, how many
-// it has in total, the lowest-numbered not-done step (nil when there is
-// none), how many not-done steps are blocked on an unfinished dependency,
-// and Problem, non-nil when the feature could not be read at all. When
-// Problem is set, Done, Total, Next and Blocked stay at their zero values —
-// a partial count would look measured and was not; Path is still set, so a
-// caller can still name the feature's own directory.
+// FeatureStatus is one feature's status line: its name, its directory
+// path, its done/total step counts, its lowest-numbered not-done step
+// (nil when there is none), how many not-done steps are blocked on an
+// unfinished dependency, and Problem, non-nil when the feature could not
+// be read at all — in which case the counts stay zero rather than partial.
 type FeatureStatus struct {
 	Name    string
 	Path    string
@@ -49,27 +45,13 @@ func (row FeatureStatus) Complete() bool {
 }
 
 // Status returns one FeatureStatus per feature directory under the
-// configured feature directory, in fs.ReadDir's documented byte order of
-// the directory names — io/fs.ReadDir and the fs.ReadDirFS interface it
-// delegates to both document "sorted by filename", and os.Root.FS is
-// documented to implement fs.ReadDirFS, so that order is relied on rather
-// than re-established with a sort. Next is the lowest-numbered step file
-// whose frontmatter status is not "done", printed as pattern.ID(n) rather
-// than the frontmatter's own id — the same token scaffold.findStepFile
-// resolves for "brief finish" — and, like Start, ignores depends-on for
-// ordering. Blocked counts a not-done step as blocked when it declares at
-// least one depends-on id that does not name a done step's pattern.ID(n):
-// direct dependencies only, and an id naming no step file blocks. A
-// missing feature root is zero features, not an error: Status returns
-// (nil, nil). An unreadable top-level feature root, and an invalid
-// configured step-file pattern, still propagate an error. A feature
-// directory that cannot be opened or listed, or a step file inside it that
-// cannot be read or whose frontmatter does not parse, is degraded into
-// that row's Problem instead — one malformed feature never blinds Status
-// to the rest. A symlink entry in the feature root is marked the same way
-// without being followed, because Status never reads through it; a
-// regular file entry is skipped with no row at all — the feature directory
-// legitimately holds a README.md or a .DS_Store beside real features.
+// configured feature directory, in fs.ReadDir's byte order. Next is the
+// lowest-numbered not-done step; Blocked counts a not-done step whose
+// depends-on names no done step, direct dependencies only. A missing
+// feature root is zero features, not an error. A feature directory or
+// step file that cannot be read or parsed is degraded into that row's
+// Problem instead, so one malformed feature never blinds Status to the
+// rest.
 func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 	topRoot, err := s.openFeatureDir(filepath.Join(s.root, s.cfg.FeatureDirectory))
 	if err != nil {
@@ -123,11 +105,8 @@ func (s *Server) Status(_ context.Context) ([]FeatureStatus, error) {
 	return rows, nil
 }
 
-// statusRow opens one feature directory, name, under topRoot as its own
-// os.Root — a permission failure here is degraded into the row's Problem
-// rather than propagated, the adapter-level counterpart to StatusFS's own
-// degrade-not-propagate stance on every fault reachable once the directory
-// is open — and delegates to StatusFS.
+// statusRow opens feature directory name under topRoot and delegates to
+// StatusFS; an open failure here is degraded into the row's Problem too.
 func (s *Server) statusRow(topRoot dirFS, pattern stepfile.Pattern, name, displayPath string) FeatureStatus {
 	root, err := topRoot.OpenRoot(name)
 	if err != nil {
@@ -138,21 +117,13 @@ func (s *Server) statusRow(topRoot dirFS, pattern stepfile.Pattern, name, displa
 	return s.StatusFS(FeatureFS{FS: root.FS(), Path: displayPath}, pattern)
 }
 
-// StatusFS is Status's core for one feature: fsys is that feature's own
-// filesystem, already opened and confined the same way StartFS's fsys is,
-// and pattern is the step-file pattern Status compiles once for every
-// feature it walks. A failure listing fsys, reading or parsing one of its
-// step files, or either of the two faults assemble.Start itself refuses a
-// feature over — an unreadable or heading-less specification (specFault),
-// or a missing or unreadable state file (readStateFile) — is degraded into
-// the returned row's Problem rather than propagated: the first such failure
-// wins, checked in that order (listing, then specification, then state,
-// then step files — the same spec-then-state order Check applies), and the
-// row's counts stay at their zero values. A row's Problem is therefore a
-// subset of what would make Start refuse, not the whole set: Start also
-// refuses on the briefed step's own missing "id:" or absent checklist
-// heading, which StatusFS never reads far enough to see. Name is
-// filepath.Base(fsys.Path).
+// StatusFS is Status's core for one feature. A failure listing fsys,
+// reading its specification or state file, or reading/parsing a step file
+// is degraded into the returned row's Problem rather than propagated —
+// checked in that order, first failure wins — leaving the row's counts at
+// zero. This is a subset of what makes Start refuse: Start also refuses on
+// the briefed step's own missing "id:" or absent checklist heading, which
+// StatusFS never reads far enough to see.
 func (s *Server) StatusFS(fsys FeatureFS, pattern stepfile.Pattern) FeatureStatus {
 	name := filepath.Base(fsys.Path)
 
@@ -212,16 +183,15 @@ func (s *Server) StatusFS(fsys FeatureFS, pattern stepfile.Pattern) FeatureStatu
 	return row
 }
 
-// stateFaultProblem renders err — readStateFile's own error, always a
-// *RefusalError by that function's contract — as the Problem StatusFS
-// reports for a missing, unreadable or fence-broken state file. The type
-// assertion falls back to newProblem for any other error shape rather than
-// panicking, so a future readStateFile change that stops honoring its own
-// contract degrades into an ordinary Problem instead of crashing Status.
+// stateFaultProblem renders err, readStateFile's own error, as the Problem
+// StatusFS reports for a missing, unreadable or fence-broken state file.
 func stateFaultProblem(displayPath string, err error) Problem {
 	if refusal, ok := errors.AsType[*RefusalError](err); ok {
 		return refusal.Problem
 	}
 
+	// Falls back to newProblem for any other error shape rather than
+	// panicking, so an errant caller degrades into a Problem instead of
+	// crashing Status.
 	return *newProblem(displayPath, err, false)
 }

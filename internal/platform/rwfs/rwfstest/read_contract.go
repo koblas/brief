@@ -9,29 +9,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// DirOpener is the minimal directory-descending read shape a production
-// adapter built directly over *os.Root (rather than rwfs.OS itself) tends
-// to mirror — internal/assemble's own dirFS is the motivating case: FS
-// returns the directory's own read view, Lstat inspects one entry without
-// following a symlink, and OpenRoot descends into a named entry as a fresh
-// DirOpener sharing the same underlying store. ReadOpenRootContract
-// exercises exactly this shape; an adapter whose own OpenRoot returns its
-// own named interface type rather than rwfstest.DirOpener needs a small
-// local wrapper translating one into the other (Go's interface
-// satisfaction does not consider two distinct named interface types with
-// an identical method set interchangeable in a return position) — see
-// internal/assemble's own read_contract_internal_test.go.
+// DirOpener is the minimal directory-descending read shape ReadOpenRootContract
+// exercises. An adapter whose OpenRoot returns a different named interface
+// type needs a small local wrapper to satisfy this one; see
+// internal/assemble's read_contract_internal_test.go.
 type DirOpener interface {
 	FS() fs.FS
 	Lstat(name string) (fs.FileInfo, error)
 	OpenRoot(name string) (DirOpener, error)
 }
 
-// ReadContract exercises the read side of rwfs.FS's own contract — Open,
-// ReadFile, ReadDir, Stat, Lstat, ReadLink, and the through-a-file-ancestor
-// error case — against a freshly seeded fs.FS from mk. It is Contract's
-// read-only twin, for an adapter that only ever reads, such as
-// internal/assemble's own osRoot/memDirFS via their own FS() method.
+// ReadContract exercises the read side of rwfs.FS's contract against a
+// freshly seeded fs.FS from mk. It is Contract's read-only twin, for an
+// adapter that only ever reads.
 func ReadContract(t *testing.T, mk func(t *testing.T) fs.FS, opts ...Option) {
 	t.Helper()
 
@@ -76,10 +66,8 @@ func ReadContract(t *testing.T, mk func(t *testing.T) fs.FS, opts ...Option) {
 }
 
 // ReadOpenRootContract exercises OpenRoot's read-side contract against a
-// fresh DirOpener from mk: descending into an existing subdirectory and
-// reading through it, and the missing-name and file-in-place error cases —
-// the read-only subset of what Contract's own testContractOpenRoot proves
-// against a full rwfs.FS, restricted to the DirOpener shape.
+// fresh DirOpener from mk: descending into an existing subdirectory, and
+// the missing-name and file-in-place error cases.
 func ReadOpenRootContract(t *testing.T, mk func(t *testing.T) DirOpener, opts ...Option) {
 	t.Helper()
 

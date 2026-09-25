@@ -10,13 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_init_then_uninstall_leaves_the_tree_as_before_except_the_feature_root
-// pins R6's own asymmetry end to end: against a repository already
-// carrying unrelated files (a root README, a nested source file, a
-// ".claude/" file), Init then Uninstall (default, unedited config)
-// reproduces the exact pre-existing tree, plus exactly the empty feature
-// root directory Init created and Uninstall deliberately never removes —
-// asserted present, not merely tolerated if it happened to still be there.
 func Test_init_then_uninstall_leaves_the_tree_as_before_except_the_feature_root(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -51,14 +44,6 @@ func Test_init_then_uninstall_leaves_the_tree_as_before_except_the_feature_root(
 	assert.True(t, entry.isDir)
 }
 
-// Test_init_then_uninstall_for_claude_code_leaves_pre_existing_claude_files_byte_identical
-// pins R6 end to end for the plugin: against a repository already carrying
-// a host's own files at ".claude/settings.json" and
-// ".claude/skills/other/SKILL.md" (both above host.PluginDir, so brief
-// never touches them), Init then Uninstall for claude-code reproduces the
-// exact pre-existing tree plus the feature root Init created — the control
-// proving the snapshot actually changed after Init, so "unchanged after
-// round trip" is not vacuously true of a run that wrote nothing.
 func Test_init_then_uninstall_for_claude_code_leaves_pre_existing_claude_files_byte_identical(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -91,13 +76,6 @@ func Test_init_then_uninstall_for_claude_code_leaves_pre_existing_claude_files_b
 	assert.Equal(t, expected, after)
 }
 
-// Test_init_then_uninstall_leaves_claude_md_byte_identical pins R5's own
-// round trip across every append shape the byte rules distinguish, plus
-// the ".claude/CLAUDE.md" fallback and the "nothing there at all" case:
-// each asserts the tree actually changed after Init (so "restored after
-// round trip" is never vacuously true of a run that wrote nothing) before
-// asserting Uninstall restores it byte-identical — or, when nothing
-// preceded Init, absent again afterward.
 func Test_init_then_uninstall_leaves_claude_md_byte_identical(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -143,10 +121,8 @@ func Test_init_then_uninstall_leaves_claude_md_byte_identical(t *testing.T) {
 			maps.Copy(expected, before)
 			expected["docs"] = memTreeEntry{isDir: true}
 			expected[featureRootRel] = memTreeEntry{isDir: true}
-			// A claude-code Init always creates ".claude/skills/brief/..."; Uninstall
-			// prunes empty directories only down to and including host.PluginDir
-			// (R6 never removes ".claude/skills/" or ".claude/" themselves), so both
-			// survive, empty, regardless of what the CLAUDE.md fixture pre-created.
+			// Uninstall prunes empty directories down to host.PluginDir, so ".claude"
+			// and ".claude/skills" survive empty regardless of the fixture.
 			expected[".claude"] = memTreeEntry{isDir: true}
 			expected[filepath.Join(".claude", "skills")] = memTreeEntry{isDir: true}
 
@@ -155,15 +131,6 @@ func Test_init_then_uninstall_leaves_claude_md_byte_identical(t *testing.T) {
 	}
 }
 
-// Test_init_with_agents_then_uninstall_leaves_the_tree_as_before pins the
-// round trip end to end for --with-agents: against a repository with
-// nothing pre-existing, Init --with-agents then Uninstall reproduces the
-// exact pre-existing tree, plus exactly the empty feature root Init
-// created — the control (afterInit != before) proves this run actually
-// wrote something, and ".claude/skills/brief/" is gone entirely while
-// ".claude/skills/" and ".claude/" themselves — never brief's to remove —
-// survive empty, the same boundary a plain claude-code round trip already
-// pins.
 func Test_init_with_agents_then_uninstall_leaves_the_tree_as_before(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -196,11 +163,8 @@ func Test_init_with_agents_then_uninstall_leaves_the_tree_as_before(t *testing.T
 	assert.NotContains(t, after, filepath.Join(".claude", "skills", "brief"), "the plugin directory, agents/ included, must be fully removed")
 }
 
-// Test_init_then_uninstall_deletes_a_pre_existing_empty_CLAUDE_md pins the
-// accepted exception R6's own "brief created it" signal is exposed to: an
-// emptied CLAUDE.md is deleted on uninstall, and that rule cannot tell a
-// file brief emptied apart from one that started empty — so a pre-existing,
-// already-empty CLAUDE.md is deleted too, not restored as an empty file.
+// Uninstall cannot tell a CLAUDE.md brief emptied apart from one that
+// started empty, so a pre-existing empty file is deleted too.
 func Test_init_then_uninstall_deletes_a_pre_existing_empty_CLAUDE_md(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)

@@ -1,12 +1,6 @@
 // This file's remaining scenario is real-disk-only: a symlink entry in
-// the feature root must be detected without being followed, real
-// containment behavior rwfs.Mem does not model the same way (see
-// internal/platform/rwfs/doc.go). Every plain status scenario — content a
-// fixture controls, no symlink or permission behavior — runs against
-// rwfs.Mem in status_internal_test.go. The helpers below stay here rather
-// than moving with them: json_refusal_test.go and help_test.go still call
-// writeMalformedStatusFeature and newStatusJSONFixture
-// (status_json_test.go), which in turn call these.
+// the feature root must be detected without being followed. The helpers
+// below stay here since other test files still call them.
 
 package cli_test
 
@@ -23,11 +17,7 @@ import (
 )
 
 // writeConformingFeatureFiles writes a conforming specification and state
-// file under featureDir — the same two files assemble.Start's own read-side
-// checks require (MAJOR 1) — and creates featureDir if it does not already
-// exist. Content is fixed, so calling it more than once for the same
-// featureDir (writeStatusStep does, once per step) never disagrees with
-// itself.
+// file under featureDir, creating it if needed; safe to call more than once.
 func writeConformingFeatureFiles(t *testing.T, featureDir string) {
 	t.Helper()
 
@@ -36,22 +26,14 @@ func writeConformingFeatureFiles(t *testing.T, featureDir string) {
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(conformingState), 0o600))
 }
 
-// stepTitle is the heading writeStatusStep writes for id: deliberately
-// distinct from id itself, unlike an earlier fixture that wrote "# <id>" —
-// a NEXT-column assertion against that fixture proved only that the id was
-// echoed twice, never that the table's title column carries the step's own
-// markdown.Title.
+// stepTitle is the heading writeStatusStep writes for id, deliberately
+// distinct from id so a NEXT-column assertion can't pass on echo alone.
 func stepTitle(id string) string {
 	return "Implement " + id
 }
 
-// writeStatusStep writes one step file for feature under wd's default
-// feature-directory layout, with a heading distinct from its id (stepTitle),
-// after writing a conforming specification and state file for feature if
-// neither already exists — MAJOR 1: status must not report a clean row for
-// a feature "brief start" would itself refuse, so every status fixture
-// needs the two files Start's own read-side checks require, not just step
-// files.
+// writeStatusStep writes one step file for feature, after writing a
+// conforming specification and state file for it if neither exists yet.
 func writeStatusStep(t *testing.T, wd, feature, name, id, status string, dependsOn []string) {
 	t.Helper()
 
@@ -82,10 +64,7 @@ func writeStatusStep(t *testing.T, wd, feature, name, id, status string, depends
 }
 
 // writeMalformedStatusFeature writes a conforming specification and state
-// file, then one step file with no frontmatter at all, under feature's
-// default layout: the row's Problem must land on the step file's own
-// frontmatter fault, not on a spec/state fault this fixture does not mean
-// to exercise (MAJOR 1 checks spec and state ahead of step files).
+// file, then one step file with no frontmatter at all.
 func writeMalformedStatusFeature(t *testing.T, wd, feature string) {
 	t.Helper()
 
@@ -94,11 +73,6 @@ func writeMalformedStatusFeature(t *testing.T, wd, feature string) {
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-01.md"), []byte("no frontmatter here\n"), 0o600))
 }
 
-// Test_status_on_a_repository_whose_only_entry_is_a_symlink_prints_a_row_not_the_no_features_notice
-// is the symlink half of SCENARIO-10/11's own seam: a symlink entry in the
-// feature root must not be swallowed by the "no features" notice, and must
-// not be followed — real os.Root/os.Symlink containment behavior, kept on
-// disk.
 func Test_status_on_a_repository_whose_only_entry_is_a_symlink_prints_a_row_not_the_no_features_notice(t *testing.T) {
 	wd := t.TempDir()
 	realDir := filepath.Join(wd, "real-delta")

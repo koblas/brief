@@ -1,10 +1,5 @@
-// This file reaches the unexported run directly so doctor's own
-// environment seams (WithLookPath, WithExecutable, WithBinaryVersion) can
-// be pinned deterministically: under `go test`, os.Executable resolves to
-// the test binary and exec.LookPath("brief") depends on the runner's own
-// PATH, neither of which a black-box cli_test file can control. Every
-// other doctor behavior — usage errors, exit codes, JSON shape — is
-// exercised the same way other leaves' own internal test files are.
+// White-box: reaches the unexported run so doctor's environment seams
+// (WithLookPath, WithExecutable) can be pinned deterministically.
 
 package cli
 
@@ -27,9 +22,7 @@ import (
 )
 
 // newDoctorFixture builds a wd with a valid ".brief.yaml", its default
-// feature root ("docs/specifications"), and a ".git" directory, plus a
-// "self-brief" file used as both the PATH binary and the running
-// binary's own path — the baseline every test below starts from.
+// feature root, a ".git" directory, and a "self-brief" file.
 func newDoctorFixture(t *testing.T) (string, string) {
 	t.Helper()
 
@@ -43,11 +36,8 @@ func newDoctorFixture(t *testing.T) (string, string) {
 	return wd, self
 }
 
-// doctorFakeSeams returns the runSeam every test below passes to run,
-// pointing both the PATH lookup and the running binary at self — the same
-// file, so env-path reports OK deterministically — and WithHomeDir at a
-// fresh, empty directory, so the roles check never reads the developer's
-// own real "~/.claude/agents".
+// doctorFakeSeams points both the PATH lookup and the running binary at
+// self, and WithHomeDir at a fresh, empty directory.
 func doctorFakeSeams(t *testing.T, self string) []runSeam {
 	t.Helper()
 
@@ -60,9 +50,6 @@ func doctorFakeSeams(t *testing.T, self string) []runSeam {
 
 func noBuildInfo() (*debug.BuildInfo, bool) { return nil, false }
 
-// Test_doctor_prints_one_row_per_check_and_exits_0_in_a_healthy_repo pins
-// R13's row format ("<SEVERITY>  <id>  <path>  <detail>", two-space
-// joined, paths relative to wd) and the "setup ok" stderr summary.
 func Test_doctor_prints_one_row_per_check_and_exits_0_in_a_healthy_repo(t *testing.T) {
 	wd, self := newDoctorFixture(t)
 	var stdout, stderr bytes.Buffer
@@ -89,9 +76,6 @@ func Test_doctor_prints_one_row_per_check_and_exits_0_in_a_healthy_repo(t *testi
 	assert.Equal(t, "brief doctor: setup ok; run 'brief check' for feature content\n", stderr.String())
 }
 
-// Test_doctor_reports_a_missing_feature_root_as_an_error_and_exits_1 pins
-// R13's exit contract: a missing feature root is ERROR with a fix, the
-// stderr summary counts it, and brief doctor exits 1.
 func Test_doctor_reports_a_missing_feature_root_as_an_error_and_exits_1(t *testing.T) {
 	wd, self := newDoctorFixture(t)
 	require.NoError(t, os.RemoveAll(filepath.Join(wd, "docs", "specifications")))
@@ -105,11 +89,8 @@ func Test_doctor_reports_a_missing_feature_root_as_an_error_and_exits_1(t *testi
 	assert.Equal(t, "brief doctor: 1 ERROR, 0 WARN; this checks setup only, run 'brief check' for feature content\n", stderr.String())
 }
 
-// Test_doctor_reports_an_unparseable_config_as_rows_not_a_refusal pins
-// that an invalid ".brief.yaml" never routes through resolveRoot: it
-// still prints every row (config-parse ERROR, config-values SKIP) rather
-// than the single-line refusal every other command renders for the same
-// file.
+// An invalid ".brief.yaml" never routes through resolveRoot: it still
+// prints every row rather than the single-line refusal other commands give.
 func Test_doctor_reports_an_unparseable_config_as_rows_not_a_refusal(t *testing.T) {
 	wd, self := newDoctorFixture(t)
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("progress-heading: [not a scalar\n"), 0o600))
@@ -124,9 +105,8 @@ func Test_doctor_reports_an_unparseable_config_as_rows_not_a_refusal(t *testing.
 	assert.NotContains(t, stderr.String(), "no files changed", "an unparseable config must not render as a refusal")
 }
 
-// Test_doctor_reports_one_row_per_invalid_value_and_exits_1 pins that
-// every *config.ValueError becomes its own row (never collapsed to the
-// first, the way config.Resolve's own refusal is).
+// Every *config.ValueError becomes its own row, never collapsed to the
+// first the way config.Resolve's refusal is.
 func Test_doctor_reports_one_row_per_invalid_value_and_exits_1(t *testing.T) {
 	wd, self := newDoctorFixture(t)
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("handoff-cap-lines: 0\n"), 0o600))
@@ -139,9 +119,6 @@ func Test_doctor_reports_one_row_per_invalid_value_and_exits_1(t *testing.T) {
 	assert.Contains(t, stdout.String(), "ERROR  config-values  .brief.yaml  handoff-cap-lines is 0, must be at least 1; fix: correct the value, or delete the key to use its default\n")
 }
 
-// Test_doctor_json_reports_absolute_paths_null_fix_and_counts pins
-// doctor --json's own document shape: absolute paths, null path/fix where
-// none apply, and counts summing to len(checks).
 func Test_doctor_json_reports_absolute_paths_null_fix_and_counts(t *testing.T) {
 	wd, self := newDoctorFixture(t)
 	var stdout, stderr bytes.Buffer
@@ -187,9 +164,8 @@ func Test_doctor_json_reports_absolute_paths_null_fix_and_counts(t *testing.T) {
 	assert.Nil(t, configFile.Fix)
 }
 
-// Test_doctor_json_writes_zero_stderr_bytes pins R1/R6: --json is decided
-// before any text-mode line is written, even on a run that would
-// otherwise print WARN rows.
+// --json is decided before any text-mode line is written, even on a run
+// that would otherwise print WARN rows.
 func Test_doctor_json_writes_zero_stderr_bytes(t *testing.T) {
 	wd, self := newDoctorFixture(t)
 	require.NoError(t, os.Remove(filepath.Join(wd, ".brief.yaml")))
@@ -202,12 +178,8 @@ func Test_doctor_json_writes_zero_stderr_bytes(t *testing.T) {
 	assert.NotEmpty(t, stdout.String())
 }
 
-// newFullyInstalledDoctorFixture builds newDoctorFixture's own baseline
-// plus a complete Claude Code integration — every Plugin(true) file, the
-// three role agents, the brief-workflow skill, a role-bound ".brief.yaml"
-// and a root CLAUDE.md snippet for the default feature directory —
-// written from internal/platform/artifact renders directly, mirroring
-// internal/doctor's own fixture.
+// newFullyInstalledDoctorFixture builds newDoctorFixture's baseline plus
+// a complete Claude Code integration: plugin, agents, skill and snippet.
 func newFullyInstalledDoctorFixture(t *testing.T) (string, string) {
 	t.Helper()
 
@@ -233,9 +205,6 @@ func newFullyInstalledDoctorFixture(t *testing.T) (string, string) {
 	return wd, self
 }
 
-// Test_doctor_reports_every_row_ok_when_fully_installed pins that a
-// repository init already set up end to end reports the five host rows
-// and roles all OK, alongside the original seven.
 func Test_doctor_reports_every_row_ok_when_fully_installed(t *testing.T) {
 	wd, self := newFullyInstalledDoctorFixture(t)
 	var stdout, stderr bytes.Buffer
@@ -250,10 +219,8 @@ func Test_doctor_reports_every_row_ok_when_fully_installed(t *testing.T) {
 	assert.Equal(t, "brief doctor: setup ok; run 'brief check' for feature content\n", stderr.String())
 }
 
-// Test_doctor_reports_a_non_regular_host_skill_as_an_error_and_exits_1
-// pins host-skill's own ERROR arm at the CLI boundary: a SKILL.md replaced
-// by a directory is the one new ERROR row Rule 7 grants host-skill, and
-// exits 1.
+// A SKILL.md replaced by a directory is the one new ERROR row host-skill
+// grants, and exits 1.
 func Test_doctor_reports_a_non_regular_host_skill_as_an_error_and_exits_1(t *testing.T) {
 	wd, self := newFullyInstalledDoctorFixture(t)
 	skillPath := filepath.Join(wd, filepath.FromSlash(host.WorkflowSkillDir), "SKILL.md")
@@ -269,10 +236,7 @@ func Test_doctor_reports_a_non_regular_host_skill_as_an_error_and_exits_1(t *tes
 	assert.Equal(t, "brief doctor: 1 ERROR, 0 WARN; this checks setup only, run 'brief check' for feature content\n", stderr.String())
 }
 
-// Test_doctor_reports_roles_skill_ok_after_init_with_agents pins
-// roles-skill at the CLI boundary (S05): a repository set up end to end by
-// "brief init --host claude-code --with-agents" (planner/implementer bound
-// to brief's own rendered agents, which carry "skills: [brief-workflow]")
+// A repository set up by "brief init --host claude-code --with-agents"
 // reports the exact roles-skill row, and doctor still exits 0.
 func Test_doctor_reports_roles_skill_ok_after_init_with_agents(t *testing.T) {
 	wd := t.TempDir()
@@ -292,10 +256,8 @@ func Test_doctor_reports_roles_skill_ok_after_init_with_agents(t *testing.T) {
 	assert.Contains(t, stdout.String(), "OK  roles-skill  .brief.yaml  planner, implementer preload brief-workflow\n")
 }
 
-// Test_doctor_reports_env_path_error_when_not_on_path_and_the_plugin_is_installed
-// pins env-path's own ERROR arm reaching the CLI: brief missing from PATH
-// in a fully installed repository is exit 1, with the stderr summary
-// counting the one ERROR.
+// brief missing from PATH in a fully installed repository is exit 1, with
+// the stderr summary counting the one ERROR.
 func Test_doctor_reports_env_path_error_when_not_on_path_and_the_plugin_is_installed(t *testing.T) {
 	wd, _ := newFullyInstalledDoctorFixture(t)
 	var stdout, stderr bytes.Buffer
@@ -311,12 +273,8 @@ func Test_doctor_reports_env_path_error_when_not_on_path_and_the_plugin_is_insta
 	assert.Equal(t, "brief doctor: 1 ERROR, 0 WARN; this checks setup only, run 'brief check' for feature content\n", stderr.String())
 }
 
-// chmodUnreadableDir chmods dir to 0o000 and registers a t.Cleanup that
-// restores it to 0o755 before TempDir's own removal runs — an inaccessible
-// directory left at 0o000 (no execute/search bit) would otherwise make
-// RemoveAll unable to traverse into it. Skips under euid 0, where chmod's
-// permission bits have no effect and every Lstat underneath would silently
-// succeed.
+// chmodUnreadableDir chmods dir to 0o000 and restores it to 0o755 on
+// cleanup, before TempDir's own removal runs. Skips under euid 0.
 func chmodUnreadableDir(t *testing.T, dir string) {
 	t.Helper()
 
@@ -328,21 +286,8 @@ func chmodUnreadableDir(t *testing.T, dir string) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 }
 
-// Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable
-// pins fix pass 8's M2 fix at the CLI boundary: a ".claude" directory
-// doctor cannot even Lstat into (mode 0o000) must not silently flip
-// doctor's own exit code from 1 to 0. Repro: ".claude/CLAUDE.md" holds the
-// current brief block and brief is missing from PATH — with ".claude"
-// readable that is ERROR env-path, exit 1 (doctorLong's own "exits 1 when
-// any check is ERROR"); the same tree with ".claude" at 0o000 must keep
-// exiting 1, host-snippet must keep discriminating "not readable" from
-// "not installed" (never SKIP), and the ERROR count must not read zero —
-// a stat failure other than "not found" must never read as "nothing
-// installed" one layer up from host-snippet's own row. host-plugin's own
-// subject files, equally present-but-unreadable under the same ".claude",
-// turn ERROR too (fix pass 10), so this repro's non-zero ERROR count no
-// longer rests on env-path alone; host-hook stays WARN regardless, since
-// doctor cannot tell a lost hook file from --no-hook either way.
+// A ".claude" directory doctor cannot even Lstat into (mode 0o000) must
+// not silently flip doctor's exit code from 1 to 0.
 func Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable(t *testing.T) {
 	wd, _ := newDoctorFixture(t)
 	claudeDir := filepath.Join(wd, ".claude")
@@ -373,13 +318,8 @@ func Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreada
 	assert.NotContains(t, stderr.String(), "0 ERROR", "an unreadable .claude must not report zero ERROR rows")
 }
 
-// Test_doctor_reports_host_plugin_error_when_the_plugin_directory_is_unreadable
-// pins fix pass 10's restore: an unreadable host-plugin subject file must
-// surface as ERROR, not the WARN fix pass 9 gave it, since a Claude Code
-// install "brief doctor" cannot read is one it cannot load either — a
-// bare "brief doctor" run against it must exit non-zero, unlike env-path,
-// which stays OK throughout this test (brief is found on PATH). Control
-// arm: the identical, readable install exits 0.
+// An unreadable host-plugin subject file must surface as ERROR: a bare
+// "brief doctor" run against it exits non-zero. Control: readable exits 0.
 func Test_doctor_reports_host_plugin_error_when_the_plugin_directory_is_unreadable(t *testing.T) {
 	wd := t.TempDir()
 	var initStdout, initStderr bytes.Buffer
@@ -405,16 +345,8 @@ func Test_doctor_reports_host_plugin_error_when_the_plugin_directory_is_unreadab
 	assert.NotContains(t, stdout.String(), "ERROR  env-path")
 }
 
-// Test_doctor_reports_every_host_row_skip_when_dot_claude_is_a_regular_file
-// pins P1's ENOTDIR fix at the CLI boundary: a ".claude" that is a plain
-// file, not a directory, makes every Lstat through it fail with ENOTDIR —
-// classifyProbeError must read that as absent, the same as no ".claude" at
-// all, never as present-but-unreadable. Control arm: newDoctorFixture's
-// own bare baseline (no ".claude" whatsoever) reports the identical rows
-// and exit code, proving the file-in-the-way case is not distinguishable
-// from plain absence. Mutation-verified alongside the doctor-level ENOTDIR
-// cases (internal/doctor/host_test.go): the same classifyProbeError arm
-// backs every row asserted here.
+// A ".claude" that is a plain file makes every Lstat through it fail with
+// ENOTDIR; classifyProbeError must read that as absent, not unreadable.
 func Test_doctor_reports_every_host_row_skip_when_dot_claude_is_a_regular_file(t *testing.T) {
 	wd, _ := newDoctorFixture(t)
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".claude"), []byte("not a directory\n"), 0o600))
@@ -442,8 +374,6 @@ func Test_doctor_reports_every_host_row_skip_when_dot_claude_is_a_regular_file(t
 	assert.Equal(t, stdout.String(), controlOut.String(), "a '.claude' regular file must report identically to no '.claude' at all")
 }
 
-// Test_doctor_too_many_arguments_is_a_usage_error pins that "brief
-// doctor" takes no positional argument.
 func Test_doctor_too_many_arguments_is_a_usage_error(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
@@ -455,11 +385,8 @@ func Test_doctor_too_many_arguments_is_a_usage_error(t *testing.T) {
 	assert.Equal(t, "brief doctor: too many arguments; run 'brief doctor'\n", stderr.String())
 }
 
-// Test_doctor_refuses_a_working_directory_that_does_not_exist pins the one
-// refusal runDoctor emits on its production path (no withRootFS seam,
-// rootFS nil): locateInRepo's own nonexistent-startDir guard
-// (config.LocateInRepo's first check), checked ahead of Diagnose, the same
-// shape every other command's resolveRoot already refuses with.
+// The refusal runDoctor emits on its production path (no withRootFS
+// seam), checked ahead of Diagnose.
 func Test_doctor_refuses_a_working_directory_that_does_not_exist(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	var stdout, stderr bytes.Buffer
@@ -472,11 +399,8 @@ func Test_doctor_refuses_a_working_directory_that_does_not_exist(t *testing.T) {
 	assert.Contains(t, stderr.String(), missing)
 }
 
-// Test_doctor_refuses_a_working_directory_that_does_not_exist_on_a_seamed_fsys
-// pins the same refusal on runDoctor's withRootFS branch: locateInRepoFS's
-// own nonexistent-startDir guard, over an rwfs.Mem holding nothing at all —
-// never t.TempDir(), since the check fails before Diagnose (or anything
-// else) ever reads through the fsys.
+// Same refusal on runDoctor's withRootFS branch, over an rwfs.Mem holding
+// nothing at all.
 func Test_doctor_refuses_a_working_directory_that_does_not_exist_on_a_seamed_fsys(t *testing.T) {
 	missing := "/repo/does-not-exist"
 	mem := rwfs.NewMem(fstest.MapFS{})
@@ -490,16 +414,8 @@ func Test_doctor_refuses_a_working_directory_that_does_not_exist_on_a_seamed_fsy
 	assert.Contains(t, stderr.String(), missing)
 }
 
-// Test_doctor_reaches_diagnose_when_the_seamed_wd_exists_on_the_fsys is the
-// control arm for the two refusal tests above: the only variable that
-// changes is whether wd is present on the seamed rwfs.Mem. Present, the
-// pre-check's refusal never fires and runDoctor falls through into
-// srv.Diagnose, which — unlike the pre-check — never refuses and instead
-// prints one row per check to stdout; a refusal never writes stdout at
-// all, so stdout carrying a "root-dir" row (root-dir always runs, and
-// always reports ERROR here since "/repo" has no real feature-root
-// directory to probe) proves Diagnose ran, not the pre-check's own
-// refusal path.
+// Control arm for the two refusal tests above: wd is present on the
+// seamed rwfs.Mem, so the pre-check's refusal never fires.
 func Test_doctor_reaches_diagnose_when_the_seamed_wd_exists_on_the_fsys(t *testing.T) {
 	present := "/repo"
 	mem := rwfs.NewMem(fstest.MapFS{"repo": &fstest.MapFile{Mode: fs.ModeDir | 0o755}})

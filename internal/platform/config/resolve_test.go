@@ -12,30 +12,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fsAbs joins slash-separated segments under "/", the way every
-// LocateWithinFS test names an absolute path its fstest.MapFS fixture is
-// keyed against (fsName strips the leading "/" to get the fs.FS-relative
-// name back).
+// fsAbs joins slash-separated segments under "/", matching how fsName
+// strips the leading "/" to get the fs.FS-relative name back.
 func fsAbs(elem ...string) string {
 	return filepath.FromSlash("/" + filepath.ToSlash(filepath.Join(elem...)))
 }
 
-// inspectFixtureName is the one file every InspectFS test's own fixture
-// holds, always at fsAbs(inspectFixtureName).
+// inspectFixtureName is the one file every InspectFS fixture holds.
 const inspectFixtureName = "config.yaml"
 
 // inspectFixture returns a fstest.MapFS holding a single file at
-// inspectFixtureName, body its own contents — InspectFS's own fixture,
-// consistent with fsAbs for the absolute name every case passes it.
+// inspectFixtureName, body its contents.
 func inspectFixture(body string) fstest.MapFS {
 	return fstest.MapFS{inspectFixtureName: &fstest.MapFile{Data: []byte(body)}}
 }
 
-// Test_locate_within_fs_nearest_and_shadowed pins LocateWithinFS's own
-// nearest-wins and shadowed-ancestor guards: the nearest ".brief.yaml"
-// wins, every farther ancestor config is reported as shadowed
-// (nearest-first), and a repository with none reports an empty nearest and
-// no shadowed ancestors.
 func Test_locate_within_fs_nearest_and_shadowed(t *testing.T) {
 	t.Run("the nearest of two configs wins, the farther one is shadowed", func(t *testing.T) {
 		fsys := fstest.MapFS{
@@ -63,9 +54,7 @@ func Test_locate_within_fs_nearest_and_shadowed(t *testing.T) {
 	})
 }
 
-// Test_locate_within_fs_missing_start_dir pins the missing-startDir guard:
-// a startAbs fs.Stat cannot find refuses as *config.InvalidConfigError,
-// naming startAbs itself (not the fs-relative name fs.Stat saw).
+// Must name startAbs itself, not the fs-relative name fs.Stat saw.
 func Test_locate_within_fs_missing_start_dir(t *testing.T) {
 	fsys := fstest.MapFS{
 		"repo/.brief.yaml": &fstest.MapFile{Data: []byte("x")},
@@ -80,9 +69,6 @@ func Test_locate_within_fs_missing_start_dir(t *testing.T) {
 	assert.Equal(t, fsAbs("repo", "does-not-exist"), target.Path)
 }
 
-// Test_locate_within_fs_walk_terminates_at_root pins the walk's own
-// termination: a config file sitting exactly at "/" (fsName's own "."
-// mapping) is still found from several levels below.
 func Test_locate_within_fs_walk_terminates_at_root(t *testing.T) {
 	fsys := fstest.MapFS{
 		"a/b/marker.txt": &fstest.MapFile{Data: []byte("x")},
@@ -96,10 +82,6 @@ func Test_locate_within_fs_walk_terminates_at_root(t *testing.T) {
 	assert.Empty(t, shadowed)
 }
 
-// Test_locate_within_fs_stops_at_boundary pins the boundary guard: a
-// boundary directory that is walked but never exceeded — a config above it
-// is never found, one at or below it still is, and an empty boundary is
-// unbounded.
 func Test_locate_within_fs_stops_at_boundary(t *testing.T) {
 	t.Run("a config above the boundary is not found", func(t *testing.T) {
 		fsys := fstest.MapFS{
@@ -113,9 +95,7 @@ func Test_locate_within_fs_stops_at_boundary(t *testing.T) {
 		assert.Empty(t, nearest)
 		assert.Empty(t, shadowed)
 
-		// Control: the identical fixture with no boundary does find it —
-		// proving the boundary itself, not some quirk of the fixture, is
-		// what kept it from being found above.
+		// Control: the same fixture with no boundary does find it.
 		nearest, shadowed, err = config.LocateWithinFS(fsys, fsAbs("repo", "sub"), "")
 
 		require.NoError(t, err)
@@ -150,11 +130,6 @@ func Test_locate_within_fs_stops_at_boundary(t *testing.T) {
 	})
 }
 
-// Test_inspect_fs_decodes_onto_defaults pins InspectFS's own decode
-// contract: a key the file sets overrides Default(), every key it omits
-// keeps Default()'s own value — the four state headings, the checklist
-// heading, the handoff file suffix and the state file name each get their
-// own case since each is read from a different part of Config's own shape.
 func Test_inspect_fs_decodes_onto_defaults(t *testing.T) {
 	cases := []struct {
 		name string
@@ -240,9 +215,6 @@ func Test_inspect_fs_decodes_onto_defaults(t *testing.T) {
 	}
 }
 
-// Test_inspect_fs_treats_an_empty_file_as_the_shipped_profile pins
-// InspectFS's own io.EOF-is-not-a-failure rule: a zero-byte file decodes
-// as Default(), with no violations.
 func Test_inspect_fs_treats_an_empty_file_as_the_shipped_profile(t *testing.T) {
 	fsys := inspectFixture("")
 
@@ -253,11 +225,6 @@ func Test_inspect_fs_treats_an_empty_file_as_the_shipped_profile(t *testing.T) {
 	assert.Equal(t, config.Default(), cfg)
 }
 
-// Test_inspect_fs_refuses_a_config_that_fails_to_decode pins InspectFS's
-// own decode-failure shape: malformed YAML and an unknown key both refuse
-// as *InvalidConfigError, Path set to the abs name given, neither
-// "resolve config:" prefixed nor otherwise wrapped — that prefix is
-// Inspect's own, pinned separately in resolve_disk_test.go.
 func Test_inspect_fs_refuses_a_config_that_fails_to_decode(t *testing.T) {
 	t.Run("malformed yaml", func(t *testing.T) {
 		fsys := inspectFixture("progress-heading: [this is not a scalar\n")
@@ -283,11 +250,8 @@ func Test_inspect_fs_refuses_a_config_that_fails_to_decode(t *testing.T) {
 	})
 }
 
-// Test_inspect_fs_refuses_a_path_it_cannot_open pins InspectFS's own
-// open-failure shape, the control for the decode-failure case above: a
-// name fsys has no entry for is a plain *fs.PathError, Path rewritten to
-// the abs name given, never *InvalidConfigError — an unreadable file is a
-// plain failure, not an invalid one.
+// Control for the decode-failure case above: a name fsys has no entry for
+// is a plain *fs.PathError, never *InvalidConfigError.
 func Test_inspect_fs_refuses_a_path_it_cannot_open(t *testing.T) {
 	fsys := fstest.MapFS{}
 
@@ -301,11 +265,6 @@ func Test_inspect_fs_refuses_a_path_it_cannot_open(t *testing.T) {
 	assert.Equal(t, fsAbs("missing.yaml"), pathErr.Path)
 }
 
-// Test_inspect_fs_reports_every_invalid_value_in_field_declaration_order
-// pins InspectFS's own violations contract, doctor's config-values row
-// source: every bad value in the file, not only the first, each reported
-// in Config's own field-declaration order, alongside the fully decoded
-// Config; a clean config reports none.
 func Test_inspect_fs_reports_every_invalid_value_in_field_declaration_order(t *testing.T) {
 	t.Run("multiple bad values report in field-declaration order", func(t *testing.T) {
 		fsys := inspectFixture("step-file-pattern: \"SCENARIO-%s.md\"\nhandoff-cap-lines: 0\n")
@@ -330,10 +289,8 @@ func Test_inspect_fs_reports_every_invalid_value_in_field_declaration_order(t *t
 	})
 }
 
-// Test_inspect_fs_reports_a_violation_for_every_r1_rule covers every R1
-// value rule: each case's own fixture violates exactly one rule, and
-// InspectFS must report it as a *config.ValueError naming the offending
-// key, the value that failed, and the rule's own reason text.
+// Each case's fixture violates exactly one value rule; InspectFS must
+// report it as a *config.ValueError naming the key, value and reason.
 func Test_inspect_fs_reports_a_violation_for_every_r1_rule(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -514,11 +471,6 @@ func Test_inspect_fs_reports_a_violation_for_every_r1_rule(t *testing.T) {
 	}
 }
 
-// Test_inspect_fs_keeps_the_stepfile_sentinel_reachable_for_a_bad_pattern
-// pins that a step-file-pattern violation's own Err wraps
-// stepfile.ErrInvalidPattern rather than replacing it: a caller branching
-// with errors.Is against it must still see through ValueError's own
-// Unwrap.
 func Test_inspect_fs_keeps_the_stepfile_sentinel_reachable_for_a_bad_pattern(t *testing.T) {
 	fsys := inspectFixture("step-file-pattern: \"SCENARIO-%s.md\"\n")
 
@@ -529,9 +481,6 @@ func Test_inspect_fs_keeps_the_stepfile_sentinel_reachable_for_a_bad_pattern(t *
 	assert.ErrorIs(t, violations[0], stepfile.ErrInvalidPattern)
 }
 
-// Test_inspect_fs_keeps_the_handoff_suffix_sentinel_reachable_for_a_bad_suffix
-// is Test_inspect_fs_keeps_the_stepfile_sentinel_reachable_for_a_bad_pattern's
-// sibling case for the handoff-file-suffix rule.
 func Test_inspect_fs_keeps_the_handoff_suffix_sentinel_reachable_for_a_bad_suffix(t *testing.T) {
 	fsys := inspectFixture("handoff-file-suffix: \"sub/HANDOFF.md\"\n")
 

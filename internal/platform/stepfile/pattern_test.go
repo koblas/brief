@@ -7,10 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_Compile_refuses collects the patterns Compile must reject. They
-// share one assertion and one behaviour family: a step-file-pattern that
-// cannot round-trip — either it does not name exactly one step number, or
-// it renders a name Pattern.Number can never read back.
 func Test_Compile_refuses(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -23,16 +19,11 @@ func Test_Compile_refuses(t *testing.T) {
 		{name: "a pattern carrying a percent escape", pattern: "100%%-%d.md"},
 		{name: "a pattern with a path separator", pattern: "steps/%d.md"},
 		{
-			// "%3d" renders Name(1) as "SCENARIO-  1.md", space-padded, and
-			// Number only accepts digits in the verb's place — so it could
-			// never read back its own Name output, making a feature's
-			// second step unaddressable.
+			// "%3d" renders Name(1) as "SCENARIO-  1.md", space-padded, which Number cannot read back.
 			name:    "an unpadded width verb",
 			pattern: "SCENARIO-%3d.md",
 		},
 		{
-			// The "-" flag left-justifies with spaces on the right, which
-			// Number's digits-only scan cannot read back either.
 			name:    "a left-justified verb",
 			pattern: "SCENARIO-%-4d.md",
 		},
@@ -47,11 +38,6 @@ func Test_Compile_refuses(t *testing.T) {
 	}
 }
 
-// Test_Compile_accepts_a_zero_padded_width_verb is the positive control for
-// the width refusals above: "%02d" pads with zeros, which Number reads back
-// as ordinary digits, so Compile must keep accepting it. It is not in the
-// table above because it asserts a different tuple — no error AND a
-// rendered name.
 func Test_Compile_accepts_a_zero_padded_width_verb(t *testing.T) {
 	p, err := stepfile.Compile("SCENARIO-%02d.md")
 
@@ -59,10 +45,7 @@ func Test_Compile_accepts_a_zero_padded_width_verb(t *testing.T) {
 	require.Equal(t, "SCENARIO-03.md", p.Name(3))
 }
 
-// Test_Compile_accepts_a_zero_width_zero_padded_verb pins that "%0d"
-// renders and round-trips identically to plain "%d": verbRe's group once
-// required at least one digit after the leading "0", rejecting "%0d" while
-// accepting "%00d" for no behavioural reason.
+// Pins that "%0d" renders and round-trips identically to plain "%d".
 func Test_Compile_accepts_a_zero_width_zero_padded_verb(t *testing.T) {
 	p, err := stepfile.Compile("SCENARIO-%0d.md")
 
@@ -104,10 +87,6 @@ func Test_Number_round_trips_a_number_wider_than_the_verbs_padding(t *testing.T)
 	require.Equal(t, 100, n)
 }
 
-// Test_Number_refuses collects the filenames Number must not recognize as a
-// step of the pattern "SCENARIO-%02d.md". One assertion, one family: a name
-// that does not round-trip through this pattern. The positive cases above
-// stay separate because each asserts a number as well as a bool.
 func Test_Number_refuses(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -116,11 +95,7 @@ func Test_Number_refuses(t *testing.T) {
 		{name: "an unpadded near miss", filename: "SCENARIO-7.md"},
 		{name: "non-numeric text in the verb's place", filename: "SCENARIO-XX.md"},
 		{
-			// The one filename only the digits-only scan rejects. Atoi
-			// parses "-5" happily, and Name(-5) renders "SCENARIO--5.md"
-			// right back, so the round-trip check at the end of Number
-			// agrees too — without the scan, a negative step number would
-			// be a recognized step.
+			// Only the digits-only scan rejects this: Atoi parses "-5", and Name(-5) renders it right back.
 			name:     "a negative number in the verb's place",
 			filename: "SCENARIO--5.md",
 		},

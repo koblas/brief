@@ -1,9 +1,5 @@
-// Shared rwfs.Mem test plumbing for every command-level test that seams
-// setup through newMemSetupSeam — init_internal_test.go and
-// uninstall_internal_test.go both use it — or that builds a bare feature
-// tree through memTree for new/finish/start/check/status's own
-// withRootFS seam. White-box package: newMemSetupSeam builds a runSeam via
-// the unexported withSetupOpts.
+// Shared rwfs.Mem test plumbing for command-level tests: newMemSetupSeam
+// for the setup seam, memTree for a feature tree via withRootFS.
 
 package cli
 
@@ -21,25 +17,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// memRoot is the virtual working directory every new/finish/start/check/
-// status Mem test resolves against — fabricated, never a real disk path,
-// the same convention doctor_internal_test.go's own "/repo" fixtures use.
+// memRoot is the virtual working directory every Mem test resolves
+// against — fabricated, never a real disk path.
 const memRoot = "/repo"
 
-// fsAbs joins slash-separated segments under "/", the way every
-// newMemSetupSeam-backed test names an absolute path its rwfs.Mem fixture
-// is keyed against. Identical to internal/setup's, config's, repo's and
-// doctor's own fsAbs test helper, duplicated for the same reason those
-// packages duplicate fsName from each other.
+// fsAbs joins slash-separated segments under "/", the absolute path an
+// rwfs.Mem fixture is keyed against.
 func fsAbs(elem ...string) string {
 	return filepath.FromSlash("/" + filepath.ToSlash(filepath.Join(elem...)))
 }
 
-// memKey turns abs — an already-absolute, fsAbs-fabricated path — into the
-// name a Mem's own fstest.MapFS is keyed against: fsName's own inverse
-// (internal/setup's fs.go, package-private, so this package cannot call it
-// directly), duplicated for the same reason internal/setup's own mem_internal_test.go
-// duplicates it from config/repo/doctor.
+// memKey turns an fsAbs-fabricated path into the name a Mem's own
+// fstest.MapFS is keyed against.
 func memKey(abs string) string {
 	trimmed := strings.TrimPrefix(filepath.ToSlash(abs), "/")
 	if trimmed == "" {
@@ -50,27 +39,13 @@ func memKey(abs string) string {
 }
 
 // newVirtualMem returns an rwfs.Mem seeded with root as an explicit
-// directory entry — every fsys read Init or Uninstall performs starts by
-// confirming wd itself exists (config.LocateWithinFS's own first check),
-// so any fixture needs at least this much regardless of what else it
-// seeds. root is virtual, fabricated as an absolute path — never a real
-// disk path — since newMemSetupSeam's own writableCheck never reaches
-// real disk to ask.
+// directory entry, so a read confirming wd exists finds it.
 func newVirtualMem(root string) *rwfs.Mem {
 	return rwfs.NewMem(fstest.MapFS{memKey(root): &fstest.MapFile{Mode: fs.ModeDir | 0o755}})
 }
 
-// newMemSetupSeam returns the runSeam a command-level init/uninstall test
-// runs mem's own fixture through instead of real disk: setup.WithFSRoot and
-// setup.WithResolveRoot(identity) — mem names no real directory for
-// filepath.EvalSymlinks to resolve — plus setup.WithWritableCheck's own
-// no-op, so R10's pre-write check never asks real disk about a target that
-// only exists on mem, mirroring internal/setup's own newMemServer recipe
-// (mem_internal_test.go). setup.WithHomeDir defaults to a fixed empty string, the
-// same as emptyHomeSeam, so a bare-name role binding never resolves against
-// the developer's own real "~/.claude/agents"; extra opts are appended
-// last, so a test can still override any of these without repeating the
-// others.
+// newMemSetupSeam returns the runSeam a command-level test runs mem's
+// fixture through instead of real disk; extra opts override the defaults.
 func newMemSetupSeam(mem *rwfs.Mem, extra ...setup.Option) runSeam {
 	opts := append([]setup.Option{
 		setup.WithFSRoot(mem),
@@ -83,21 +58,13 @@ func newMemSetupSeam(mem *rwfs.Mem, extra ...setup.Option) runSeam {
 }
 
 // memTree accumulates directory and file entries for an rwfs.Mem fixture,
-// keyed by absolute, fsAbs-fabricated path — a small builder so a
-// new/finish/start/check/status Mem test can lay out a feature tree the
-// same declarative way its disk-based sibling built one with
-// os.MkdirAll/os.WriteFile, without repeating fstest.MapFS's own map
-// literal shape at every call site. dir and file both return t so calls
-// chain; mem builds the rwfs.Mem once every entry is added.
+// keyed by fsAbs-fabricated path. dir and file return t so calls chain.
 type memTree struct {
 	entries fstest.MapFS
 }
 
 // newMemTree returns a memTree seeded with every path in dirs as an
-// explicit directory entry — root itself always belongs in that list, the
-// same "confirm wd exists" requirement newVirtualMem documents, since a
-// zero-file fixture would otherwise have no entry for config.LocateWithinFS's
-// own first check to find.
+// explicit directory entry; root must be included so a "wd exists" check finds it.
 func newMemTree(dirs ...string) *memTree {
 	t := &memTree{entries: fstest.MapFS{}}
 
@@ -127,10 +94,8 @@ func (t *memTree) mem() *rwfs.Mem {
 	return rwfs.NewMem(t.entries)
 }
 
-// memJSONString marshals s the same way testify's assert.Equal would
-// compare it, for building a golden literal around a dynamically computed
-// value without hand-escaping it — mirroring json_refusal_test.go's own
-// jsonString, duplicated since that is a package cli_test symbol.
+// memJSONString marshals s the way assert.Equal compares it, for building
+// a golden literal around a dynamically computed value.
 func memJSONString(t *testing.T, s string) string {
 	t.Helper()
 
@@ -140,8 +105,7 @@ func memJSONString(t *testing.T, s string) string {
 	return string(b)
 }
 
-// memJSONKeys returns doc's own keys, for an exact-key-set assertion via
-// assert.ElementsMatch — mirroring json_usage_test.go's own jsonKeys.
+// memJSONKeys returns doc's keys, for an exact-key-set assertion via assert.ElementsMatch.
 func memJSONKeys(doc map[string]json.RawMessage) []string {
 	keys := make([]string, 0, len(doc))
 	for k := range doc {
@@ -151,8 +115,7 @@ func memJSONKeys(doc map[string]json.RawMessage) []string {
 	return keys
 }
 
-// memDecodedError is the JSON shape of a --json error document's "error"
-// member — mirroring json_refusal_test.go's own decodedError.
+// memDecodedError is the JSON shape of a --json error document's "error" member.
 type memDecodedError struct {
 	Kind         string  `json:"kind"`
 	Message      string  `json:"message"`
@@ -164,10 +127,7 @@ type memDecodedError struct {
 }
 
 // memDecodeErrorDocument asserts stdout holds exactly one --json error
-// document matching R1/R3's shape (schema 1, ok false, exit_code 1, the
-// exact key set of both the document and its error object) for
-// wantCommand, and returns the document's own error object — mirroring
-// json_refusal_test.go's own decodeErrorDocument.
+// document for wantCommand and returns its error object.
 func memDecodeErrorDocument(t *testing.T, stdout []byte, wantCommand string) memDecodedError {
 	t.Helper()
 
@@ -202,13 +162,8 @@ func memDecodeErrorDocument(t *testing.T, stdout []byte, wantCommand string) mem
 }
 
 // memDecodeUsageErrorDocument asserts stdout holds exactly one --json
-// usage-error document matching R1/R2/R3's shape (schema 1, ok false,
-// exit_code 2, error.kind "usage", error.path/line/problem null, the
-// exact key set of both the document and its error object, and
-// error.files_changed matching wantFilesChanged) for wantCommand, and
-// returns the document's own error.message — mirroring
-// json_usage_test.go's own decodeUsageErrorDocument, minus its unused
-// error.fix return.
+// usage-error document for wantCommand and wantFilesChanged, and returns
+// its error.message.
 func memDecodeUsageErrorDocument(t *testing.T, stdout []byte, wantCommand string, wantFilesChanged *bool) string {
 	t.Helper()
 

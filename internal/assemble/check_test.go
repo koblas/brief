@@ -15,8 +15,7 @@ import (
 )
 
 // checkBodyOfLines returns a body of exactly n distinct lines, with a
-// trailing newline, mirroring scaffold_test's own helper of the same
-// shape.
+// trailing newline.
 func checkBodyOfLines(n int) []byte {
 	lines := make([]string, n)
 	for i := range lines {
@@ -27,7 +26,7 @@ func checkBodyOfLines(n int) []byte {
 }
 
 // checkConformingSpec returns a specification body carrying cfg's
-// configured progress heading and nothing else Check's C1 rule requires.
+// configured progress heading and nothing else Check requires.
 func checkConformingSpec(cfg config.Config) string {
 	return "# demo\n\n" + cfg.ProgressHeading + "\n\ncontent\n"
 }
@@ -46,7 +45,7 @@ func checkConformingState(cfg config.Config) string {
 
 // checkStateOfLines returns a state body of exactly n lines carrying cfg's
 // four configured headings, padded with filler so a truncation bug cannot
-// hide behind a repeated line — mirrors scaffold_test's stateBodyOfLines.
+// hide behind a repeated line.
 func checkStateOfLines(cfg config.Config, n int) string {
 	var lines []string
 
@@ -149,13 +148,8 @@ func checkFSRunner(t *testing.T, cfg config.Config, fsys assemble.FeatureFS) fun
 	}
 }
 
-// ruleCase is one row of
-// Test_check_assigns_each_producer_its_stable_rule_id's table: setup
-// builds the smallest MapFS fixture that trips exactly one of CheckFS's
-// content producers; wantRule is that producer's own stable Rule. The
-// three producers whose own subject is the OS adapter one level up — an
-// escaping symlink, a symlinked feature directory, an unreadable feature
-// directory — are check_disk_test.go's own table instead.
+// ruleCase is one row of the table below: setup builds the smallest MapFS
+// fixture that trips exactly one of CheckFS's content producers.
 type ruleCase struct {
 	name     string
 	setup    func(t *testing.T) func() ([]assemble.Finding, error)
@@ -173,10 +167,7 @@ func ruleCaseSpecMissing(t *testing.T) func() ([]assemble.Finding, error) {
 }
 
 // ruleCaseSpecUnreadable builds a feature whose specification read fails
-// for a reason other than not existing — injected through failFS, since
-// specFault's own contract is "classify this read error", not "reproduce a
-// real EISDIR": the classification does not care what OS fact produced the
-// error, only that it is not fs.ErrNotExist.
+// for a reason other than not existing, injected through failFS.
 func ruleCaseSpecUnreadable(t *testing.T) func() ([]assemble.Finding, error) {
 	t.Helper()
 
@@ -371,9 +362,8 @@ func ruleCaseHandoffCap(t *testing.T) func() ([]assemble.Finding, error) {
 	return checkFSRunner(t, cfg, fsys)
 }
 
-// Test_check_assigns_each_producer_its_stable_rule_id pins R8: every one of
-// CheckFS's content producers stamps its Finding with a stable,
-// never-renamed Rule id a script can branch on instead of parsing English.
+// Every one of CheckFS's content producers stamps its Finding with a
+// stable, never-renamed Rule id.
 func Test_check_assigns_each_producer_its_stable_rule_id(t *testing.T) {
 	cases := []ruleCase{
 		{name: "spec missing", setup: ruleCaseSpecMissing, wantRule: assemble.RuleSpecMissing},
@@ -406,14 +396,8 @@ func Test_check_assigns_each_producer_its_stable_rule_id(t *testing.T) {
 	}
 }
 
-// Test_check_reports_an_over_cap_handoff_file pins C10's own data — the
-// finding names the right path, line, measured value and cap (the
-// Gherkin's own assertion) — by checking each fact rather than the whole
-// sentence verbatim: whether that sentence is textually identical to
-// scaffold.Finish's own refusal is check_drift_test.go's claim, not this
-// one, and pinning the same exact string here would make this test go red
-// on the identical mutation that test exists to catch, hiding which of the
-// two claims actually broke.
+// Checks each fact (path, line, measured value, cap) rather than the whole
+// sentence verbatim; that string match is check_drift_test.go's claim.
 func Test_check_reports_an_over_cap_handoff_file(t *testing.T) {
 	cfg := fixtureConfig()
 	cfg.HandoffCapLines = 10
@@ -433,11 +417,7 @@ func Test_check_reports_an_over_cap_handoff_file(t *testing.T) {
 	assert.Equal(t, assemble.SeverityWarn, f.Severity)
 }
 
-// Test_check_reports_nothing_for_a_missing_handoff_file is the control arm
-// for C10: a done step with no handoff file at all is not a finding — a
-// missing handoff is exactly "this step has never been finished under a
-// caps-aware finish", which scaffold.Finish's own re-finish exemption
-// (R16) already treats as nothing to diverge from.
+// Control arm: a done step with no handoff file at all is not a finding.
 func Test_check_reports_nothing_for_a_missing_handoff_file(t *testing.T) {
 	cfg := fixtureConfig()
 	files := conformingFeatureFiles(cfg)
@@ -513,14 +493,8 @@ func Test_check_reports_a_missing_state_file(t *testing.T) {
 	assert.Contains(t, f.Detail, "file does not exist")
 }
 
-// Test_check_marks_a_zero_step_feature_in_flight_not_complete is the cheap
-// optional closing STATE.md's own trap: a feature with no step files at
-// all is vacuously "every step done" by a naive empty loop, but
-// assemble.Status's own Complete() requires Total > 0 and so calls the
-// same feature "in progress". A zero-step feature's own finding (here, a
-// missing state heading — C5, which fires regardless of step count) must
-// take SeverityError and InFlight true, agreeing with Status rather than
-// contradicting it with a WARN/"(complete)" reading.
+// A zero-step feature's finding must take SeverityError and InFlight true,
+// agreeing with assemble.Status's own Complete() requiring Total > 0.
 func Test_check_marks_a_zero_step_feature_in_flight_not_complete(t *testing.T) {
 	cfg := fixtureConfig()
 	files := map[string]string{
@@ -556,10 +530,8 @@ func Test_check_reports_a_specification_with_no_progress_heading(t *testing.T) {
 	assert.Contains(t, f.Detail, cfg.ProgressHeading)
 }
 
-// Test_check_reports_a_step_whose_frontmatter_does_not_parse_and_still_reports_its_handoff_cap
-// is C6 paired with C10's independence from it: STEP-01's frontmatter is
-// garbage, and its handoff file is over cap — both must be reported, proof
-// that Check never reuses readSteps's all-or-nothing stance.
+// STEP-01's frontmatter is garbage, and its handoff file is over cap; both
+// must be reported.
 func Test_check_reports_a_step_whose_frontmatter_does_not_parse_and_still_reports_its_handoff_cap(t *testing.T) {
 	cfg := fixtureConfig()
 	cfg.HandoffCapLines = 10
@@ -596,9 +568,8 @@ func Test_check_reports_an_unticked_checklist_item_on_a_done_step(t *testing.T) 
 	assert.Equal(t, `checklist item "second thing" is not ticked`, f.Detail)
 }
 
-// Test_check_reports_nothing_for_an_unticked_checklist_item_on_an_open_step
-// is C7's control arm: the same unticked item on an open step is ordinary
-// in-progress work, not a finding.
+// The same unticked item on an open step is ordinary in-progress work,
+// not a finding.
 func Test_check_reports_nothing_for_an_unticked_checklist_item_on_an_open_step(t *testing.T) {
 	cfg := fixtureConfig()
 	files := conformingFeatureFiles(cfg)
@@ -623,9 +594,8 @@ func Test_check_reports_a_dependency_id_that_names_no_step_file(t *testing.T) {
 	assert.Equal(t, `step "STEP-01" depends on "STEP-99", which names no step file`, f.Detail)
 }
 
-// Test_check_reports_nothing_for_an_ordinary_unmet_dependency is C8's
-// control arm: a depends-on id that names a real, known, not-yet-done step
-// is ordinary in-progress work, already counted by Status's Blocked.
+// A depends-on id that names a real, known, not-yet-done step is ordinary
+// in-progress work, already counted by Status's Blocked.
 func Test_check_reports_nothing_for_an_ordinary_unmet_dependency(t *testing.T) {
 	cfg := fixtureConfig()
 	files := conformingFeatureFiles(cfg)
@@ -650,11 +620,8 @@ func Test_check_reports_a_step_that_depends_on_itself(t *testing.T) {
 	assert.Equal(t, `step "STEP-01" depends on "STEP-01", which is not finished`, f.Detail)
 }
 
-// Test_check_reports_a_dangling_dependency_that_is_not_first_in_the_list is
-// C8's masking regression: idx.FirstUnmet stops at the first unmet id, so a
-// dangling id (STEP-99) listed after a merely-open-and-known one (STEP-01)
-// used to be silently dropped. checkStepDependencyFindings must walk every
-// declared id rather than reuse that refusal predicate.
+// A dangling id (STEP-99) listed after a merely-open-and-known one
+// (STEP-01) must still be reported, not masked by the first unmet id.
 func Test_check_reports_a_dangling_dependency_that_is_not_first_in_the_list(t *testing.T) {
 	cfg := fixtureConfig()
 	files := conformingFeatureFiles(cfg)
@@ -669,11 +636,8 @@ func Test_check_reports_a_dangling_dependency_that_is_not_first_in_the_list(t *t
 	assert.Equal(t, `step "STEP-02" depends on "STEP-99", which names no step file`, f.Detail)
 }
 
-// Test_check_reports_a_self_dependency_masked_behind_an_earlier_unmet_dependency
-// is C9's counterpart masking regression: a self-dependency listed after an
-// ordinary open-and-known one used to be hidden the same way — FirstUnmet
-// returned the earlier, unmet-but-known id and never reached the self id at
-// all.
+// A self-dependency listed after an ordinary open-and-known one must still
+// be reported, not masked by the earlier id.
 func Test_check_reports_a_self_dependency_masked_behind_an_earlier_unmet_dependency(t *testing.T) {
 	cfg := fixtureConfig()
 	files := conformingFeatureFiles(cfg)
@@ -688,12 +652,8 @@ func Test_check_reports_a_self_dependency_masked_behind_an_earlier_unmet_depende
 	assert.Equal(t, `step "STEP-02" depends on "STEP-02", which is not finished`, f.Detail)
 }
 
-// Test_check_reports_a_self_dependency_on_a_done_step is C9's done-step
-// regression: idx.FirstUnmet short-circuits on fm.Done(), so a done step's
-// self-dependency used to report nothing at all — a permanently
-// unfinishable step (per stepfile's own doc) that Check is the only reader
-// positioned to flag, per R18's backstop role. SCENARIO-22 narrowed only
-// C7 (the checklist rule) to done steps; C8 and C9 carry no such narrowing.
+// A done step's self-dependency, a permanently unfinishable step, must
+// still be reported; only the checklist rule is narrowed to done steps.
 func Test_check_reports_a_self_dependency_on_a_done_step(t *testing.T) {
 	cfg := fixtureConfig()
 	files := conformingFeatureFiles(cfg)
@@ -708,9 +668,8 @@ func Test_check_reports_a_self_dependency_on_a_done_step(t *testing.T) {
 	assert.Equal(t, assemble.SeverityWarn, f.Severity)
 }
 
-// Test_check_reports_a_dangling_dependency_on_a_done_step is C8's
-// done-step regression, the same short-circuit as the self-dependency case
-// above but for an id that names no step file at all.
+// Same as the self-dependency case above, but for an id that names no
+// step file at all.
 func Test_check_reports_a_dangling_dependency_on_a_done_step(t *testing.T) {
 	cfg := fixtureConfig()
 	files := conformingFeatureFiles(cfg)
@@ -725,10 +684,8 @@ func Test_check_reports_a_dangling_dependency_on_a_done_step(t *testing.T) {
 	assert.Equal(t, assemble.SeverityWarn, f.Severity)
 }
 
-// Test_check_assigns_ERROR_when_a_feature_is_still_in_flight_and_WARN_when_every_step_is_done
-// pins severity's one variable: the same defect (an over-cap handoff) on a
-// feature with an open sibling step is ERROR; on a feature whose every
-// step is done, it is WARN.
+// The same defect (an over-cap handoff) on a feature with an open sibling
+// step is ERROR; on a feature whose every step is done, it is WARN.
 func Test_check_assigns_ERROR_when_a_feature_is_still_in_flight_and_WARN_when_every_step_is_done(t *testing.T) {
 	cfg := fixtureConfig()
 	cfg.HandoffCapLines = 10
@@ -753,12 +710,8 @@ func Test_check_assigns_ERROR_when_a_feature_is_still_in_flight_and_WARN_when_ev
 	assert.Equal(t, assemble.SeverityWarn, fDone.Severity)
 }
 
-// Test_check_orders_findings_specification_then_state_then_steps_ascending
-// pins the byte-exact ordering contract across one fixture carrying nine
-// of Check's ten rules (every one but C2, which is mutually exclusive with
-// C3-C5): the specification (C1), then the state file's C3-C5 in that
-// order, then STEP-01 through STEP-05 ascending, each contributing the
-// rule its body triggers.
+// Pins the byte-exact ordering contract: the specification, then the
+// state file's own rules, then STEP-01 through STEP-05 ascending.
 func Test_check_orders_findings_specification_then_state_then_steps_ascending(t *testing.T) {
 	cfg := fixtureConfig()
 	cfg.HandoffCapLines = 10
@@ -814,9 +767,7 @@ func Test_check_orders_findings_specification_then_state_then_steps_ascending(t 
 	}
 }
 
-// Test_check_reports_nothing_for_a_conforming_feature is the population
-// control every rule test above implicitly relies on: a feature that trips
-// none of C1-C10 reports no findings at all.
+// A feature that trips none of Check's rules reports no findings at all.
 func Test_check_reports_nothing_for_a_conforming_feature(t *testing.T) {
 	cfg := fixtureConfig()
 	files := conformingFeatureFiles(cfg)
@@ -829,14 +780,9 @@ func Test_check_reports_nothing_for_a_conforming_feature(t *testing.T) {
 	assert.Empty(t, findings)
 }
 
-// Test_check_reports_a_feature_whose_step_files_cannot_be_listed is the
-// same C3 defect one layer deeper than an unreadable feature directory: the
-// feature directory opens fine but its step files cannot be listed (the
-// branch a stricter-than-darwin permission model, such as Linux's, takes
-// at a directory readable to enter but not to list). checkStepFindings
-// used to swallow this failure silently (return nil, true) rather than
-// report it. It carries fuller assertions than the "steps unlistable" row
-// in the table above, which only pins the Rule.
+// The feature directory opens fine but its step files cannot be listed.
+// Fuller assertions than the "steps unlistable" row above, which only
+// pins the Rule.
 func Test_check_reports_a_feature_whose_step_files_cannot_be_listed(t *testing.T) {
 	cfg := fixtureConfig()
 	fsys := featureFS(conformingFeatureFiles(cfg))
@@ -852,10 +798,8 @@ func Test_check_reports_a_feature_whose_step_files_cannot_be_listed(t *testing.T
 	assert.Equal(t, assemble.SeverityError, f.Severity)
 }
 
-// Test_GroupByFeature_folds_findings_into_one_group_per_feature_in_order
-// pins the fold: two features' findings collapse into one FeatureFindings
-// apiece, in first-appearance order, each carrying its Name/Path/InFlight
-// from the findings themselves and every one of its own findings verbatim.
+// Two features' findings collapse into one FeatureFindings apiece, in
+// first-appearance order.
 func Test_GroupByFeature_folds_findings_into_one_group_per_feature_in_order(t *testing.T) {
 	findings := []assemble.Finding{
 		{Rule: assemble.RuleChecklist, Feature: "alpha", FeaturePath: "/repo/docs/specifications/alpha", InFlight: true, Detail: "alpha finding 1"},
@@ -878,8 +822,6 @@ func Test_GroupByFeature_folds_findings_into_one_group_per_feature_in_order(t *t
 	assert.Equal(t, findings[2:3], groups[1].Findings)
 }
 
-// Test_GroupByFeature_returns_an_empty_result_for_no_findings is the
-// zero-input arm: no findings folds into no groups.
 func Test_GroupByFeature_returns_an_empty_result_for_no_findings(t *testing.T) {
 	groups := assemble.GroupByFeature(nil)
 

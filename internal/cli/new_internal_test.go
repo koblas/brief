@@ -1,7 +1,5 @@
-// new's scenarios — every one, none of them OS-subject — run against
-// rwfs.Mem here, reaching run() directly since withRootFS is unexported.
-// new_json_disk_test.go keeps only its own ENAMETOOLONG case, a real
-// filesystem name-length limit rwfs.Mem does not model.
+// new's scenarios run against rwfs.Mem here, reaching run() directly.
+// new_json_disk_test.go keeps only the real-filesystem ENAMETOOLONG case.
 
 package cli
 
@@ -30,9 +28,8 @@ func runNewMem(t *testing.T, tree *memTree, args []string) (string, string, erro
 	return stdout.String(), stderr.String(), err
 }
 
-// memOneLine asserts buf holds exactly one newline-terminated line and
-// returns it without the trailing newline — mirroring run_test.go's own
-// oneLine, duplicated since that is a package cli_test symbol.
+// memOneLine asserts s holds exactly one newline-terminated line and
+// returns it without the trailing newline.
 func memOneLine(t *testing.T, s string) string {
 	t.Helper()
 
@@ -57,22 +54,13 @@ func Test_creates_the_step_and_prints_its_path_mem(t *testing.T) {
 		stderr.String())
 	assert.Equal(t, "docs/specifications/payments/SCENARIO-01.md\n", stdout.String())
 
-	// Result.Modified names the specification whether or not its own
-	// rewrite actually lands — this readback is what proves the progress
-	// entry was really appended, not merely that NewStep reported it was.
+	// Readback proves the progress entry was really appended, not merely reported.
 	specPath := memKey(filepath.Join(memRoot, "docs", "specifications", "payments", "specification.md"))
 	gotSpec, err := mem.ReadFile(specPath)
 	require.NoError(t, err)
 	assert.Contains(t, string(gotSpec), "- [ ] SCENARIO-01")
 }
 
-// Test_new_feature_refuses_an_existing_feature_mem is new feature's own
-// no-overwrite guard: a second "new feature payments" against the same
-// tree refuses with scaffold.ErrFeatureExists rather than truncating the
-// first call's own specification.md — NewStep's step file can never
-// collide this way (its own step number is always freshly computed), so
-// this is the guard the "no-overwrite" half of this command's own
-// representative pair actually names.
 func Test_new_feature_refuses_an_existing_feature_mem(t *testing.T) {
 	mem := newMemTree(memRoot).mem()
 
@@ -126,10 +114,8 @@ func Test_prints_usage_to_stdout_when_help_is_requested_for_new_step_mem(t *test
 	assert.NotEmpty(t, stdout)
 }
 
-// Test_refuses_on_one_line_for_an_unknown_feature_for_step_mem pins that
-// the error "new step" returns for an unknown feature still satisfies
-// errors.Is(err, scaffold.ErrNoSuchFeature) — enrichUnknownFeature wraps the
-// sentinel rather than replacing it.
+// The error still satisfies errors.Is(err, scaffold.ErrNoSuchFeature): the
+// enriched wrapper wraps the sentinel rather than replacing it.
 func Test_refuses_on_one_line_for_an_unknown_feature_for_step_mem(t *testing.T) {
 	stdout, stderr, err := runNewMem(t, newMemTree(memRoot), []string{"new", "step", "payments"})
 
@@ -158,17 +144,8 @@ func Test_refuses_on_one_line_when_the_specification_has_no_progress_heading_mem
 	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
 }
 
-// Test_refuses_on_one_line_for_an_invalid_step_file_pattern_from_an_ancestor_config_mem
-// builds the "payments" feature directly through scaffold, bypassing
-// run() and its own config.Resolve call: the ancestor ".brief.yaml" this
-// test writes carries an invalid step-file-pattern, which R1 now refuses
-// at load for every command — including "new feature", which the setup
-// here no longer runs through the CLI. "new step" itself is what this
-// test exercises, and it is the CLI call that resolves the ancestor
-// config and must surface the refusal. Both the direct scaffold call and
-// the run() call share one *rwfs.Mem: tree.mem() copies its own fixture
-// on every call, so two independent Mem instances would never see one
-// another's writes (see start_internal_test.go's own note).
+// The feature is built directly through scaffold, bypassing run()'s config
+// resolve, since the ancestor config is itself invalid; both share one *rwfs.Mem.
 func Test_refuses_on_one_line_for_an_invalid_step_file_pattern_from_an_ancestor_config_mem(t *testing.T) {
 	wd := filepath.Join(memRoot, "a", "b")
 	tree := newMemTree(memRoot, wd)
@@ -191,11 +168,6 @@ func Test_refuses_on_one_line_for_an_invalid_step_file_pattern_from_an_ancestor_
 	assert.True(t, strings.HasSuffix(line, "(no files changed)"), "line %q must end with (no files changed)", line)
 }
 
-// Test_new_feature_json_is_one_exact_document_mem is the exact-bytes
-// golden pinning newDocument's key order for "new feature": step is null
-// (no call creates a feature and a step together), path names the feature
-// directory, created lists the specification and the state file in write
-// order, both absolute, and modified is empty.
 func Test_new_feature_json_is_one_exact_document_mem(t *testing.T) {
 	stdout, stderr, err := runNewMem(t, newMemTree(memRoot), []string{"new", "feature", "payments", "--json"})
 
@@ -212,11 +184,8 @@ func Test_new_feature_json_is_one_exact_document_mem(t *testing.T) {
 	assert.Equal(t, want, stdout)
 }
 
-// Test_new_step_json_names_the_step_and_its_file_mem decodes "new step
-// --json"'s document rather than pinning a literal id: wantID is captured
-// from a text-mode run against a sibling, equally fresh feature — both are
-// their feature's first step, so production's own next-step-number logic
-// assigns the same id to each independently.
+// wantID is captured from a text-mode run against a sibling, equally
+// fresh feature, not a hardcoded literal.
 func Test_new_step_json_names_the_step_and_its_file_mem(t *testing.T) {
 	textTree := newMemTree(memRoot)
 	textMem := textTree.mem()

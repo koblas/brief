@@ -26,14 +26,8 @@ func readFileT(t *testing.T, path string) []byte {
 	return body
 }
 
-// Test_init_edit_agents_then_uninstall_leaves_bound_agents_byte_identical
-// pins R16's own round trip across every shape it holds for: a bare-name
-// role bound to an agent carrying no top-level "skills:" key, one bound to
-// an agent carrying a non-empty block list, and one bound to an agent
-// already carrying a canonical single-entry flow list — Init --edit-agents
-// then Uninstall reproduces each one exactly byte-identical. The control
-// (afterEdit != before) proves the edit actually landed before the round
-// trip claims to undo it.
+// The afterEdit != before assertion below proves the edit actually landed
+// before the round trip claims to undo it.
 func Test_init_edit_agents_then_uninstall_leaves_bound_agents_byte_identical(t *testing.T) {
 	roundTrip := func(t *testing.T, planner, plannerBody, implementer, implementerBody string) {
 		t.Helper()

@@ -1,7 +1,5 @@
-// Both scenarios here return before runCheckHook ever reads wd — the
-// opt-in gate (config.LocateInRepo) and FeatureContaining's own
-// resolution never run — so neither needs check_hook_disk_test.go's own
-// real repository tree, unlike everything else "check --hook" covers.
+// Both scenarios here return before runCheckHook reads wd, so neither
+// needs check_hook_disk_test.go's real repository tree.
 
 package cli_test
 
@@ -16,18 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_check_hook_usage_errors covers every text-mode usage-error shape
-// "check --hook" reports before it ever reads the repository: exit 2, the
-// pinned stderr line, empty stdout. Each case discriminates on its own
-// mutation: the host it validates, or the flag combination it rejects. A
-// malformed stdin payload is not a case here: it is no longer a usage
-// error (exit 2) at all — see check_hook_disk_test.go's own
-// Test_check_hook_malformed_payload_in_an_opted_in_repo_exits_1 and
-// Test_check_hook_is_silent_for_malformed_stdin_when_no_brief_yaml_is_found
-// for its own two shapes. "--hook with --json" is not a case here either:
-// R5 routes every usage error to stdout as a JSON document under --json,
-// a different assertion shape entirely — covered by
-// Test_check_hook_with_json_reports_the_usage_error_as_json below.
+// Covers every text-mode usage-error shape "check --hook" reports before
+// reading the repository; a malformed stdin payload is not a usage error.
 func Test_check_hook_usage_errors(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -51,10 +39,7 @@ func Test_check_hook_usage_errors(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			// Neither case ever reads wd: both usage errors return before
-			// runCheckHook's own opt-in gate (config.LocateInRepo) runs, so
-			// a fabricated path proves that as much as a real directory
-			// would.
+			// Neither case reads wd, so a fabricated path is enough.
 			wd := "/repo"
 
 			var stdout, stderr bytes.Buffer
@@ -69,9 +54,7 @@ func Test_check_hook_usage_errors(t *testing.T) {
 }
 
 func Test_check_hook_with_json_reports_the_usage_error_as_json(t *testing.T) {
-	// This usage error returns before runCheckHook ever reads wd (it is
-	// checked ahead of the host lookup and the opt-in gate), so a
-	// fabricated path proves that as much as a real directory would.
+	// This usage error returns before runCheckHook reads wd.
 	wd := "/repo"
 
 	var stdout, stderr bytes.Buffer

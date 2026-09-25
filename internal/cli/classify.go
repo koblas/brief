@@ -5,64 +5,33 @@ import (
 	"strings"
 )
 
-// argKind is classifyDashArg's result: which of the six shapes root,
-// "new" and the help stub need to tell apart in their first argument,
-// since all three disable cobra's own flag parsing.
+// argKind is classifyDashArg's result: which of six shapes a first
+// argument takes, for the commands that disable cobra's own flag parsing.
 type argKind int
 
 const (
-	// argNotFlag is a plain word, "", "-", or "--" — pflag's own
-	// end-of-flags terminator, never a flag itself. The caller falls
-	// through to its own unknown-command/unknown-type wording.
+	// argNotFlag is a plain word, "", "-", or "--" (pflag's end-of-flags terminator).
 	argNotFlag argKind = iota
 
-	// argHelpFlag is "-h"/"--help" spelled with no attached value: bare,
-	// or a shorthand cluster made entirely of 'h' characters ("-hh",
-	// "-hhh", ...) — pflag's own shorthand-cluster parser consumes a run
-	// of defined, no-value shorthand characters without error, and "h"
-	// is the only such character this tree registers.
+	// argHelpFlag is "-h"/"--help" with no attached value: bare, or a shorthand cluster made entirely of 'h' ("-hh", "-hhh", ...).
 	argHelpFlag
 
-	// argHelpFlagWithValue is the help flag given an explicit value:
-	// "--help=<v>", or a single-dash all-'h' cluster followed by "="
-	// ("-h=<v>", "-hh=<v>", "-hh="). msg is that flag exactly as typed,
-	// value stripped, for the caller's "takes no value" message.
+	// argHelpFlagWithValue is the help flag with an explicit value ("--help=<v>", "-hh=<v>"); msg is the flag as typed, value stripped.
 	argHelpFlagWithValue
 
-	// argUnknownFlag is any other dash-prefixed token. msg is the
-	// pflag-shaped, single-line message the caller reports verbatim.
+	// argUnknownFlag is any other dash-prefixed token; msg is the pflag-shaped, single-line message to report verbatim.
 	argUnknownFlag
 
-	// argVersionFlag is exactly "--version", spelled with no attached
-	// value. msg is unknownLongFlagMessage("--version"), the same wording
-	// argUnknownFlag would report for it — so a caller that has no
-	// "--version" contract of its own (runNew, the help stub) can fold this
-	// case into its argUnknownFlag arm byte-for-byte. Root is the one
-	// caller with its own "--version" contract: it prints the version for
-	// a sole "--version" and reports its own "takes no arguments" copy for
-	// a trailing argument, using neither msg for that branch. "--version=<v>"
-	// does not match here: it classifies as argVersionFlagWithValue instead,
-	// since a value on "--version" is a different rule (root's "takes no
-	// value" case) than this exact-match kind carries.
+	// argVersionFlag is exactly "--version" with no attached value; msg is unknownLongFlagMessage("--version"). Root alone has its own "--version" contract and uses neither msg.
 	argVersionFlag
 
-	// argVersionFlagWithValue is "--version" given an explicit value:
-	// "--version=<v>", including an empty value ("--version="). msg is
-	// unknownLongFlagMessage(arg), which is identical to argVersionFlag's
-	// own msg since that function already drops the "=value" part — so
-	// runNew and the help stub fold this case into their existing
-	// argUnknownFlag, argVersionFlag arm with no wording change of their
-	// own. Root is the one caller with its own "--version" contract:
-	// it reports its own "takes no value" copy, using neither msg nor
-	// args[0] for that branch, and never checks for a trailing argument —
-	// a value on "--version" always wins over one.
+	// argVersionFlagWithValue is "--version=<v>", including an empty value; msg is unknownLongFlagMessage(arg), identical to argVersionFlag's own msg.
 	argVersionFlagWithValue
 )
 
-// classifyDashArg classifies arg the way root, "new" and the help stub
-// each need to. It has no precondition on arg: every input, including "",
-// "-", and any dash-prefixed garbage, resolves to one of the six argKind
-// values above without panicking.
+// classifyDashArg classifies arg into one of the argKind values above. Any
+// input, including "", "-" and dash-prefixed garbage, resolves without
+// panicking.
 func classifyDashArg(arg string) (argKind, string) {
 	if len(arg) < 2 || arg[0] != '-' || arg == "--" {
 		return argNotFlag, ""
@@ -102,9 +71,7 @@ func classifyDashArg(arg string) (argKind, string) {
 	return argUnknownFlag, unknownShortFlagMessage(cluster)
 }
 
-// isAllH reports whether s is one or more 'h' characters and nothing
-// else — the only shorthand this tree registers with no value, so a
-// cluster made entirely of 'h' parses exactly like a single "-h" does.
+// isAllH reports whether s is one or more 'h' characters and nothing else.
 func isAllH(s string) bool {
 	if s == "" {
 		return false
@@ -119,12 +86,10 @@ func isAllH(s string) bool {
 	return true
 }
 
-// unknownLongFlagMessage renders arg — a "--"-prefixed token that is
-// neither "--help" nor "--help=<v>" — the way pflag's own error would for
-// the same token on a leaf command: bad flag syntax when its name is
-// empty or starts with "-"/"=", else "unknown flag: --<name>" with any
-// attached "=<value>" trimmed. The result is already flattened to one
-// line.
+// unknownLongFlagMessage renders arg (a "--"-prefixed token other than
+// "--help"/"--help=<v>") the way pflag's own error would: bad flag syntax
+// when the name is empty or starts with "-"/"=", else "unknown flag:
+// --<name>" with any "=<value>" trimmed.
 func unknownLongFlagMessage(arg string) string {
 	name := arg[2:]
 	if name == "" || name[0] == '-' || name[0] == '=' {
@@ -136,15 +101,12 @@ func unknownLongFlagMessage(arg string) string {
 	return flattenOneLine("unknown flag: --" + name)
 }
 
-// unknownShortFlagMessage renders cluster — a single-dash token's
-// characters after the leading "-" — the way pflag's own shorthand-cluster
-// parser would: it consumes every leading 'h', the only defined no-value
-// shorthand this tree registers, before quoting the first character it
-// cannot resolve and the residual cluster from there. classifyDashArg
-// only calls this once it has ruled out cluster's portion before any "="
-// being entirely 'h', so the skip loop always stops before running off
-// the end of cluster and residual is never empty. The result is already
-// flattened to one line.
+// unknownShortFlagMessage renders cluster (a single-dash token's
+// characters after "-") the way pflag's shorthand-cluster parser would:
+// skip every leading 'h', then quote the first unresolved character and
+// the residual cluster. classifyDashArg only calls this once cluster's
+// portion before any "=" is known not to be entirely 'h', so residual is
+// never empty.
 func unknownShortFlagMessage(cluster string) string {
 	i := 0
 	for i < len(cluster) && cluster[i] == 'h' {
@@ -153,12 +115,8 @@ func unknownShortFlagMessage(cluster string) string {
 
 	residual := cluster[i:]
 
-	// pflag's own NotExistError quotes a raw byte, not residual's real
-	// UTF-8 rune: it widens the byte to a rune, re-encodes that as UTF-8,
-	// then widens that encoding's own first byte to a rune again. For any
-	// ASCII byte the round trip is the identity; for any multi-byte UTF-8
-	// lead byte it collapses to a single constant, 'Ã' (U+00C3) — pflag's
-	// own quirk, mirrored here byte-for-byte rather than decoded to the
-	// character actually typed.
+	// Mirrors pflag's own NotExistError, which quotes a raw byte rather
+	// than residual's real UTF-8 rune: any multi-byte lead byte collapses
+	// to the constant 'Ã' (U+00C3) instead of the character actually typed.
 	return flattenOneLine(fmt.Sprintf("unknown shorthand flag: %q in -%s", rune(string(residual[0])[0]), residual))
 }

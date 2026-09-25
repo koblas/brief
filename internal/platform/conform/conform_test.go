@@ -12,7 +12,7 @@ import (
 )
 
 // bodyOfLines returns a body of exactly n distinct lines, with a trailing
-// newline, mirroring scaffold_test's own helper of the same shape.
+// newline.
 func bodyOfLines(n int) []byte {
 	lines := make([]string, n)
 	for i := range lines {

@@ -1,9 +1,6 @@
-// Both cases below stay black-box: they decode through
-// decodeErrorDocument/decodeUsageErrorDocument (json_refusal_test.go,
-// json_usage_test.go), shared package cli_test helpers init_json_internal_test.go's
-// own white-box package cannot import without duplicating their full
-// key-set assertions. Every other init --json scenario in this package
-// moved there (rwfs.Mem).
+// Black-box: decodes through decodeErrorDocument/decodeUsageErrorDocument,
+// shared cli_test helpers the white-box init_json_internal_test.go cannot
+// import. Every other init --json scenario moved there (rwfs.Mem).
 
 package cli_test
 
@@ -18,9 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_init_json_refusal_reports_files_changed_false pins R3's refusal
-// shape for init: kind "refusal", files_changed false (the config never
-// parsed, so nothing was ever written), and a message naming the fix.
 func Test_init_json_refusal_reports_files_changed_false(t *testing.T) {
 	wd := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte("handoff-cap-lines: 0\n"), 0o600))
@@ -39,13 +33,9 @@ func Test_init_json_refusal_reports_files_changed_false(t *testing.T) {
 	assert.Contains(t, decoded.Fix, "brief init --force")
 }
 
-// Test_init_json_unknown_host_fix_agrees_with_the_message pins the MINOR
-// fix: R8's own unknown-host line trails prose ("to wire it by hand")
-// after its "; run '...'" clause, the one shape usageFix's own generic
-// extraction cannot recover (it requires the message to end at the closing
-// quote — see Test_json_mode_usage_error_fix_stops_at_the_quote_when_the_line_has_trailing_prose
-// in json_usage_test.go). error.fix must still name the same --print hint
-// the message itself does, not init's own --host invocation.
+// The unknown-host line trails prose after its "; run '...'" clause, a
+// shape the generic fix-extraction cannot recover; error.fix must still
+// name the same --print hint the message itself does.
 func Test_init_json_unknown_host_fix_agrees_with_the_message(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer

@@ -14,14 +14,10 @@ import (
 )
 
 // newHealthyDoctorFixture builds a wd with a valid, role-bound
-// ".brief.yaml", its default feature root ("docs/specifications"), a
-// ".git" directory, and a fully installed Claude Code integration — the
-// plugin manifest, both plugin skills, the hook, the three role agents,
-// the brief-workflow skill (host.Lookup(host.ClaudeCode)'s own paths, each
-// written from its own artifact.Render) and a root CLAUDE.md holding
-// SnippetBlock for the configured feature directory. This is the baseline
-// every case in this file starts from, mutated by exactly one deviation
-// per test.
+// ".brief.yaml", its default feature root, a ".git" directory, and a
+// fully installed Claude Code integration. This is the baseline every
+// case in this file starts from, mutated by exactly one deviation per
+// test.
 func newHealthyDoctorFixture(t *testing.T) string {
 	t.Helper()
 
@@ -56,7 +52,7 @@ func newHealthyDoctorFixture(t *testing.T) string {
 	return wd
 }
 
-// writeHostFile writes body to wd/relPath, creating relPath's own parent
+// writeHostFile writes body to wd/relPath, creating its parent
 // directories first.
 func writeHostFile(t *testing.T, wd, relPath string, body []byte) {
 	t.Helper()
@@ -66,21 +62,17 @@ func writeHostFile(t *testing.T, wd, relPath string, body []byte) {
 	require.NoError(t, os.WriteFile(path, body, 0o600))
 }
 
-// emptyHomeDir returns a doctor.Option pointing WithHomeDir at "" — every
-// test in this file that builds a Server directly (bypassing NewServer's
-// own os.UserHomeDir default) injects this, so a bare-name role binding
-// never resolves against the developer's own real "~/.claude/agents". An
-// empty home resolves to agentfile's own zero Tree (DirTree("")), which
-// FindIn never searches — the same "nothing here" result a real, empty
-// temp directory would produce, without touching disk.
+// emptyHomeDir returns a doctor.Option pointing WithHomeDir at "", so a
+// bare-name role binding never resolves against the developer's own real
+// "~/.claude/agents".
 func emptyHomeDir(t *testing.T) doctor.Option {
 	t.Helper()
 
 	return doctor.WithHomeDir(func() (string, error) { return "", nil })
 }
 
-// findCheck returns the first Check in report carrying id, failing the
-// test if none does.
+// findCheck returns the first Check carrying id, failing the test if none
+// does.
 func findCheck(t *testing.T, report doctor.Report, id string) doctor.Check {
 	t.Helper()
 
@@ -105,13 +97,6 @@ func checkIDs(report doctor.Report) []string {
 	return ids
 }
 
-// Test_diagnose_reports_every_check_ok_in_a_healthy_repository pins the
-// fixed row order (config-file, config-parse, config-values,
-// config-shadow, root-dir, env-git, env-path, host-plugin, host-hook,
-// host-skill, host-snippet, host-agents, roles, roles-skill) and that a
-// fully healthy, fully installed repository reports every row OK — not
-// merely "not ERROR or WARN", which a SKIP row (the no-config arm's own
-// shape) would also satisfy.
 func Test_diagnose_reports_every_check_ok_in_a_healthy_repository(t *testing.T) {
 	wd := newHealthyDoctorFixture(t)
 	self := filepath.Join(wd, "self-brief")
@@ -145,13 +130,6 @@ type diagnoseCase struct {
 	wantSeverity doctor.Severity
 }
 
-// Test_diagnose_classifies_common_setup_problems sweeps the setup faults
-// Diagnose must classify: an absent config warns config-file and skips
-// config-parse; an unparseable config errors config-parse and skips both
-// config-values and root-dir (the feature directory is unknown); a
-// missing or non-directory feature root errors root-dir; a ".git" file
-// (a worktree) satisfies env-git the same as a directory would, while no
-// ".git" at all warns it.
 func Test_diagnose_classifies_common_setup_problems(t *testing.T) {
 	cases := []diagnoseCase{
 		{
@@ -262,11 +240,7 @@ func Test_diagnose_classifies_common_setup_problems(t *testing.T) {
 	}
 }
 
-// Test_diagnose_reports_root_dir_readability_and_writability_separately
-// pins that root-dir checks readability before writability, each with its
-// own detail: an unreadable directory (0o000) never reaches the write
-// probe, while a readable-but-unwritable one (0o555) does. Both arms skip
-// under euid 0, where chmod's permission bits have no effect.
+// Skips under euid 0, where chmod's permission bits have no effect.
 func Test_diagnose_reports_root_dir_readability_and_writability_separately(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -298,11 +272,6 @@ func Test_diagnose_reports_root_dir_readability_and_writability_separately(t *te
 	}
 }
 
-// Test_diagnose_reports_one_config_values_row_per_violation_in_field_order
-// pins doctor's config-values fan-out: every *config.ValueError Inspect
-// reports becomes its own ERROR row, in Config's own field-declaration
-// order — step-file-pattern ahead of handoff-cap-lines — never collapsed
-// to the first violation the way config.Resolve's own refusal is.
 func Test_diagnose_reports_one_config_values_row_per_violation_in_field_order(t *testing.T) {
 	wd := newHealthyDoctorFixture(t)
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"),
@@ -326,26 +295,14 @@ func Test_diagnose_reports_one_config_values_row_per_violation_in_field_order(t 
 	assert.Contains(t, rows[1].Detail, "handoff-cap-lines")
 }
 
-// fsAbs joins slash-separated segments under "/", the way every
-// WithRootFS-backed test names an absolute path its fstest.MapFS fixture
-// is keyed against — config.LocateWithinFS, config.InspectFS and
-// repo.RootFS each strip the leading "/" internally (fsName) to get the
-// fs.FS-relative name back. Identical to config's and repo's own fsAbs
-// test helper, duplicated for the same reason those packages duplicate
-// fsName from each other.
+// fsAbs joins slash-separated segments under "/", the absolute path a
+// WithRootFS-backed test's fstest.MapFS fixture is keyed against.
 func fsAbs(elem ...string) string {
 	return filepath.FromSlash("/" + filepath.ToSlash(filepath.Join(elem...)))
 }
 
-// Test_diagnose_names_shadowed_ancestor_configs_in_config_shadow_detail
-// pins that a farther ancestor ".brief.yaml" — shadowed by the nearer one
-// Resolve/Inspect actually read — is still named, so a repository is
-// never left wondering which of two configs is in effect. config-shadow
-// itself stays OK: a shadowed ancestor is not a fault. This is a pure
-// config/env-git walk over WithRootFS's own fstest.MapFS: root-dir keeps
-// reading real disk regardless (root-dir is never fs.FS-backed — see
-// checks.go), so this test asserts nothing about it, and its fabricated
-// root ("/repo/...") is never expected to exist there.
+// root-dir keeps reading real disk regardless, so this test asserts
+// nothing about it.
 func Test_diagnose_names_shadowed_ancestor_configs_in_config_shadow_detail(t *testing.T) {
 	fsys := fstest.MapFS{
 		"repo/.git/HEAD":        &fstest.MapFile{Data: []byte("ref: refs/heads/main\n")},
@@ -362,13 +319,8 @@ func Test_diagnose_names_shadowed_ancestor_configs_in_config_shadow_detail(t *te
 	assert.Contains(t, check.Detail, rootConfig)
 }
 
-// Test_diagnose_ignores_an_ancestor_config_outside_the_enclosing_git_repository
-// pins the boundary rule at the doctor layer: an ancestor ".brief.yaml"
-// above the nearest enclosing git repository is never reported as this
-// repository's own config-file row — the family reports exactly as it
-// would for no config at all, matching the root init would actually write
-// to. Same WithRootFS/MapFS shape as the shadow test above; root-dir is
-// unasserted for the same reason.
+// An ancestor ".brief.yaml" above the nearest enclosing git repository is
+// never reported as this repository's own config-file row.
 func Test_diagnose_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
 	fsys := fstest.MapFS{
 		"home/.brief.yaml":    &fstest.MapFile{Data: []byte("progress-heading: \"## Home\"\n")},
@@ -420,24 +372,15 @@ func Test_diagnose_leaves_the_feature_root_byte_identical(t *testing.T) {
 	assert.Equal(t, doctor.SeverityOK, check.Severity, "control arm: the probe must have run and found the root writable")
 }
 
-// envPathCase is one row of Test_diagnose_classifies_env_path: opts
-// builds the Server options standing in for lookPath, executable and the
-// running version.
+// envPathCase is one row of Test_diagnose_classifies_env_path.
 type envPathCase struct {
 	name         string
 	opts         func(t *testing.T, found string) []doctor.Option
 	wantSeverity doctor.Severity
 }
 
-// Test_diagnose_classifies_env_path sweeps env-path's own version-comparison
-// rules against a bare fixture (no Claude Code integration installed, so
-// "not on PATH" stays WARN — the ERROR arm is
-// Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed's
-// own concern): brief missing from PATH warns; the PATH binary being the
-// same file as the running one is OK without ever reading a version; a
-// different file carrying the same, non-"(devel)" version is OK; a
-// different file carrying a different version, or one whose version cannot
-// be read, both warn.
+// No Claude Code integration is installed here, so "not on PATH" stays
+// WARN.
 func Test_diagnose_classifies_env_path(t *testing.T) {
 	cases := []envPathCase{
 		{
@@ -531,17 +474,7 @@ func Test_diagnose_classifies_env_path(t *testing.T) {
 	}
 }
 
-// Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed
-// pins env-path's own ERROR arm (R13): brief missing from PATH is ERROR
-// when the Claude Code integration is installed — any Plugin(true) ∪
-// Agents() file present, or a snippet block found — and unchanged WARN
-// otherwise. The brief-workflow skill alone does not count (Rule 1: the
-// skill is not an install signal, since uninstall can leave an edited
-// SKILL.md behind after everything else is removed). The four cases
-// differ in exactly one variable: what, if anything, is installed. lookPath
-// always errors here, so checkEnvPath never reaches its own OS-subject
-// identity check (sameFile, resolveSymlinks) — the fixture runs against an
-// in-memory fstest.MapFS rather than disk.
+// The brief-workflow skill alone does not count as installed.
 func Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -601,18 +534,6 @@ func Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed(t
 	}
 }
 
-// Test_diagnose_treats_an_unreadable_host_snippet_directory_as_present_not_absent
-// pins fix pass 8's M2 fix: a stat failure other than "not found" — here,
-// ".claude" itself at 0o000, so Lstat on ".claude/CLAUDE.md" fails with
-// permission denied rather than IsNotExist — must never be folded into
-// "absent". Repro: the same fixture with ".claude" readable reports
-// host-snippet OK "installed" and env-path ERROR (brief missing from
-// PATH, integration installed); with ".claude" at 0o000 the row must keep
-// discriminating "not readable" from "not installed", and env-path must
-// stay ERROR — a false "nothing here" reading of the permission error
-// would silently downgrade it to WARN, and the CLI's own exit code from 1
-// to 0 (Test_doctor_env_path_stays_error_when_the_host_snippet_directory_is_unreadable
-// pins that consequence at the CLI boundary).
 func Test_diagnose_treats_an_unreadable_host_snippet_directory_as_present_not_absent(t *testing.T) {
 	wd := newHostFixture(t)
 	claudeDir := filepath.Join(wd, ".claude")

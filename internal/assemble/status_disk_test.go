@@ -1,9 +1,7 @@
-// These Status scenarios stay on real disk: Status's own multi-feature
-// enumeration and ordering, the os.Root containment chain a symlinked or
-// unreadable feature directory exercises, and the openRoot test-injection
-// seam all live at the adapter layer StatusFS sits behind, one level below
-// anything an in-memory fs.FS can stand in for. StatusFS's own single-
-// feature content rules are pinned against fstest.MapFS in status_test.go.
+// These Status scenarios stay on real disk: multi-feature enumeration and
+// ordering, and the os.Root containment chain a symlinked or unreadable
+// feature directory exercises. StatusFS's own single-feature content rules
+// are pinned against fstest.MapFS in status_test.go.
 package assemble_test
 
 import (
@@ -27,27 +25,16 @@ func writeStepFile(t *testing.T, featureDir, name, content string) {
 }
 
 // writeConformingFeature creates featureDir and writes a specification and
-// state file that pass specFault/readStateFile — the same two checks
-// assemble.Start refuses on, so Status must not report a clean row for a
-// feature Start would refuse. Every fixture in this file that means to
-// exercise step-level behavior, not the spec/state gate itself, must route
-// its directory creation through this rather than a bare os.MkdirAll, or the
-// spec/state check now ahead of the step read would win the row's Problem
-// for the wrong reason.
+// state file that pass specFault/readStateFile, so a fixture exercising
+// step-level behavior does not trip the spec/state gate instead.
 func writeConformingFeature(t *testing.T, cfg config.Config, featureDir string) {
 	t.Helper()
 
 	checkWriteFeature(t, cfg, featureDir, checkConformingSpec(cfg), checkConformingState(cfg))
 }
 
-// Test_status_marks_a_feature_whose_step_frontmatter_does_not_parse is the
-// core SCENARIO-11 claim: a malformed feature (delta, whose one step file
-// carries no frontmatter at all) gets a Problem-carrying row of its own
-// rather than failing the whole call, and — the control that proves the
-// tolerance does not blind Status to the rest — the other three features'
-// rows are byte-identical to what they would be with no malformed feature
-// present. Real disk: the claim is about Status enumerating four sibling
-// feature directories, not about one feature's own content.
+// delta's malformed step file gets a Problem-carrying row of its own; the
+// other three features' rows prove the tolerance does not blind the rest.
 func Test_status_marks_a_feature_whose_step_frontmatter_does_not_parse(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -105,12 +92,8 @@ func Test_status_marks_a_feature_whose_step_frontmatter_does_not_parse(t *testin
 	assert.Equal(t, "run 'brief check delta' to list every fault", delta.Problem.Fix)
 }
 
-// Test_status_marks_a_feature_whose_step_file_cannot_be_read uses a step
-// file that is a symlink escaping the feature root: deterministic and
-// needs no privileges, unlike a chmod case. os.Root refuses to follow it
-// ("path escapes from parent"), and that refusal is what Status must
-// degrade into a Problem rather than propagate. Real disk: the refusal is
-// os.Root's own containment behavior.
+// A step file that is a symlink escaping the feature root: os.Root's own
+// "path escapes from parent" refusal, degraded into a Problem.
 func Test_status_marks_a_feature_whose_step_file_cannot_be_read(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -133,13 +116,8 @@ func Test_status_marks_a_feature_whose_step_file_cannot_be_read(t *testing.T) {
 	assert.Equal(t, "make it readable and re-run", rows[0].Problem.Fix)
 }
 
-// Test_status_marks_a_feature_directory_that_cannot_be_opened injects an
-// EACCES failure through assemble.SetOpenRootForTest rather than chmod:
-// root bypasses ordinary permission checks, so a chmod-000 directory does
-// not reproduce this branch under every CI identity, and a skip keyed on
-// os.Geteuid would let the branch go untested there with no signal. Real
-// disk: openRoot is the adapter-level containment hook StatusFS never
-// touches.
+// Injects an EACCES failure through SetOpenRootForTest rather than chmod,
+// which root would bypass under any CI identity.
 func Test_status_marks_a_feature_directory_that_cannot_be_opened(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -165,13 +143,8 @@ func Test_status_marks_a_feature_directory_that_cannot_be_opened(t *testing.T) {
 	assert.Equal(t, "make it readable and re-run", rows[0].Problem.Fix)
 }
 
-// Test_status_marks_a_symlinked_feature_directory_rather_than_dropping_it
-// is the change of behaviour SCENARIO-11 owns: a symlink named like a
-// feature, sitting in the feature root, must not vanish from status the
-// way it did before this scenario (no row at all). Its target is a
-// perfectly good feature directory — the row is marked because brief does
-// not follow the link, not because anything about the target is wrong.
-// Real disk: the subject is the top-level symlink itself.
+// The target is a perfectly good feature directory: the row is marked
+// because brief does not follow the link, not because the target is wrong.
 func Test_status_marks_a_symlinked_feature_directory_rather_than_dropping_it(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -198,12 +171,8 @@ func Test_status_marks_a_symlinked_feature_directory_rather_than_dropping_it(t *
 	assert.Equal(t, "replace it with a real directory", rows[0].Problem.Fix)
 }
 
-// Test_status_skips_a_regular_file_in_the_feature_directory_without_a_row
-// is the control for the symlink test above, differing in exactly one
-// variable: a regular file beside three good features yields three rows,
-// not four, and no Problem — pinning SCENARIO-10's decision ("Status
-// skips non-directories") against the symlink branch widening to catch
-// every non-directory entry. Real disk: the top-level entry-type switch.
+// Control for the symlink test above: a regular file beside three good
+// features yields three rows, not four, and no Problem.
 func Test_status_skips_a_regular_file_in_the_feature_directory_without_a_row(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -228,14 +197,9 @@ func Test_status_skips_a_regular_file_in_the_feature_directory_without_a_row(t *
 	}
 }
 
-// Test_status_still_propagates_an_unreadable_top_level_feature_directory
-// is the control that keeps the malformed-feature tolerance scoped to one
-// feature at a time: a failure opening cfg.FeatureDirectory itself — not
-// one feature's directory — still fails the whole call. A self-referential
-// symlink at that path is used rather than chmod: it makes os.OpenRoot
-// fail with ELOOP independent of OS permission bits or effective uid,
-// exercising the same propagate branch a chmod-000 root would, under any
-// CI identity. Real disk: cfg.FeatureDirectory's own open call.
+// A failure opening cfg.FeatureDirectory itself, not one feature's
+// directory, still fails the whole call. A self-referential symlink makes
+// os.OpenRoot fail with ELOOP, independent of OS permission bits.
 func Test_status_still_propagates_an_unreadable_top_level_feature_directory(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -251,11 +215,7 @@ func Test_status_still_propagates_an_unreadable_top_level_feature_directory(t *t
 	assert.Nil(t, rows)
 }
 
-// Test_status_still_propagates_an_invalid_step_file_pattern is the other
-// top-level control: an invalid configured pattern fails before any
-// feature is read, and SCENARIO-11 does not change that. Real disk: the
-// claim is about Status's own precompute-before-listing order, which needs
-// only a real, empty feature-directory root to exercise.
+// An invalid configured pattern fails before any feature is read.
 func Test_status_still_propagates_an_invalid_step_file_pattern(t *testing.T) {
 	cfg := fixtureConfig()
 	cfg.StepFilePattern = "no-verb-in-here.md"
@@ -270,10 +230,8 @@ func Test_status_still_propagates_an_invalid_step_file_pattern(t *testing.T) {
 	assert.Nil(t, rows)
 }
 
-// Test_status_returns_nil_not_an_empty_slice_for_zero_features pins the
-// nil-vs-empty-slice distinction SCENARIO-15's future --json marshaling
-// depends on, for a feature root that exists but holds no entries at all —
-// distinct from the "root does not exist" case below.
+// A feature root that exists but holds no entries at all, distinct from
+// the "root does not exist" case below.
 func Test_status_returns_nil_not_an_empty_slice_for_zero_features(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -287,9 +245,7 @@ func Test_status_returns_nil_not_an_empty_slice_for_zero_features(t *testing.T) 
 	assert.Nil(t, rows)
 }
 
-// Test_status_reports_no_features_when_the_feature_root_does_not_exist is
-// R14's "nothing to return is not an error" case: a repository that has
-// never run brief has no feature-directory tree at all.
+// A repository that has never run brief has no feature-directory tree at all.
 func Test_status_reports_no_features_when_the_feature_root_does_not_exist(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -302,10 +258,8 @@ func Test_status_reports_no_features_when_the_feature_root_does_not_exist(t *tes
 	assert.Empty(t, rows)
 }
 
-// Test_status_propagates_a_feature_root_that_is_not_a_directory is the
-// control arm for the test above: a feature-root path that exists but is
-// a regular file is a misconfiguration, not an empty repository, and must
-// stay an error rather than being swallowed by the same ErrNotExist guard.
+// Control arm for the test above: a regular file where the feature root
+// belongs is a misconfiguration, not an empty repository.
 func Test_status_propagates_a_feature_root_that_is_not_a_directory(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -319,14 +273,9 @@ func Test_status_propagates_a_feature_root_that_is_not_a_directory(t *testing.T)
 	assert.Nil(t, rows)
 }
 
-// Test_status_orders_features_in_byte_order_not_case_insensitive_order
-// pins fs.ReadDir's documented byte order against a future case-insensitive
-// collation. "Zeta", "alpha" and "Beta" differ from each other by more than
-// case, so APFS's case-insensitive filesystem cannot fold two of them
-// together and mask the ordering claim. Green on arrival is expected here:
-// io/fs.ReadDir and os.Root.FS's ReadDirFS both document "sorted by
-// filename" byte order, and Status relies on that without adding its own
-// sort. Real disk: the claim is about os.Root.FS's own ReadDir order.
+// "Zeta", "alpha" and "Beta" differ by more than case, so a
+// case-insensitive filesystem cannot fold two of them together and mask
+// the ordering claim.
 func Test_status_orders_features_in_byte_order_not_case_insensitive_order(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()

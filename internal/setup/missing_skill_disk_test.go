@@ -1,10 +1,8 @@
 package setup_test
 
-// OS-subject: every case in this file binds a bare-name planner or
-// implementer role, which reaches agentfile.ResolveBinding's own real file
-// search and planBoundAgent's own real os.Lstat/os.ReadFile — neither is
-// routed through the fsRoot seam (fs.go, doc.go), so a Mem fixture would
-// silently resolve against nothing rather than this file's own content.
+// Every case here binds a bare-name role, reaching agentfile.ResolveBinding's
+// real file search and planBoundAgent's real os.Lstat/os.ReadFile; a Mem
+// fixture would silently resolve against nothing instead.
 
 import (
 	"os"
@@ -17,10 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newServerWithHome returns a Server whose own home directory is pinned to
-// home — every test in this file binds a bare-name role, so leaving the
-// default os.UserHomeDir in place would make the result depend on the
-// developer's own "~/.claude/agents".
+// newServerWithHome returns a Server pinned to home, so results don't depend
+// on the developer's own "~/.claude/agents".
 func newServerWithHome(t *testing.T, home string) *setup.Server {
 	t.Helper()
 
@@ -36,10 +32,8 @@ func writeMissingSkillAgent(t *testing.T, path, body string) {
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
 }
 
-// writeConfigWithRoles writes a minimal, valid ".brief.yaml" at wd binding
-// roles — one line per non-empty field, in RoleBindings' own order — the
-// same "edited but valid" shape Test_init_with_agents_never_edits_an_existing_config
-// already relies on to keep planConfig's own ActionKept branch.
+// writeConfigWithRoles writes a minimal ".brief.yaml" at wd binding roles,
+// one line per non-empty field, in RoleBindings' own order.
 func writeConfigWithRoles(t *testing.T, wd string, planner, implementer, reviewer string) {
 	t.Helper()
 
@@ -59,10 +53,8 @@ func writeConfigWithRoles(t *testing.T, wd string, planner, implementer, reviewe
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(body), 0o600))
 }
 
-// Test_init_reports_bound_agents_missing_the_workflow_skill pins
-// Result.AgentsMissingSkill (S06): the report covers bare-name planner and
-// implementer bindings only, one item per lacking agentfile.Definition,
-// never touching the file itself.
+// Result.AgentsMissingSkill covers only bare-name planner and implementer
+// bindings, one item per lacking agentfile.Definition.
 func Test_init_reports_bound_agents_missing_the_workflow_skill(t *testing.T) {
 	t.Run("bare project agent lacking the skill is listed and left untouched", func(t *testing.T) {
 		wd := t.TempDir()

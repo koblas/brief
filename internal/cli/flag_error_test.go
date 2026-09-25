@@ -10,12 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_reports_an_undefined_long_flag_as_one_usage_line_naming_the_command_invocation
-// is SCENARIO-02's table: every leaf reports an undefined long flag through
-// the same root SetFlagErrorFunc frame — "brief <path>: <pflag error>; run
-// '<invocation>'" — with empty stdout and exit 2. Expected stderr is written
-// out literally per row, never built from a production invocation constant
-// (e.g. finishInvocation): building it from the constant would pin nothing.
+// wantStderr is written out literally per row, not built from a production
+// invocation constant, so the assertion pins the literal rather than the code.
 func Test_reports_an_undefined_long_flag_as_one_usage_line_naming_the_command_invocation(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -74,14 +70,6 @@ func Test_reports_an_undefined_long_flag_as_one_usage_line_naming_the_command_in
 	}
 }
 
-// Test_new_reports_the_version_flag_as_unknown pins that "--version" is
-// root-only (R6): a bare "new --version" (no subtype) is reported byte-
-// identical to today's argUnknownFlag wording, through runNew's own
-// argVersionFlag arm.
-//
-// Mutation-verified: routing runNew's argVersionFlag case to argNotFlag's
-// bodyless arm instead of the argUnknownFlag one reds this test — "new
-// --version" would then report "unknown type "--version"" instead.
 func Test_new_reports_the_version_flag_as_unknown(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -94,42 +82,8 @@ func Test_new_reports_the_version_flag_as_unknown(t *testing.T) {
 	assert.Equal(t, "brief new: unknown flag: --version; run 'brief new <type> --help'", oneLine(t, &stderr))
 }
 
-// Test_reports_the_version_flag_as_unknown_outside_the_root is SCENARIO-06's
-// table (R6): "--version" is root-only, so "help --version" and every
-// leaf's "--version" are reported byte-identical to today's pre-feature
-// bytes — the help stub's own argUnknownFlag/argVersionFlag/
-// argVersionFlagWithValue fold for "help --version", and pflag's own
-// unknown-flag path for every leaf, since no leaf registers a "version"
-// flag and internal/cli has no persistent flags. "new --version" stays in
-// its own standalone test above; "new"/"help" "--version=x"/"--version="
-// stay in the cross-site table
-// (Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites).
-// This table owns only "help --version" (bare) and the seven leaves, one
-// pin per line.
-//
-// Mutation-verified, restored byte-identical after each:
-//   - help stub (cli.go, newHelpCommand's switch): moving argVersionFlag out
-//     of "case argUnknownFlag, argVersionFlag, argVersionFlagWithValue:" into
-//     the bodyless "case argNotFlag, argVersionFlag:" arm reds only the
-//     "help --version" row — it then falls through to cmd.Root().Find(args)
-//     and reports `brief help: unknown command "--version"; expected one
-//     of: ...` — and nothing else in this table or the cross-site table's
-//     "help --version=x"/"help --version=" rows, proving the bare-flag and
-//     value arms are independently guarded.
-//   - leaf control arm: registering a "version" bool flag on "start"'s own
-//     flag set reds exactly the two "start" rows in this table ("start
-//     --version demo", "start --version=x demo"), proving those two rows
-//     are falsifiable, plus start's help goldens
-//     (Test_prints_start_help_as_usage_line_prose_and_flag_table,
-//     Test_help_start_prints_the_literal_start_help), which render start's
-//     flag table and are expected to move when a real flag is registered.
-//
-// The other six leaf rows (finish, status, check, new feature, new step,
-// completion) are behavior pins, not guard evidence: no flag registration
-// or classifyDashArg call sits between pflag and those bytes at a leaf, so
-// there is no guard in this package to break — pflag's own unknown-flag
-// path produces them unconditionally, the same as any other undefined long
-// flag on those commands.
+// "new --version" stays in its own standalone test above; "new"/"help"
+// "--version=x"/"--version=" stay in the cross-site table below.
 func Test_reports_the_version_flag_as_unknown_outside_the_root(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -198,20 +152,9 @@ func Test_reports_the_version_flag_as_unknown_outside_the_root(t *testing.T) {
 	}
 }
 
-// Test_reports_an_undefined_short_flag_as_one_usage_line_naming_the_command_invocation
-// is SCENARIO-03's table: every leaf reports an undefined shorthand flag
-// through the same root SetFlagErrorFunc frame as SCENARIO-02's long-flag
-// table, plus the grouped-shorthand shapes pflag produces for a cluster of
-// short flags. pflag quotes the whole cluster when every letter in it is
-// undefined ("-xy" -> "in -xy") but quotes only the residual cluster once a
-// leading defined shorthand ("-h") has been consumed ("-hx" -> "in -x").
-//
-// The "residual cluster after a defined -h" row pins pflag's own
-// leading-shorthand-skip behavior at a leaf's real pflag.Parse — pflag's
-// own parseSingleShortArg loop, not any function this package owns (see
-// unknownShortFlagMessage in classify.go for the same skip reimplemented
-// for root/new/help's hand-classified args[0]) — so it is a golden
-// literal pinned here, not mutation-verifiable against our own code.
+// pflag quotes the whole shorthand cluster when every letter is undefined
+// ("-xy" -> "in -xy") but only the residual once a leading defined shorthand
+// ("-h") is consumed ("-hx" -> "in -x").
 func Test_reports_an_undefined_short_flag_as_one_usage_line_naming_the_command_invocation(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -275,15 +218,9 @@ func Test_reports_an_undefined_short_flag_as_one_usage_line_naming_the_command_i
 	}
 }
 
-// Test_rejects_a_single_dash_long_flag_as_one_usage_line_naming_the_command_invocation
-// is SCENARIO-04's table: a single-dash spelling of a long flag ("-json",
-// "-handoff", "-state", "-help") parses as a pflag shorthand cluster, not
-// as the long flag, and is rejected through the same root SetFlagErrorFunc
-// frame as SCENARIO-02/03. "-help" and "-handoff" both start with "h",
-// cobra's auto help shorthand: pflag consumes it first and reports only
-// the residual cluster ("-elp", "-andoff"), the same residual rule
-// SCENARIO-03 pinned for "-hx". "-json" and "-state" have no defined first
-// letter, so the whole word is quoted.
+// A single-dash spelling of a long flag parses as a pflag shorthand cluster,
+// not the long flag. "-help"/"-handoff" start with cobra's auto "h" help
+// shorthand, so pflag consumes it and reports only the residual cluster.
 func Test_rejects_a_single_dash_long_flag_as_one_usage_line_naming_the_command_invocation(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -352,11 +289,6 @@ func Test_rejects_a_single_dash_long_flag_as_one_usage_line_naming_the_command_i
 	}
 }
 
-// Test_flattens_a_flag_error_that_embeds_a_newline_to_one_stderr_line pins
-// that the root FlagErrorFunc frame runs pflag's own error text through
-// flattenOneLine before embedding it: a flag name carrying a literal
-// newline (shell-quoted, e.g. $'--fo\no') would otherwise make pflag's
-// error itself span two lines, breaking R14's one-line contract.
 func Test_flattens_a_flag_error_that_embeds_a_newline_to_one_stderr_line(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -390,13 +322,9 @@ func Test_flattens_a_flag_error_that_embeds_a_newline_to_one_stderr_line(t *test
 	}
 }
 
-// Test_reports_a_flag_missing_its_value_as_one_usage_line_naming_the_command_invocation
-// is SCENARIO-05's table: "finish" is the only leaf with a value-taking flag
-// (--handoff, --state, both String); a bare --json can never be "missing its
-// value" because pflag gives every Bool an implicit NoOptDefVal. Flag
-// parsing runs before runFinish's own argument-count check, so a missing
-// value is reported even when no positional was given at all. Expected
-// stderr is written out literally per row, per the file's existing rule.
+// "finish" is the only leaf with a value-taking flag; flag parsing runs
+// before its argument-count check, so a missing value is reported even with
+// no positional given at all.
 func Test_reports_a_flag_missing_its_value_as_one_usage_line_naming_the_command_invocation(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -440,12 +368,9 @@ func Test_reports_a_flag_missing_its_value_as_one_usage_line_naming_the_command_
 	}
 }
 
-// Test_reports_an_empty_flag_value_as_that_flag_being_required pins that
 // "--handoff=" / "--state=" are not flag-parse errors: pflag accepts the
-// explicit empty value, so parsing succeeds and runFinish's own
-// handoffPath == "" / statePath == "" guard reports it as the flag being
-// required, in brief's own required-flag wording rather than pflag's
-// "needs an argument" wording.
+// explicit empty value, so parsing succeeds and the required-flag check
+// reports it instead.
 func Test_reports_an_empty_flag_value_as_that_flag_being_required(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -479,13 +404,8 @@ func Test_reports_an_empty_flag_value_as_that_flag_being_required(t *testing.T) 
 	}
 }
 
-// Test_takes_the_next_flag_as_the_value_of_a_flag_missing_its_value pins
-// that pflag takes the next token as a flag's value even when that token
-// itself starts with "--": "--handoff --state s.md" reads "--state" as
-// --handoff's value and "s.md" as a third positional, so the result is
-// "too many arguments", never a "needs an argument" error; "--handoff
-// --state" with nothing after it reads "--state" as --handoff's value and
-// leaves --state itself unset, so the result is "--state is required".
+// pflag takes the next token as a flag's value even when that token itself
+// starts with "--".
 func Test_takes_the_next_flag_as_the_value_of_a_flag_missing_its_value(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -519,15 +439,8 @@ func Test_takes_the_next_flag_as_the_value_of_a_flag_missing_its_value(t *testin
 	}
 }
 
-// Test_reports_an_undefined_flag_as_a_usage_error_whichever_side_of_help_it_is_on
-// is SCENARIO-06's table: pflag's ParseFlags stops at the first bad token,
-// so an undefined flag is a usage error through the same root
-// SetFlagErrorFunc frame as SCENARIO-02 regardless of where --help/-h falls
-// relative to it. Every leaf gets both orders of --help; -h is scoped to
-// start only, since cobra's InitDefaultHelpFlag registers -h identically on
-// every leaf and a per-leaf -h row would prove nothing more about the
-// frame. Expected stderr reuses SCENARIO-02's literals verbatim: --help/-h
-// in the args changes nothing about the line pflag reports.
+// pflag's ParseFlags stops at the first bad token, so an undefined flag is a
+// usage error regardless of where --help/-h falls relative to it.
 func Test_reports_an_undefined_flag_as_a_usage_error_whichever_side_of_help_it_is_on(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -621,12 +534,9 @@ func Test_reports_an_undefined_flag_as_a_usage_error_whichever_side_of_help_it_i
 	}
 }
 
-// Test_prints_help_for_the_h_shorthand_alone is the control arm for the -h
-// rows above: it proves -h alone still prints help (nil error, exit 0,
-// empty stderr, the same start prose Test_prints_the_start_usage_for_help
-// pins for --help), and that -h's stdout is byte-identical to --help's.
-// Without this, "start --bogus -h" would pass even if -h were itself
-// undefined, since pflag errors on --bogus before -h is ever parsed.
+// Control arm for the -h rows above: without it, "start --bogus -h" would
+// pass even if -h were itself undefined, since pflag errors on --bogus
+// before -h is ever parsed.
 func Test_prints_help_for_the_h_shorthand_alone(t *testing.T) {
 	wd := t.TempDir()
 	var helpStdout, helpStderr bytes.Buffer
@@ -646,17 +556,8 @@ func Test_prints_help_for_the_h_shorthand_alone(t *testing.T) {
 	assert.Equal(t, helpStdout.String(), shortStdout.String())
 }
 
-// Test_json_flag_with_a_value_never_reaches_the_bool_flag_rewrite pins R5:
-// "--json=<v>" — any value, including an explicit empty one — is caught by
-// run's own scanJSONFlag before ExecuteContext ever runs, so it is always
-// "'--json' takes no value", never boolFlagParseMessage's
-// strconv-rejected-value wording, which fires only once a value actually
-// reaches pflag.Parse. Before this scenario, start's --json was the only
-// bool flag brief defined, and these two rows pinned boolFlagParseMessage's
-// rewrite of pflag's raw strconv wording; the JSON-mode matrix in
-// json_usage_test.go's "status --help=x --json" row now carries that
-// proof instead, using a leaf's auto-registered --help — the live bool
-// flag once --json is intercepted ahead of pflag entirely.
+// "--json=<v>", any value including an explicit empty one, is caught before
+// ExecuteContext ever runs, so it always reports "takes no value".
 func Test_json_flag_with_a_value_never_reaches_the_bool_flag_rewrite(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -690,12 +591,8 @@ func Test_json_flag_with_a_value_never_reaches_the_bool_flag_rewrite(t *testing.
 	}
 }
 
-// Test_accepts_the_double_dash_json_flag is one shape of the control arm
-// for the tables above: "--json" differs from a rejected row only in the
-// flag's dash count ("-json" -> "--json") and succeeds, proving the
-// rejection above is specific to the single-dash spelling rather than to
-// the flag or command itself. JSON body is already pinned in
-// start_test.go.
+// Control arm: differs from a rejected row above only in dash count, and
+// succeeds — proving the rejection is specific to the single-dash spelling.
 func Test_accepts_the_double_dash_json_flag(t *testing.T) {
 	wd := newStartFixture(t, "open")
 	var stdout, stderr bytes.Buffer
@@ -707,10 +604,6 @@ func Test_accepts_the_double_dash_json_flag(t *testing.T) {
 	assert.Empty(t, stderr.String())
 }
 
-// Test_accepts_the_double_dash_handoff_and_state_flags is the
-// --handoff/--state shape of the control arm: finish's disk effects are
-// already pinned in finish_test.go, so this asserts only the observable
-// this file's rejected rows share, nil error and exit 0.
 func Test_accepts_the_double_dash_handoff_and_state_flags(t *testing.T) {
 	wd := newFinishCLIFixture(t)
 	handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
@@ -723,13 +616,8 @@ func Test_accepts_the_double_dash_handoff_and_state_flags(t *testing.T) {
 	assert.Equal(t, 0, cli.ExitCode(err))
 }
 
-// Test_prints_help_for_the_hh_cluster_alone is the "-hh" shape of
-// Test_prints_help_for_the_h_shorthand_alone's control arm: a shorthand
-// cluster made entirely of "h" characters parses exactly like a single
-// "-h" does for pflag's own shorthand-cluster parser, so it stays root's,
-// "new"'s and the help stub's own sole-argument "print help" case (see
-// Test_help_flag_as_the_sole_argument_prints_the_help_stubs_own_usage,
-// help_test.go, for the help stub's pinned golden of that same case).
+// A shorthand cluster made entirely of "h" characters parses like a single
+// "-h" for pflag's own shorthand-cluster parser.
 func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -764,35 +652,9 @@ func Test_prints_help_for_the_hh_cluster_alone(t *testing.T) {
 	}
 }
 
-// Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites
-// crosses root, "new" and the help stub against one shared list of
-// dash-prefixed tokens: the same classifyDashArg call backs all three, so
-// each token's kind is identical at every site — only the invocation named
-// in the "run '...'" tail, and the command-path prefix, differ per site.
-//
-// Mutation-verified, restored byte-identical after each: narrowing
-// classifyDashArg's hasEq branch to only single-character all-h names (so
-// "-h=<v>" still classifies as argHelpFlagWithValue but "-hh=<v>"/"-hh="
-// fall through to the unknown-flag branch instead) reds exactly the six
-// "-hh=x"/"-hh=" rows at root, new and help, and nothing else. Dropping
-// classifyDashArg's "--version=" prefix branch reds only the two root
-// "--version=*" rows; the "new"/"help" "--version=*" rows stay green,
-// since they already fold argUnknownFlag into the same wording. Routing
-// runNew's (respectively the help stub's) argVersionFlagWithValue case to
-// the bodyless argNotFlag arm reds only that site's two "--version=*"
-// rows, proving each site's fold is independent of the other's.
-//
-// The "-v"/"-v=x"/"-vh"/"-hv" group pins R5: -v stays an unknown shorthand
-// at every site, never a --version alias. Mutation-verified against the
-// whole package, restored byte-identical after each: routing
-// classifyDashArg's final argUnknownFlag return to argVersionFlag (with msg
-// unknownLongFlagMessage(arg)) whenever arg has a "-v" prefix reds exactly
-// the "-v"/"-v=x"/"-vh" rows at all three sites and nothing else in the
-// package; it does not reach the "-hv" rows, since that arg starts "-h"
-// rather than "-v". Widening isAllH to also accept 'v' reds exactly the
-// "-hv" rows (and "-v"/"-vh") at all three sites and nothing else instead,
-// since they then classify as argHelpFlag; of the two mutations, only this
-// one reaches "-hv".
+// Crosses root, "new" and the help stub against one shared list of
+// dash-prefixed tokens: each token's kind must be identical at every site,
+// differing only in the invocation named in the "run '...'" tail.
 func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_sites(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -864,7 +726,7 @@ func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_s
 		{name: "new -x", args: []string{"new", "-x"}, wantStderr: "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'"},
 		{name: "help -x", args: []string{"help", "-x"}, wantStderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'"},
 
-		// "-v" (R5: -v is reserved for a future --verbose, never a --version alias)
+		// -v is reserved for a future --verbose, never a --version alias.
 		{name: "root -v", args: []string{"-v"}, wantStderr: "brief: unknown shorthand flag: 'v' in -v; run 'brief <command> --help'"},
 		{name: "new -v", args: []string{"new", "-v"}, wantStderr: "brief new: unknown shorthand flag: 'v' in -v; run 'brief new <type> --help'"},
 		{name: "help -v", args: []string{"help", "-v"}, wantStderr: "brief help: unknown shorthand flag: 'v' in -v; run 'brief help <command>'"},
@@ -900,23 +762,9 @@ func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_s
 	}
 }
 
-// Test_quotes_a_multibyte_unknown_shorthand_flag_byte_identically_across_leaf_root_and_new
-// pins that classify.go's unknownShortFlagMessage (backing root, "new" and
-// the help stub) quotes a non-ASCII residual byte exactly the way pflag's
-// own NotExistError does for the same token at a leaf's real pflag.Parse:
-// both take the residual's first byte, not its real UTF-8 rune, so every
-// row's quoted character is pflag's own quirk ('Ã', U+00C3) rather than
-// the character actually typed — pinned deliberately, not "fixed" to show
-// the real one. wantLeaf is pflag's own message, observed directly rather
-// than derived from any production constant; wantRoot/wantNew are asserted
-// equal to it both as full literals and, explicitly, on the message
-// segment between "brief <path>: " and "; run '" alone, since that segment
-// is the one classifyDashArg's callers all build from the same
-// unknownShortFlagMessage call.
-//
-// Mutation-verified: quoting rune(residual[0]) instead of pflag's
-// round-tripped byte reds only the "outside the Latin-1 Supplement block"
-// row; the two Latin-1 rows stay green, since both forms agree there.
+// A non-ASCII residual byte is quoted using pflag's own quirk of taking the
+// residual's first byte, not its real UTF-8 rune, so the quoted character is
+// not the one actually typed — pinned deliberately, not "fixed".
 func Test_quotes_a_multibyte_unknown_shorthand_flag_byte_identically_across_leaf_root_and_new(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -986,10 +834,8 @@ func Test_quotes_a_multibyte_unknown_shorthand_flag_byte_identically_across_leaf
 	}
 }
 
-// flagMessagePart extracts the message segment between "brief <path>: "
-// and the trailing "; run '<invocation>'" every usage error in this file
-// shares, so a test can compare that segment alone across sites whose
-// path and invocation differ.
+// flagMessagePart extracts the message between "brief <path>: " and the
+// trailing "; run '<invocation>'".
 func flagMessagePart(t *testing.T, line, prefix string) string {
 	t.Helper()
 
@@ -1002,10 +848,6 @@ func flagMessagePart(t *testing.T, line, prefix string) string {
 	return msg
 }
 
-// Test_accepts_the_double_dash_help_flag_on_every_leaf is the --help shape
-// of the control arm, one row per leaf: help text is already pinned in
-// help_test.go's goldens, so each row asserts only nil error, exit 0, and
-// empty stderr.
 func Test_accepts_the_double_dash_help_flag_on_every_leaf(t *testing.T) {
 	tests := []struct {
 		name string

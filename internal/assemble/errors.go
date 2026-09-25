@@ -8,25 +8,18 @@ import (
 	"strings"
 )
 
-// ErrNoSuchFeature is returned when the named feature has no directory
-// under the configured feature directory.
+// ErrNoSuchFeature is returned when the named feature has no directory.
 var ErrNoSuchFeature = errors.New("no such feature")
 
-// ErrMalformedFeature is returned when a feature directory exists but is
-// missing a file Start requires, such as its specification or state file,
-// or that file cannot be read as intended — including a fenced code block
-// that never closes, which would otherwise make every configured section
-// after the fence opens read as absent.
+// ErrMalformedFeature is returned when a feature directory is missing a
+// file Start requires, or that file cannot be read or parsed.
 var ErrMalformedFeature = errors.New("malformed feature")
 
 // Problem describes why Status could not read a feature directory or one
-// of its step files, or why Start refused to assemble a Brief: Path is the
-// absolute path of the offending directory or file — the step file itself
-// when the fault is that file's own frontmatter, never the feature
-// directory it lives in — Detail is the underlying failure's own message,
-// Fix is the one-line remedy printed beside it, and Line is the 1-based
-// line number within Path the fault points at (0 when it names the whole
-// file), copied from the *RefusalError that produced it.
+// of its step files, or why Start refused to assemble a Brief. Path is the
+// offending directory or file, Detail is the failure's message, Fix is the
+// one-line remedy, and Line is the 1-based line within Path the fault
+// points at (0 for the whole file).
 type Problem struct {
 	Path   string
 	Detail string
@@ -35,15 +28,10 @@ type Problem struct {
 }
 
 // RefusalError is the read-side refusal Start returns when it declines to
-// assemble a Brief rather than return one that silently omits context: the
-// embedded Problem names the absolute path, what was wrong with it, how to
-// fix it, and the 1-based line number within Path the refusal points at (0
-// when it names the whole file); Err is the sentinel this refusal wraps for
-// errors.Is. cli/refusal.go renders these fields into R14a's one-line
-// refusal template, appending ":Line" to the path when Problem.Line is set,
-// with no "(no files changed)" tail: a read refusal changes nothing on disk
-// by construction. It is the read-side counterpart of scaffold.RefusalError,
-// duplicated rather than shared because assemble must not import scaffold.
+// assemble a Brief rather than return one that silently omits context. Err
+// is the sentinel this refusal wraps for errors.Is. It is the read-side
+// counterpart of scaffold.RefusalError, duplicated rather than shared
+// because assemble must not import scaffold.
 type RefusalError struct {
 	Problem
 
@@ -65,17 +53,11 @@ func (e *RefusalError) Unwrap() error {
 	return e.Err
 }
 
-// readClassFix is the remedy offered when a feature directory or step file
-// could not be opened or read at all, as opposed to being read and found
-// unparseable.
+// readClassFix is the remedy for a directory or file that could not be opened or read at all.
 const readClassFix = "make it readable and re-run"
 
-// stepFrontmatterError is the error readSteps wraps a
-// stepfile.ParseFrontmatter failure in: name is the step file's own
-// filename within the feature directory, the one piece of information
-// ParseFrontmatter's own error carries nothing of. Unwrap returns err
-// unchanged, so errors.Is(err, stepfile.ErrNoFrontmatter) still reaches the
-// sentinel through this wrapper.
+// stepFrontmatterError wraps a stepfile.ParseFrontmatter failure with the
+// step file's name, so errors.Is still reaches the wrapped sentinel.
 type stepFrontmatterError struct {
 	name string
 	err  error
@@ -92,32 +74,13 @@ func (e *stepFrontmatterError) Unwrap() error {
 	return e.err
 }
 
-// newProblem converts err, returned while opening or listing a feature's
-// own directory, while reading its specification or state file, or while
-// reading and parsing one of its step files, into the Problem the caller
-// reports.
-//
-// An open/read failure surfaces as a wrapped *fs.PathError; when nameable
-// is true, that error's own Path field (relative to the feature's root) is
-// joined onto base to name the offending file, and the PathError's own
-// wrapped message becomes Detail, with Fix pointing at making the file
-// readable.
-//
-// A step-file frontmatter parse failure surfaces as a *stepFrontmatterError:
-// its own name is joined onto base to name the step file, its wrapped
-// error's own message becomes Detail, prefixed "frontmatter does not
-// parse: " — the same prefix assemble.Check's own C6 finding and
-// scaffold.Finish's own frontmatter refusal both already carry, one wording
-// for the one fault regardless of which of the three read paths meets it —
-// and Fix always names 'brief check <feature>' — filepath.Base(base), the
-// feature directory, never the step file's own name — as the one place
-// every fault in the feature is listed.
-//
-// Every other error falls to the third, unreached branch: no current caller
-// passes newProblem anything but a *fs.PathError or a *stepFrontmatterError,
-// so this stays a documented default rather than a tested one.
+// newProblem converts err, from opening/reading a feature's directory or
+// files or from parsing a step file's frontmatter, into the Problem a
+// caller reports.
 func newProblem(base string, err error, nameable bool) *Problem {
 	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
+		// nameable joins the PathError's own relative Path onto base;
+		// unset, base already names the offending file directly.
 		path := base
 		if nameable {
 			path = filepath.Join(base, pathErr.Path)
@@ -134,6 +97,8 @@ func newProblem(base string, err error, nameable bool) *Problem {
 		}
 	}
 
+	// Every other error falls here: no caller currently passes anything
+	// but a *fs.PathError or a *stepFrontmatterError.
 	detail := strings.TrimPrefix(err.Error(), "assemble: ")
 
 	return &Problem{

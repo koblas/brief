@@ -13,14 +13,10 @@ import (
 // configuration value cannot be used to name or recognize step files.
 var ErrInvalidPattern = errors.New("invalid step-file pattern")
 
-// verbRe matches a single-integer fmt verb, restricted to the forms
-// Number can read back: %d and a zero-padded width, %0Nd — including
-// %0d itself, a zero-width zero pad that renders and round-trips
-// identically to plain %d. %3d pads with spaces and %-4d left-justifies
-// with spaces on the right — Number's digits-only scan of the verb's
-// place can never recognize either rendering, so a pattern using them
-// would create a filename Compile accepts but no round trip can ever
-// find again.
+// verbRe matches a single-integer fmt verb restricted to the forms Number
+// can read back: %d and a zero-padded width, %0Nd (including %0d). %3d
+// and %-4d pad with spaces, which Number's digits-only scan can never
+// read back.
 var verbRe = regexp.MustCompile(`%(0[0-9]*)?d`)
 
 // Pattern is a compiled step-file-pattern: a single-integer fmt pattern
@@ -34,18 +30,9 @@ type Pattern struct {
 }
 
 // Compile validates pattern and returns the compiled form, refusing with
-// ErrInvalidPattern when pattern:
-//
-//   - is empty, or is "." or "..";
-//   - contains a path separator ("/" or "\"), which would name a
-//     subdirectory instead of a flat file in the feature directory;
-//   - does not contain exactly one integer verb matching %d or %0Nd —
-//     %3d and %-4d are rejected even though fmt accepts them, because
-//     they pad with spaces (respectively on the left and the right),
-//     and Number's digits-only scan can never read a space back out of
-//     the verb's place;
-//   - contains any other "%", including %s, %v or the escape %%, which
-//     would make the literal prefix and suffix ambiguous.
+// ErrInvalidPattern when pattern is empty or is "." or ".."; contains a
+// path separator; does not contain exactly one integer verb matching %d
+// or %0Nd; or contains any other "%", including %s, %v or %%.
 func Compile(pattern string) (Pattern, error) {
 	if pattern == "" || pattern == "." || pattern == ".." {
 		return Pattern{}, fmt.Errorf("%q: %w", pattern, ErrInvalidPattern)
@@ -85,10 +72,8 @@ func (p Pattern) ID(n int) string {
 
 // Number reports the step number filename encodes, and whether it is a
 // step file at all. filename is a step file for n only if it round-trips
-// exactly: Name(n) == filename. A near-miss — SCENARIO-7.md against
-// SCENARIO-%02d.md — is not a step file, even though its digits parse; it
-// is discoverable by a directory scan but not addressable by id or by
-// depends-on, so treating it as a match would create an unaddressable step.
+// exactly: Name(n) == filename. A near-miss, such as "SCENARIO-7.md"
+// against "SCENARIO-%02d.md", is not a step file even though its digits parse.
 func (p Pattern) Number(filename string) (int, bool) {
 	if !strings.HasPrefix(filename, p.prefix) || !strings.HasSuffix(filename, p.suffix) {
 		return 0, false

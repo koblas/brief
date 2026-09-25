@@ -15,33 +15,21 @@ const (
 	PrintMerge PrintAction = "merge"
 )
 
-// PrintArtifact is one pending artifact InitRequest.Print (R9) reports:
-// Path (absolute), Action, and Body — the exact bytes a real run would
-// write there. The snippet's own Body is always artifact.SnippetBlock's
-// bare block, never the full CLAUDE.md file a real run would merge it
-// into.
+// PrintArtifact is one pending artifact InitRequest.Print reports: Path
+// (absolute), Action, and Body, the exact bytes a real run would write
+// there. The snippet's Body is always the bare block, never the full
+// CLAUDE.md file a real run would merge it into.
 type PrintArtifact struct {
 	Path   string
 	Action PrintAction
 	Body   string
 }
 
-// printArtifacts derives Result.Print from artifacts — Init's own planned
-// Artifacts, in that same order — and the bytes apply would write for each
-// one: pending files only, ActionCreated mapped to PrintCreate and
-// ActionMerged to PrintMerge; the feature root and any ActionUnchanged or
-// ActionKept artifact are excluded — except the CLAUDE.md snippet's own
-// ActionKept "not a regular file" row (snippetArt.notRegular), which prints
-// as PrintMerge anyway: apply never writes through it either, but unlike
-// every other ActionKept artifact there is no existing content on disk to
-// leave alone, so the adopter still needs the block's own bytes to add by
-// hand. configBody is the variant apply would write (ConfigFile, or under
-// WithAgents ConfigFileWithRoles); writeArts supplies every plugin and
-// agent file's own render body, keyed by path; boundAgentArts supplies
-// every KindBoundAgent row's own inserted or rewritten line (the whole
-// file's bytes are never printed for one, only that line); the snippet's
-// own body always comes from artifact.SnippetBlock(dir), not from
-// writeArts. The result is never nil.
+// printArtifacts derives Result.Print from artifacts and the bytes apply
+// would write for each pending one: ActionCreated maps to PrintCreate,
+// ActionMerged to PrintMerge, and the rest are excluded, except a
+// non-regular snippet row, which still needs its block printed to add by
+// hand. Never nil.
 func printArtifacts(artifacts []Artifact, configBody []byte, writeArts []pluginArtifact, boundAgentArts []boundAgentArtifact, snippetArt snippetArtifact) []PrintArtifact {
 	bodies := make(map[string][]byte, len(writeArts))
 	for _, w := range writeArts {

@@ -30,9 +30,8 @@ brief start reads; it never writes.
 // names as how to fix it.
 const startInvocation = "brief start <feature>"
 
-// startDocument is start's --json success document: the common header
-// first, then assemble.Brief's own fields flattened beside it, no "data"
-// wrapper (R2).
+// startDocument is start's --json success document: the common header,
+// then assemble.Brief's fields flattened beside it, no "data" wrapper.
 type startDocument struct {
 	jsonHeader
 
@@ -40,13 +39,7 @@ type startDocument struct {
 }
 
 // runStart implements "brief start [--json] <feature>"; rest is its
-// positional arguments, from either side of --json, flags already parsed
-// away. start's own pflag "json" flag stays registered only so its help
-// table row still renders, since run's own scanJSONFlag strips every
-// "--json" token before pflag ever parses one — out.json alone decides
-// this run's mode. rootFS is nil in production (resolveRoot and
-// assemble.NewServer both read real disk); a test's withRootFS runSeam
-// substitutes an rwfs.Mem for both.
+// positional arguments, flags already parsed away.
 func runStart(ctx context.Context, wd string, rest []string, out reporter, rootFS rwfs.FS) error {
 	switch {
 	case len(rest) == 0:
@@ -69,11 +62,8 @@ func runStart(ctx context.Context, wd string, rest []string, out reporter, rootF
 		return out.refusal(enrichUnknownFeature(ctx, cfg, root, feature, err, rootFS))
 	}
 
-	// In --json mode a successful run writes nothing to stderr (R1): every
-	// shortfall is already payload (brief.Shortfalls), and the "complete"
-	// / "no step files yet" notices are payload-derivable from step:null
-	// plus done/open, so the document alone is the discriminator a
-	// structured caller reads.
+	// A successful --json run writes nothing to stderr: every shortfall
+	// and the completion state are already in the document.
 	if out.json {
 		doc := startDocument{jsonHeader: out.successHeader(), Brief: brief}
 

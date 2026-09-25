@@ -12,15 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The tests in this file pin OS-only guarantees rwfs.Mem does not, and
-// cannot economically, reproduce — see the divergences listed in doc.go.
-// They have no Mem counterpart.
+// The tests in this file pin OS-only guarantees rwfs.Mem does not
+// reproduce — see doc.go. They have no Mem counterpart.
 
-// Test_OS_refuses_a_symlink_that_escapes_the_root pins os.Root's
-// confinement: a symlink entry inside the root whose target resolves
-// outside it is refused rather than followed, protecting a caller that
-// trusts "every read stays inside dir" even when the tree was not built by
-// brief itself.
 func Test_OS_refuses_a_symlink_that_escapes_the_root(t *testing.T) {
 	outside := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o600))
@@ -37,15 +31,9 @@ func Test_OS_refuses_a_symlink_that_escapes_the_root(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Test_OS_OpenRoot_refuses_a_symlink_that_escapes_the_root pins
-// os.Root.OpenRoot's confinement for the nested-root case, alongside
-// Test_OS_refuses_a_symlink_that_escapes_the_root pinning it for a plain
-// read. The symlink target is relative — the same shape
-// "follows a symlink to a directory" in the shared contract resolves
-// successfully — so escaping the root is the one variable this test
-// isolates. The failure is left unclassified (see classifyOpenRootErr in
-// os.go): it must not be mistaken for the file-in-place case, which reports
-// syscall.ENOTDIR.
+// The symlink target is relative, so escaping the root is the one variable
+// this test isolates from the shared contract's "follows a symlink to a
+// directory" case.
 func Test_OS_OpenRoot_refuses_a_symlink_that_escapes_the_root(t *testing.T) {
 	dir := t.TempDir()
 	outside := t.TempDir()
@@ -62,12 +50,10 @@ func Test_OS_OpenRoot_refuses_a_symlink_that_escapes_the_root(t *testing.T) {
 	_, err = fsys.OpenRoot("escape")
 
 	require.Error(t, err)
-	assert.NotErrorIs(t, err, syscall.ENOTDIR)
+	assert.NotErrorIs(t, err, syscall.ENOTDIR) // must not be mistaken for the file-in-place case
 }
 
-// skipIfRoot skips t when running as the root user, for a test whose
-// premise is a permission check that root bypasses entirely — reporting a
-// false pass rather than exercising the check.
+// skipIfRoot skips t when running as root, which bypasses permission checks.
 func skipIfRoot(t *testing.T) {
 	t.Helper()
 
@@ -76,9 +62,6 @@ func skipIfRoot(t *testing.T) {
 	}
 }
 
-// Test_OS_reports_a_permission_error_when_the_directory_forbids_writing
-// pins that the OS adapter surfaces a real permission failure rather than
-// silently succeeding, unlike Mem which never consults the mode it records.
 func Test_OS_reports_a_permission_error_when_the_directory_forbids_writing(t *testing.T) {
 	skipIfRoot(t)
 

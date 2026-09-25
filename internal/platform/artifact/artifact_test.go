@@ -14,13 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Test_config_file_resolves_to_the_shipped_defaults guards the trap an
-// all-comment ".brief.yaml" is exposed to: config.Inspect treats a
-// zero-live-line file the same as a zero-byte one (io.EOF-as-empty), so
-// ConfigFile's own bytes — as written, every line commented — must decode
-// to config.Default() with no violations. A render that ever emits one
-// live line (a "---" marker, say) would break this without touching the
-// uncommented form at all.
+// config.Inspect treats a zero-live-line file the same as a zero-byte one,
+// so ConfigFile's all-commented bytes must still decode to config.Default().
 func Test_config_file_resolves_to_the_shipped_defaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".brief.yaml")
@@ -33,11 +28,6 @@ func Test_config_file_resolves_to_the_shipped_defaults(t *testing.T) {
 	assert.Equal(t, config.Default(), cfg)
 }
 
-// Test_uncommenting_the_config_file_yields_the_shipped_defaults strips
-// exactly one leading "#" from every line not beginning "# " — the
-// uncomment rule R2's copy documents — and proves the result is valid YAML
-// that decodes to config.Default() with no violations: the real round trip
-// a repository owner performs by hand when they want to change a value.
 func Test_uncommenting_the_config_file_yields_the_shipped_defaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".brief.yaml")
@@ -45,10 +35,7 @@ func Test_uncommenting_the_config_file_yields_the_shipped_defaults(t *testing.T)
 
 	cfg, violations, err := config.Inspect(path)
 
-	// optional-conventions round-trips through YAML's empty flow sequence
-	// "[]" as a non-nil empty slice, never the nil Default() itself holds;
-	// the two are the same "nothing set" value, so want is normalized to
-	// match rather than treated as a mismatch.
+	// OptionalConventions round-trips as a non-nil "[]", not Default()'s nil.
 	want := config.Default()
 	want.OptionalConventions = []string{}
 
@@ -57,15 +44,8 @@ func Test_uncommenting_the_config_file_yields_the_shipped_defaults(t *testing.T)
 	assert.Equal(t, want, cfg)
 }
 
-// looksLikeKeyValue reports whether rest — a ConfigFile line with its own
-// leading "#" stripped — is a YAML "key: value" line rather than doc prose:
-// its own leading-whitespace-trimmed run of lower-case letters, digits and
-// hyphens is immediately followed by ":". This is the discriminator
-// Test_every_config_key_is_documented needs and a bare "# " prefix check
-// cannot give it: ConfigFile comments every line with one leading "#", so a
-// nested key under "roles:" ("#  reviewer: \"\"") already starts with "# "
-// from its own two-space YAML indent, indistinguishable from a real doc
-// line by prefix alone.
+// looksLikeKeyValue reports whether rest (a ConfigFile line with its
+// leading "#" stripped) is a YAML "key: value" line rather than doc prose.
 func looksLikeKeyValue(rest string) bool {
 	trimmed := strings.TrimLeft(rest, " ")
 
@@ -83,13 +63,6 @@ func looksLikeKeyValue(rest string) bool {
 	return true
 }
 
-// Test_every_config_key_is_documented enforces the doc/value line pairing
-// structurally: every line of ConfigFile() is commented (R2's "no live
-// line at all"), and every value line (looksLikeKeyValue on its own bytes
-// with the leading "#" stripped) is immediately preceded by a doc prose
-// line — one starting "# " that does not itself look like a key:value pair
-// — so no value line, nested or not, documents itself only by accident of
-// being readable YAML.
 func Test_every_config_key_is_documented(t *testing.T) {
 	body := strings.TrimRight(string(artifact.ConfigFile()), "\n")
 	lines := strings.Split(body, "\n")
@@ -110,14 +83,6 @@ func Test_every_config_key_is_documented(t *testing.T) {
 	}
 }
 
-// Test_the_bound_config_file_binds_only_the_roles pins ConfigFileWithRoles
-// (S08's second KindConfig render, written only by "init --with-agents" in
-// the same run it creates the config): it decodes to config.Default() with
-// Roles equal to AgentBindings() and no violations, every key outside
-// "roles:" stays commented exactly as ConfigFile() writes it, both variants
-// recognize as OriginCurrent for KindConfig, and Render(KindConfig) is
-// still the plain ConfigFile() — the bound variant is never the "one true"
-// render, only a second recognized body.
 func Test_the_bound_config_file_binds_only_the_roles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".brief.yaml")
@@ -149,19 +114,12 @@ func Test_the_bound_config_file_binds_only_the_roles(t *testing.T) {
 	assert.Equal(t, artifact.ConfigFile(), artifact.Render(artifact.KindConfig))
 }
 
-// Test_the_current_config_render_is_a_known_digest pins that ConfigFile's
-// own bytes, as shipped today, are recognized by Recognize as the current
-// render — the compiled-in registry Recognize checks must always contain
-// today's own digest.
 func Test_the_current_config_render_is_a_known_digest(t *testing.T) {
 	origin := artifact.Recognize(artifact.KindConfig, artifact.ConfigFile())
 
 	assert.Equal(t, artifact.OriginCurrent, origin)
 }
 
-// Test_Recognize reports current for bytes matching a compiled-in digest
-// and edited for anything else, by table: the current render on one side,
-// an arbitrary edited body on the other.
 func Test_Recognize(t *testing.T) {
 	cases := []struct {
 		name string
@@ -179,9 +137,8 @@ func Test_Recognize(t *testing.T) {
 	}
 }
 
-// editOneByte returns a copy of body with its last byte changed, the
-// smallest possible edit that still differs from body — a fixture for
-// proving Recognize rejects even a one-byte mismatch.
+// editOneByte returns a copy of body with its last byte changed — the
+// smallest edit that still differs from body.
 func editOneByte(body []byte) []byte {
 	out := append([]byte(nil), body...)
 	out[len(out)-1]++
@@ -189,12 +146,6 @@ func editOneByte(body []byte) []byte {
 	return out
 }
 
-// Test_recognize_classifies_each_plugin_file_against_its_own_kind pins
-// Recognize for every plugin Kind this package renders: its own current
-// render is OriginCurrent, a one-byte edit of it is OriginEdited, and — the
-// discriminator proving Recognize checks the kind, not just any known
-// digest — another Kind's own current render, checked against a different
-// Kind, is OriginEdited too.
 func Test_recognize_classifies_each_plugin_file_against_its_own_kind(t *testing.T) {
 	cases := []struct {
 		name string
@@ -230,9 +181,6 @@ func Test_recognize_classifies_each_plugin_file_against_its_own_kind(t *testing.
 	}
 }
 
-// Test_hooks_file_runs_brief_check_on_post_tool_use_edits pins ClaudeHooks'
-// own JSON shape: a PostToolUse entry matching "Edit|Write|MultiEdit" that
-// runs "brief check --hook claude-code" as a "command" hook.
 func Test_hooks_file_runs_brief_check_on_post_tool_use_edits(t *testing.T) {
 	var doc struct {
 		Hooks struct {
@@ -254,10 +202,6 @@ func Test_hooks_file_runs_brief_check_on_post_tool_use_edits(t *testing.T) {
 	assert.Equal(t, "brief check --hook claude-code", doc.Hooks.PostToolUse[0].Hooks[0].Command)
 }
 
-// Test_plugin_manifest_names_the_plugin_brief_and_carries_no_version pins
-// R4: the manifest names the plugin "brief" and carries no "version" key —
-// a skills-directory plugin does not require one, and omitting it keeps
-// the render identical release to release.
 func Test_plugin_manifest_names_the_plugin_brief_and_carries_no_version(t *testing.T) {
 	var manifest map[string]any
 	require.NoError(t, json.Unmarshal(artifact.PluginManifest(), &manifest))
@@ -266,8 +210,7 @@ func Test_plugin_manifest_names_the_plugin_brief_and_carries_no_version(t *testi
 	assert.NotContains(t, manifest, "version")
 }
 
-// skillFile is one SKILL.md file's frontmatter and body, parsed by
-// parseSkillFile.
+// skillFile is one SKILL.md file's frontmatter and body.
 type skillFile struct {
 	Description            string `yaml:"description"`
 	DisableModelInvocation bool   `yaml:"disable-model-invocation"`
@@ -275,11 +218,9 @@ type skillFile struct {
 	ArgumentHint           string `yaml:"argument-hint"`
 }
 
-// parseSkillFile splits body into its YAML frontmatter (between "---"
-// lines) and the markdown body following it. The returned keys map
-// reports every key the frontmatter carries, so a test can assert an
-// absence ("name", "user-invocable") that skillFile's own fixed field set
-// cannot represent.
+// parseSkillFile splits body into its YAML frontmatter and markdown body.
+// The returned keys map reports every frontmatter key, so a test can
+// assert an absence skillFile's fixed field set cannot represent.
 func parseSkillFile(t *testing.T, body []byte) (skillFile, map[string]any, string) {
 	t.Helper()
 
@@ -302,12 +243,6 @@ func parseSkillFile(t *testing.T, body []byte) (skillFile, map[string]any, strin
 	return fm, keys, rest
 }
 
-// Test_skill_files_are_user_invoked_and_scoped_to_their_command pins R4's
-// SKILL.md shape for both start and finish: a non-empty description,
-// disable-model-invocation true, allowed-tools scoped to that command's
-// own "brief <cmd> *" Bash prefix, the matching argument-hint, no "name"
-// or "user-invocable" key (both already hold the value brief wants), and a
-// body that runs the command with $ARGUMENTS.
 func Test_skill_files_are_user_invoked_and_scoped_to_their_command(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -335,10 +270,7 @@ func Test_skill_files_are_user_invoked_and_scoped_to_their_command(t *testing.T)
 	}
 }
 
-// wantSkillWorkflow is the brief-workflow skill's ruled bytes, transcribed
-// independently from specification.md's own "The skill file" block — never
-// derived from artifact.SkillWorkflow() or artifact.Render(), so this test
-// actually proves the render against the spec rather than against itself.
+// wantSkillWorkflow is transcribed independently, never derived from artifact.SkillWorkflow().
 const wantSkillWorkflow = "---\n" +
 	"description: brief's step protocol — pick up a feature's next open step with brief start, tick its checklist as items go green, close it with " +
 	"brief finish. Use when planning or implementing a step of a brief-tracked feature.\n" +
@@ -382,18 +314,12 @@ const wantSkillWorkflow = "---\n" +
 	"caps are configured per repository, and brief's own output names the ones in force.\n" +
 	"`brief <command> --help` covers every flag.\n"
 
-// Test_workflow_skill_renders_the_ruled_bytes pins artifact.SkillWorkflow()
-// against wantSkillWorkflow, a literal transcribed from specification.md
-// rather than from the render itself — R1's own promise that the skill's
-// bytes are exactly what the spec ruled, not merely self-consistent.
 func Test_workflow_skill_renders_the_ruled_bytes(t *testing.T) {
 	assert.Equal(t, []byte(wantSkillWorkflow), artifact.SkillWorkflow())
 }
 
-// uncomment strips exactly one leading "#" from every line not beginning
-// "# " (hash, space) — the inverse of what ConfigFile writes: a "# " line
-// is doc prose and stays a comment forever; every other line is a
-// commented YAML line and becomes live.
+// uncomment strips one leading "#" from every line not beginning "# ",
+// the inverse of what ConfigFile writes.
 func uncomment(body []byte) []byte {
 	lines := strings.Split(string(body), "\n")
 	for i, line := range lines {

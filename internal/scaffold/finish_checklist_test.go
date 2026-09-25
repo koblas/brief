@@ -15,23 +15,19 @@ import (
 )
 
 // step02BodyWithOpenItem returns newFinishFixture's STEP-02 body with its
-// checklist's second item left unticked ("- [ ] second thing"), landing at
-// a known line (13) so a refusal test can pin an exact line number.
+// checklist's second item left unticked, landing at line 13.
 func step02BodyWithOpenItem(cfg config.Config) string {
 	return openItemStep02Body(cfg, "open", "second thing")
 }
 
 // doneStep02BodyWithOpenItem is step02BodyWithOpenItem with its frontmatter
-// already saying done, so a test can pin the checklist check ahead of
-// (refinish).verdict() on a step that would otherwise take the re-finish
-// path.
+// already saying done.
 func doneStep02BodyWithOpenItem(cfg config.Config) string {
 	return openItemStep02Body(cfg, "done", "second thing")
 }
 
 // bareOpenItemStep02Body is step02BodyWithOpenItem with its open item
-// carrying no text at all ("- [ ]" alone), landing at the same line 13, so
-// a test can pin the refusal copy's empty-text branch (no "%q").
+// carrying no text at all, landing at the same line 13.
 func bareOpenItemStep02Body(cfg config.Config) string {
 	return openItemStep02Body(cfg, "open", "")
 }
@@ -59,10 +55,6 @@ func openItemStep02Body(cfg config.Config, status, item string) string {
 		"## Fixture Handoff" + "\n"
 }
 
-// Test_finish_refuses_a_step_with_an_open_checklist_item pins SCENARIO-20's
-// refusal directly against step02BodyWithOpenItem's own line 13, and pairs
-// the Mem snapshot probe newFinishFixtureFS's other refusal tests use,
-// proving nothing landed.
 func Test_finish_refuses_a_step_with_an_open_checklist_item(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	putStepFS(t, fx, "STEP-02.md", step02BodyWithOpenItem(fx.cfg))
@@ -84,13 +76,8 @@ func Test_finish_refuses_a_step_with_an_open_checklist_item(t *testing.T) {
 	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
-// Test_finish_accepts_a_step_whose_checklist_is_empty is the `new step` ->
-// `finish` path (measured case (a)): NewStep writes a bare checklist
-// heading with nothing under it, and that must keep succeeding, not start
-// refusing on its very first run. It stays on disk: it exercises
-// NewFeature, NewStep and Finish together end to end, and asserts the four
-// writes actually landed, so it cannot pass vacuously on a call that
-// silently no-ops.
+// Stays on disk: exercises NewFeature, NewStep and Finish end to end, and
+// asserts the four writes landed, so it cannot pass on a silent no-op.
 func Test_finish_accepts_a_step_whose_checklist_is_empty(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -132,10 +119,6 @@ func Test_finish_accepts_a_step_whose_checklist_is_empty(t *testing.T) {
 	assert.Equal(t, "handoff body\n", string(handoffGot))
 }
 
-// Test_finish_accepts_a_step_with_no_checklist_heading covers 14's degrade
-// rule at the write side: a step file with no line matching the
-// configured checklist heading at all is accepted, matching
-// assemble.Start's read-side Section.Found == false degrade.
 func Test_finish_accepts_a_step_with_no_checklist_heading(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	noHeading := strings.Replace(step02BodyWithOpenItem(fx.cfg), fx.cfg.ChecklistHeading, "## Not The Checklist", 1)
@@ -146,10 +129,6 @@ func Test_finish_accepts_a_step_with_no_checklist_heading(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// Test_finish_ignores_an_unchecked_item_outside_the_checklist_section pins
-// the section boundary at the Finish level: an open item under a
-// following heading of the same level is not part of the checklist
-// section, matching markdown.Section's own same-or-higher-level stop.
 func Test_finish_ignores_an_unchecked_item_outside_the_checklist_section(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	body := "---\n" +
@@ -177,10 +156,6 @@ func Test_finish_ignores_an_unchecked_item_outside_the_checklist_section(t *test
 	require.NoError(t, err)
 }
 
-// Test_finish_reports_the_open_checklist_item_rather_than_a_missing_specification
-// pins the checklist check ahead of the specification read: a step with an
-// open item, in a feature whose specification.md has been deleted,
-// reports the open item, not the missing specification.
 func Test_finish_reports_the_open_checklist_item_rather_than_a_missing_specification(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	putStepFS(t, fx, "STEP-02.md", step02BodyWithOpenItem(fx.cfg))
@@ -192,10 +167,6 @@ func Test_finish_reports_the_open_checklist_item_rather_than_a_missing_specifica
 	assert.NotErrorIs(t, err, scaffold.ErrMalformedFeature)
 }
 
-// Test_finish_reports_a_state_body_missing_a_heading_rather_than_the_open_checklist_item
-// pins the checklist check after the argument band: a step with an open
-// item, given a state body missing a configured heading, reports the
-// missing heading, not the open item — checkArgumentHeadings runs first.
 func Test_finish_reports_a_state_body_missing_a_heading_rather_than_the_open_checklist_item(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	putStepFS(t, fx, "STEP-02.md", step02BodyWithOpenItem(fx.cfg))
@@ -207,10 +178,6 @@ func Test_finish_reports_a_state_body_missing_a_heading_rather_than_the_open_che
 	assert.NotErrorIs(t, err, scaffold.ErrOpenChecklistItem)
 }
 
-// Test_finish_reports_the_open_checklist_item_on_a_done_step_with_a_divergent_handoff
-// pins the checklist check ahead of (refinish).verdict(): a done step with
-// an open item, given a handoff that differs from the recorded one,
-// reports the open item, never ErrAlreadyFinished.
 func Test_finish_reports_the_open_checklist_item_on_a_done_step_with_a_divergent_handoff(t *testing.T) {
 	fx := newFinishedFixtureFS(t)
 	putStepFS(t, fx, "STEP-02.md", doneStep02BodyWithOpenItem(fx.cfg))
@@ -222,10 +189,6 @@ func Test_finish_reports_the_open_checklist_item_on_a_done_step_with_a_divergent
 	assert.NotErrorIs(t, err, scaffold.ErrAlreadyFinished)
 }
 
-// Test_finish_refuses_a_bare_open_checklist_item_without_a_quoted_empty_string
-// pins decision 5's empty-text branch: an item with no text at all ("- [ ]"
-// alone) drops the "%q" from the refusal copy rather than naming an empty
-// quoted string.
 func Test_finish_refuses_a_bare_open_checklist_item_without_a_quoted_empty_string(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	putStepFS(t, fx, "STEP-02.md", bareOpenItemStep02Body(fx.cfg))

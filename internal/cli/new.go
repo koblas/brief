@@ -42,14 +42,9 @@ const newFeatureInvocation = "brief new feature <name>"
 const newStepInvocation = "brief new step <feature>"
 
 // newDocument is "new feature"'s and "new step"'s shared --json success
-// document: the common header first, then the scaffolded feature, the
-// step id (null for "new feature" — no call creates a feature and a step
-// together), the single path the text-mode contract prints, every path
-// this call created, and every path it rewrote in place instead (empty for
-// "new feature", which creates both its files fresh; the specification for
-// "new step", whose progress list it appends an entry to) — absolute
-// throughout (R6). Created and Modified are never nil, so each encodes
-// "[]" rather than "null" if ever empty.
+// document: the common header, the scaffolded feature, the step id (null
+// for "new feature"), the path the text-mode contract prints, and every
+// path created or modified — all absolute, Created and Modified never nil.
 type newDocument struct {
 	jsonHeader
 
@@ -60,14 +55,10 @@ type newDocument struct {
 	Modified []string `json:"modified"`
 }
 
-// runNew handles "brief new <type> ...": rejects "-h"/"--help" given an
-// attached value, routes a sole "-h"/"--help" argument to cmd.Help()
-// (new's flag parsing is disabled, so cobra's own help check never sees
-// it), rejects a "-h"/"--help" alongside any other argument and any other
-// dash-prefixed type with the same flag-shaped wording runRoot uses — "--"
-// excluded, since it is pflag's own flag-parsing terminator rather than a
-// flag itself — and otherwise reports type is neither feature nor step —
-// nothing at all, or something unknown.
+// runNew handles "brief new <type> ...": routes a sole "-h"/"--help" to
+// cmd.Help() (new's own flag parsing is disabled, so cobra never sees it),
+// reports any other dash-prefixed argument the same way runRoot does, and
+// otherwise reports type as missing or unknown.
 func runNew(cmd *cobra.Command, args []string, out reporter) error {
 	if len(args) == 0 {
 		return out.usageError("brief new: no type given; expected one of: feature, step")
@@ -91,9 +82,7 @@ func runNew(cmd *cobra.Command, args []string, out reporter) error {
 }
 
 // runNewFeature implements "brief new feature <name>"; rest is its
-// positional arguments, flags already parsed away. rootFS is nil in
-// production (resolveRoot and scaffold.NewServer both read real disk); a
-// test's withRootFS runSeam substitutes an rwfs.Mem for both.
+// positional arguments, flags already parsed away.
 func runNewFeature(ctx context.Context, wd string, rest []string, out reporter, rootFS rwfs.FS) error {
 	switch {
 	case len(rest) == 0:
@@ -138,9 +127,7 @@ func runNewFeature(ctx context.Context, wd string, rest []string, out reporter, 
 }
 
 // runNewStep implements "brief new step <feature>"; rest is its
-// positional arguments, flags already parsed away. rootFS is nil in
-// production (resolveRoot and scaffold.NewServer both read real disk); a
-// test's withRootFS runSeam substitutes an rwfs.Mem for both.
+// positional arguments, flags already parsed away.
 func runNewStep(ctx context.Context, wd string, rest []string, out reporter, rootFS rwfs.FS) error {
 	switch {
 	case len(rest) == 0:

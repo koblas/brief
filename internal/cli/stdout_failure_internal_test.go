@@ -1,12 +1,5 @@
-// A stdout write that fails must never leave the process exiting 1 with an
-// empty stderr: cmd/brief/main.go prints nothing a command returns, and the
-// cobra root sets SilenceErrors, so the one-line R14 message has to come
-// from the command itself — on stderr in both text and --json mode, since
-// stdout is the stream that just failed.
-//
-// White-box for the same reason as every other _mem file here: run()'s
-// withRootFS seam is unexported. check --hook's own case reads real disk
-// and lives in stdout_failure_disk_test.go.
+// White-box: run()'s withRootFS seam is unexported. check --hook's case
+// reads real disk and lives in stdout_failure_disk_test.go.
 
 package cli
 
@@ -23,26 +16,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// failingWriter refuses every Write — not only the first — the way a full
-// disk or a closed descriptor does, so a renderer that writes in several
-// pieces fails on each of them.
+// failingWriter refuses every Write, so a multi-piece renderer fails on each.
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) {
 	return 0, &fs.PathError{Op: "write", Path: "/dev/stdout", Err: syscall.ENOSPC}
 }
 
-// errReadOnly is the writable check's own failure for init's unwritable
-// refusal: it wraps setup.ErrUnwritable, the sentinel runInit routes to
-// renderUnwritable.
+// errReadOnly wraps setup.ErrUnwritable to drive init's unwritable refusal.
 var errReadOnly = fmt.Errorf("read-only file system: %w", setup.ErrUnwritable)
 
-// writeFailureCause is failingWriter's own error text, as it must appear
-// verbatim in every stdout-failure line.
+// writeFailureCause is failingWriter's error text.
 const writeFailureCause = "write /dev/stdout: no space left on device"
 
-// runMemFailingStdout runs args against tree with stdout replaced by
-// failingWriter, returning stderr and the error run returned.
+// runMemFailingStdout runs args against tree with a failing stdout.
 func runMemFailingStdout(t *testing.T, tree *memTree, args []string) (string, error) {
 	t.Helper()
 
@@ -53,15 +40,13 @@ func runMemFailingStdout(t *testing.T, tree *memTree, args []string) (string, er
 	return stderr.String(), err
 }
 
-// wantReadFailure is the stdout-failure line for a run that changed no
-// files: re-running hint is safe.
+// wantReadFailure is the stdout-failure line for a run that changed no files.
 func wantReadFailure(command, hint string) string {
 	return "brief " + command + ": writing to stdout failed: " + writeFailureCause +
 		"; fix the output destination, then run '" + hint + "' again\n"
 }
 
-// wantWriteFailure is the stdout-failure line for a run that already
-// changed files before its output failed.
+// wantWriteFailure is the stdout-failure line for a run that changed files.
 func wantWriteFailure(command, hint string) string {
 	return "brief " + command + ": writing to stdout failed: " + writeFailureCause +
 		"; files were already changed, check them with 'git status' before running '" + hint + "' again\n"
@@ -103,11 +88,6 @@ func Test_check_reports_a_stdout_write_failure_on_stderr_mem(t *testing.T) {
 	assert.Equal(t, wantReadFailure("check", checkInvocation), stderr)
 }
 
-// Test_finish_json_reports_a_stdout_write_failure_after_replacing_the_state_file_mem
-// is the reported repro: "brief finish ... --json > /dev/full" replaced
-// STATE.md, exited 1 and printed nothing. The line must say files already
-// changed — never R14a's "(no files changed)" tail — and must not promise
-// that a re-run is harmless.
 func Test_finish_json_reports_a_stdout_write_failure_after_replacing_the_state_file_mem(t *testing.T) {
 	tree := newMemFinishFixture("- [x] do the thing")
 	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
@@ -141,9 +121,6 @@ func Test_start_reports_a_stdout_write_failure_after_its_convention_notices_mem(
 		wantReadFailure("start", startInvocation), stderr)
 }
 
-// Test_finish_json_no_op_reports_a_stdout_write_failure_as_safe_to_re_run_mem
-// re-finishes with identical inputs: nothing is written, so the line must
-// not claim files changed.
 func Test_finish_json_no_op_reports_a_stdout_write_failure_as_safe_to_re_run_mem(t *testing.T) {
 	tree := newMemFinishFixture("- [x] do the thing")
 	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
@@ -168,9 +145,8 @@ func Test_new_feature_json_reports_a_stdout_write_failure_after_creating_files_m
 	assert.Equal(t, wantWriteFailure("new feature", newFeatureInvocation), stderr)
 }
 
-// runSetupFailingStdout runs args in a fresh virtual repository through
-// newMemSetupSeam, after running each of before there with a working
-// stdout, and returns the failing run's stderr and error.
+// runSetupFailingStdout runs each of before with a working stdout, then args
+// with a failing one, in a fresh virtual repository.
 func runSetupFailingStdout(t *testing.T, args []string, before ...[]string) (string, error) {
 	t.Helper()
 
@@ -236,9 +212,6 @@ func Test_version_json_reports_a_stdout_write_failure_on_stderr(t *testing.T) {
 	assert.Equal(t, wantReadFailure("--version", "brief --version --json"), stderr.String())
 }
 
-// Test_init_json_re_run_reports_a_stdout_write_failure_as_safe_to_re_run
-// runs init a second time on an already-initialized repository, which
-// writes nothing.
 func Test_init_json_re_run_reports_a_stdout_write_failure_as_safe_to_re_run(t *testing.T) {
 	stderr, err := runSetupFailingStdout(t, []string{"init", "--host", "none", "--json"},
 		[]string{"init", "--host", "none"})
@@ -278,10 +251,7 @@ func Test_init_print_json_reports_a_stdout_write_failure_as_safe_to_re_run(t *te
 	assert.Equal(t, wantReadFailure("init", initInvocation), stderr)
 }
 
-// Test_init_json_that_only_modifies_a_file_reports_a_stdout_write_failure_after_writing
-// re-runs init on an installed claude-code repository whose CLAUDE.md lost
-// its snippet: the re-run merges the snippet back — the one file it
-// touches, reported as modified, never created.
+// CLAUDE.md lost its snippet, so the re-run modifies exactly that one file.
 func Test_init_json_that_only_modifies_a_file_reports_a_stdout_write_failure_after_writing(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -306,10 +276,6 @@ func Test_doctor_json_reports_a_stdout_write_failure_on_stderr(t *testing.T) {
 	assert.Equal(t, 1, ExitCode(err))
 	assert.Equal(t, wantReadFailure("doctor", doctorInvocation), stderr.String())
 }
-
-// A --json error document that cannot reach stdout falls back to its own
-// "message" — the same line text mode prints — on stderr, keeping the
-// error's own exit code.
 
 func Test_json_refusal_falls_back_to_its_message_on_stderr_when_stdout_fails_mem(t *testing.T) {
 	stderr, err := runMemFailingStdout(t, newMemStartFixture("open"), []string{"start", "nosuch", "--json"})

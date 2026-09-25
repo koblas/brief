@@ -1,16 +1,7 @@
-// OS-subject: every case in this file removes a real bound agent file (a
-// repository ".claude/agents/*.md" file --edit-agents merged, or resolved
-// through a bare-name role binding) — internal/setup's own bound_agent.go
-// (confinedAgentFile) always reads and writes those files through real
-// disk regardless of setup.WithFSRoot, so no rwfs.Mem fixture in
-// uninstall_internal_test.go can stand in for one (the same reason
-// internal/cli/init_bound_agent_internal_test.go stays on disk).
-//
-// White-box package: this file reaches the unexported run directly so a
-// bound-agent role can be resolved against an injected home directory —
-// through cli.Run a bare "developer" binding would also search the
-// developer's own "~/.claude/agents", making these tests depend on the
-// machine they happen to run on.
+// OS-subject: every case here removes a real bound agent file, which
+// bound_agent.go always reads and writes through real disk. This file
+// reaches the unexported run directly so the bound-agent role resolves
+// against an injected home directory, not the developer's real one.
 
 package cli
 
@@ -26,11 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// boundAgentUninstallFixture installs a claude-code plugin via "init" — the
-// snippet, skill and plugin files this file's own row and stderr
-// assertions rely on being present — with an injected, empty home
-// directory, then rebinds ".brief.yaml" to a bare-name implementer and
-// writes one bound agent file already carrying "brief-workflow".
+// boundAgentUninstallFixture installs a claude-code plugin via "init" with
+// an injected, empty home directory, then rebinds ".brief.yaml" to a
+// bare-name implementer and writes one bound agent file.
 func boundAgentUninstallFixture(t *testing.T) (string, runSeam, string) {
 	t.Helper()
 
@@ -54,9 +43,6 @@ func boundAgentUninstallFixture(t *testing.T) (string, runSeam, string) {
 	return wd, seam, agentPath
 }
 
-// Test_uninstall_reports_the_bound_agent_row pins Surface & Copy's own
-// stdout row, its stderr next-action line, --json's own modified/removed
-// split, and --dry-run leaving the file untouched.
 func Test_uninstall_reports_the_bound_agent_row(t *testing.T) {
 	t.Run("text", func(t *testing.T) {
 		wd, seam, agentPath := boundAgentUninstallFixture(t)

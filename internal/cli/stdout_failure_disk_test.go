@@ -1,8 +1,5 @@
-// check --hook's own stdout-write failure stays on real disk for the same
-// reason check_hook_disk_test.go does: runCheckHook's opt-in gate and
-// edited-path resolution have no seam. Every other command's own
-// stdout-write failure is covered on rwfs.Mem in
-// stdout_failure_internal_test.go.
+// Real disk: runCheckHook's opt-in gate and edited-path resolution have no
+// seam. Every other command's case is in stdout_failure_internal_test.go.
 
 package cli_test
 
@@ -19,19 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// failingStdout refuses every Write, the way a full disk or a closed
-// descriptor does.
+// failingStdout refuses every Write.
 type failingStdout struct{}
 
 func (failingStdout) Write([]byte) (int, error) {
 	return 0, &fs.PathError{Op: "write", Path: "/dev/stdout", Err: syscall.ENOSPC}
 }
 
-// Test_check_hook_reports_a_stdout_write_failure_on_stderr uses the same
-// single-ERROR tree as
-// Test_check_hook_reports_only_the_feature_containing_the_edited_path_as_additional_context:
-// a feature with no step files and no STATE.md, so the hook has a finding
-// to write.
+// No step files and no STATE.md, so the hook has a finding to write.
 func Test_check_hook_reports_a_stdout_write_failure_on_stderr(t *testing.T) {
 	wd := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(""), 0o600))

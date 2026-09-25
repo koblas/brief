@@ -15,36 +15,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// This file is the proof SCENARIO-22 exists for: for each of the four
-// predicates internal/platform/conform shares between scaffold.Finish and
-// assemble.Check, the same defect refused by one is reported by the
-// other, and their <problem> text is byte-identical. internal/cli is the
-// only package allowed to import both scaffold and assemble, so it is the
-// only place this comparison can be written; it calls both Servers
-// directly rather than through cli.Run, since the claim is about the two
-// packages' own Problem strings, not about any rendering either command
-// layers on top of them. Neither Server ever touches real disk here: both
-// take the same rwfs.Mem fixture through their own exported WithFS
-// Option, so this file needs no access to cli's own internal seams.
+// For each predicate internal/platform/conform shares between
+// scaffold.Finish and assemble.Check, this file proves the same defect
+// refused by one is reported by the other with byte-identical text.
 
 // driftRoot is the virtual root every fixture in this file resolves
 // against — fabricated, never a real disk path.
 const driftRoot = "/repo"
 
-// stateWithUnterminatedFence carries every one of the default profile's
-// four required headings, each followed by content, then an opened fence
-// never closed — the headings all sit before the fence opens, so
-// conform.MissingHeading still finds every one of them and only
-// conform.UnterminatedFence's predicate fires.
+// stateWithUnterminatedFence carries all four required headings, then an
+// opened fence never closed, so only UnterminatedFence's predicate fires.
 const stateWithUnterminatedFence = "## Binding decisions\n\ndecision\n\n" +
 	"## Left unbuilt\n\nsymbol\n\n" +
 	"## Traps\n\ntrap\n\n" +
 	"## Open debts\n\ndebt\n\n" +
 	"```\nunterminated\n"
 
-// stateMissingTraps carries three of the default profile's four required
-// headings, "## Traps" omitted entirely — heading and section both absent,
-// not merely emptied.
+// stateMissingTraps omits "## Traps" entirely — heading and section both
+// absent, not merely emptied.
 const stateMissingTraps = "## Binding decisions\n\ndecision\n\n" +
 	"## Left unbuilt\n\nsymbol\n\n" +
 	"## Open debts\n\ndebt\n"
@@ -55,12 +43,8 @@ func driftKey(path string) string {
 	return strings.TrimPrefix(filepath.ToSlash(path), "/")
 }
 
-// driftFixtureFS returns an rwfs.Mem holding a conforming specification
-// and state file for "demo" under driftRoot's default layout, plus one
-// step file, SCENARIO-01, carrying status and checklistItems, extended by
-// extra (each a driftRoot-relative path and its body) — the drift tests'
-// shared starting point before each one corrupts exactly the one input
-// its predicate concerns.
+// driftFixtureFS returns an rwfs.Mem holding a conforming specification,
+// state and step file for "demo", extended by extra (path to body).
 func driftFixtureFS(status string, checklistItems []string, extra map[string]string) *rwfs.Mem {
 	featureDir := filepath.Join(driftRoot, "docs", "specifications", "demo")
 
@@ -160,12 +144,8 @@ func Test_check_drift_missing_state_heading_matches_finishes_own_refusal(t *test
 	assert.Equal(t, refusal.Problem, finding.Detail)
 }
 
-// Test_check_drift_open_checklist_item_matches_finishes_own_refusal is the
-// one predicate that cannot pair on a single fixture: Finish refuses an
-// OPEN step's unticked item, and Check only ever reports a DONE step's
-// (an open step's is ordinary in-progress work). Two fixtures, differing
-// only in status:, still prove one definition: the problem text depends on
-// the item's own text alone, never on the step's status.
+// Two fixtures, differing only in status: Finish refuses an OPEN step's
+// unticked item, Check only reports a DONE step's — same problem text.
 func Test_check_drift_open_checklist_item_matches_finishes_own_refusal(t *testing.T) {
 	cfg := config.Default()
 	items := []string{"- [x] first thing", "- [ ] second thing"}

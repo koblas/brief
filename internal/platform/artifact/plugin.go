@@ -1,10 +1,8 @@
 package artifact
 
 // PluginManifest renders ".claude-plugin/plugin.json": {"name": "brief"},
-// two-space indented, trailing newline. It carries no "version" key —
-// code.claude.com/docs/en/plugins-reference confirms version is optional
-// for a skills-directory plugin — so its bytes never change across a
-// release unless the plugin's own name does.
+// two-space indented, trailing newline. It carries no "version" key, so
+// its bytes never change across a release unless the plugin's name does.
 func PluginManifest() []byte {
 	return mustReadFile("plugin.json")
 }
@@ -37,15 +35,14 @@ func SkillWorkflow() []byte {
 
 // ClaudeHooks renders "hooks/hooks.json": one PostToolUse entry matching
 // "Edit|Write|MultiEdit" that runs "brief check --hook claude-code" as a
-// "command" hook (R12).
+// "command" hook.
 func ClaudeHooks() []byte {
 	return mustReadFile("hooks.json")
 }
 
-// Render returns kind's own current bytes — written bytes and recognized
-// bytes are always one value, since digestsFor's own compiled-in digests
-// are computed from these same render functions — or nil for a Kind this
-// package does not render.
+// Render returns kind's current bytes, or nil for a Kind this package does
+// not render. Written bytes and recognized bytes are always the same
+// value, since digestsFor's digests are computed from these same functions.
 func Render(kind Kind) []byte {
 	switch kind {
 	case KindConfig:
