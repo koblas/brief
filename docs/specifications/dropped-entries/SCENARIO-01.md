@@ -87,9 +87,12 @@ Follow-up note (fix pass 1, MINOR test finding 8) — the mutation each table ca
 one line per table:
 - `Test_trailing_tag_extraction` (`internal/scaffold/dropped_internal_test.go`): "a trailing
   token in parens" rules out never matching a trailing group at all; "no parens at all" rules
-  out matching without one; "empty parens" rules out accepting an empty token; "whitespace
-  inside the parens" rules out accepting a token containing whitespace; "parens in the middle"
-  rules out matching anywhere but the string's own tail.
+  out matching without one; "whitespace inside the parens" rules out accepting a token
+  containing whitespace; "parens in the middle" rules out matching anywhere but the string's
+  own tail. "Empty parens" pins the contract (untagged) rather than ruling out a mutation of
+  its own: zero captured characters return "" the same way whichever exclusion set
+  `trailingTagRe`'s character class names, so no mutation of that class discriminates this
+  case specifically.
 - `Test_dropExcerpt` (`internal/cli/finish_dropped_internal_test.go`): "exactly eighty runes"
   rules out cutting at or under the limit; "eighty-one runes" rules out never cutting (an
   off-by-one on the boundary); "multibyte text" rules out counting bytes instead of runes.

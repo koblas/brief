@@ -28,12 +28,13 @@ const (
 // cli only turns it into JSON or row text (string(...)).
 type Severity string
 
-// SeverityWarn is every drop's severity (D4: a drop is reported, never
-// refused).
+// SeverityWarn is every drop's severity: a drop is reported, never
+// refused.
 const SeverityWarn Severity = "WARN"
 
 // Severity returns the urgency a drop under r carries — SeverityWarn for
-// both DropRuleEntry and DropRuleDebt today (D4).
+// both DropRuleEntry and DropRuleDebt: a drop is always reported, never
+// refused.
 func (r DropRule) Severity() Severity {
 	return SeverityWarn
 }
@@ -129,89 +130,58 @@ func scannableHeadings(headings config.StateHeadings) []string {
 }
 
 // occurrence is one entry found in a body, pooled with the configured
-// heading it is nearest-enclosed by (nearestHeading) — never simply the
-// heading whose own markdown.Entries scan happened to find it, since two
-// configured headings can nest, or a heading configured with no leading
-// "#" can match a plain body line and scan past every heading after it.
+// heading it is attributed to — never simply "whichever scan happened to
+// run first", since two configured headings can nest, or a heading
+// configured with no leading "#" can match a plain body line and scan
+// past every heading after it, letting more than one heading's own scan
+// reach the same physical entry line.
 type occurrence struct {
 	heading string
 	entry   markdown.Entry
 	text    string
 }
 
-// headingAnchor is one scannable configured heading's own first-occurrence
-// line in a body (markdown.HeadingLine).
-type headingAnchor struct {
-	heading string
-	line    int
-}
-
-// headingAnchors returns, for each heading in scannable that appears in
-// body, its own first-occurrence line, sorted ascending by line —
-// nearestHeading's own search space.
-func headingAnchors(body string, scannable []string) []headingAnchor {
-	anchors := make([]headingAnchor, 0, len(scannable))
-
-	for _, h := range scannable {
-		if line, ok := markdown.HeadingLine(body, h); ok {
-			anchors = append(anchors, headingAnchor{heading: h, line: line})
-		}
-	}
-
-	sort.Slice(anchors, func(i, j int) bool { return anchors[i].line < anchors[j].line })
-
-	return anchors
-}
-
-// nearestHeading returns the heading of the last anchor at or before
-// entryLine — the configured heading whose own section most narrowly
-// contains a line at entryLine, regardless of which heading's own
-// markdown.Entries scan happened to reach it first. anchors must already
-// be sorted ascending by line.
-func nearestHeading(anchors []headingAnchor, entryLine int) string {
-	var heading string
-
-	for _, a := range anchors {
-		if a.line > entryLine {
-			break
-		}
-
-		heading = a.heading
-	}
-
-	return heading
-}
-
 // poolOccurrences scans every heading in scannable's own section of body
 // for entries and pools them into one line-ordered list, each physical
-// line kept once: a configured heading that nests inside another, or one
-// configured with no leading "#" so its own section never terminates
-// (markdown.Section ends only at a heading of the same or higher level),
-// can make more than one heading's own scan reach the same entry line —
-// pooling attributes it to nearestHeading rather than counting or
-// reporting it once per scan that found it.
+// line kept once. When more than one heading's own markdown.Entries scan
+// reaches the same line — because their sections nest, or a heading
+// configured with no leading "#" never terminates its own section
+// (markdown.Section ends only at a heading of the same or higher level) —
+// the line is attributed to whichever of those heading's own scan
+// actually reached it (never one whose section had already ended before
+// that line) with the greatest markdown.HeadingLine: the most specific
+// heading that genuinely encloses it, not merely the configured heading
+// nearest to it by line number, which can sit inside a *different*,
+// already-closed subsection.
 func poolOccurrences(body []byte, scannable []string) []occurrence {
 	text := string(body)
-	anchors := headingAnchors(text, scannable)
 
-	seen := make(map[int]bool)
+	headingLine := make(map[string]int, len(scannable))
+	for _, h := range scannable {
+		if line, ok := markdown.HeadingLine(text, h); ok {
+			headingLine[h] = line
+		}
+	}
 
-	var out []occurrence
+	byLine := make(map[int]occurrence)
 
 	for _, h := range scannable {
 		for _, e := range markdown.Entries(text, h) {
-			if seen[e.Line] {
+			if existing, found := byLine[e.Line]; found && headingLine[existing.heading] >= headingLine[h] {
 				continue
 			}
 
-			seen[e.Line] = true
-
-			out = append(out, occurrence{
-				heading: nearestHeading(anchors, e.Line),
+			byLine[e.Line] = occurrence{
+				heading: h,
 				entry:   e,
 				text:    normalizeEntryText(e.Text),
-			})
+			}
 		}
+	}
+
+	out := make([]occurrence, 0, len(byLine))
+	for _, o := range byLine {
+		out = append(out, o)
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].entry.Line < out[j].entry.Line })
@@ -231,9 +201,9 @@ func countByText(occurrences []occurrence) map[string]int {
 }
 
 // surplusIndices returns, for old (pooled and line-ordered), the indices
-// D2's multiset rule marks dropped: for each distinct text, the surplus of
+// the multiset rule marks dropped: for each distinct text, the surplus of
 // old occurrences over newCounts[text] — the last ones, by index, in old's
-// own order.
+// own order — are the ones no longer present in the new body.
 func surplusIndices(old []occurrence, newCounts map[string]int) map[int]bool {
 	groups := make(map[string][]int)
 	for i, o := range old {
@@ -293,10 +263,10 @@ func projectDropped(old []occurrence, dropped map[int]bool, openDebts string) []
 // two state headings is never a drop, and a text duplicated in oldBody but
 // dropped only some of its occurrences is reported for its later
 // occurrence. Each body line belongs to at most one configured heading —
-// poolOccurrences' own nearestHeading assignment — so a nested or
-// runaway-scanned heading never inflates a count or reports the same
-// physical entry twice. The returned slice is never nil, and is already in
-// old-file line order.
+// poolOccurrences' own attribution — so a nested or runaway-scanned
+// heading never inflates a count or reports the same physical entry
+// twice. The returned slice is never nil, and is already in old-file line
+// order.
 func droppedEntries(oldBody, newBody []byte, headings config.StateHeadings) []DroppedEntry {
 	scannable := scannableHeadings(headings)
 

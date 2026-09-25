@@ -41,11 +41,12 @@ type Entry struct {
 // of that line's own indentation, so an indented sub-item folds in too,
 // its own list marker kept verbatim (only the parent item's own leading
 // marker is ever stripped, once, at Text's start) — until a blank line,
-// the next column-0 item, a heading of any level, or a fence delimiter.
-// A fence delimiter ends the entry in progress and begins the ordinary
-// fence-skip scan: its contents are never entries and never fold into the
-// entry before it, and the line immediately after the closing fence starts
-// a fresh scan rather than folding into the entry before the fence either.
+// the next column-0 item, a heading of any level, a thematic break, or a
+// fence delimiter. A fence delimiter ends the entry in progress and
+// begins the ordinary fence-skip scan: its contents are never entries and
+// never fold into the entry before it, and the line immediately after the
+// closing fence starts a fresh scan rather than folding into the entry
+// before the fence either.
 func Entries(body, heading string) []Entry {
 	lines := strings.Split(body, "\n")
 
@@ -98,9 +99,20 @@ func Entries(body, heading string) []Entry {
 
 // isContinuationLine reports whether line folds into the entry in
 // progress as continuation text: it is not blank, not itself a column-0
-// item, not a heading of any level, and not a fence delimiter.
+// item, not a thematic break, not a heading of any level, and not a fence
+// delimiter. A thematic break is checked on its own — not only through
+// entryItemText, which already excludes it from being an item — because
+// CommonMark treats one as interrupting a list in progress, the same as a
+// heading or a fence, rather than as ordinary paragraph text that folds
+// in.
 func isContinuationLine(line string) bool {
-	if strings.TrimSpace(line) == "" {
+	trimmed := trimEOL(line)
+
+	if strings.TrimSpace(trimmed) == "" {
+		return false
+	}
+
+	if thematicBreakRe.MatchString(trimmed) {
 		return false
 	}
 

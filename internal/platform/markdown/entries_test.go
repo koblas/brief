@@ -137,6 +137,11 @@ func Test_Entries_continuation_stops_at_blank_line_next_item_heading_and_fence(t
 			body: "## Heading\n\n- item one\ncontinuation\n```\nfence content\n```\ntrailing text\n",
 			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}},
 		},
+		{
+			name: "a thematic break directly after the continuation stops it immediately and is not itself an entry",
+			body: "## Heading\n\n- item one\ncontinuation\n* * *\n",
+			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}},
+		},
 	}
 
 	for _, c := range cases {

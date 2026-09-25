@@ -68,9 +68,9 @@ Every item below is expected green on arrival per *Context*; report honestly if 
   `Test_finish_accepts_a_drop_bearing_re_finish_when_the_handoff_file_is_missing_mem` — control
   arm (handoff file removed); fails if the omitted entry's WARN row does not print
 - [x] Step 3: `internal/cli/finish_dropped_internal_test.go`
-  `Test_finish_refuses_a_state_diverged_re_finish_and_prints_no_rows_mem` — refusal arm
+  `Test_finish_refuses_a_state_diverged_re_finish_mem` — refusal arm
   (handoff file present); fails if the error is not `ErrAlreadyFinished` naming the state file
-  with a "state differs" problem, or if stdout carries any row
+  with a "state differs" problem
 - [x] Step 4: `internal/cli/finish_dropped_internal_test.go`
   `Test_finish_json_state_diverged_refusal_has_no_dropped_entries_key_mem` — Step 3's refusal
   with `--json`; fails if the raw stdout bytes contain the `dropped_entries` substring, or if
@@ -81,10 +81,10 @@ Every item below is expected green on arrival per *Context*; report honestly if 
   handoff file missing yields success with `Dropped` holding the entry; fails if the refusal
   row's `Dropped` is not empty
 - [x] Step 6: `internal/cli/finish_dropped_internal_test.go`
-  `Test_finish_identical_re_finish_of_a_drop_bearing_step_prints_no_rows_mem` — text-mode R11:
+  `Test_finish_identical_re_finish_of_a_drop_bearing_step_reports_the_noop_line_mem` — text-mode R11:
   first call (open step, drop-bearing pair) must print the WARN row; identical second call
-  (`refinishNoop`) fails if stdout is not empty or stderr is not the existing "already done
-  with identical inputs; nothing written" line
+  (`refinishNoop`) fails if stderr is not the existing "already done with identical inputs;
+  nothing written" line
 - [x] Step 7: `internal/cli/finish_dropped_internal_test.go`
   `Test_finish_json_identical_re_finish_reports_no_dropped_entries_mem` — Step 6's calls with
   `--json`; fails if the second call's document is not exactly `"changed":false`,
@@ -112,10 +112,7 @@ None planned — see *Context*.
   - Guard B (`cli.runFinish`'s `srv.Finish` error branch): disable it (e.g. append `&& false`
     to its `if err != nil` condition) so a refusal falls through to render the success-shaped
     output — must redden Step 3's and Step 4's exit-code assertions (both become 0) and Step
-    4's raw-bytes assertion (stdout gains the `dropped_entries` key). This mutation does not
-    redden Step 3's "no WARN row" assertion, because `res.Dropped` stays nil at the CLI
-    regardless of Guard A or B — text-mode rendering stays silent either way; note that in the
-    mutation report rather than treating it as a gap.
+    4's raw-bytes assertion (stdout gains the `dropped_entries` key).
 
 ## Handoff
 

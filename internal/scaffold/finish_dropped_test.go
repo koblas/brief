@@ -548,6 +548,96 @@ func Test_finish_reports_a_drop_under_a_nested_open_debts_heading_exactly_once(t
 	}, res.Dropped)
 }
 
+// Test_finish_attributes_a_drop_under_an_unconfigured_subsection_to_its_actual_ancestor
+// proves nearestHeading picks only among headings whose *own* scan really
+// reached the entry's line, not merely the nearest configured heading by
+// line number: "### Notes" (unconfigured) is a sibling of "### Open debts"
+// under "## Traps", so "### Open debts"' own section (CommonMark
+// same-or-higher-level rule) ends at "### Notes" and its scan never
+// reaches "- notes entry" — only "## Traps"' own overrunning scan does.
+// Picking "the nearest configured heading by line" instead would
+// misattribute the drop to "### Open debts", since its own anchor line
+// sits between "## Traps"' and the entry's.
+func Test_finish_attributes_a_drop_under_an_unconfigured_subsection_to_its_actual_ancestor(t *testing.T) {
+	cfg := droppedNestedOpenDebtsConfig()
+	oldState := strings.Join([]string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- trap entry", "",
+		"### Open debts", "",
+		"- debt entry", "",
+		"### Notes", "",
+		"- notes entry", "",
+	}, "\n") + "\n"
+	mem := newDroppedFixtureFS(t, oldState)
+	newState := []byte(strings.Join([]string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- trap entry", "",
+		"### Open debts", "",
+		"- debt entry", "",
+	}, "\n") + "\n")
+
+	res, err := finishDroppedWithConfig(t, mem, newState, cfg)
+
+	require.NoError(t, err)
+	assert.Equal(t, []scaffold.DroppedEntry{
+		{Rule: scaffold.DropRuleEntry, Heading: "Traps", Line: 15, Tag: "", Text: "notes entry"},
+	}, res.Dropped)
+}
+
+// droppedReversedNestingConfig reconfigures Traps to "### Traps", one
+// level deeper than the default "## Open debts", inverting which of the
+// two nests inside the other relative to config.StateHeadings.Ordered()'s
+// own field order (BindingDecisions, LeftUnbuilt, Traps, OpenDebts):
+// Traps is scanned *before* OpenDebts in that fixed order, but is the
+// physically deeper, more specific heading here.
+func droppedReversedNestingConfig() config.Config {
+	cfg := config.Default()
+	cfg.StateHeadings.Traps = "### Traps"
+
+	return cfg
+}
+
+// Test_finish_attributes_a_drop_to_the_physically_deeper_heading_even_when_scanned_first
+// proves poolOccurrences picks the heading whose own scan reaches an entry
+// with the *greatest* markdown.HeadingLine, not whichever scannable
+// heading happens to be scanned last: "### Traps" nests inside "## Open
+// debts"' own section here — the reverse of every other nested-heading
+// test in this file — yet Ordered() still scans Traps before OpenDebts.
+// An implementation that let the later scan win regardless of heading
+// depth would misattribute "- trap entry" to "Open debts"
+// (dropped-debt); the correct, depth-based attribution is "Traps"
+// (dropped-entry).
+func Test_finish_attributes_a_drop_to_the_physically_deeper_heading_even_when_scanned_first(t *testing.T) {
+	cfg := droppedReversedNestingConfig()
+	oldState := strings.Join([]string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Open debts", "",
+		"- debt entry", "",
+		"### Traps", "",
+		"- trap entry", "",
+	}, "\n") + "\n"
+	mem := newDroppedFixtureFS(t, oldState)
+	newState := []byte(strings.Join([]string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Open debts", "",
+		"- debt entry", "",
+		"### Traps", "",
+	}, "\n") + "\n")
+
+	res, err := finishDroppedWithConfig(t, mem, newState, cfg)
+
+	require.NoError(t, err)
+	assert.Equal(t, []scaffold.DroppedEntry{
+		{Rule: scaffold.DropRuleEntry, Heading: "Traps", Line: 11, Tag: "", Text: "trap entry"},
+	}, res.Dropped)
+}
+
 // Test_finish_reports_a_drop_once_when_a_configured_heading_carries_no_hash
 // proves the MAJOR fix's second overlap source: cfg.StateHeadings.Traps set
 // to the plain string "Traps" (config.Resolve's own validateHeading rule
