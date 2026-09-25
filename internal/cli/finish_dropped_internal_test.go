@@ -287,6 +287,97 @@ func Test_finish_treats_moving_an_entry_between_state_headings_as_no_drop_but_mo
 	}
 }
 
+// Test_finish_reports_a_reworded_re_tagged_or_re_ticked_entry_as_dropped_mem
+// proves SCENARIO-06: droppedEntries keys its pooled multiset diff on
+// normalizeEntryText(e.Text) alone (SCENARIO-01's binding decision), and
+// markdown.Entries' entryItemText strips only the "- "/"* "/"N. " marker,
+// never a leading "[ ]"/"[x]" checkbox — so a reworded, re-tagged, or
+// re-ticked entry already normalizes to a different string from its old
+// occurrence and is reported as a drop carrying the *old* text/tag/line.
+// The shared old body's "## Traps" section holds "- kept entry" at line 7
+// then "- [x] Fix the thing (TAG1)" at line 9 — the same layout
+// Test_finish_treats_moving_an_entry_between_state_headings_... uses — and
+// only the new body's line 9 varies per case, so each drop case differs
+// from the old body, and from the whitespace-reflow control, by exactly
+// one variable. "kept entry" is unchanged in every new body so the diff is
+// never vacuous.
+func Test_finish_reports_a_reworded_re_tagged_or_re_ticked_entry_as_dropped_mem(t *testing.T) {
+	oldLines := []string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- kept entry", "",
+		"- [x] Fix the thing (TAG1)", "",
+		"## Open debts", "",
+	}
+	oldState := strings.Join(oldLines, "\n") + "\n"
+
+	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	handoffRel := filepath.Join("docs", "specifications", "demo", "SCENARIO-01-HANDOFF.md")
+	specRel := filepath.Join("docs", "specifications", "demo", "specification.md")
+
+	wantDroppedStdout := "WARN  " + stateRel + ":9  dropped from Traps, tagged TAG1: [x] Fix the thing (TAG1)\n"
+	wantDroppedStderr := fmt.Sprintf(
+		"brief finish: demo SCENARIO-01 done; wrote %s, replaced %s (dropped 1 entry, listed on stdout), ticked %s; demo is complete\n",
+		handoffRel, stateRel, specRel)
+
+	cases := []struct {
+		name       string
+		newLine9   string
+		wantStdout string
+		wantStderr string
+	}{
+		{
+			name:       "reworded",
+			newLine9:   "- [x] Fix the other thing (TAG1)",
+			wantStdout: wantDroppedStdout,
+			wantStderr: wantDroppedStderr,
+		},
+		{
+			name:       "re-tagged",
+			newLine9:   "- [x] Fix the thing (TAG2)",
+			wantStdout: wantDroppedStdout,
+			wantStderr: wantDroppedStderr,
+		},
+		{
+			name:       "re-ticked",
+			newLine9:   "- [ ] Fix the thing (TAG1)",
+			wantStdout: wantDroppedStdout,
+			wantStderr: wantDroppedStderr,
+		},
+		{
+			name:       "whitespace-only reflow is not a drop",
+			newLine9:   "- [x] Fix  the   thing (TAG1)",
+			wantStdout: "",
+			wantStderr: memWantFinishCompleteLine("demo", "SCENARIO-01"),
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			newLines := []string{
+				"## Binding decisions", "",
+				"## Left unbuilt", "",
+				"## Traps", "",
+				"- kept entry", "",
+				c.newLine9, "",
+				"## Open debts", "",
+			}
+			newState := strings.Join(newLines, "\n") + "\n"
+
+			tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+			handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+			statePath := memWriteInput(tree, "state.md", newState)
+
+			stdout, stderr, err := runFinishMem(t, tree, handoffPath, statePath)
+
+			require.NoError(t, err)
+			assert.Equal(t, c.wantStdout, stdout)
+			assert.Equal(t, c.wantStderr, stderr)
+		})
+	}
+}
+
 func Test_dropExcerpt(t *testing.T) {
 	cases := []struct {
 		name string
