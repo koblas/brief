@@ -42,6 +42,10 @@ For each test file under review:
    a closed stdout mid-write).
 4. **Check every rule** from the `go-testing` skill. Pay special attention to:
    - Structure (GWT with blank lines, no comments, setup discipline)
+   - Test comments (`go-testing` → *Test comments*): MINOR for a comment over 2 lines above
+     the func or 1 inside the body, one that restates the name, narrates setup, explains how
+     production code decides, cites a spec/finding/review id, records mutation evidence, or
+     that a fix pass made longer. Accurate is not a pass — over budget is still a finding.
    - Naming conventions
    - Forbidden logic in test bodies
    - Assertion style and redundancy

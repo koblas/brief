@@ -33,16 +33,14 @@ guesses is the point of this phase.
    verdict **and the literal surface**: every command and flag name, the flag help strings,
    the success and refusal lines, the fix text, the exit codes, and the `--json` field names.
    Copy is cheapest to change here. The same line changed after it ships costs a failing
-   test, a production edit, a re-gate, and a reviewer pass — on one feature, nine such lines
-   were the whole final fix pass.
+   test, a production edit, a re-gate, and a reviewer pass.
 
    **Ask for an edge-case row table, not just the happy path.** For every output the surface
    produces (each report block, row kind, hint, suffix, refusal), product-vision lists every
    input class that reaches it — present / missing / edited / older / not a regular file /
    outside the repository / user-level / unparseable / already done — and rules the exact
-   text and whether each one gets a row, a hint or silence. On one feature, three post-ship
-   rounds (~1.7M tokens) were spent ruling rows for escaping, uneditable and user-level
-   agents that no one had enumerated at scoping. Report its verdict:
+   text and whether each one gets a row, a hint or silence. A row no one enumerated at
+   scoping gets ruled after ship, one fix round at a time. Report its verdict:
    - **DON'T BUILD** or **RETHINK** — stop, put it to the user before going further.
    - **SHIP WITH CHANGES** — fold changes into the intent before Phase 2.
    - **SHIP** — continue.

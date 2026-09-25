@@ -175,12 +175,37 @@ package summarize
 - **Starts with the symbol name**, then a complete sentence: `// mintSession creates …`,
   not `// creates …` or `// This function creates …`. `go doc` prints it verbatim.
 - States **what it does, what it returns, and what it refuses** — the contract a caller
-  needs. Name the error sentinels and the conditions that produce them.
+  needs. Name the error sentinels and the conditions that produce them — in a clause
+  each, not a paragraph each.
 - **Cite the standard when the behaviour is one.** `RFC 6749 §5.1`, `OIDC Core §3.1.2.1`,
   `RFC 7009 §2.2` — section symbol included. A citation replaces a paragraph of
   explanation and is the one form of "why" that never goes stale.
-- Keep it **tight**: a sentence or three. Detail that belongs to one branch belongs at
-  that branch, not in the doc comment.
+- **Budget, and it binds:** exported func/type ~4 lines; unexported func/type 1–2 lines;
+  `const`, `var`, sentinel error 1 line. Past the budget the text is *how* — the
+  algorithm, a slot order, a walk through each branch — and *how* belongs in the body at
+  the line it explains, not in the doc comment
+  ([go.dev/doc/comment](https://go.dev/doc/comment), *Funcs*).
+- **Each fact once, where the code enforces it.** A constraint shared by several symbols
+  is one line beside the code that sets it, not restated on each.
+- **No spec or finding ids** (`R7`, `BR-3`) — they point outside `go doc`. State the rule.
+- **A fix makes a comment shorter or truer, never longer.**
+
+```go
+// Bad — 16 lines of doc on a 14-line function: slot order, what the mapper
+// returns, every re-read branch. The slot-order fact is also restated on two
+// other symbols.
+// resolveTransferCancellation classifies a cancelled Transfer transaction.
+// commitTransfer lists the witness slot before the debit slot in slots (R8),
+// so mapTransactWriteError resolves a transaction cancelled by BOTH
+// conditions to the witness's own sentinel, not errWriteContention -- ...
+// (11 more lines)
+
+// Good — the contract; the ordering note lives once, beside the slots literal.
+// resolveTransferCancellation maps a cancelled transfer transaction to a
+// store error. A failed witness check is ambiguous, so it re-reads:
+// ErrInsufficientFunds if the debit would now overdraw the account,
+// otherwise errWriteContention.
+```
 
 ### 3. Never document history in a comment
 
@@ -241,7 +266,8 @@ If the output does not say what the package is for, or a function's line does no
 what it guarantees, the comment is wrong — not the reader.
 
 Scope: production Go under `cmd/` and `internal/`. Test files follow the `go-testing`
-skill; `go doc` ignores them, so their comments explain the *rule under test*.
+skill (*Test comments*): the test name carries the rule under test, so a test comment
+defaults to none and never exceeds two lines.
 
 ## Testing conventions (summary — defer to the `go-testing` skill for depth)
 

@@ -82,8 +82,8 @@ All Go commands run from the repo root.
 
 `STATE.md` is the feature's current truth, and the ONLY inherited context later architects
 and developers read by default. Without it, every agent on a long feature reads every prior
-`## Handoff`, so context grows with the square of the scenario count — on one 20-scenario
-feature that growth dominated every later agent's budget.
+`## Handoff`, so context grows with the square of the scenario count and dominates every
+later agent's budget.
 
 **It is rewritten, never appended to.** That is the whole mechanism. An append-only file is
 just the handoffs again with extra steps.
@@ -158,11 +158,11 @@ Findings arrive ranked `[BLOCKER|MAJOR|MINOR|NIT] <file>:<line>` with `Failure:`
    in your report.
 8. **Comments state the contract, not the change history (MANDATORY).** Every fix pass adds
    prose, and two rules keep regressing because each pass re-derives them:
-   - **No review-round citations in production code.** `(REVIEW-04's MAJOR 2)`, `(REVIEW-05's
-     own finding)` and the like belong in `_test.go` (a test is legitimately coupled to its
-     originating bug report) or in the report itself — never in a non-test file. Those reports
+   - **No review-round, finding or spec citations in any comment — tests included.**
+     `(REVIEW-04's MAJOR 2)`, `R7`, `SCENARIO-04` belong in the report or the PR. Those reports
      live under `docs/specifications/` and will be archived; the citation becomes a dead
-     reference. Production count of `REVIEW-0` must stay at zero.
+     reference. State the rule instead. Test comments follow `go-testing` → *Test comments*:
+     the name is the documentation, default no comment, max 2 lines.
    - **No diff-narration.** A comment whose subject is *what this pass changed* ("only this
      function's body changed", "the duplicate that used to live here", "round 4 type-asserted
      only X") is correct on the commit it lands in and false on the next one. Test: **does
@@ -200,7 +200,7 @@ Findings arrive ranked `[BLOCKER|MAJOR|MINOR|NIT] <file>:<line>` with `Failure:`
 
 11. **Every branch this pass adds is tested and proven before you return (MANDATORY).** A fix
     pass that adds a guard, an error return or a fallback without a test that reaches it hands
-    the reviewer its next MAJOR — on one feature that loop ran six fix passes. Before
+    the reviewer its next MAJOR, and the loop repeats every pass. Before
     reporting:
     - Run the Verification block in `.claude/rules/agent-briefs.md` with `<start>` = the
       commit this fix pass started from: one covered full-suite run, then

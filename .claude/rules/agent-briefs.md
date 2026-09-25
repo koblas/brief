@@ -1,6 +1,6 @@
 # Standing brief for pipeline agents
 
-All here used to get retyped into each `architect`/`developer`/reviewer prompt, 60–100 lines per invocation. Live here so prompt carry only what specific to that scenario. Read once; no ask for repeat.
+Standing brief every `architect`/`developer`/reviewer prompt would otherwise retype. Live here so prompt carry only what specific to that scenario. Read once; no ask for repeat.
 
 ## Verification
 
@@ -19,14 +19,14 @@ golangci-lint run ./...
 
 **Narrow loop while working, full run once.** During scenario `### Red` and `### Green` phases run only packages and tests in play — `go test ./internal/setup/ -run 'Skill|Init'`. Run block above once, in `### Verify` phase (and at end of every fix pass). Full suite after every edit = most expensive habit, proves nothing final run does not. That one `go test` line is both full suite and coverage data — do not run suite second time for gate.
 
-**Coverage gate before handing off.** Every production line you added must be executed by test. `uncovered-diff.py` lists each added non-test line no test executes, grouped into runs with enclosing function, exits 1 if any left. Reach zero, or mark genuinely unreachable defensive branch in code with `// unreachable: <reason>` on the line (or the line above it) — then it move to "declared unreachable" section reviewer judge, and stop failing gate every later pass. On one feature, untested branches added by previous pass were bulk of test-reviewer MAJORs, cost six fix passes.
+**Coverage gate before handing off.** Every production line you added must be executed by test. `uncovered-diff.py` lists each added non-test line no test executes, grouped into runs with enclosing function, exits 1 if any left. Reach zero, or mark genuinely unreachable defensive branch in code with `// unreachable: <reason>` on the line (or the line above it) — then it move to "declared unreachable" section reviewer judge, and stop failing gate every later pass. Untested branch added by fix pass becomes next round's test-reviewer MAJOR.
 
 **Counts come from `test-stats.py --base <start> --changed`**: every package whose tests changed, with `now (±delta)` for top-level tests, `t.TempDir()` sites and disk-touching tests, read from git at `<start>` — never from archive or checkout you build yourself.
 
 Rules:
 
 - **Never pipe verification command through `head`/`tail`.** Hides failures below cut, and `$?` become pipe status — `go build ./nonexistent 2>&1 | tail -2` reports **exit 0** for failed build. If must pipe, prefix `set -o pipefail`.
-- **Report exact test count and delta, from `.claude/scripts/test-stats.py`** — "green" not result, and hand-rolled counts drifted up to nine tests between agents on same commit. Quote its rows as printed. Never write own counting script. Count that moved without explanation = finding, not rounding error.
+- **Report exact test count and delta, from `.claude/scripts/test-stats.py`** — "green" not result, and hand-rolled counts drift between agents on same commit. Quote its rows as printed. Never write own counting script. Count that moved without explanation = finding, not rounding error.
 - Green summary not mean everything ran. `test-stats.py --run <pkgdir>` counts leaf pass/fail/skip in one parallel `go test -json`; check skips before leaning on package.
 - Write scratch files only under `$TMPDIR` or session scratchpad — never `/tmp`, never path outside worktree you got.
 - Bash call failing with `operation not permitted` mean shell was **sandboxed**. Re-run with `dangerouslyDisableSandbox: true`.
@@ -49,9 +49,9 @@ Developer sets `status: done` when scenario complete, plus tick in `specificatio
 
 ## IDE diagnostics are advisory
 
-IDE indexes mid-edit, and during mutation windows. Routinely reports compile errors `go build` does not, and indexes deleted files. Across one 20-scenario feature it wrong every single time.
+IDE indexes mid-edit, and during mutation windows. Routinely reports compile errors `go build` does not, and indexes deleted files.
 
-No chase them. No re-verify on their account. Authority is `go build`. One exception: diagnostic that **contradicts claim you just made** worth single targeted check — that how live mutation left by crashed run got caught.
+No chase them. No re-verify on their account. Authority is `go build`. One exception: diagnostic that **contradicts claim you just made** worth single targeted check — it can be live mutation left behind by crashed run.
 
 ## Mutation verification
 
@@ -66,9 +66,9 @@ cp "$TMPDIR/<name>.orig" <file>      # restore
 diff "$TMPDIR/<name>.orig" <file>    # prove byte-identical
 ```
 
-Interrupted run once died holding gutted security guard, tree looked merely "failing" not "deliberately broken". Copy make that recoverable.
+Interrupted run can die holding gutted guard, and tree then looks merely "failing" not "deliberately broken". Copy make that recoverable.
 
-**Never use `git stash` for this.** Pipeline work runs in git worktrees, and every worktree shares one stash stack with main checkout and any other session: bare `git stash pop` can apply someone else entry. Never reuse old `$TMPDIR` copy either — stale copy once silently reverted file to previous commit contents.
+**Never use `git stash` for this.** Pipeline work runs in git worktrees, and every worktree shares one stash stack with main checkout and any other session: bare `git stash pop` can apply someone else entry. Never reuse old `$TMPDIR` copy either — stale copy silently reverts file to older contents.
 
 Rules:
 
@@ -76,11 +76,12 @@ Rules:
 - **Verify guards INDIVIDUALLY.** Two guards that only go red when BOTH disabled mean either can be deleted silently. Disable one at a time.
 - Mutation that breaks compilation **not** evidence. If every test fails, you proved file parses, nothing more. Make mutation surgical and still-valid.
 - Say which mutation you ran and which test it reddened. "Mutation-verified" alone not claim anyone can check.
+- Mutation results go in the report and STATE.md, never in a test comment (`go-testing` → *Test comments*).
 - **Reviewers never mutate worktree.** Reviewers run parallel; mutation in shared tree poisons every concurrent run. Mutate `git archive <sha>` export under `$TMPDIR`. Only developer (runs alone) mutates in place.
 
 ## Reviewing: scope and completeness
 
-Review gate not free. One 10-scenario feature spent roughly 550k tokens on reviewers, another 780k on developer passes answering them, and largest single cause was reviewers re-reading whole packages they already read in earlier round.
+Review gate not free, and largest avoidable cost is reviewers re-reading whole packages they already read in earlier round.
 
 **Read the delta, not the tree.** Your prompt names commit range or file list. Start from `git diff <range>`, read only what diff touches. Every reviewer has `Bash` for exactly this; reviewer that cannot run it say so rather than quietly reading whole packages. Widen to whole file when diff alone cannot settle question — and say in finding why you had to. Package you already reviewed in earlier round, on surface this fix did not touch, has nothing new in it.
 
@@ -90,7 +91,7 @@ Review gate not free. One 10-scenario feature spent roughly 550k tokens on revie
 
 ## Assertions that prove nothing
 
-One feature produced **fourteen** assertions that looked like proof and were not. Recurring shapes:
+Assertions that look like proof and are not recur in few shapes:
 
 - Asserting against constant fixture set, or value copied out of production code being tested. Pin derived by reading code pins nothing.
 - Negative assertions satisfied by nothing happening at all — dominant shape. Absence claim needs **control arm** showing thing DOES happen when guard removed, and control must differ from claim in exactly one variable.
