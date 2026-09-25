@@ -10,8 +10,7 @@ import (
 // Test_Entries_recognizes_every_column_zero_marker pins D1's three
 // recognized bullet grammars — "- ", "* " and "N. " — each anchored at
 // column 0 directly under the heading, one blank line below it so the
-// case never depends on continuation-line folding (built in a later
-// scenario).
+// case never depends on continuation-line folding.
 func Test_Entries_recognizes_every_column_zero_marker(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -34,10 +33,10 @@ func Test_Entries_recognizes_every_column_zero_marker(t *testing.T) {
 }
 
 // Test_Entries_excludes_lines_that_are_not_column_zero_items collects the
-// two shapes D1 says are never an entry — a paragraph line and an indented
-// line — each placed first in the section (never directly under a list
-// item), so the case is not accidentally exercising the continuation-line
-// rule a later scenario builds.
+// two shapes D1 says are never an entry of their own — a paragraph line
+// and an indented line — each placed first in the section, directly under
+// the heading rather than under a preceding item, so there is no entry in
+// progress for either to fold into as continuation text.
 func Test_Entries_excludes_lines_that_are_not_column_zero_items(t *testing.T) {
 	cases := []struct {
 		name string
@@ -62,4 +61,62 @@ func Test_Entries_returns_nothing_when_the_heading_is_absent(t *testing.T) {
 	got := markdown.Entries("no heading here\n", "## Heading")
 
 	assert.Empty(t, got)
+}
+
+// Test_Entries_folds_a_wrapped_continuation_line_into_the_entry_text pins
+// D1's continuation-line folding: an unindented wrapped second physical
+// line joins the item regardless of its own indentation ("lazy
+// continuation"), and a following indented sub-item folds in too, its own
+// list marker kept rather than stripped — only the parent item's own
+// leading marker is stripped, once, at Text's start. Line stays the item's
+// own first line even though Text now spans two later lines (D6).
+func Test_Entries_folds_a_wrapped_continuation_line_into_the_entry_text(t *testing.T) {
+	body := "## Heading\n\n- item text\nwrapped continuation\n  - sub item\n"
+
+	got := markdown.Entries(body, "## Heading")
+
+	assert.Equal(t, []markdown.Entry{{Line: 3, Text: "item text wrapped continuation - sub item"}}, got)
+}
+
+// Test_Entries_continuation_stops_at_blank_line_next_item_heading_and_fence
+// pins every boundary that ends an in-progress entry's continuation, one
+// continuation line between the item and the boundary in every case, and
+// asserts the exact resulting Entries rather than only an absence — an
+// implementation that folds nothing would otherwise pass this table
+// vacuously.
+func Test_Entries_continuation_stops_at_blank_line_next_item_heading_and_fence(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []markdown.Entry
+	}{
+		{
+			name: "a blank line then a second item stops the continuation",
+			body: "## Heading\n\n- item one\ncontinuation\n\n- item two\n",
+			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}, {Line: 6, Text: "item two"}},
+		},
+		{
+			name: "a second item directly after the continuation line stops it immediately",
+			body: "## Heading\n\n- item one\ncontinuation\n- item two\n",
+			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}, {Line: 5, Text: "item two"}},
+		},
+		{
+			name: "a heading deeper than the section's own heading ends the continuation but not the section",
+			body: "## Heading\n\n- item one\ncontinuation\n### Sub heading\n- item two\n",
+			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}, {Line: 6, Text: "item two"}},
+		},
+		{
+			name: "an opening fence ends the continuation and neither its contents nor the line after the closing fence fold in",
+			body: "## Heading\n\n- item one\ncontinuation\n```\nfence content\n```\ntrailing text\n",
+			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := markdown.Entries(c.body, "## Heading")
+
+			assert.Equal(t, c.want, got)
+		})
+	}
 }

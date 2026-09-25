@@ -378,6 +378,108 @@ func Test_finish_reports_a_reworded_re_tagged_or_re_ticked_entry_as_dropped_mem(
 	}
 }
 
+// memOldStateWithMultilineTrapEntry returns an old STATE.md body whose
+// "## Traps" section holds a multi-line entry — an unindented wrapped
+// continuation line plus an indented sub-item, the sub-item's own marker
+// kept (SCENARIO-07's folding rule) — at whole-body line 9, and whose "##
+// Binding decisions" section holds a second, single-line entry kept
+// unchanged, so a diff that ignored the new body entirely cannot pass by
+// accident. The folded, normalized text is "wrap item text continued
+// words - sub item text" (well under dropExcerpt's 80-rune cut).
+func memOldStateWithMultilineTrapEntry() string {
+	lines := []string{
+		"## Binding decisions", "",
+		"- kept entry", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- wrap item text",
+		"continued words",
+		"  - sub item text", "",
+		"## Open debts", "",
+	}
+
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// Test_finish_reports_no_drop_when_a_wrapped_entry_is_reflowed_to_one_line_mem
+// proves SCENARIO-07: markdown.Entries folds a multi-line entry's
+// continuation and indented sub-item into one Text, so a new body that
+// reflows the same words onto a single physical line normalizes to the
+// same identity as the old multi-line entry and is never reported as a
+// drop.
+func Test_finish_reports_no_drop_when_a_wrapped_entry_is_reflowed_to_one_line_mem(t *testing.T) {
+	oldState := memOldStateWithMultilineTrapEntry()
+	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+	newLines := []string{
+		"## Binding decisions", "",
+		"- kept entry", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- wrap item text continued words - sub item text", "",
+		"## Open debts", "",
+	}
+	newState := strings.Join(newLines, "\n") + "\n"
+	statePath := memWriteInput(tree, "state.md", newState)
+
+	stdout, stderr, err := runFinishMem(t, tree, handoffPath, statePath)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout)
+	assert.Equal(t, memWantFinishCompleteLine("demo", "SCENARIO-01"), stderr)
+}
+
+// Test_finish_reports_a_dropped_multiline_entry_at_its_first_line_mem is
+// Test_finish_reports_no_drop_when_a_wrapped_entry_is_reflowed_to_one_line_mem's
+// control arm, differing in exactly one variable: the new body omits the
+// multi-line entry entirely instead of reflowing it. The reported row's
+// line is the entry's own first old-file line (D6, line 9) and its excerpt
+// carries the fully folded text, continuation and sub-item words included.
+func Test_finish_reports_a_dropped_multiline_entry_at_its_first_line_mem(t *testing.T) {
+	oldState := memOldStateWithMultilineTrapEntry()
+	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+	newState := "## Binding decisions\n\n- kept entry\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n"
+	statePath := memWriteInput(tree, "state.md", newState)
+
+	stdout, stderr, err := runFinishMem(t, tree, handoffPath, statePath)
+
+	require.NoError(t, err)
+	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	assert.Equal(t, "WARN  "+stateRel+":9  dropped from Traps, untagged: wrap item text continued words - sub item text\n", stdout)
+	assert.Contains(t, stderr, "(dropped 1 entry, listed on stdout)")
+}
+
+// Test_finish_reports_a_duplicated_entry_dropped_once_at_its_later_occurrence_mem
+// proves D2's "surplus old occurrences — the last ones in old-file order —
+// are dropped": the old body carries the identical normalized text as two
+// separate column-0 items under "## Traps", at old-file lines 7 and 9, and
+// the new body carries it once, so exactly one of the two is a surplus.
+// dropped.go's idxs[len(idxs)-surplus:] already selects the tail of the
+// line-ordered group — this test is expected green on arrival.
+func Test_finish_reports_a_duplicated_entry_dropped_once_at_its_later_occurrence_mem(t *testing.T) {
+	oldLines := []string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- dup text", "",
+		"- dup text", "",
+		"## Open debts", "",
+	}
+	oldState := strings.Join(oldLines, "\n") + "\n"
+	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+	newState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n- dup text\n\n## Open debts\n"
+	statePath := memWriteInput(tree, "state.md", newState)
+
+	stdout, stderr, err := runFinishMem(t, tree, handoffPath, statePath)
+
+	require.NoError(t, err)
+	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	assert.Equal(t, "WARN  "+stateRel+":9  dropped from Traps, untagged: dup text\n", stdout)
+	assert.Contains(t, stderr, "(dropped 1 entry, listed on stdout)")
+}
+
 func Test_dropExcerpt(t *testing.T) {
 	cases := []struct {
 		name string

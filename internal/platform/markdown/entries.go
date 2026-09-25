@@ -12,9 +12,12 @@ import (
 var entryItemRe = regexp.MustCompile(`^(?:[-*] |\d+\. )`)
 
 // Entry is one list item Entries found under a configured heading: Line is
-// its 1-based line number counted over the whole body it was scanned
-// from, matching FirstUnchecked's own convention, and Text is the item's
-// content with its marker and surrounding horizontal whitespace stripped.
+// its 1-based line number counted over the whole body it was scanned from,
+// matching FirstUnchecked's own convention, fixed at the item's own first
+// line and never advancing as later continuation lines fold in. Text is
+// the item's content: its own leading marker and surrounding horizontal
+// whitespace stripped, followed by every folded continuation line (see
+// Entries), each joined in with a single space.
 type Entry struct {
 	Line int
 	Text string
@@ -24,8 +27,17 @@ type Entry struct {
 // section under heading in body, in document order. A line inside a
 // fenced code block is never treated as an item, matching Section and
 // FirstUnchecked. Entries returns nil when heading is absent from body or
-// its section holds no column-0 list item — an indented line and a
-// paragraph line are both ignored, never entries of their own.
+// its section holds no column-0 list item.
+//
+// An item folds in every following line as continuation text — regardless
+// of that line's own indentation, so an indented sub-item folds in too,
+// its own list marker kept verbatim (only the parent item's own leading
+// marker is ever stripped, once, at Text's start) — until a blank line,
+// the next column-0 item, a heading of any level, or a fence delimiter.
+// A fence delimiter ends the entry in progress and begins the ordinary
+// fence-skip scan: its contents are never entries and never fold into the
+// entry before it, and the line immediately after the closing fence starts
+// a fresh scan rather than folding into the entry before the fence either.
 func Entries(body, heading string) []Entry {
 	lines := strings.Split(body, "\n")
 
@@ -38,26 +50,65 @@ func Entries(body, heading string) []Entry {
 
 	var fence fenceState
 
-	for i := headingIdx + 1; i < sectionEnd; i++ {
+	i := headingIdx + 1
+	for i < sectionEnd {
 		line := lines[i]
 
 		if fence.step(line) {
+			i++
 			continue
 		}
 
 		if fence.open {
+			i++
 			continue
 		}
 
 		text, ok := entryItemText(line)
 		if !ok {
+			i++
 			continue
 		}
 
-		entries = append(entries, Entry{Line: i + 1, Text: text})
+		entryLine := i + 1
+
+		parts := []string{text}
+
+		j := i + 1
+		for j < sectionEnd && isContinuationLine(lines[j]) {
+			parts = append(parts, strings.TrimSpace(lines[j]))
+			j++
+		}
+
+		entries = append(entries, Entry{Line: entryLine, Text: strings.Join(parts, " ")})
+
+		i = j
 	}
 
 	return entries
+}
+
+// isContinuationLine reports whether line folds into the entry in
+// progress as continuation text: it is not blank, not itself a column-0
+// item, not a heading of any level, and not a fence delimiter.
+func isContinuationLine(line string) bool {
+	if strings.TrimSpace(line) == "" {
+		return false
+	}
+
+	if _, ok := entryItemText(line); ok {
+		return false
+	}
+
+	if headingLevelOf(line) > 0 {
+		return false
+	}
+
+	if _, _, _, ok := fenceDelim(line); ok {
+		return false
+	}
+
+	return true
 }
 
 // entryItemText reports line's item text when line is a column-0 list

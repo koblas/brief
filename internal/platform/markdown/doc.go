@@ -22,6 +22,9 @@
 // found the same way whether the caller is writing (scaffold.Finish) or
 // reading (check). Entries is the one column-0 list-item scanner —
 // "- ", "* " or "N. " markers only, fence-aware like the rest — that
-// scaffold's own drop-reporting diff builds on; an indented line is
-// ignored, never an entry of its own.
+// scaffold's own drop-reporting diff builds on; a line that is not itself
+// a column-0 item folds into the preceding item as continuation text
+// instead of being ignored, an indented sub-item's own marker kept
+// verbatim, until a blank line, the next column-0 item, a heading of any
+// level, or a fence delimiter ends it.
 package markdown
