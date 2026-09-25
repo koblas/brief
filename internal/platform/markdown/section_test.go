@@ -72,8 +72,9 @@ func Test_Section_trims_leading_and_trailing_blank_lines(t *testing.T) {
 func Test_HeadingLine_returns_the_1_based_line_of_the_matching_line(t *testing.T) {
 	body := "para\n\n## Heading\n\nbody\n"
 
-	got, _ := markdown.HeadingLine(body, "## Heading")
+	got, ok := markdown.HeadingLine(body, "## Heading")
 
+	assert.True(t, ok)
 	assert.Equal(t, 3, got)
 }
 
@@ -86,8 +87,9 @@ func Test_HeadingLine_returns_false_when_the_heading_is_absent(t *testing.T) {
 func Test_HeadingLine_skips_a_matching_line_inside_a_fenced_code_block(t *testing.T) {
 	body := "```\n## Heading\n```\n\n## Heading\n"
 
-	got, _ := markdown.HeadingLine(body, "## Heading")
+	got, ok := markdown.HeadingLine(body, "## Heading")
 
+	assert.True(t, ok)
 	assert.Equal(t, 5, got)
 }
 

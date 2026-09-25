@@ -833,20 +833,20 @@ func (w *failNthWriter) Write(p []byte) (int, error) {
 }
 
 // Test_finish_stops_writing_dropped_rows_on_the_first_write_error_mem
-// proves the MAJOR fix at internal/cli/finish.go: runFinish no longer
-// ignores a WARN-row write error. The old body carries three dropped
+// pins writeDroppedRows' (internal/cli/finish_dropped.go) own contract: it
+// stops at the first row-write error rather than continuing past it, and
+// runFinish (internal/cli/finish.go) surfaces that error as a refusal —
+// exit 1, stating the state was already replaced — rather than a bare
+// wrapped error main.go would exit on without ever printing (SilenceErrors
+// is set on the root command, so nothing but ExitCode(err) is ever read
+// from a plain returned error). The old body carries three dropped
 // entries; the fake stdout writer fails only its *second* call and would
 // succeed on a third if writeDroppedRows kept going past the failure — so
 // the buffer holding exactly the first row's bytes, and nothing from the
 // third, is proof the loop actually stops rather than merely capturing
 // the first error while continuing to write every later row that itself
 // happens to succeed. runFinish also never goes on to print the
-// "replaced ..." success line, and reports the failure through the
-// package's own visible error path (reporter.refusal), stating that the
-// state was already replaced — not a bare wrapped error main.go would
-// exit on without ever printing (SilenceErrors is set on the root
-// command, so nothing but ExitCode(err) is ever read from a plain
-// returned error).
+// "replaced ..." success line.
 func Test_finish_stops_writing_dropped_rows_on_the_first_write_error_mem(t *testing.T) {
 	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n" +
 		"- first dropped\n- second dropped\n- third dropped\n\n## Open debts\n\n"

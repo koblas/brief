@@ -24,12 +24,13 @@ const (
 )
 
 // Severity is the urgency a DroppedEntry carries, mirroring
-// assemble.Severity and doctor.Severity's own shape: scaffold decides it,
-// cli only turns it into JSON or row text (string(...)).
+// assemble.Severity and doctor.Severity's own shape: cli only turns it
+// into JSON or row text (string(...)), never assigns it.
 type Severity string
 
-// SeverityWarn is every drop's severity: a drop is reported, never
-// refused.
+// SeverityWarn is the only Severity value a DroppedEntry ever carries:
+// every drop is reported at SeverityWarn, and dropping an entry never
+// refuses the write.
 const SeverityWarn Severity = "WARN"
 
 // DroppedEntry is one state-file entry Finish's replacement body no longer

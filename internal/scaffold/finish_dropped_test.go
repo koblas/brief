@@ -639,16 +639,6 @@ func Test_finish_attributes_a_drop_to_the_physically_deeper_heading_even_when_sc
 	}, res.Dropped)
 }
 
-// Test_finish_reports_a_drop_once_when_a_configured_heading_carries_no_hash
-// proves the MAJOR fix's second overlap source: cfg.StateHeadings.Traps set
-// to the plain string "Traps" (config.Resolve's own validateHeading rule
-// requires only non-empty and pairwise-distinct, no "#"). Matched against a
-// body line that is not an ATX heading, its own headingLevelOf is 0, so the
-// pre-fix section scan for "Traps" never finds a terminating heading and
-// reads to end of file — overrunning into "## Open debts"' own section and
-// pooling "- debt entry" a second time, under "Traps", alongside "## Open
-// debts"' own correct scan. The fix reports the drop once, under its true
-// nearest-enclosing heading.
 // Test_finish_dedupes_a_new_bodys_nested_heading_overlap_before_diffing
 // proves poolOccurrences' by-line dedup is applied to the *new* body, not
 // only the old one: droppedEntries calls poolOccurrences twice
@@ -693,6 +683,16 @@ func Test_finish_dedupes_a_new_bodys_nested_heading_overlap_before_diffing(t *te
 	}, res.Dropped)
 }
 
+// Test_finish_reports_a_drop_once_when_a_configured_heading_carries_no_hash
+// proves the MAJOR fix's second overlap source: cfg.StateHeadings.Traps set
+// to the plain string "Traps" (config.Resolve's own validateHeading rule
+// requires only non-empty and pairwise-distinct, no "#"). Matched against a
+// body line that is not an ATX heading, its own headingLevelOf is 0, so the
+// pre-fix section scan for "Traps" never finds a terminating heading and
+// reads to end of file — overrunning into "## Open debts"' own section and
+// pooling "- debt entry" a second time, under "Traps", alongside "## Open
+// debts"' own correct scan. The fix reports the drop once, under its true
+// nearest-enclosing heading.
 func Test_finish_reports_a_drop_once_when_a_configured_heading_carries_no_hash(t *testing.T) {
 	cfg := config.Default()
 	cfg.StateHeadings.Traps = "Traps"

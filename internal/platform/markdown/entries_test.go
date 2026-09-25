@@ -114,6 +114,10 @@ func Test_Entries_folds_a_wrapped_continuation_line_into_the_entry_text(t *testi
 // leading-space cases pin thematicBreakRe's other two marker characters and
 // CommonMark's own indentation tolerance, none of which
 // Test_Entries_excludes_a_column_zero_thematic_break exercises on its own.
+// The four-or-more-space case is the negative control on that same
+// boundary: past three leading spaces thematicBreakRe no longer matches,
+// so the line is ordinary continuation text and folds in rather than
+// ending the entry.
 func Test_Entries_continuation_stops_at_blank_line_next_item_heading_and_fence(t *testing.T) {
 	cases := []struct {
 		name string
@@ -159,6 +163,11 @@ func Test_Entries_continuation_stops_at_blank_line_next_item_heading_and_fence(t
 			name: "a thematic break indented up to three spaces directly after the continuation still stops it immediately",
 			body: "## Heading\n\n- item one\ncontinuation\n   ***\n",
 			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}},
+		},
+		{
+			name: "a thematic break indented four spaces is outside thematicBreakRe's bound and folds in as continuation text",
+			body: "## Heading\n\n- item one\n    ***\n",
+			want: []markdown.Entry{{Line: 3, Text: "item one ***"}},
 		},
 	}
 
