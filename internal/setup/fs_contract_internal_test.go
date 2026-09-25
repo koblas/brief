@@ -12,17 +12,9 @@ import (
 )
 
 // diskFSUnderTempDir adapts diskFS to a name space rooted at a fresh
-// t.TempDir() rather than diskFS's own production "/" root: base is
-// fsName(tempDir), and every method joins it onto the contract's own
-// relative name — via plain string concatenation, never filepath.Join or
-// path.Clean, so a name the contract deliberately makes invalid (a
-// dot-dot, a doubled separator) still reaches diskFS's real abs() mapping
-// unmodified rather than being normalized away by the wrapper itself.
-// diskFS.abs is the exact inverse of fsName (fs.go's own doc comment), so
-// this join, followed by diskFS's own abs(), reconstructs the real,
-// absolute temp-dir path the contract's writes and reads actually land at
-// — this is the only way to contract-test diskFS at all without touching
-// the real "/" its zero value is otherwise rooted at.
+// t.TempDir() rather than diskFS's own production "/" root. join uses plain
+// string concatenation, never filepath.Join, so a name the contract
+// deliberately makes invalid reaches diskFS's abs() mapping unmodified.
 type diskFSUnderTempDir struct {
 	diskFS
 
@@ -84,9 +76,8 @@ func (d diskFSUnderTempDir) OpenRoot(name string) (rwfs.FS, error) {
 var _ rwfs.FS = diskFSUnderTempDir{}
 
 // newDiskFSContractFS returns diskFS, viewed through a fresh t.TempDir(),
-// pre-seeded with the same symlink-to-file and symlink-to-directory
-// fixtures rwfs' own contract fixtures use, created with plain os.Symlink
-// since diskFS (like OS) has no Symlink-creating method of its own.
+// pre-seeded with symlink-to-file and symlink-to-directory fixtures via
+// plain os.Symlink, since diskFS has no Symlink-creating method of its own.
 func newDiskFSContractFS(t *testing.T) rwfs.FS {
 	t.Helper()
 
@@ -102,11 +93,8 @@ func newDiskFSContractFS(t *testing.T) rwfs.FS {
 	return d
 }
 
-// Test_diskFS_contract runs rwfs' own read/write contract against diskFS,
-// proving it satisfies rwfs.FS beyond the compile-time var _ rwfs.FS
-// assertion (fs.go) — every documented divergence declared through its own
-// Option, cited to fs.go's and doc.go's own doc comments rather than
-// re-derived here.
+// This proves diskFS satisfies rwfs.FS beyond the compile-time var _
+// rwfs.FS assertion.
 func Test_diskFS_contract(t *testing.T) {
 	rwfstest.Contract(t, newDiskFSContractFS,
 		rwfstest.SkipInvalidNames(

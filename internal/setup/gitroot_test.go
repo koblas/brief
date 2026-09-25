@@ -9,16 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_Init_ignores_an_ancestor_config_outside_the_enclosing_git_repository
-// pins the boundary rule: an ancestor ".brief.yaml" (and CLAUDE.md) sitting
-// above the nearest enclosing git repository — a HOME-level config, say —
-// is never adopted. Init writes a fresh config at wd instead of merging
-// into the ancestor's own CLAUDE.md or installing the plugin under the
-// ancestor's own ".claude/". The ancestor CLAUDE.md is proven
-// byte-identical afterward, which is vacuous unless the same run also
-// proves it wrote *something* — the fresh config and plugin at wd. The
-// ancestor walk (repo.RootFS, config.LocateWithinFS) only ever stats a
-// ".git" or ".brief.yaml" candidate, so this is Mem-backed, fully virtual.
 func Test_Init_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
 	home := fsAbs("home")
 	proj := fsAbs("home", "proj")
@@ -60,11 +50,6 @@ func Test_Init_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t
 	assert.NotContains(t, snap, memKey(home)+"/.claude", "init must never create the ancestor's own .claude/")
 }
 
-// Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root is
-// the control for the case above: a config sitting exactly at the nearest
-// enclosing git repository root — not above it — is still adopted, even
-// though wd is a subdirectory holding neither a config nor a ".git" of its
-// own.
 func Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root(t *testing.T) {
 	root := fsAbs("repo")
 	mem := newVirtualMem(root)
@@ -86,11 +71,6 @@ func Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root(t *tes
 	assert.Equal(t, featureRoot, row.Path)
 }
 
-// Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root
-// is Test_Init_still_adopts_a_config_at_the_enclosing_git_repository_root's
-// own sibling for Uninstall: a config sitting exactly at the nearest
-// enclosing git repository root is still adopted and removed, even though
-// wd is a subdirectory holding neither a config nor a ".git" of its own.
 func Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root(t *testing.T) {
 	root := fsAbs("repo")
 	mem := newVirtualMem(root)
@@ -117,11 +97,6 @@ func Test_Uninstall_still_adopts_a_config_at_the_enclosing_git_repository_root(t
 	assert.NotContains(t, mem.Snapshot(), memKey(configPath))
 }
 
-// Test_Uninstall_ignores_an_ancestor_config_outside_the_enclosing_git_repository
-// is Test_Init_ignores_an_ancestor_config_outside_the_enclosing_git_repository's
-// own sibling for Uninstall: an ancestor config above the enclosing git
-// repository is never removed, and Uninstall reports nothing installed
-// rather than reaching outside the repository.
 func Test_Uninstall_ignores_an_ancestor_config_outside_the_enclosing_git_repository(t *testing.T) {
 	home := fsAbs("home")
 	proj := fsAbs("home", "proj")

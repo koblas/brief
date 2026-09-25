@@ -9,11 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_uninstall_removes_an_unedited_config_and_keeps_the_feature_root pins
-// R6's ownership rule for the happy path: a config whose bytes still equal
-// this binary's own render is removed, reported ActionRemoved with an empty
-// Detail, and Result.Removed names its absolute path — while the feature
-// root Init created, and a file placed under it, survive untouched.
 func Test_uninstall_removes_an_unedited_config_and_keeps_the_feature_root(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -47,10 +42,6 @@ func Test_uninstall_removes_an_unedited_config_and_keeps_the_feature_root(t *tes
 	assert.Equal(t, "keep me", string(snap[memKey(marker)].Data))
 }
 
-// Test_uninstall_keeps_an_edited_config_and_reports_it pins R6's "edited
-// locally" branch: a config whose bytes decode without violation but
-// differ from artifact.ConfigFile() is left byte-identical (ActionKept)
-// and Result.Removed stays empty.
 func Test_uninstall_keeps_an_edited_config_and_reports_it(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -69,10 +60,6 @@ func Test_uninstall_keeps_an_edited_config_and_reports_it(t *testing.T) {
 	assert.Equal(t, original, mem.Snapshot()[memKey(configPath)].Data)
 }
 
-// Test_uninstall_force_removes_an_edited_config pins --force's own
-// override of the "edited locally" branch: the same fixture the test above
-// keeps, --force instead removes, still reporting the "edited locally"
-// detail.
 func Test_uninstall_force_removes_an_edited_config(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -90,11 +77,6 @@ func Test_uninstall_force_removes_an_edited_config(t *testing.T) {
 	assert.NotContains(t, mem.Snapshot(), memKey(configPath))
 }
 
-// Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited pins the
-// no-refusal-class divergence from Init: recognition is digest-only, so
-// neither an unparseable file nor an R1-invalid value ever produces an
-// error — both are simply "edited locally", kept without --force and
-// removed with it.
 func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing.T) {
 	tests := []struct {
 		name string
@@ -131,10 +113,6 @@ func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing
 	}
 }
 
-// Test_uninstall_with_no_config_reports_nothing_installed pins the
-// "nothing installed" equivalence: zero artifacts, every slice empty but
-// non-nil, no error. The control arm is an existing feature root with no
-// config nearby — still zero artifacts, and untouched.
 func Test_uninstall_with_no_config_reports_nothing_installed(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -159,9 +137,6 @@ func Test_uninstall_with_no_config_reports_nothing_installed(t *testing.T) {
 	assert.True(t, info.Mode.IsDir())
 }
 
-// Test_uninstall_dry_run_plans_removal_and_removes_nothing pins R9's own
-// DryRun promise for Uninstall: the row says "removed", Result.Removed
-// stays empty, and mem is untouched, byte-identical.
 func Test_uninstall_dry_run_plans_removal_and_removes_nothing(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -182,11 +157,6 @@ func Test_uninstall_dry_run_plans_removal_and_removes_nothing(t *testing.T) {
 	assert.Equal(t, before, mem.Snapshot())
 }
 
-// Test_uninstall_keeps_a_config_path_that_is_not_a_regular_file pins the
-// Lstat guard: ".brief.yaml" as an empty directory (Remove fails on a
-// non-empty one regardless, so an empty one is the fixture that would
-// actually catch a dropped guard) is kept, detail "not a regular file",
-// with or without --force, and the directory survives.
 func Test_uninstall_keeps_a_config_path_that_is_not_a_regular_file(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -209,10 +179,6 @@ func Test_uninstall_keeps_a_config_path_that_is_not_a_regular_file(t *testing.T)
 	assert.True(t, info.Mode.IsDir())
 }
 
-// Test_uninstall_operates_on_a_config_found_in_an_ancestor pins the shared
-// root rule: a config found walking up from wd (config.LocateInRepo, no
-// enclosing git repository in this fixture so the walk is unbounded) is the
-// one Uninstall removes, not anything relative to wd itself.
 func Test_uninstall_operates_on_a_config_found_in_an_ancestor(t *testing.T) {
 	parent := fsAbs("repo")
 	mem := newVirtualMem(parent)
@@ -234,11 +200,6 @@ func Test_uninstall_operates_on_a_config_found_in_an_ancestor(t *testing.T) {
 	assert.NotContains(t, mem.Snapshot(), memKey(configPath))
 }
 
-// Test_uninstall_never_removes_either_feature_root_after_force_init pins
-// R6's last sentence: a non-default feature-directory, then "init --force"
-// (which leaves both the old custom root and the new default one), then
-// "uninstall --force" — neither root is ever removed, including the
-// default one, which is empty.
 func Test_uninstall_never_removes_either_feature_root_after_force_init(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -273,8 +234,6 @@ func Test_uninstall_never_removes_either_feature_root_after_force_init(t *testin
 	assert.True(t, info.Mode.IsDir())
 }
 
-// Test_uninstall_rejects_an_unknown_host pins the same usage-error branch
-// Init reports: a host outside Hosts() never reaches config.Locate at all.
 func Test_uninstall_rejects_an_unknown_host(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -285,14 +244,6 @@ func Test_uninstall_rejects_an_unknown_host(t *testing.T) {
 	assert.ErrorIs(t, err, setup.ErrUnknownHost)
 }
 
-// Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_directories
-// pins R6's own removal order and directory pruning: the CLAUDE.md block
-// first, then the brief-workflow skill, then the plugin's four rows report
-// hooks.json, finish skill, start skill, manifest — the reverse of Init's
-// own write order — then the config last, every row ActionRemoved, and
-// afterward ".claude/skills/brief/" is gone while ".claude/skills/" and
-// ".claude/" (the host's own directories, never brief's to remove) still
-// stand. This is the package's own full-row-order pin for Uninstall.
 func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_directories(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -328,11 +279,6 @@ func Test_uninstall_for_claude_code_removes_the_unedited_plugin_and_its_empty_di
 	assert.True(t, info.Mode.IsDir())
 }
 
-// Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced
-// pins R6's "edited locally" branch for a plugin file: without --force the
-// edited start skill (and the directories holding it) survive; with
-// --force it is removed, detail "edited locally", and the plugin's own
-// directory tree is pruned same as the happy path.
 func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced(t *testing.T) {
 	edited := []byte("---\nedited by hand\n---\n")
 
@@ -377,11 +323,6 @@ func Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_u
 	}
 }
 
-// Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directory
-// pins the missing-file branch: hooks.json never existed (a --no-hook
-// init), so it plans no row and no error, and the remaining three plugin
-// files plus the brief-workflow skill and the CLAUDE.md block still remove
-// cleanly with the plugin directory pruned.
 func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directory(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -407,11 +348,6 @@ func Test_uninstall_after_a_no_hook_init_removes_the_three_files_and_the_directo
 	assert.NotContains(t, mem.Snapshot(), memKey(filepath.Join(wd, ".claude", "skills", "brief")))
 }
 
-// Test_uninstall_keeps_a_plugin_directory_holding_a_file_brief_did_not_write
-// pins the pruning boundary: an adopter's own file under
-// "skills/extra/notes.md" keeps "skills/" and "brief/" standing even
-// though every one of brief's own files in this same run is removed — the
-// control proving pruning runs at all.
 func Test_uninstall_keeps_a_plugin_directory_holding_a_file_brief_did_not_write(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -442,13 +378,6 @@ func Test_uninstall_keeps_a_plugin_directory_holding_a_file_brief_did_not_write(
 	assert.True(t, info.Mode.IsDir())
 }
 
-// Test_uninstall_removes_agents_and_prunes_the_agents_directory pins the
-// "always plans agent removal" rule (R7/R4): unlike Init, Uninstall has no
-// --with-agents flag of its own — an init that installed the three agent
-// files has them removed here regardless, in the reverse of Init's own
-// order (reviewer, implementer, planner), ahead of the plugin's own files,
-// and "agents/" is pruned alongside the plugin's other now-empty
-// directories.
 func Test_uninstall_removes_agents_and_prunes_the_agents_directory(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -502,10 +431,6 @@ func Test_uninstall_removes_agents_and_prunes_the_agents_directory(t *testing.T)
 	assert.NotContains(t, snap, memKey(filepath.Join(wd, ".claude", "skills", "brief", "agents")), "the now-empty agents/ directory must be pruned")
 }
 
-// Test_uninstall_keeps_an_edited_agent_unless_forced pins the same "edited
-// locally" branch a plugin file gets, for an agent file: kept without
-// --force, removed (still detail "edited locally") with it, mirroring
-// Test_uninstall_keeps_an_edited_plugin_file_and_the_directories_holding_it_unless_forced.
 func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
 	edited := []byte("---\nname: planner\nedited: true\n---\n")
 
@@ -546,12 +471,8 @@ func Test_uninstall_keeps_an_edited_agent_unless_forced(t *testing.T) {
 	}
 }
 
-// olderPlannerBytesForUninstall, olderImplementerBytesForUninstall are the
-// pre-SCENARIO-02 planner and implementer renders, captured mechanically
-// (%q dump) before agents.go changed — copied here since setup_test cannot
-// import an unexported artifact fixture (see agents_test.go's own
-// olderPlannerBytes/olderImplementerBytes, this file's own package-level
-// duplicate to keep this test self-contained within its own table).
+// olderPlannerBytesForUninstall and olderImplementerBytesForUninstall are
+// agent renders that predate the current format, used to exercise removal.
 const (
 	olderPlannerBytesForUninstall = "---\nname: planner\ndescription: Turn a feature's specification into ordered scenario " +
 		"plans.\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\nTurn the feature's " +
@@ -564,13 +485,6 @@ const (
 		"<path>`.\n"
 )
 
-// Test_uninstall_removes_an_older_agent_file_without_force pins Rule 6 at
-// Uninstall's own removal path: a planner or implementer holding the
-// pre-SCENARIO-02 bytes is removed without --force — ActionRemoved, no
-// detail, ForceRemovable false, gone — the same "older is not edited" rule
-// planPluginRemoval must apply to every plugin Kind. The control row is
-// the same fixture actually edited by hand: kept without --force,
-// ForceRemovable true, bytes untouched.
 func Test_uninstall_removes_an_older_agent_file_without_force(t *testing.T) {
 	cases := []struct {
 		name               string
@@ -630,10 +544,6 @@ func Test_uninstall_removes_an_older_agent_file_without_force(t *testing.T) {
 	}
 }
 
-// Test_uninstall_removes_a_bound_config pins the second KindConfig
-// digest's own removal path: a config holding artifact.ConfigFileWithRoles
-// — the bound variant "init --with-agents" wrote — is recognized and
-// removed exactly like the plain render, ActionRemoved with no detail.
 func Test_uninstall_removes_a_bound_config(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -652,11 +562,6 @@ func Test_uninstall_removes_a_bound_config(t *testing.T) {
 	assert.NotContains(t, mem.Snapshot(), memKey(configPath))
 }
 
-// Test_uninstall_for_host_none_leaves_the_plugin_in_place pins the
-// host-gated planning: with --host none, uninstall never plans a single
-// plugin file, so the tree it installed under claude-code survives
-// completely — only the control arm, uninstalling the same tree under
-// claude-code, actually removes it.
 func Test_uninstall_for_host_none_leaves_the_plugin_in_place(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)

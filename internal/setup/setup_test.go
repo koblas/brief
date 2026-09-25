@@ -10,29 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newServer builds the Server every test in this file exercises. Init
-// takes no seams today, so the helper carries no options of its own — it
-// exists so every test constructs the same way and a later option never
-// requires shotgun surgery across this file.
+// newServer builds the Server every test in this file exercises.
 func newServer(t *testing.T) *setup.Server {
 	t.Helper()
 
 	return setup.NewServer()
 }
 
-// Test_init_creates_the_config_and_feature_root_in_a_fresh_repo pins R2 for
-// a repository with nothing installed yet: both artifacts report created,
-// the config file's bytes are exactly artifact.ConfigFile(), and the
-// feature root exists as a directory afterward. Init's own planning and
-// apply here never touch a bound-agent path or a symlink, so this is
-// Mem-backed rather than disk. This HostNone run has only two rows, so it
-// is not the package's own full-row-order pin (R11's whole order — plugin
-// files, skill, agents, bound-agent, snippet, config — needs a
-// HostClaudeCode --with-agents run instead; agents_test.go's own
-// Test_init_with_agents_writes_three_agents_and_a_config_binding_them is
-// that pin, and plugin_test.go's own
-// Test_init_for_claude_code_writes_the_plugin_after_the_feature_root_and_before_the_config
-// pins the plugin files' own sub-order through res.Created).
 func Test_init_creates_the_config_and_feature_root_in_a_fresh_repo(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)

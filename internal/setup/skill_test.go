@@ -15,12 +15,9 @@ func skillFilePath(root string) string {
 	return filepath.Join(root, ".claude", "skills", "brief-workflow", "SKILL.md")
 }
 
-// Test_init_for_claude_code_writes_the_workflow_skill_after_the_hook pins
-// the skill's own row position (Rule 1) by relative position rather than a
-// hardcoded full Kind sequence, so it holds regardless of which other flags
-// change what sits immediately around the skill row: the skill row comes
-// after every KindPlugin/KindHook row and before every KindAgent/KindSnippet
-// row, over the three shapes that change what those neighbors are.
+// This checks the skill row's relative position rather than a hardcoded
+// full Kind sequence, so it holds across the three shapes that change what
+// sits immediately around it.
 func Test_init_for_claude_code_writes_the_workflow_skill_after_the_hook(t *testing.T) {
 	cases := []struct {
 		name string
@@ -70,10 +67,6 @@ func Test_init_for_claude_code_writes_the_workflow_skill_after_the_hook(t *testi
 	}
 }
 
-// Test_init_for_host_none_writes_no_skill_row pins the host-gated planning
-// rule for the skill: --host none plans no skill row and writes no file,
-// while the control arm — the identical repository, initialized under
-// claude-code — does.
 func Test_init_for_host_none_writes_no_skill_row(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -103,9 +96,6 @@ func Test_init_for_host_none_writes_no_skill_row(t *testing.T) {
 	assert.True(t, sawSkill, "the control install must have planned a skill row")
 }
 
-// Test_rerunning_init_for_claude_code_reports_the_skill_unchanged pins R3's
-// convergence for the skill file: a second, identical run reports it
-// ActionUnchanged and writes nothing further.
 func Test_rerunning_init_for_claude_code_reports_the_skill_unchanged(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -122,10 +112,6 @@ func Test_rerunning_init_for_claude_code_reports_the_skill_unchanged(t *testing.
 	assert.NotContains(t, res.Created, skillFilePath(wd))
 }
 
-// Test_init_keeps_an_edited_skill_file_even_under_force pins R6's own
-// asymmetry for the skill file, mirroring a plugin file's own branch: an
-// edited copy is kept, ActionKept, detail "edited locally", byte-identical,
-// even under --force — which only ever rewrites the config.
 func Test_init_keeps_an_edited_skill_file_even_under_force(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -146,9 +132,6 @@ func Test_init_keeps_an_edited_skill_file_even_under_force(t *testing.T) {
 	assert.Equal(t, edited, mem.Snapshot()[memKey(skillFilePath(wd))].Data)
 }
 
-// Test_init_keeps_a_skill_path_that_is_not_a_regular_file pins the Lstat
-// guard mirroring a plugin file's own: a directory at the skill's own path
-// is kept, detail "not a regular file", never followed nor written.
 func Test_init_keeps_a_skill_path_that_is_not_a_regular_file(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -163,9 +146,6 @@ func Test_init_keeps_a_skill_path_that_is_not_a_regular_file(t *testing.T) {
 	assert.Equal(t, setup.Artifact{Kind: setup.KindSkill, Path: skillFilePath(wd), Action: setup.ActionKept, Detail: "not a regular file"}, skillArt)
 }
 
-// Test_init_dry_run_for_claude_code_reports_the_skill_row_and_writes_nothing
-// pins R9 for the skill: the same pending row a real run would report, and
-// no bytes written to mem afterward.
 func Test_init_dry_run_for_claude_code_reports_the_skill_row_and_writes_nothing(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -182,9 +162,6 @@ func Test_init_dry_run_for_claude_code_reports_the_skill_row_and_writes_nothing(
 	assert.Equal(t, before, mem.Snapshot())
 }
 
-// Test_init_print_reports_the_skill_body pins R9's --print shape for the
-// skill: a PrintCreate entry whose body equals artifact.SkillWorkflow(),
-// and nothing written to mem.
 func Test_init_print_reports_the_skill_body(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -206,11 +183,6 @@ func Test_init_print_reports_the_skill_body(t *testing.T) {
 	assert.Equal(t, before, mem.Snapshot())
 }
 
-// Test_init_over_an_install_without_the_skill_creates_only_it pins the
-// upgrade path every current adopter hits: a repository already carrying
-// every other claude-code artifact but no skill file (the pre-S01 shape)
-// reruns to create only the skill row — everything else already converged
-// to ActionUnchanged.
 func Test_init_over_an_install_without_the_skill_creates_only_it(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -243,12 +215,6 @@ func Test_init_over_an_install_without_the_skill_creates_only_it(t *testing.T) {
 	assert.Equal(t, wantActions, gotActions)
 }
 
-// Test_uninstall_removes_an_unedited_skill_and_prunes_its_directory pins
-// R6's removal contract for the skill file: an unedited copy is removed and
-// ".claude/skills/brief-workflow/" is pruned once empty, while a sibling
-// ".claude/skills/other/" (never brief's) survives, and the skill row sits
-// between the last agent row and the hook row (Uninstall's own reverse of
-// Init's write order).
 func Test_uninstall_removes_an_unedited_skill_and_prunes_its_directory(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -295,10 +261,6 @@ func Test_uninstall_removes_an_unedited_skill_and_prunes_its_directory(t *testin
 	assert.True(t, info.Mode.IsDir())
 }
 
-// Test_uninstall_keeps_an_edited_skill_unless_forced pins the "edited
-// locally" branch for the skill file at Uninstall, mirroring a plugin
-// file's own: kept without --force, removed (still detail "edited
-// locally") with it.
 func Test_uninstall_keeps_an_edited_skill_unless_forced(t *testing.T) {
 	edited := []byte("---\nedited by hand\n---\n")
 
@@ -338,10 +300,6 @@ func Test_uninstall_keeps_an_edited_skill_unless_forced(t *testing.T) {
 	}
 }
 
-// Test_uninstall_for_host_none_leaves_the_skill_in_place pins the
-// host-gated removal planning for the skill, mirroring the plugin's own:
-// --host none never plans the skill row, so it survives an uninstall scoped
-// to none even though a claude-code install wrote it.
 func Test_uninstall_for_host_none_leaves_the_skill_in_place(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)

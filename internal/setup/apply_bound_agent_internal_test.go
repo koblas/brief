@@ -1,10 +1,8 @@
 package setup
 
-// OS-subject, white-box: a boundAgentArtifact's own agentFile() always
-// opens a real os.Root at resolvedRoot, confined to rel, regardless of the
-// fsys apply/applyUninstall themselves were given (bound_agent.go's own
-// confinedAgentFile) — see doc.go and fs.go's own doc comments. Both cases
-// here need a real resolvedRoot to open.
+// boundAgentArtifact's own agentFile() always opens a real os.Root at
+// resolvedRoot, regardless of the fsys apply/applyUninstall were given, so
+// both cases here need a real resolvedRoot to open.
 
 import (
 	"os"
@@ -15,12 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_apply_refuses_a_bound_agent_changed_since_planning pins the same
-// read-modify-write guard for a boundAgentArts entry (an --edit-agents
-// merge, planning-time bytes carried on boundAgentArtifact.existing): the
-// file on disk now holds something else, so apply refuses, wrapping
-// ErrConcurrentEdit, and the file's own bytes are unchanged afterward,
-// proving apply never reached ba.agentFile().write.
 func Test_apply_refuses_a_bound_agent_changed_since_planning(t *testing.T) {
 	wd := t.TempDir()
 	agentPath := filepath.Join(wd, "developer.md")
@@ -47,15 +39,6 @@ func Test_apply_refuses_a_bound_agent_changed_since_planning(t *testing.T) {
 	assert.Equal(t, "edited after planning", string(body))
 }
 
-// Test_apply_uninstall_refuses_a_bound_agent_edited_after_planning pins
-// applyUninstall's own read-modify-write guard for a boundAgentArts entry
-// (Rule 8's own removal edit, planning-time bytes carried on
-// boundAgentArtifact.existing): the file on disk now holds something else,
-// so applyUninstall refuses, wrapping ErrConcurrentEdit, and the file's own
-// bytes are unchanged afterward, proving applyUninstall never reached
-// ba.agentFile().write. The control arm is the identical fixture with the file
-// still holding exactly what planning read: applyUninstall proceeds and
-// rewrites it to the edited bytes.
 func Test_apply_uninstall_refuses_a_bound_agent_edited_after_planning(t *testing.T) {
 	wd := t.TempDir()
 	agentPath := filepath.Join(wd, "developer.md")
