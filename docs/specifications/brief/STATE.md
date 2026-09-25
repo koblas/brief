@@ -31,9 +31,10 @@ MINOR path-separator regression) folded into the decisions below. No scenario wa
   predicate (stops at the first fault, exempts a done step) and must not gain a caller that
   needs enumeration. Severity is feature-wide, computed once after the step walk and
   back-filled; a feature-level finding is always `ERROR` (doneness unmeasurable).
-- Findings render `[SEVERITY] <path>:<line> — <detail>` (field renamed `Problem`→`Detail`:
+- Findings render `<SEVERITY>  <path>[:<line>]  <detail>` (field renamed `Problem`→`Detail`:
   `assemble.Problem` is a distinct type; `scaffold.RefusalError.Problem` is unrelated too,
-  untouched). `check` exits 1 on any `ERROR`, 0 otherwise.
+  untouched). `check` groups rows under a `<feature>  (in flight|complete)` header; `finish`
+  prints them bare. `check` exits 1 on any `ERROR`, 0 otherwise.
 - A cap finding's `Line` is `cap + 1`, set by the caller (`conform.OverCap` stays line-less).
 - `assemble.Server` carries two unexported, test-only seams — `openRoot`/`readDir`, set via
   `export_test.go`'s `SetOpenRootForTest`/`SetReadDirForTest` — because root bypasses POSIX
@@ -96,13 +97,13 @@ Every scenario is complete — everything below is unowned, with none left to cl
 - A mid-write I/O failure leaves a half-applied, same-argument-retryable result; nothing
   proactively detects that state (self-repairs on retry) — unowned, dies.
 - `conform.Violation.Fix` unused by `check`; the four `checkArgument*` wrappers in
-  `scaffold/finish.go` forwarding to `conform` (left alone — inlining touches the check
-  band several scenarios' ordering tests pin); `newProblem` naming the directory rather
-  than the offending step file — all NIT/MINOR, unowned, dies unless re-opened.
+  `scaffold/finish.go` forwarding to `conform` (left alone — inlining touches check-band
+  ordering tests); `newProblem` names the directory, not the step file — NIT/MINOR, unowned.
 - `validFeatureArgument` (`assemble/check.go`) isn't shared with `Start`/`Finish`/`NewStep`,
-  which each answer a bare `.` argument differently — confirmed inconsistent copy, not a
-  data-loss path (nothing escapes the feature root); whether it's a contract or Check-local
-  hardening is a product question, unowned.
+  each answering a bare `.` argument differently — confirmed inconsistent copy, not a
+  data-loss path; whether it's a contract or Check-local hardening is a product question, unowned.
+- The missing-state/spec-file refusal's fix — "scaffold the feature again to restore it" — is a
+  dead end: `brief new feature` refuses when the directory already exists — unowned.
 - Zero-value `assemble.Server` (nil seams, only reachable by skipping `NewServer`) and
   `tickMarker` indexing `loc[1]` with no nil check (sole caller already guards with the same
   regex) — both NIT/MINOR, not constructible today, unowned.

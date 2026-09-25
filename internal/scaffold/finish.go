@@ -47,7 +47,11 @@ type FinishNext struct {
 // the just-finished step as done and ignoring depends-on, so a blocked step
 // can still be Next; the zero FinishNext when every other step is done. A
 // sibling whose frontmatter cannot be read or does not parse counts as not
-// done, so it can be named Next too.
+// done, so it can be named Next too. Dropped is every state entry the
+// replacement body no longer carries, in old-file line order, empty but
+// never nil when nothing was dropped; it is computed only on a genuine
+// write, never on the no-op or a refusal, since a no-op writes nothing to
+// diff against and a refusal returns no FinishResult at all.
 type FinishResult struct {
 	Feature, Step                    string
 	Changed                          bool
@@ -55,6 +59,7 @@ type FinishResult struct {
 	SpecPath                         string
 	Modified                         []string
 	Next                             FinishNext
+	Dropped                          []DroppedEntry
 }
 
 // Finish closes feature's step: it writes handoff to that step's own
@@ -306,7 +311,7 @@ func (s *Server) FinishFS(fsys rwfs.FS, featurePath, feature, step string, hando
 		return FinishResult{
 			Feature: feature, Step: step, Changed: false,
 			HandoffPath: handoffPath, StatePath: statePath, StepPath: stepPath, SpecPath: specPath,
-			Modified: []string{}, Next: next,
+			Modified: []string{}, Next: next, Dropped: []DroppedEntry{},
 		}, nil
 	case refinishHandoffDiverged:
 		return FinishResult{}, alreadyFinishedRefusal(handoffPath, step, "handoff")
@@ -316,6 +321,12 @@ func (s *Server) FinishFS(fsys rwfs.FS, featurePath, feature, step string, hando
 		// Falls through to the four writes below.
 	}
 
+	// dropped is computed against the state already on disk and the
+	// incoming replacement, before the write lands — a post-decision
+	// report, not part of the validation band above, so it never changes
+	// which fault a refusal names first.
+	dropped := droppedEntries(stateBytes, state, s.cfg.StateHeadings)
+
 	if err := applyFinishWrites(fsys, s.cfg, feature, step, handoffName, handoff, stepFileName, newStepBody, newSpec, state); err != nil {
 		return FinishResult{}, err
 	}
@@ -323,7 +334,7 @@ func (s *Server) FinishFS(fsys rwfs.FS, featurePath, feature, step string, hando
 	return FinishResult{
 		Feature: feature, Step: step, Changed: true,
 		HandoffPath: handoffPath, StatePath: statePath, StepPath: stepPath, SpecPath: specPath,
-		Modified: []string{statePath, stepPath, specPath}, Next: next,
+		Modified: []string{statePath, stepPath, specPath}, Next: next, Dropped: dropped,
 	}, nil
 }
 

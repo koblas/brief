@@ -69,6 +69,30 @@ func Test_Section_trims_leading_and_trailing_blank_lines(t *testing.T) {
 	assert.Equal(t, "body", got)
 }
 
+func Test_HeadingLine_returns_the_1_based_line_of_the_matching_line(t *testing.T) {
+	body := "para\n\n## Heading\n\nbody\n"
+
+	got, ok := markdown.HeadingLine(body, "## Heading")
+
+	assert.True(t, ok)
+	assert.Equal(t, 3, got)
+}
+
+func Test_HeadingLine_returns_false_when_the_heading_is_absent(t *testing.T) {
+	_, ok := markdown.HeadingLine("no heading here\n", "## Missing")
+
+	assert.False(t, ok)
+}
+
+func Test_HeadingLine_skips_a_matching_line_inside_a_fenced_code_block(t *testing.T) {
+	body := "```\n## Heading\n```\n\n## Heading\n"
+
+	got, ok := markdown.HeadingLine(body, "## Heading")
+
+	assert.True(t, ok)
+	assert.Equal(t, 5, got)
+}
+
 func Test_Title_returns_the_text_of_the_first_level_one_heading(t *testing.T) {
 	body := "# STEP-03 Assemble the brief\n\n## Scenario\n\nbody\n"
 

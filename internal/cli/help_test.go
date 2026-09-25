@@ -506,6 +506,38 @@ func Test_help_reports_a_non_help_dash_prefixed_topic_as_an_unknown_flag(t *test
 	}
 }
 
+// dropReportingParagraph is the ruled drop-reporting paragraph
+// specification.md's "Surface & Copy" section adds to finishLong, its own
+// paragraph between the flag-body prose and the JSON paragraph.
+const dropReportingParagraph = `Each entry under the four state headings that is missing from the new
+body is listed on stdout as a WARN finding (rule dropped-debt under the
+open-debts heading, dropped-entry otherwise); its line is in the file as
+it was before replacement. Removal is reported, never refused; a
+reworded entry counts as removed. Exit status stays 0.`
+
+// Test_finish_help_documents_drop_reporting_before_the_json_paragraph pins
+// SCENARIO-10: finishLong carries dropReportingParagraph verbatim, as its
+// own paragraph, positioned after the flag-body prose and before the JSON
+// paragraph — not folded into either.
+func Test_finish_help_documents_drop_reporting_before_the_json_paragraph(t *testing.T) {
+	wd := t.TempDir()
+	var stdout, stderr bytes.Buffer
+
+	err := cli.Run(t.Context(), wd, []string{"finish", "--help"}, nil, &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+
+	out := stdout.String()
+	dropIdx := strings.Index(out, dropReportingParagraph)
+	require.GreaterOrEqual(t, dropIdx, 0, "drop-reporting paragraph not found in %q", out)
+
+	jsonIdx := strings.Index(out, jsonParagraphMarker)
+	require.GreaterOrEqual(t, jsonIdx, 0, "JSON paragraph not found in %q", out)
+
+	assert.Less(t, dropIdx, jsonIdx, "drop-reporting paragraph must appear before the JSON paragraph")
+}
+
 // finishHelp is "brief finish --help"'s exact stdout: --handoff and
 // --state show their value as "path" (from the backquoted varname in each
 // flag's usage string), not pflag's default "string", each usage string's
@@ -520,10 +552,16 @@ handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
 from stdin; it may be given for at most one of --handoff and --state.
 
+Each entry under the four state headings that is missing from the new
+body is listed on stdout as a WARN finding (rule dropped-debt under the
+open-debts heading, dropped-entry otherwise); its line is in the file as
+it was before replacement. Removal is reported, never refused; a
+reworded entry counts as removed. Exit status stays 0.
+
 With --json, this command writes one JSON document on stdout: the common header
 (` + "`schema`, `command`, `ok`, `exit_code`" + `; on a usage error or refusal an ` + "`error`" + `
 object carries the failure), then its own top-level fields, in document order:
-` + "`feature`, `step`, `changed`, `handoff_path`, `state_path`, `next`, `modified`" + `.
+` + "`feature`, `step`, `changed`, `handoff_path`, `state_path`, `next`, `modified`,\n`dropped_entries`" + `.
 
 Flags:
       --handoff path   the path to the step's handoff body,

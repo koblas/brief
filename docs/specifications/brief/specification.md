@@ -171,9 +171,14 @@ no per-step files, no carried state — is out of scope rather than degraded int
   <imperative next action> (no files changed)`. The problem states the actual number or name,
   never "too long". Read refusals drop the `(no files changed)` tail — it answers a question
   the reader did not ask. **Refusals** (exit 1, stderr) and **findings** (R9, exit 0, the
-  profile's `[SEVERITY] <path>:<line> — <finding>` shape) are deliberately different shapes so
+  profile's `<SEVERITY>  <path>[:<line>]  <detail>` shape) are deliberately different shapes so
   that a script tells "finished with reported drops" from "refused" by exit code alone. That
-  holds only because findings never appear on a failed run. In `--json` mode a refusal is the
+  holds only because findings never appear on a failed run. The one exception is a fault on the
+  findings channel itself: if writing the rows to stdout fails after the writes they report
+  have already landed, the rows already written stay, no further row is written, the success
+  line is not printed, and the command exits 1 with a one-line failure — not a refusal, no
+  `(no files changed)` tail — that says the step is done. A script must not read that exit 1 as
+  "nothing changed". In `--json` mode a refusal is the
   common error document on stdout (`error.kind: "refusal"`, same path/line/problem/fix slots);
   text mode is unchanged (see `docs/specifications/human-output/`).
 
@@ -236,7 +241,7 @@ in full.
 ## Binding decisions   <decision> — <the constraint that forces it> (SCENARIO-XX)
 ## Left unbuilt        <exact symbol/route/method> — <who owns it, or "unowned"> (SCENARIO-XX)
 ## Traps               <the trap> — <what it breaks> (SCENARIO-XX)
-## Open debts          <debt> — <step that must close it, or "unowned — dies unless re-opened">
+## Open debts          <debt> — <step that must close it, or "unowned — dies unless re-opened"> (SCENARIO-XX)
 ```
 
 Cap ~80 lines. The *unowned debt* wording is load-bearing: it is the entry R9 must never let
@@ -251,8 +256,9 @@ and no empty-versus-absent distinction to make.
 **Progress** — a checklist in the specification under one stable heading. Per-step checkboxes
 live in the step file.
 
-**Findings** — `check` and `finish` emit `[SEVERITY] <path>:<line> — <finding>` by default, so
-output drops into an existing review flow.
+**Findings** — `check` and `finish` emit `<SEVERITY>  <path>[:<line>]  <detail>` by default, so
+output drops into an existing review flow. `check` groups rows under a
+`<feature>  (in flight|complete)` header; `finish` prints them bare.
 
 The profile deliberately carries no instruction for *how* to distil. That is R7's line.
 
