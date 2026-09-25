@@ -809,7 +809,7 @@ func Test_finish_json_decodes_next_and_changed_correctly_mem(t *testing.T) {
 			want: `null`,
 		},
 		{
-			name: "changed is false on the R11 no-op",
+			name: "changed is false when re-finishing with identical inputs",
 			setup: func(t *testing.T) (*rwfs.Mem, []string) {
 				t.Helper()
 
@@ -827,7 +827,7 @@ func Test_finish_json_decodes_next_and_changed_correctly_mem(t *testing.T) {
 			want: `false`,
 		},
 		{
-			name: "modified is empty on the R11 no-op",
+			name: "modified is empty when re-finishing with identical inputs",
 			setup: func(t *testing.T) (*rwfs.Mem, []string) {
 				t.Helper()
 

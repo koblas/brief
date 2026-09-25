@@ -229,10 +229,10 @@ func Test_init_dry_run_for_claude_code_writes_nothing(t *testing.T) {
 	}, res.Artifacts)
 	assert.Empty(t, res.Created)
 	assert.Equal(t, before, mem.Snapshot())
-	assert.Empty(t, rec.calls, "DryRun must never reach R10's own writability pre-check")
+	assert.Empty(t, rec.calls, "DryRun must never reach the writability pre-check")
 
 	srv2, rec2 := newMemServerRecording(newVirtualMem(wd))
 	_, err = srv2.Init(t.Context(), wd, setup.InitRequest{Host: setup.HostClaudeCode})
 	require.NoError(t, err)
-	assert.Len(t, rec2.calls, 1, "a real run must call R10's own writability pre-check exactly once")
+	assert.Len(t, rec2.calls, 1, "a real run must call the writability pre-check exactly once")
 }

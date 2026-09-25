@@ -19,7 +19,7 @@ func Test_resolveRootFS_matches_resolveRoot_on_an_invalid_config(t *testing.T) {
 		yamlSource string
 	}{
 		{
-			name:       "R1 value violation",
+			name:       "out-of-range value",
 			yamlSource: "handoff-cap-lines: 0\n",
 		},
 		{

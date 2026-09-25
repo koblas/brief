@@ -83,7 +83,7 @@ func Test_uninstall_treats_an_unparseable_or_invalid_config_as_edited(t *testing
 		body []byte
 	}{
 		{name: "unparseable yaml", body: []byte("feature-directory: [unterminated\n")},
-		{name: "R1-invalid value", body: []byte("handoff-cap-lines: 0\n")},
+		{name: "out-of-range value", body: []byte("handoff-cap-lines: 0\n")},
 	}
 
 	for _, tt := range tests {
