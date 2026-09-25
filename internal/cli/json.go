@@ -236,14 +236,18 @@ func jsonTakesNoValueMessage(cmd *cobra.Command) string {
 // detection turned JSON mode on for this run, wd is Run's own working
 // directory (R6: the base every relative refusal path is absolutized
 // against), and cmd is the command currently rendering, set by forCommand.
-// Every RunE closure and the root FlagErrorFunc narrow the base reporter
-// built in run with forCommand before rendering anything.
+// helpFailure is run's own slot for a --json help document's stdout write
+// failure: cobra's HelpFunc returns nothing, so the root help func records
+// the failure there and run returns it once ExecuteContext finishes. Every
+// RunE closure and the root FlagErrorFunc narrow the base reporter built
+// in run with forCommand before rendering anything.
 type reporter struct {
-	stdout io.Writer
-	stderr io.Writer
-	json   bool
-	wd     string
-	cmd    *cobra.Command
+	stdout      io.Writer
+	stderr      io.Writer
+	json        bool
+	wd          string
+	cmd         *cobra.Command
+	helpFailure *error
 }
 
 // forCommand returns r narrowed to cmd: every later usageError call
@@ -304,7 +308,7 @@ func (r reporter) usageErrorWithFix(msg, fix string) error {
 			},
 		}
 
-		_ = writeJSONDocument(r.stdout, doc)
+		r.writeErrorDocument(doc)
 
 		return fmt.Errorf("%s: %w", msg, ErrUsage)
 	}
@@ -314,13 +318,25 @@ func (r reporter) usageErrorWithFix(msg, fix string) error {
 	return fmt.Errorf("%s: %w", msg, ErrUsage)
 }
 
+// writeErrorDocument writes doc, R3's error document, to r.stdout. When
+// that write fails, stdout is the stream that just broke, so doc's own
+// "message" — byte for byte the line text mode prints for the same error —
+// goes to stderr instead; the caller's own error, and so its exit code, is
+// unchanged.
+func (r reporter) writeErrorDocument(doc errorDocument) {
+	if err := writeJSONDocument(r.stdout, doc); err != nil {
+		fmt.Fprintln(r.stderr, doc.Error.Message)
+	}
+}
+
 // document writes v — one of status, check, start, finish, new feature or
 // new step's own success document — to r.stdout as R1/R2's one JSON
-// document, wrapping a write failure with "brief <path>: " naming r.cmd's
-// own command path, the one place every such write's error is wrapped.
-func (r reporter) document(v any) error {
+// document, reporting a write failure through stdoutFailure: the one place
+// every such write's failure is reported. filesChanged is whether the run
+// v describes changed any file.
+func (r reporter) document(v any, filesChanged bool) error {
 	if err := writeJSONDocument(r.stdout, v); err != nil {
-		return fmt.Errorf("brief %s: %w", commandName(r.cmd), err)
+		return r.stdoutFailure(err, filesChanged)
 	}
 
 	return nil

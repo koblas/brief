@@ -193,7 +193,7 @@ func runUninstall(ctx context.Context, wd string, rest []string, host string, dr
 			Artifacts:  artifactsJSON(res.Artifacts),
 		}
 
-		return out.document(doc)
+		return out.document(doc, changedFiles(res))
 	}
 
 	for _, a := range res.Artifacts {

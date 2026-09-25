@@ -125,7 +125,7 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 			DroppedEntries: finishDroppedEntries(res.Dropped, res.StatePath),
 		}
 
-		return out.document(doc)
+		return out.document(doc, res.Changed)
 	}
 
 	if !res.Changed {

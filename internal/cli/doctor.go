@@ -186,7 +186,7 @@ func runDoctor(ctx context.Context, wd string, rest []string, readBuildInfo func
 			Checks:     doctorChecksJSON(report.Checks),
 		}
 
-		if err := out.document(doc); err != nil {
+		if err := out.document(doc, false); err != nil {
 			return err
 		}
 
