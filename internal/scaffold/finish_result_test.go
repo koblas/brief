@@ -39,7 +39,7 @@ func Test_finish_no_op_reports_changed_false_and_still_names_next(t *testing.T) 
 	require.NoError(t, err)
 	assert.False(t, second.Changed)
 	assert.Equal(t, scaffold.FinishNext{ID: "STEP-03", Title: "STEP-03", Path: filepath.Join(testFeaturePath, "STEP-03.md")}, second.Next)
-	assert.NotNil(t, second.Dropped, "the R11 no-op must still report a non-nil empty Dropped")
+	assert.NotNil(t, second.Dropped, "re-finishing with identical inputs must still report a non-nil empty Dropped")
 	assert.Empty(t, second.Dropped)
 }
 
