@@ -12,18 +12,9 @@ import (
 )
 
 // fixtureConfig returns a Config whose every field this package reads
-// differs from config.Default(), so a hardcoded default cannot pass a test
-// built against it. HandoffCapLines is 10 — distinct from config.Default's
-// 60, and strictly above the 5-line maximum of every handoff body this
-// package's tests hand to Finish (newFinishFixtureFS.newHandoff), so a cap
-// test proves the value is read from config rather than tripping on an
-// unrelated fixture body. StateCapLines is 20 — distinct from
-// HandoffCapLines and from config.Default's 80, and strictly above the
-// 16-line maximum every state body this package's non-cap tests hand to
-// Finish (newStateBody, oldStateBody, differentStateBody), for the same
-// reason. The cap and heading tests build their own boundary-sized bodies
-// (bodyOfLines, stateBodyOfLines) precisely at or over this line — that is
-// what they test.
+// differs from config.Default(). The caps sit above every fixture body's
+// own line count, so only the cap tests' own boundary-sized bodies trip
+// them.
 func fixtureConfig() config.Config {
 	cfg := config.Default()
 	cfg.FeatureDirectory = "specs"
@@ -66,11 +57,6 @@ func Test_returns_the_path_of_the_created_feature_directory(t *testing.T) {
 	assert.Equal(t, filepath.Join(testSpecsRoot, "widgets"), res.Path)
 }
 
-// Test_new_feature_reports_the_directory_and_the_files_it_created pins
-// NewFeature's result shape: Path names the feature directory, Created
-// lists exactly the specification and the state file it wrote, in write
-// order, both already readable through top by the time NewFeatureFS
-// returns.
 func Test_new_feature_reports_the_directory_and_the_files_it_created(t *testing.T) {
 	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
@@ -161,11 +147,6 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 	assert.Error(t, statErr)
 }
 
-// Test_refuses_an_existing_feature_naming_its_directory pins the refusal
-// shape NewFeature returns when the feature directory it would create
-// already exists: a *RefusalError naming that directory and wrapping
-// ErrFeatureExists, at Line 0 since the refusal concerns the whole
-// directory rather than one line inside a file.
 func Test_refuses_an_existing_feature_naming_its_directory(t *testing.T) {
 	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
@@ -187,11 +168,8 @@ func Test_refuses_an_existing_feature_naming_its_directory(t *testing.T) {
 	assert.ErrorIs(t, err, scaffold.ErrFeatureExists)
 }
 
-// Test_leaves_an_existing_features_files_byte_identical_when_it_refuses is
-// expected green on arrival: NewFeatureFS's Mkdir already refuses before
-// any write, and CreateExclusive is a second guard behind it. The snapshot
-// equality also catches an added temp entry, which a directory-listing-only
-// assertion would miss.
+// Snapshot equality also catches an added temp entry, unlike a
+// directory-listing-only assertion.
 func Test_leaves_an_existing_features_files_byte_identical_when_it_refuses(t *testing.T) {
 	top := newFeatureRootFS(t).(*rwfs.Mem) //nolint:forcetypeassert // newFeatureRootFS always returns *rwfs.Mem
 	cfg := fixtureConfig()
@@ -211,11 +189,8 @@ func Test_leaves_an_existing_features_files_byte_identical_when_it_refuses(t *te
 	assert.Equal(t, before, top.Snapshot())
 }
 
-// Test_the_snapshot_probe_sees_a_change_when_the_scaffold_writes_one is the
-// control arm for the byte-identity claim above: same fixture, same probe,
-// with NewStepFS in place of the refused NewFeatureFS call. Without this
-// control, snapshot equality passing would be equally consistent with a
-// probe that cannot detect a change at all.
+// Control arm for the byte-identity claim above: same fixture and probe,
+// with NewStepFS in place of the refused NewFeatureFS call.
 func Test_the_snapshot_probe_sees_a_change_when_the_scaffold_writes_one(t *testing.T) {
 	top := newFeatureRootFS(t).(*rwfs.Mem) //nolint:forcetypeassert // newFeatureRootFS always returns *rwfs.Mem
 	cfg := fixtureConfig()
@@ -235,12 +210,6 @@ func Test_the_snapshot_probe_sees_a_change_when_the_scaffold_writes_one(t *testi
 	assert.NotEqual(t, before, top.Snapshot())
 }
 
-// Test_reports_a_specification_write_that_cannot_be_committed_on_new_feature
-// covers NewFeature's own specification-write markPartial site: a
-// configured specification-file carrying a path separator makes
-// CreateExclusive fail against a parent directory that was never created —
-// the feature directory itself (Mkdir) has already landed by then, so the
-// failure must be reported as ErrPartialWrite.
 func Test_reports_a_specification_write_that_cannot_be_committed_on_new_feature(t *testing.T) {
 	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
@@ -256,14 +225,9 @@ func Test_reports_a_specification_write_that_cannot_be_committed_on_new_feature(
 	assert.NoError(t, statErr)
 }
 
-// Test_reports_a_state_write_that_cannot_be_committed_on_new_feature covers
-// NewFeature's own state-write markPartial site: configuring the state
-// file with the same name as the specification file makes the
-// specification's CreateExclusive land first, then the state write's own
-// CreateExclusive collide with the file the specification write just
-// created. The control arm reads that file back: its bytes are still the
-// specification skeleton, proving the second, failed write never
-// truncated what the first one landed.
+// Configuring the state file with the same name as the specification file
+// makes the state write collide with what the specification write just
+// created; the read-back below proves that write was never truncated.
 func Test_reports_a_state_write_that_cannot_be_committed_on_new_feature(t *testing.T) {
 	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()

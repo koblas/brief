@@ -14,8 +14,7 @@ import (
 )
 
 // newStepFS calls NewStepFS against a view already opened on feature,
-// requiring success — the Mem counterpart of a disk fixture's
-// srv.NewStep(ctx, feature) call.
+// requiring success.
 func newStepFS(t *testing.T, srv *scaffold.Server, view rwfs.FS, cfg config.Config, feature string) scaffold.Result {
 	t.Helper()
 
@@ -28,9 +27,6 @@ func newStepFS(t *testing.T, srv *scaffold.Server, view rwfs.FS, cfg config.Conf
 	return res
 }
 
-// Test_writes_the_step_file_with_frontmatter_a_title_and_an_empty_checklist
-// renamed from …_and_a_handoff_anchor: the tool writes no handoff file and
-// no handoff heading, so a fresh step file ends with an empty checklist.
 func Test_writes_the_step_file_with_frontmatter_a_title_and_an_empty_checklist(t *testing.T) {
 	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
@@ -56,9 +52,7 @@ func Test_writes_the_step_file_with_frontmatter_a_title_and_an_empty_checklist(t
 	assert.Equal(t, want, string(got))
 }
 
-// Test_writes_no_handoff_file pins the amended SCENARIO-03 contract: only
-// finish writes a handoff file. Its non-vacuity is
-// Test_the_handoff_probe_sees_a_handoff_file_after_a_finish's job.
+// Non-vacuity proven by Test_the_handoff_probe_sees_a_handoff_file_after_a_finish.
 func Test_writes_no_handoff_file(t *testing.T) {
 	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
@@ -71,10 +65,8 @@ func Test_writes_no_handoff_file(t *testing.T) {
 	assert.ErrorIs(t, statErr, fs.ErrNotExist)
 }
 
-// Test_the_handoff_probe_sees_a_handoff_file_after_a_finish is the control
-// arm for Test_writes_no_handoff_file: the same probe, against the same
-// feature, after a Finish call, must see the file — proving the probe
-// above tests the right path rather than passing vacuously.
+// Control arm for Test_writes_no_handoff_file: same probe, same feature,
+// after a Finish call, must see the file.
 func Test_the_handoff_probe_sees_a_handoff_file_after_a_finish(t *testing.T) {
 	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
@@ -96,9 +88,6 @@ func Test_the_handoff_probe_sees_a_handoff_file_after_a_finish(t *testing.T) {
 	assert.NoError(t, statErr)
 }
 
-// Test_a_handoff_file_does_not_advance_the_next_step_number pins
-// Pattern.Number's digits-only scan: a handoff file beside STEP-01 must
-// never be counted as a step file when NewStep numbers the next one.
 func Test_a_handoff_file_does_not_advance_the_next_step_number(t *testing.T) {
 	cfg := fixtureConfig()
 	seed := "# widgets\n\n## Progress\n\n- [ ] STEP-01\n"
@@ -116,15 +105,8 @@ func Test_a_handoff_file_does_not_advance_the_next_step_number(t *testing.T) {
 	assert.Equal(t, filepath.Join(testSpecsRoot, "widgets", "STEP-02.md"), res.Path)
 }
 
-// Test_new_step_reports_the_step_id_and_only_the_step_file_as_created pins
-// NewStep's result shape: Step is the id the created file's own name
-// carries, and Created lists only the step file — never the specification,
-// even though NewStep also modifies it by appending a progress entry. The
-// control arm is the specification's own bytes: they differ from what
-// NewFeature wrote (Test_writes_the_specification_skeleton_with_the_
-// configured_progress_heading_and_nothing_under_it pins that baseline), so
-// this test proves a real write is nonetheless excluded from Created,
-// rather than Created being empty because nothing happened.
+// Also asserts the specification's own bytes changed, proving a real
+// write is nonetheless excluded from Created, not merely that nothing ran.
 func Test_new_step_reports_the_step_id_and_only_the_step_file_as_created(t *testing.T) {
 	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
@@ -187,11 +169,6 @@ func Test_leaves_no_temp_file_in_the_feature_directory(t *testing.T) {
 	assert.ElementsMatch(t, []string{cfg.SpecificationFile, cfg.StateFile, "STEP-01.md"}, namesOf(entries))
 }
 
-// Test_NewStep_finds_a_progress_heading_terminated_by_a_carriage_return
-// reproduces the reviewer's finding directly: insertProgressEntry's
-// heading match used to right-trim only " \t", so a CRLF specification
-// whose progress heading line ends "\r\n" never matched and NewStep
-// refused with ErrNoProgressHeading on every CRLF feature.
 func Test_NewStep_finds_a_progress_heading_terminated_by_a_carriage_return(t *testing.T) {
 	cfg := fixtureConfig()
 	spec := "# widgets\r\n\r\n" + cfg.ProgressHeading + "\r\n"

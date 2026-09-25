@@ -13,12 +13,10 @@ import (
 )
 
 // droppedFixtureStep and droppedFixtureSpec build the step file and
-// specification every finish_dropped_test.go case needs, against
-// config.Default() — the default state headings ("## Traps", "## Open
-// debts", ...) are pinned literally in this file's expectations, unlike
-// the rest of this package's fixtureConfig-built tests, so this file
-// builds its own bespoke config.Default()-based feature rather than
-// reusing newFinishFixtureFS.
+// specification every case in this file needs, against config.Default():
+// its own state headings are pinned literally in this file's expectations,
+// so it builds its own bespoke feature rather than reusing
+// newFinishFixtureFS.
 func droppedFixtureStep(cfg config.Config) string {
 	return "---\n" +
 		"id: SCENARIO-02\n" +
@@ -35,8 +33,7 @@ func droppedFixtureSpec(cfg config.Config) string {
 }
 
 // newDroppedFixtureFS builds a "widgets" feature on an rwfs.Mem, one open
-// step SCENARIO-02, against config.Default() so its state headings read
-// literally "## Traps" / "## Open debts", with oldState as the state
+// step SCENARIO-02, against config.Default(), with oldState as the state
 // file's own on-disk body.
 func newDroppedFixtureFS(t *testing.T, oldState string) *rwfs.Mem {
 	t.Helper()
@@ -59,9 +56,8 @@ func finishDropped(t *testing.T, mem *rwfs.Mem, newState []byte) (scaffold.Finis
 }
 
 // finishDroppedWithConfig runs FinishFS for "widgets"/SCENARIO-02 against
-// mem under cfg, letting a case build a config.Config with a blanked or
-// duplicated StateHeadings field while newDroppedFixtureFS's own step and
-// specification bodies stay pinned to config.Default().
+// mem under cfg, letting a case reconfigure StateHeadings while
+// newDroppedFixtureFS's own bodies stay pinned to config.Default().
 func finishDroppedWithConfig(t *testing.T, mem *rwfs.Mem, newState []byte, cfg config.Config) (scaffold.FinishResult, error) {
 	t.Helper()
 
@@ -75,11 +71,10 @@ func finishDroppedWithConfig(t *testing.T, mem *rwfs.Mem, newState []byte, cfg c
 	return srv.FinishFS(mem, testFeaturePath, "widgets", "SCENARIO-02", []byte("h"), newState, pattern, handoffPattern)
 }
 
-// droppedOldStateWithEntryAtLine17 is the old STATE.md body SCENARIO-01's
-// own Gherkin fixture describes: one entry under "## Traps" kept
-// ("- kept entry"), and "- X (SCENARIO-02)" at whole-body line 17 — reached
-// by padding with prose filler lines, none of which are list items, so
-// they contribute no entry of their own.
+// droppedOldStateWithEntryAtLine17 is an old STATE.md body: one entry
+// under "## Traps" kept ("- kept entry"), and "- X (SCENARIO-02)" at
+// whole-body line 17, reached by padding with prose filler lines that
+// contribute no entry of their own.
 func droppedOldStateWithEntryAtLine17() string {
 	lines := []string{
 		"## Binding decisions", "",
@@ -97,9 +92,6 @@ func droppedOldStateWithEntryAtLine17() string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// Test_finish_reports_an_entry_the_new_state_body_omits pins SCENARIO-01's
-// own Gherkin fixture: X drops out at its old-file line, tagged, under the
-// dropped-entry rule.
 func Test_finish_reports_an_entry_the_new_state_body_omits(t *testing.T) {
 	mem := newDroppedFixtureFS(t, droppedOldStateWithEntryAtLine17())
 	newState := []byte("## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n- kept entry\n\n## Open debts\n")
@@ -112,10 +104,6 @@ func Test_finish_reports_an_entry_the_new_state_body_omits(t *testing.T) {
 	}, res.Dropped)
 }
 
-// Test_finish_classifies_an_open_debts_drop_as_dropped_debt proves D4's
-// rule split: an entry dropped from under the configured Open debts
-// heading carries dropped-debt, not dropped-entry, and is reported
-// untagged when it carries no trailing "(<token>)".
 func Test_finish_classifies_an_open_debts_drop_as_dropped_debt(t *testing.T) {
 	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n" +
 		"## Open debts\n\n- D — unowned — dies unless re-opened\n"
@@ -130,11 +118,8 @@ func Test_finish_classifies_an_open_debts_drop_as_dropped_debt(t *testing.T) {
 	assert.Empty(t, res.Dropped[0].Tag)
 }
 
-// Test_finish_reports_drops_in_old_file_line_order_across_headings proves
-// the pooled diff sorts by the old file's own line order, not by
-// cfg.StateHeadings.Ordered()'s configured order: "## Open debts" is
-// written before "## Traps" here, the reverse of Ordered(), so a drop
-// under each must still come back Open-debts-first.
+// "## Open debts" is written before "## Traps" here, the reverse of
+// Ordered(), so a drop under each must still come back Open-debts-first.
 func Test_finish_reports_drops_in_old_file_line_order_across_headings(t *testing.T) {
 	oldState := "## Open debts\n\n- OD (TAG1)\n\n" +
 		"## Binding decisions\n\n## Left unbuilt\n\n" +
@@ -152,12 +137,10 @@ func Test_finish_reports_drops_in_old_file_line_order_across_headings(t *testing
 	assert.Equal(t, "Traps", res.Dropped[1].Heading)
 }
 
-// Test_finish_ignores_list_lines_that_are_not_true_entries proves D1: a list
-// line inside a fenced code block, a paragraph line, and a list item under a
-// fifth, non-configured heading are never entries. Each case's old body also
-// carries one genuine entry under a configured heading that the new body
-// drops, so an implementation that over- or under-scans cannot pass by
-// reporting zero rows either way.
+// A list line inside a fenced code block, a paragraph line, and a list
+// item under a fifth, non-configured heading are never entries. Each
+// case's old body also carries one genuine entry that the new body drops,
+// so an implementation that over- or under-scans cannot pass vacuously.
 func Test_finish_ignores_list_lines_that_are_not_true_entries(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -221,10 +204,6 @@ func Test_finish_ignores_list_lines_that_are_not_true_entries(t *testing.T) {
 	}
 }
 
-// Test_finish_attributes_no_drop_to_a_heading_absent_from_the_old_body proves
-// a configured heading entirely missing from the old body (no line equal to
-// it at all) contributes nothing, while a different configured heading's
-// genuine drop is still reported.
 func Test_finish_attributes_no_drop_to_a_heading_absent_from_the_old_body(t *testing.T) {
 	oldState := strings.Join([]string{
 		"## Binding decisions", "",
@@ -243,12 +222,8 @@ func Test_finish_attributes_no_drop_to_a_heading_absent_from_the_old_body(t *tes
 	}, res.Dropped)
 }
 
-// Test_finish_reports_no_drops_from_an_empty_old_state_file proves D7's
-// empty-old-file clause: a zero-byte old body yields no drops. The second
-// case is the control arm, differing only in the old body's own content — a
-// non-empty old body still reports its genuine drop, so the first case's
-// empty slice is proof the guard fires on emptiness, not on the assertion
-// being unreachable.
+// The second subtest is the control arm, differing only in the old body's
+// own content, proving the first's empty slice is not vacuous.
 func Test_finish_reports_no_drops_from_an_empty_old_state_file(t *testing.T) {
 	t.Run("an empty old state body yields no drops", func(t *testing.T) {
 		mem := newDroppedFixtureFS(t, "")
@@ -274,14 +249,8 @@ func Test_finish_reports_no_drops_from_an_empty_old_state_file(t *testing.T) {
 	})
 }
 
-// Test_finish_excludes_an_empty_configured_heading_from_scanning proves D7's
-// empty-heading clause at the scaffold level: cfg.StateHeadings.OpenDebts
-// blanked to "" contributes zero entries from either position it would
-// otherwise be scanned from, rather than matching markdown.Section's
-// first-blank-line fallback for "". The old body's genuine Traps entry and a
-// fifth, non-configured "## Notes" section's own entry both sit after the
-// body's first blank line, so an implementation that still scans "" would
-// pick up both as false or duplicate rows.
+// A blanked heading ("") must not match markdown.Section's
+// first-blank-line fallback and pick up unrelated content after it.
 func Test_finish_excludes_an_empty_configured_heading_from_scanning(t *testing.T) {
 	cfg := config.Default()
 	cfg.StateHeadings.OpenDebts = ""
@@ -305,12 +274,8 @@ func Test_finish_excludes_an_empty_configured_heading_from_scanning(t *testing.T
 	}, res.Dropped)
 }
 
-// Test_finish_excludes_a_duplicated_configured_heading_from_scanning proves
-// D7's duplicated-heading clause: two StateHeadings fields set to the
-// identical text ("## Shared") contribute zero entries from either
-// position — not one, per the binding decision that a duplicated heading is
-// excluded wholesale rather than "keeping the first". The Left-unbuilt
-// entry, under a distinct, non-duplicated heading, is still reported.
+// Two StateHeadings fields set to the identical text contribute zero
+// entries, excluded wholesale rather than "keeping the first".
 func Test_finish_excludes_a_duplicated_configured_heading_from_scanning(t *testing.T) {
 	cfg := config.Default()
 	cfg.StateHeadings.BindingDecisions = "## Shared"
@@ -334,13 +299,8 @@ func Test_finish_excludes_a_duplicated_configured_heading_from_scanning(t *testi
 	}, res.Dropped)
 }
 
-// Test_finish_keeps_correct_line_numbers_and_blank_line_handling_under_crlf
-// proves an old body using CRLF line endings throughout still reports the
-// entry's correct 1-based physical line, and that the fold's blank-line
-// check treats a bare "\r" line as blank: a kept entry immediately followed
-// by such a line and then a paragraph line must not fold the paragraph in,
-// which would change its normalized text against the new body's plain-LF,
-// symmetric-content counterpart and report it as a second, false drop.
+// A bare "\r" line must fold as blank, or the following paragraph line
+// would join the kept entry's text and report a false second drop.
 func Test_finish_keeps_correct_line_numbers_and_blank_line_handling_under_crlf(t *testing.T) {
 	oldLines := []string{
 		"## Binding decisions", "",
@@ -367,17 +327,10 @@ func Test_finish_keeps_correct_line_numbers_and_blank_line_handling_under_crlf(t
 	}, res.Dropped)
 }
 
-// Test_finish_normalizes_an_interior_carriage_return_on_a_continuation_line
-// proves normalizeEntryText's ReplaceAll(raw, "\r", "") strips a carriage
-// return embedded mid-continuation-line — one trimEOL/TrimSpace, which only
-// trim a line's own edges, never reach. The "\r" sits directly between two
-// non-whitespace characters, with no adjacent space of its own: deleting it
-// concatenates them into one word, which is what discriminates this from
-// strings.Fields alone, since Fields already treats a lone "\r" as a
-// separator identical to a space — a "\r" with a space on either side would
-// tokenize the same whether or not the strip ran. The interior-CR entry's
-// old and new forms normalize to the same text and so are not reported; a
-// genuinely dropped, unrelated entry under a different heading is.
+// The "\r" sits directly between two non-whitespace characters with no
+// adjacent space, so only an explicit strip (not strings.Fields alone, for
+// which a lone "\r" already separates like a space) makes old and new
+// normalize to the same text.
 func Test_finish_normalizes_an_interior_carriage_return_on_a_continuation_line(t *testing.T) {
 	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n" +
 		"- kept multiline entry\n" +
@@ -399,13 +352,10 @@ func Test_finish_normalizes_an_interior_carriage_return_on_a_continuation_line(t
 }
 
 // newDroppedReFinishFixtureFS builds newDroppedFixtureFS's "widgets"
-// feature (SCENARIO-02, config.Default()'s own headings) and runs one
-// FinishFS call against oldState and handoff, so the fixture opens on a
-// step already done, with oldState recorded as STATE.md and handoff
-// recorded at its own file — SCENARIO-09's shared done-step drop-bearing
-// pair, at the FinishFS level. Every later call in this file reuses the
-// returned mem directly; a second newDroppedFixtureFS build would discard
-// this first finish's own writes.
+// feature and runs one FinishFS call against oldState and handoff, so the
+// fixture opens on a step already done. Every later call in this file
+// reuses the returned mem directly; a second build would discard this
+// first finish's own writes.
 func newDroppedReFinishFixtureFS(t *testing.T, oldState string, handoff []byte) *rwfs.Mem {
 	t.Helper()
 
@@ -425,21 +375,13 @@ func newDroppedReFinishFixtureFS(t *testing.T, oldState string, handoff []byte) 
 }
 
 // droppedReFinishHandoffName is the recorded handoff file
-// newDroppedReFinishFixtureFS's own first finish call writes — the row-2
-// exemption's own control variable, removed by this file's control-arm
-// subtest.
+// newDroppedReFinishFixtureFS's own first finish call writes.
 func droppedReFinishHandoffName() string {
 	return "SCENARIO-02" + config.Default().HandoffFileSuffix
 }
 
-// Test_finish_state_diverged_refusal_returns_no_dropped_entries proves D5's
-// first enforcement point (SCENARIO-09): FinishFS's refinishStateDiverged
-// case returns before droppedEntries ever runs, so a state-diverged
-// re-finish of a drop-bearing pair carries an empty FinishResult.Dropped —
-// never "computed then discarded". Its control arm, differing in exactly
-// one variable (the recorded handoff file's own presence), proves the same
-// old/new pair really is drop-bearing when the finish takes the write path
-// instead, through FinishFS's row-2 exemption.
+// The second subtest, removing the recorded handoff file, is the control
+// arm proving the same old/new pair is drop-bearing on the write path.
 func Test_finish_state_diverged_refusal_returns_no_dropped_entries(t *testing.T) {
 	oldState := droppedOldStateWithEntryAtLine17()
 	newState := []byte("## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n- kept entry\n\n## Open debts\n")
@@ -467,11 +409,9 @@ func Test_finish_state_diverged_refusal_returns_no_dropped_entries(t *testing.T)
 }
 
 // droppedNestedOpenDebtsConfig returns config.Default() with OpenDebts
-// reconfigured to "### Open debts" — a heading one level deeper than
-// "## Traps", so a body writing the four configured headings in Ordered()
-// order (as scaffold's own stateSkeleton does) nests Open debts' own
-// section inside Traps' rather than after it: "## Traps" only ends at the
-// next heading of the *same or higher* level, and "###" is neither.
+// reconfigured to "### Open debts", one level deeper than "## Traps", so a
+// body writing headings in Ordered() order nests Open debts' section
+// inside Traps' rather than after it.
 func droppedNestedOpenDebtsConfig() config.Config {
 	cfg := config.Default()
 	cfg.StateHeadings.OpenDebts = "### Open debts"
@@ -480,11 +420,9 @@ func droppedNestedOpenDebtsConfig() config.Config {
 }
 
 // droppedNestedOldState is every nested-heading test's shared old body:
-// "### Open debts" sits inside "## Traps"' own section (nested per
-// droppedNestedOpenDebtsConfig), holding one entry, "- debt entry", at
-// whole-body line 11; "## Traps" itself holds one entry of its own,
-// "- trap entry", at line 7 — kept unchanged in every case below, so a
-// scan that ignores the new body entirely cannot pass by reporting it.
+// "### Open debts" sits inside "## Traps"' own section, holding
+// "- debt entry" at line 11; "## Traps" holds "- trap entry" at line 7,
+// kept unchanged in every case below.
 func droppedNestedOldState() string {
 	return strings.Join([]string{
 		"## Binding decisions", "",
@@ -496,14 +434,9 @@ func droppedNestedOldState() string {
 	}, "\n") + "\n"
 }
 
-// Test_finish_treats_an_entry_moved_out_of_a_nested_open_debts_heading_as_no_drop
-// proves the nested-heading MAJOR fix: pre-fix, droppedEntries scanned "##
-// Traps" and "### Open debts" independently, so "- debt entry" — physically
-// inside both sections — was pooled twice on the old side; moving it to
-// "## Binding decisions" (a single, non-nested new occurrence) then read as
-// a surplus of one and reported a false drop. With each old-body line
-// attributed to its one nearest-enclosing configured heading, old and new
-// counts agree and nothing is reported.
+// "- debt entry" sits physically inside both "## Traps" and "### Open
+// debts"; each old-body line must attribute to only its one
+// nearest-enclosing heading, or moving the entry reads as a false drop.
 func Test_finish_treats_an_entry_moved_out_of_a_nested_open_debts_heading_as_no_drop(t *testing.T) {
 	cfg := droppedNestedOpenDebtsConfig()
 	mem := newDroppedFixtureFS(t, droppedNestedOldState())
@@ -522,13 +455,9 @@ func Test_finish_treats_an_entry_moved_out_of_a_nested_open_debts_heading_as_no_
 	assert.Empty(t, res.Dropped)
 }
 
-// Test_finish_reports_a_drop_under_a_nested_open_debts_heading_exactly_once
-// is the same nested fixture's drop case: "- debt entry" is omitted
-// entirely rather than moved. Pre-fix, the same double pooling reported it
-// twice, at the same old-file line, under both "Traps" and "Open debts"
-// (unstable relative order). The fix reports it once, under its own
-// nearest-enclosing heading, "### Open debts" — dropped-debt, not
-// dropped-entry.
+// Same nested fixture, but "- debt entry" is omitted entirely: reported
+// once, under its own nearest-enclosing heading ("### Open debts",
+// dropped-debt), not twice under both headings.
 func Test_finish_reports_a_drop_under_a_nested_open_debts_heading_exactly_once(t *testing.T) {
 	cfg := droppedNestedOpenDebtsConfig()
 	mem := newDroppedFixtureFS(t, droppedNestedOldState())
@@ -548,17 +477,9 @@ func Test_finish_reports_a_drop_under_a_nested_open_debts_heading_exactly_once(t
 	}, res.Dropped)
 }
 
-// Test_finish_attributes_a_drop_under_an_unconfigured_subsection_to_its_actual_ancestor
-// proves poolOccurrences picks only among headings whose *own*
-// markdown.Entries scan really reached the entry's line, not merely the
-// nearest configured heading by line number: "### Notes" (unconfigured)
-// is a sibling of "### Open debts" under "## Traps", so "### Open
-// debts"' own section (CommonMark same-or-higher-level rule) ends at
-// "### Notes" and its scan never reaches "- notes entry" — only "##
-// Traps"' own overrunning scan does. Picking "the nearest configured
-// heading by line" instead would misattribute the drop to "### Open
-// debts", since its own heading line sits between "## Traps"' and the
-// entry's.
+// "### Notes" (unconfigured) is a sibling of "### Open debts" under "##
+// Traps", so only "## Traps"' own overrunning scan reaches its entry — not
+// "the nearest configured heading by line", which would misattribute it.
 func Test_finish_attributes_a_drop_under_an_unconfigured_subsection_to_its_actual_ancestor(t *testing.T) {
 	cfg := droppedNestedOpenDebtsConfig()
 	oldState := strings.Join([]string{
@@ -590,11 +511,8 @@ func Test_finish_attributes_a_drop_under_an_unconfigured_subsection_to_its_actua
 }
 
 // droppedReversedNestingConfig reconfigures Traps to "### Traps", one
-// level deeper than the default "## Open debts", inverting which of the
-// two nests inside the other relative to config.StateHeadings.Ordered()'s
-// own field order (BindingDecisions, LeftUnbuilt, Traps, OpenDebts):
-// Traps is scanned *before* OpenDebts in that fixed order, but is the
-// physically deeper, more specific heading here.
+// level deeper than "## Open debts": Traps is scanned before OpenDebts in
+// Ordered()'s fixed order, but is the physically deeper heading here.
 func droppedReversedNestingConfig() config.Config {
 	cfg := config.Default()
 	cfg.StateHeadings.Traps = "### Traps"
@@ -602,16 +520,9 @@ func droppedReversedNestingConfig() config.Config {
 	return cfg
 }
 
-// Test_finish_attributes_a_drop_to_the_physically_deeper_heading_even_when_scanned_first
-// proves poolOccurrences picks the heading whose own scan reaches an entry
-// with the *greatest* markdown.HeadingLine, not whichever scannable
-// heading happens to be scanned last: "### Traps" nests inside "## Open
-// debts"' own section here — the reverse of every other nested-heading
-// test in this file — yet Ordered() still scans Traps before OpenDebts.
 // An implementation that let the later scan win regardless of heading
-// depth would misattribute "- trap entry" to "Open debts"
-// (dropped-debt); the correct, depth-based attribution is "Traps"
-// (dropped-entry).
+// depth would misattribute "- trap entry" to "Open debts"; the correct,
+// depth-based attribution is "Traps".
 func Test_finish_attributes_a_drop_to_the_physically_deeper_heading_even_when_scanned_first(t *testing.T) {
 	cfg := droppedReversedNestingConfig()
 	oldState := strings.Join([]string{
@@ -639,23 +550,10 @@ func Test_finish_attributes_a_drop_to_the_physically_deeper_heading_even_when_sc
 	}, res.Dropped)
 }
 
-// Test_finish_dedupes_a_new_bodys_nested_heading_overlap_before_diffing
-// proves poolOccurrences' by-line dedup is applied to the *new* body, not
-// only the old one: droppedEntries calls poolOccurrences twice
-// (internal/scaffold/dropped.go), once per body, and a fix that pooled the
-// old side correctly while reverting the new side to a raw, un-deduped
-// per-heading markdown.Entries loop would still pass every other test in
-// this file, since none of them give the new body its own nested-heading
-// overlap. Here "### Open debts" nests inside "## Traps"' own section in
-// the *new* body only — "## Traps" only ends at a heading of the same or
-// higher level, so its own scan overruns into the nested "### Open debts"
-// section and finds "- dup text" a second time — while the old body holds
-// the identical normalized text twice, under two ordinary, non-nested
-// headings, so old-side counting is never in question. A raw, un-deduped
-// new-side count reads "dup text" as present twice in the new body
-// (matching the old count of two) and reports no drop at all; the correct,
-// deduped count of one reports exactly one surplus, at the old body's later
-// occurrence.
+// poolOccurrences' by-line dedup must apply to the new body too, not only
+// the old: here "### Open debts" nests inside "## Traps" in the new body
+// only, so an un-deduped new-side count would read "dup text" as present
+// twice and report no drop at all.
 func Test_finish_dedupes_a_new_bodys_nested_heading_overlap_before_diffing(t *testing.T) {
 	cfg := droppedNestedOpenDebtsConfig()
 	oldState := strings.Join([]string{
@@ -683,16 +581,9 @@ func Test_finish_dedupes_a_new_bodys_nested_heading_overlap_before_diffing(t *te
 	}, res.Dropped)
 }
 
-// Test_finish_reports_a_drop_once_when_a_configured_heading_carries_no_hash
-// proves the MAJOR fix's second overlap source: cfg.StateHeadings.Traps set
-// to the plain string "Traps" (config.Resolve's own validateHeading rule
-// requires only non-empty and pairwise-distinct, no "#"). Matched against a
-// body line that is not an ATX heading, its own headingLevelOf is 0, so the
-// pre-fix section scan for "Traps" never finds a terminating heading and
-// reads to end of file — overrunning into "## Open debts"' own section and
-// pooling "- debt entry" a second time, under "Traps", alongside "## Open
-// debts"' own correct scan. The fix reports the drop once, under its true
-// nearest-enclosing heading.
+// cfg.StateHeadings.Traps set to the plain string "Traps" (no "#") must
+// not overrun to end of file and pool "- debt entry" a second time under
+// both headings; it reports once, under its true nearest ancestor.
 func Test_finish_reports_a_drop_once_when_a_configured_heading_carries_no_hash(t *testing.T) {
 	cfg := config.Default()
 	cfg.StateHeadings.Traps = "Traps"

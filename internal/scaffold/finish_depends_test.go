@@ -22,10 +22,8 @@ func readStepFS(t *testing.T, fx finishFixtureFS, name string) string {
 }
 
 // reopenStep01FS rewrites newFinishFixtureFS's STEP-01 from "status: done"
-// to "status: open", so STEP-02's depends-on: [STEP-01] — already declared
-// by step02Body — goes unmet: the fixture's happy path is already
-// dependency-satisfied (STEP-01 ships done), so a broken check could pass
-// the whole existing suite without this rewrite.
+// to "status: open", so STEP-02's depends-on: [STEP-01] goes unmet — the
+// fixture's happy path ships STEP-01 done, satisfied by default.
 func reopenStep01FS(t *testing.T, fx finishFixtureFS) {
 	t.Helper()
 
@@ -33,9 +31,6 @@ func reopenStep01FS(t *testing.T, fx finishFixtureFS) {
 	putStepFS(t, fx, "STEP-01.md", reopened)
 }
 
-// Test_finish_refuses_a_step_whose_dependency_is_not_finished is SCENARIO-21's
-// core case: STEP-02 declares depends-on: [STEP-01], and STEP-01 is
-// reopened, so the refusal names STEP-01 and nothing lands.
 func Test_finish_refuses_a_step_whose_dependency_is_not_finished(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	reopenStep01FS(t, fx)
@@ -57,10 +52,6 @@ func Test_finish_refuses_a_step_whose_dependency_is_not_finished(t *testing.T) {
 	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
-// Test_finish_refuses_a_dependency_id_that_names_no_step_file pins the
-// second refusal copy branch: STEP-99 is not a recorded id at all, so
-// idx.Known is false and the copy says "names no step file" rather than
-// "is not finished".
 func Test_finish_refuses_a_dependency_id_that_names_no_step_file(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	unknownDep := strings.Replace(step02Body(fx.cfg), "depends-on: [STEP-01]\n", "depends-on: [STEP-99]\n", 1)
@@ -83,11 +74,8 @@ func Test_finish_refuses_a_dependency_id_that_names_no_step_file(t *testing.T) {
 	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
-// Test_finish_refuses_a_dependency_whose_step_file_does_not_parse pins
-// Decision 5: STEP-01 exists but its frontmatter is garbage, so it is
-// Recorded as a known, not-done step rather than skipped — the refusal
-// takes the "is not finished" branch, never "names no step file" and
-// never scaffold.ErrMalformedFeature, and never a pass.
+// STEP-01 exists but its frontmatter is garbage, so it is recorded as a
+// known, not-done step rather than skipped.
 func Test_finish_refuses_a_dependency_whose_step_file_does_not_parse(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	putStepFS(t, fx, "STEP-01.md", "not frontmatter at all\n")
@@ -103,10 +91,8 @@ func Test_finish_refuses_a_dependency_whose_step_file_does_not_parse(t *testing.
 	assert.NotContains(t, refusal.Problem, "names no step file")
 }
 
-// Test_finish_refuses_a_step_that_depends_on_itself pins Decision 3: a
-// self-dependency takes the "is not finished" branch, naming the step's
-// own id on both sides of the line — and is then permanently unfinishable
-// through this command until the frontmatter is edited by hand.
+// A self-dependency takes the "is not finished" branch, naming the step's
+// own id on both sides of the line.
 func Test_finish_refuses_a_step_that_depends_on_itself(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	selfDep := strings.Replace(step02Body(fx.cfg), "depends-on: [STEP-01]\n", "depends-on: [STEP-02]\n", 1)
@@ -124,11 +110,9 @@ func Test_finish_refuses_a_step_that_depends_on_itself(t *testing.T) {
 		err.Error())
 }
 
-// Test_finish_accepts_a_step_with_no_declared_dependencies is the control
-// arm for Decision 6: STEP-03 declares depends-on: [] in a feature that
-// also holds STEP-02, an unrelated not-done sibling — the scan is skipped
-// entirely, so STEP-03 finishes, and the four writes are asserted so this
-// cannot pass on a silent no-op.
+// STEP-03 declares depends-on: [] in a feature that also holds STEP-02, an
+// unrelated not-done sibling; the four writes are asserted so this cannot
+// pass on a silent no-op.
 func Test_finish_accepts_a_step_with_no_declared_dependencies(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	ticked := strings.Replace(readStepFS(t, fx, "STEP-03.md"), "- [ ] not done yet\n", "- [x] not done yet\n", 1)
@@ -155,9 +139,6 @@ func Test_finish_accepts_a_step_with_no_declared_dependencies(t *testing.T) {
 	assert.Equal(t, string(handoff), string(handoffGot))
 }
 
-// Test_finish_accepts_a_step_whose_dependency_is_done is the satisfied
-// side of the boundary: STEP-02 depends on STEP-01, which newFinishFixtureFS
-// records status: done, and finishes normally.
 func Test_finish_accepts_a_step_whose_dependency_is_done(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 
@@ -172,9 +153,6 @@ func Test_finish_accepts_a_step_whose_dependency_is_done(t *testing.T) {
 	assert.True(t, fm.Done())
 }
 
-// Test_finish_reports_an_open_checklist_item_before_an_unfinished_dependency
-// pins SCENARIO-20's position ahead of this scenario's dependency check: a
-// step both un-ticked and blocked reports the open checklist item.
 func Test_finish_reports_an_open_checklist_item_before_an_unfinished_dependency(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	reopenStep01FS(t, fx)
@@ -186,10 +164,6 @@ func Test_finish_reports_an_open_checklist_item_before_an_unfinished_dependency(
 	assert.NotErrorIs(t, err, scaffold.ErrUnmetDependency)
 }
 
-// Test_finish_reports_an_unfinished_dependency_before_the_specification_read
-// pins the dependency check ahead of the specification read: a blocked
-// step in a feature whose progress entry for it is missing reports the
-// dependency, not scaffold.ErrNoProgressEntry.
 func Test_finish_reports_an_unfinished_dependency_before_the_specification_read(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	reopenStep01FS(t, fx)
@@ -204,10 +178,6 @@ func Test_finish_reports_an_unfinished_dependency_before_the_specification_read(
 	assert.NotErrorIs(t, err, scaffold.ErrNoProgressEntry)
 }
 
-// Test_re_finishing_a_done_step_whose_dependency_is_open_with_recorded_inputs_stays_a_noop
-// pins Decision 4: a done step's dependency being reopened by hand must
-// not turn a same-inputs re-finish into a refusal — FirstUnmet's done
-// short-circuit is what keeps R11's no-op reachable on this tree.
 func Test_re_finishing_a_done_step_whose_dependency_is_open_with_recorded_inputs_stays_a_noop(t *testing.T) {
 	fx := newFinishedFixtureFS(t)
 	reopenStep01FS(t, fx)
@@ -219,11 +189,6 @@ func Test_re_finishing_a_done_step_whose_dependency_is_open_with_recorded_inputs
 	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
-// Test_re_finishing_a_done_step_whose_dependency_is_open_with_divergent_inputs_is_still_ErrAlreadyFinished
-// is Decision 4's other half, on the same reopened-dependency tree: a
-// divergent handoff still reports scaffold.ErrAlreadyFinished, never
-// scaffold.ErrUnmetDependency, because FirstUnmet short-circuits on the
-// dependant's own doneness before either branch of the new check applies.
 func Test_re_finishing_a_done_step_whose_dependency_is_open_with_divergent_inputs_is_still_ErrAlreadyFinished(t *testing.T) {
 	fx := newFinishedFixtureFS(t)
 	reopenStep01FS(t, fx)

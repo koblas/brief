@@ -13,12 +13,10 @@ import (
 )
 
 // This file holds NewFeature's disk-only tests: validateFeatureName runs
-// inside the NewFeature entry point itself, before NewFeatureFS or any
-// filesystem call, so every refusal here is decided without touching disk
-// at all — there is no FS-taking core to redirect onto rwfs.Mem for it,
-// only the real entry point. The owner-only permission test stays on disk
-// for the usual reason: rwfs.Mem never applies the process umask
-// (rwfs/doc.go).
+// inside the NewFeature entry point itself, before any filesystem call, so
+// every refusal here is decided without touching disk at all. The
+// owner-only permission test stays on disk since rwfs.Mem never applies
+// the process umask.
 
 func Test_refuses_a_feature_name_containing_whitespace(t *testing.T) {
 	root := t.TempDir()
@@ -104,23 +102,10 @@ func Test_creates_nothing_at_all_when_the_name_is_refused(t *testing.T) {
 	assert.NoDirExists(t, filepath.Join(root, "specs"))
 }
 
-// Test_the_scaffolded_files_are_all_created_owner_only pins the mode
-// writeExclusive creates the specification, state and step files with.
-//
-// This is the other half of a claim the scaffold makes in two places.
-// replace.go passes rwfs.FS.WriteFile a 0o600 perm so the handoff file --
-// the only file Finish creates rather than replaces -- is born no wider
-// than the files beside it, and Test_the_handoff_file_is_created_with_the_
-// same_mode_as_its_siblings pins that against its fixture's state file. But
-// a fixture's mode is chosen by the fixture: without this test, changing
-// writeExclusive's own constant to 0o644 leaves the whole suite green while
-// real trees grow three 0o644 files beside a 0o600 handoff -- the same
-// inconsistency, reintroduced from the other end.
-//
-// The umask is pinned only so the assertion reads the same way as its
-// siblings in this repo; 0o600 carries no bits a conventional umask strips,
-// so unlike the atomicfile fresh-create tests this one is umask-stable
-// either way.
+// The other half of the claim Test_the_handoff_file_is_created_with_the_same_mode_as_its_siblings
+// pins from the opposite direction: without this test, changing
+// writeExclusive's own constant to 0o644 leaves the whole suite green
+// while real trees grow three 0o644 files beside a 0o600 handoff.
 func Test_the_scaffolded_files_are_all_created_owner_only(t *testing.T) {
 	oldMask := syscall.Umask(0o022)
 	t.Cleanup(func() { syscall.Umask(oldMask) })

@@ -40,8 +40,8 @@ func newStateBody(cfg config.Config) []byte {
 // differentStateBody is a replacement state body carrying the four
 // configured headings, each holding a marker distinct from both
 // oldStateBody's and newStateBody's, for tests that need a state argument
-// that both passes SCENARIO-19's heading check and still diverges from
-// whatever is already recorded on disk.
+// that passes the heading check and still diverges from whatever is
+// already recorded on disk.
 func differentStateBody(cfg config.Config) []byte {
 	var body strings.Builder
 	for _, h := range cfg.StateHeadings.Ordered() {
@@ -55,10 +55,9 @@ func differentStateBody(cfg config.Config) []byte {
 // key Frontmatter does not know (owner: planner) and a depends-on
 // satisfied by STEP-01. Its checklist is fully ticked and holds a fenced
 // block containing a decoy "## Fixture Handoff" line, so a naive anchor
-// search or a checklist-completeness bug would misfire on this fixture
-// rather than on a contrived edge case. A bare handoff heading is followed
-// by a legacy "## Notes" section, so every "preserved outside the span"
-// assertion built against this fixture has content to lose.
+// search would misfire on this fixture. A bare handoff heading is followed
+// by a legacy "## Notes" section, giving "preserved outside the span"
+// assertions content to lose.
 func step02Body(cfg config.Config) string {
 	return "---\n" +
 		"id: STEP-02\n" +
@@ -87,10 +86,6 @@ func step02Body(cfg config.Config) string {
 		"PLEASE KEEP THIS\n"
 }
 
-// Test_writes_the_supplied_handoff_to_its_own_file pins the amended
-// SCENARIO-05 contract directly: the handoff no longer lives inside the
-// step file, it lives at handoffPath(), and it holds fx.newHandoff
-// verbatim — including its trailing newline and its nested fence.
 func Test_writes_the_supplied_handoff_to_its_own_file(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 
@@ -103,9 +98,6 @@ func Test_writes_the_supplied_handoff_to_its_own_file(t *testing.T) {
 	assert.Equal(t, string(fx.newHandoff), string(got))
 }
 
-// Test_leaves_the_step_file_byte_identical_apart_from_the_status_line is
-// R21's second clause at the Server level — the legacy-"## Notes"-section
-// preservation proof.
 func Test_leaves_the_step_file_byte_identical_apart_from_the_status_line(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 
@@ -120,9 +112,6 @@ func Test_leaves_the_step_file_byte_identical_apart_from_the_status_line(t *test
 	assert.Equal(t, want, string(got))
 }
 
-// Test_leaves_the_specification_byte_identical_apart_from_the_finished_step_s_progress_line
-// proves the trailing "## Notes" section in the specification survives
-// finish's progress-checkbox edit untouched.
 func Test_leaves_the_specification_byte_identical_apart_from_the_finished_step_s_progress_line(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	before, readErr := fx.mem.ReadFile(fx.cfg.SpecificationFile)
@@ -166,16 +155,6 @@ func Test_marks_the_step_done_in_its_frontmatter(t *testing.T) {
 	assert.True(t, fm.Done())
 }
 
-// Test_finish_refuses_a_replacement_state_body_with_an_unterminated_fence
-// is the last surviving argument-fence check: a replacement state body
-// whose fence never closes would leave every configured state heading
-// unreadable on the next Start, since assemble.stateSections finds each
-// one by scanning forward for a terminator. Named against
-// scaffold.StateSource, since Finish never learns the argument's real
-// path — a caller that does, such as cli's --state flag, upgrades the
-// placeholder before rendering. The handoff argument carries no such
-// check: it is written verbatim to its own file and nothing reads it
-// structurally.
 func Test_finish_refuses_a_replacement_state_body_with_an_unterminated_fence(t *testing.T) {
 	cfg := fixtureConfig()
 	pattern, patternErr := stepfilePattern(cfg)
@@ -213,11 +192,6 @@ func Test_finish_refuses_a_replacement_state_body_with_an_unterminated_fence(t *
 	assert.Equal(t, before, mem.Snapshot(), "a refused finish must leave every file byte-identical")
 }
 
-// Test_Finish_ticks_a_progress_entry_when_the_specification_uses_CRLF pins
-// that tickProgressEntry's heading match, like insertProgressEntry's, must
-// right-trim "\r" along with " \t": a CRLF specification's progress
-// heading must still match, or Finish would refuse every CRLF feature with
-// ErrNoProgressHeading.
 func Test_Finish_ticks_a_progress_entry_when_the_specification_uses_CRLF(t *testing.T) {
 	cfg := fixtureConfig()
 	pattern, patternErr := stepfilePattern(cfg)
@@ -305,19 +279,8 @@ func Test_does_not_tick_an_entry_whose_id_merely_starts_with_the_finished_id(t *
 	assert.Contains(t, string(got), "- [x] STEP-1")
 }
 
-// Test_reports_a_handoff_write_that_cannot_be_committed guards the
-// contract Finish's write sequence carries: a directory at the handoff's
-// own path makes Mem.WriteFile refuse with fs.ErrExist, nothing else
-// disturbed — asserted file by file: the step file still says open, the
-// state file still holds its old body, and the specification's STEP-02
-// entry is still unticked.
-//
-// It also pins convergence: the step file must still say status: open,
-// since that is the sole doneness authority and a retry has to be able to
-// repair the half-finished state — and then, clearing the obstruction and
-// retrying with the same arguments, that the retry actually lands the
-// handoff and marks the step done, not merely that the precondition for a
-// retry holds.
+// A directory at the handoff's own path makes Mem.WriteFile refuse; the
+// retry below proves convergence once the obstruction clears.
 func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	require.NoError(t, fx.mem.Mkdir(fx.handoffName(), 0o755))
@@ -333,10 +296,7 @@ func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 	assert.Contains(t, string(stepBody), "status: open",
 		"a write that could not be committed must leave the step retryable")
 
-	// The three writes after the blocked one must not have run. Their
-	// control arm is the retry below: it changes both of these files, which
-	// is what proves these two probes would have seen a write had one
-	// happened, rather than being satisfied by nothing occurring at all.
+	// Control arm for these two probes is the retry below.
 	gotState, readErr := fx.mem.ReadFile(fx.cfg.StateFile)
 	require.NoError(t, readErr)
 	assert.Equal(t, oldStateBody(fx.cfg), string(gotState),
@@ -360,9 +320,7 @@ func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Contains(t, string(gotStepAfterRetry), "status: done")
 
-	// The control arm for the two "did not run" assertions above: the same
-	// two probes, on the same two files, now see the writes the blocked
-	// attempt left undone.
+	// Same two probes now see the writes the blocked attempt left undone.
 	stateAfterRetry, readErr := fx.mem.ReadFile(fx.cfg.StateFile)
 	require.NoError(t, readErr)
 	assert.Equal(t, string(fx.newState), string(stateAfterRetry))
@@ -372,12 +330,6 @@ func Test_reports_a_handoff_write_that_cannot_be_committed(t *testing.T) {
 	assert.Contains(t, string(specAfterRetry), "- [x] STEP-02: Assemble the thing")
 }
 
-// Test_refuses_an_unknown_step pins the unknown-step refusal's shape: it
-// names the id and feature, and its Fix lists every step id
-// newFinishFixtureFS wrote (STEP-01..03, ascending by number) — the same
-// "known:" convention cli's own unknown-feature refusal carries, rather
-// than a "run 'brief new step'" suggestion that writes files on what is
-// otherwise a read-only refusal.
 func Test_refuses_an_unknown_step(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	before := fx.mem.Snapshot()
@@ -393,10 +345,6 @@ func Test_refuses_an_unknown_step(t *testing.T) {
 	assert.Equal(t, "known: STEP-01, STEP-02, STEP-03", refusal.Fix)
 }
 
-// Test_refuses_an_unknown_step_with_no_step_files_suggests_creating_one is
-// Test_refuses_an_unknown_step's empty-list companion: a feature directory
-// with no step files at all gets the "known: none; run '...' to create
-// one" suggestion instead of an empty list.
 func Test_refuses_an_unknown_step_with_no_step_files_suggests_creating_one(t *testing.T) {
 	cfg := fixtureConfig()
 	pattern, patternErr := stepfilePattern(cfg)
@@ -416,11 +364,8 @@ func Test_refuses_an_unknown_step_with_no_step_files_suggests_creating_one(t *te
 	assert.Equal(t, "known: none; run 'brief new step widgets' to create one", refusal.Fix)
 }
 
-// Test_refuses_an_unknown_step_lists_known_ids_in_numeric_not_filename_order
-// pins knownStepIDs' sort by stepfile.Pattern.Number rather than
-// fs.ReadDir's byte order: an unpadded "STEP-%d.md" pattern puts
-// "STEP-10.md" before "STEP-2.md" in filename order, while the Fix's
-// "known:" list must still name STEP-2 first.
+// An unpadded "STEP-%d.md" pattern puts "STEP-10.md" before "STEP-2.md" in
+// filename order; the Fix's "known:" list must still name STEP-2 first.
 func Test_refuses_an_unknown_step_lists_known_ids_in_numeric_not_filename_order(t *testing.T) {
 	cfg := fixtureConfig()
 	cfg.StepFilePattern = "STEP-%d.md"

@@ -7,13 +7,10 @@ import (
 	"github.com/koblas/brief/internal/platform/conform"
 )
 
-// ErrInvalidFeatureName is returned when NewFeature is asked to create a
-// name that would break the whitespace-separated four-field status
-// contract: an empty name, or one containing a rune unicode.IsSpace
-// reports true for — the same predicate strings.Fields splits that
-// contract's fields on. It is a bare sentinel, not a *RefusalError: an
-// invalid name is an invocation defect, reported by cli as a usage error
-// rather than as a write refusal.
+// ErrInvalidFeatureName is returned when NewFeature is asked to create an
+// empty name, or one containing whitespace. It is a bare sentinel, not a
+// *RefusalError: an invalid name is an invocation defect, reported by cli
+// as a usage error rather than as a write refusal.
 var ErrInvalidFeatureName = errors.New("invalid feature name")
 
 // ErrNoSuchFeature is returned when the named feature has no directory
@@ -42,97 +39,60 @@ var ErrNoSuchStep = errors.New("no such step")
 var ErrNoProgressEntry = errors.New("no progress entry found")
 
 // ErrUnterminatedFence is returned when a replacement state body given to
-// Finish opens a fenced code block it never closes: assemble.Start finds
-// every configured heading by scanning forward for a terminator, so an
-// open fence there would leave every heading after it unreadable. It is
-// conform.ErrUnterminatedFence: assemble.Check reports the same fault as a
-// Finding against a state file the write path never validated.
+// Finish opens a fenced code block it never closes. It is
+// conform.ErrUnterminatedFence.
 var ErrUnterminatedFence = conform.ErrUnterminatedFence
 
 // ErrAlreadyFinished is returned when Finish is asked to close a step whose
 // frontmatter already says done, but the supplied handoff or state differs
 // from what is recorded on disk. It travels inside a *RefusalError naming
-// the specific divergent file — the recorded handoff file or the state
-// file — so the caller can read the recorded bytes and compare rather than
-// having their new input silently discarded or the record silently
-// replaced. A done step whose handoff file is missing or unreadable is
-// exempt from this refusal: with no recorded handoff there is nothing to
-// diverge from, and Finish is the only path to a done step, so refusing
-// would leave a crash-then-hand-edit tree, or a tree migrated before
-// handoff files existed, with no way forward.
+// the specific divergent file, so the caller can read the recorded bytes
+// and compare rather than having their new input silently discarded.
 var ErrAlreadyFinished = errors.New("step already finished with different inputs")
 
 // ErrOverCap is returned when a body Finish is asked to write measures more
-// lines, by markdown.CountLines, than its configured cap
-// (cfg.HandoffCapLines for the handoff argument, cfg.StateCapLines for the
-// state argument — both share this one sentinel). RefusalError.Path names
-// which body: HandoffSource or StateSource. It is conform.ErrOverCap:
-// assemble.Check reports the same fault as a Finding against a handoff or
-// state file that predates the cap.
+// lines than its configured cap (cfg.HandoffCapLines or cfg.StateCapLines).
+// RefusalError.Path names which body: HandoffSource or StateSource. It is
+// conform.ErrOverCap.
 var ErrOverCap = conform.ErrOverCap
 
 // ErrOpenChecklistItem is returned when Finish is asked to close a step
-// whose own checklist section — the section under cfg.ChecklistHeading —
-// still carries an item not ticked with "[x]"/"[X]" (markdown.FirstUnchecked).
-// It travels inside a *RefusalError naming the step file and the item's
-// line. A checklist with no items, or a step file with no checklist
-// heading at all, is never refused this way — the freshly scaffolded step
-// NewStep writes is exactly that shape. It is conform.ErrOpenChecklistItem:
-// assemble.Check reports the same fault as a Finding, but only against a
-// done step — an open step's unticked item is ordinary in-progress work.
+// whose checklist section (cfg.ChecklistHeading) carries an item not ticked
+// with "[x]"/"[X]". It travels inside a *RefusalError naming the step file
+// and the item's line; a checklist with no items, or no checklist heading
+// at all, is never refused this way. It is conform.ErrOpenChecklistItem.
 var ErrOpenChecklistItem = conform.ErrOpenChecklistItem
 
 // ErrUnmetDependency is returned when Finish is asked to close a step whose
-// frontmatter declares a depends-on id that is not a done step, by
-// stepfile.DependencyIndex.FirstUnmet. It travels inside a *RefusalError
-// naming the step file being finished (Line 0), and covers two distinct
-// causes rendered as different copy: the dependency names a step file that
-// exists but is not done — including a self-dependency, which can never
-// become done through this check alone since the tool refuses rather than
-// writes — or the dependency names no step file at all
-// (stepfile.DependencyIndex.Known is false). A done step is never refused
-// this way, whatever its dependencies say: FirstUnmet short-circuits on
-// the dependant's own doneness, so a re-finish of a done step whose
-// dependency was later reopened stays a no-op. A step file this scenario
-// depends on that cannot be read or whose frontmatter does not parse is
-// recorded as a known, not-done step rather than skipped, so it takes the
-// "is not finished" branch, never the "names no step file" one — finish
-// grows no separate malformed-sibling refusal for that case.
+// frontmatter declares a depends-on id that is not a done step. It travels
+// inside a *RefusalError naming the step file being finished (Line 0), with
+// copy distinguishing a dependency that exists but is not done from one
+// that names no step file at all. A done step is never refused this way.
 var ErrUnmetDependency = errors.New("step depends on a step that is not finished")
 
 // ErrMissingStateHeading is returned when a replacement state body given to
 // Finish carries no section for one of cfg.StateHeadings.Ordered()'s four
-// required headings. The check is presence-only (markdown.Section's found
-// return), in any order, and a section with an empty body is valid — a
-// freshly scaffolded state file with every section empty is accepted; only
-// a missing heading line itself is refused. It is
-// conform.ErrMissingStateHeading: assemble.Check reports the same fault as
-// a Finding against a state file the write path never validated.
+// required headings. The check is presence-only, in any order; an empty
+// section is valid. It is conform.ErrMissingStateHeading.
 var ErrMissingStateHeading = conform.ErrMissingStateHeading
 
 // ErrPartialWrite marks a write-path error returned after at least one of
-// Finish's, NewFeature's, or NewStep's own writes already landed on disk —
-// distinct from one returned before any of them did. cli's files_changed
-// (R3) reads this through errors.Is rather than assuming every write
-// command's own failure always changed nothing.
+// Finish's, NewFeature's, or NewStep's own writes already landed on disk.
 var ErrPartialWrite = errors.New("partial write")
 
 // StateSource is the RefusalError.Path placeholder a refusal carries when
 // it concerns the bytes of Finish's state argument rather than a file
-// Finish opened itself. Finish never learns where those bytes came from —
-// a file, or standard input — so a caller that does know, such as cli's
-// --state flag, is expected to replace the placeholder with the real
-// source before rendering the refusal.
+// Finish opened itself, since Finish never learns their real source; a
+// caller that does, such as cli's --state flag, replaces the placeholder
+// before rendering the refusal.
 const StateSource = "<state>"
 
 // HandoffSource is StateSource's counterpart for Finish's handoff argument.
 const HandoffSource = "<handoff>"
 
-// RefusalError reports a refusal that changed nothing on disk: the path
-// it concerns, what was wrong with it, and how to fix it. cli renders
-// these fields into R14a's one-line refusal template, appending ":Line"
-// to the path when Line is set. Line is 0 when the refusal names a whole
-// file or path rather than one line inside it.
+// RefusalError reports a refusal that changed nothing on disk: the path it
+// concerns, what was wrong with it, and how to fix it. Line is 0 when the
+// refusal names a whole file or path rather than one line inside it.
 type RefusalError struct {
 	Path    string
 	Line    int
@@ -157,10 +117,8 @@ func (e *RefusalError) Unwrap() error {
 }
 
 // partialWriteError marks err as ErrPartialWrite without changing what
-// Error() reports: Go's multi-error Unwrap lets errors.Is reach both err's
-// own chain and ErrPartialWrite, while Error() renders exactly what err
-// alone would have, so a --json document's "message"/"problem" text is
-// never affected by whether a write landed before this error was returned.
+// Error() reports, so a caller's rendered message is unaffected by whether
+// a write landed before this error was returned.
 type partialWriteError struct {
 	err error
 }

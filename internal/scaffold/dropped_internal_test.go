@@ -6,9 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Test_trailing_tag_extraction pins D3's grammar for the unexported
-// trailing-tag extractor: a trailing "(<token>)" with a non-empty,
-// whitespace-free token is a tag; anything else is untagged.
+// White-box: trailingTag is unexported and combinatorial enough (five
+// grammar cases) to test directly rather than through Finish's Dropped.
 func Test_trailing_tag_extraction(t *testing.T) {
 	cases := []struct {
 		name string
