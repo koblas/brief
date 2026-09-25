@@ -31,9 +31,10 @@ MINOR path-separator regression) folded into the decisions below. No scenario wa
   predicate (stops at the first fault, exempts a done step) and must not gain a caller that
   needs enumeration. Severity is feature-wide, computed once after the step walk and
   back-filled; a feature-level finding is always `ERROR` (doneness unmeasurable).
-- Findings render `[SEVERITY] <path>:<line> — <detail>` (field renamed `Problem`→`Detail`:
+- Findings render `<SEVERITY>  <path>[:<line>]  <detail>` (field renamed `Problem`→`Detail`:
   `assemble.Problem` is a distinct type; `scaffold.RefusalError.Problem` is unrelated too,
-  untouched). `check` exits 1 on any `ERROR`, 0 otherwise.
+  untouched). `check` groups rows under a `<feature>  (in flight|complete)` header; `finish`
+  prints them bare. `check` exits 1 on any `ERROR`, 0 otherwise.
 - A cap finding's `Line` is `cap + 1`, set by the caller (`conform.OverCap` stays line-less).
 - `assemble.Server` carries two unexported, test-only seams — `openRoot`/`readDir`, set via
   `export_test.go`'s `SetOpenRootForTest`/`SetReadDirForTest` — because root bypasses POSIX

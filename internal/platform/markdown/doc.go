@@ -20,5 +20,8 @@
 // disagree about what a "line" is. FirstUnchecked is the one
 // checklist-item scanner, fence-aware like Section, so an unticked item is
 // found the same way whether the caller is writing (scaffold.Finish) or
-// reading (check).
+// reading (check). Entries is the one column-0 list-item scanner —
+// "- ", "* " or "N. " markers only, fence-aware like the rest — that
+// scaffold's own drop-reporting diff builds on; an indented line is
+// ignored, never an entry of its own.
 package markdown

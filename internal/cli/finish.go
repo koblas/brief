@@ -127,12 +127,18 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 
 	handoffRel, stateRel, specRel := displayPath(wd, res.HandoffPath), displayPath(wd, res.StatePath), displayPath(wd, res.SpecPath)
 
+	for _, d := range res.Dropped {
+		fmt.Fprintf(out.stdout, "%s  %s:%d  %s\n", dropSeverity, stateRel, d.Line, dropDetail(d))
+	}
+
+	replacedClause := stateRel + dropCountSuffix(len(res.Dropped))
+
 	if res.Next.ID != "" {
 		fmt.Fprintf(out.stderr, "brief finish: %s %s done; wrote %s, replaced %s, ticked %s; next: %s — run 'brief start %s'\n",
-			feature, step, handoffRel, stateRel, specRel, res.Next.ID, feature)
+			feature, step, handoffRel, replacedClause, specRel, res.Next.ID, feature)
 	} else {
 		fmt.Fprintf(out.stderr, "brief finish: %s %s done; wrote %s, replaced %s, ticked %s; %s is complete\n",
-			feature, step, handoffRel, stateRel, specRel, feature)
+			feature, step, handoffRel, replacedClause, specRel, feature)
 	}
 
 	return nil

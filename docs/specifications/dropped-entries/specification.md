@@ -244,7 +244,7 @@ Scenario: SCENARIO-10 — finish --help documents drop reporting
 
 ## BDD Acceptance Progress
 
-- [ ] SCENARIO-01: A dropped state entry is reported, not refused
+- [x] SCENARIO-01: A dropped state entry is reported, not refused
 - [ ] SCENARIO-02: A dropped open debt is reported under its own rule
 - [ ] SCENARIO-03: A finish that removes nothing prints what it prints today
 - [ ] SCENARIO-04: --json lists dropped entries in a structured field

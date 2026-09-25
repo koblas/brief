@@ -171,7 +171,7 @@ no per-step files, no carried state — is out of scope rather than degraded int
   <imperative next action> (no files changed)`. The problem states the actual number or name,
   never "too long". Read refusals drop the `(no files changed)` tail — it answers a question
   the reader did not ask. **Refusals** (exit 1, stderr) and **findings** (R9, exit 0, the
-  profile's `[SEVERITY] <path>:<line> — <finding>` shape) are deliberately different shapes so
+  profile's `<SEVERITY>  <path>[:<line>]  <detail>` shape) are deliberately different shapes so
   that a script tells "finished with reported drops" from "refused" by exit code alone. That
   holds only because findings never appear on a failed run. In `--json` mode a refusal is the
   common error document on stdout (`error.kind: "refusal"`, same path/line/problem/fix slots);
@@ -251,8 +251,9 @@ and no empty-versus-absent distinction to make.
 **Progress** — a checklist in the specification under one stable heading. Per-step checkboxes
 live in the step file.
 
-**Findings** — `check` and `finish` emit `[SEVERITY] <path>:<line> — <finding>` by default, so
-output drops into an existing review flow.
+**Findings** — `check` and `finish` emit `<SEVERITY>  <path>[:<line>]  <detail>` by default, so
+output drops into an existing review flow. `check` groups rows under a
+`<feature>  (in flight|complete)` header; `finish` prints them bare.
 
 The profile deliberately carries no instruction for *how* to distil. That is R7's line.
 

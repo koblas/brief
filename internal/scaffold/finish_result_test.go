@@ -27,6 +27,8 @@ func Test_finish_reports_the_absolute_handoff_and_state_paths_changed_true_and_n
 	assert.Equal(t, fx.handoffPath(), res.HandoffPath)
 	assert.Equal(t, filepath.Join(testFeaturePath, fx.cfg.StateFile), res.StatePath)
 	assert.Equal(t, scaffold.FinishNext{ID: "STEP-03", Title: "STEP-03", Path: filepath.Join(testFeaturePath, "STEP-03.md")}, res.Next)
+	assert.NotNil(t, res.Dropped, "Dropped must be a non-nil empty slice, never nil, when nothing was dropped")
+	assert.Empty(t, res.Dropped)
 }
 
 // Test_finish_no_op_reports_changed_false_and_still_names_next proves the
@@ -44,6 +46,8 @@ func Test_finish_no_op_reports_changed_false_and_still_names_next(t *testing.T) 
 	require.NoError(t, err)
 	assert.False(t, second.Changed)
 	assert.Equal(t, scaffold.FinishNext{ID: "STEP-03", Title: "STEP-03", Path: filepath.Join(testFeaturePath, "STEP-03.md")}, second.Next)
+	assert.NotNil(t, second.Dropped, "the R11 no-op must still report a non-nil empty Dropped")
+	assert.Empty(t, second.Dropped)
 }
 
 // Test_finish_next_is_empty_when_every_other_step_is_done builds a
