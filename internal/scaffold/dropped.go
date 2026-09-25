@@ -86,8 +86,8 @@ func dropRuleFor(heading, openDebts string) DropRule {
 	return DropRuleEntry
 }
 
-// scannableHeadings filters headings.Ordered() to the heading strings D7
-// allows a scan to use: non-empty and appearing exactly once. An empty
+// scannableHeadings filters headings.Ordered() to the heading strings a scan
+// may use: non-empty and appearing exactly once. An empty
 // value would match markdown.Section's first-blank-line fallback and a
 // value shared by more than one configured field would scan its section
 // twice; both are excluded wholesale, from every position they occupy, not
@@ -119,7 +119,7 @@ func scannableHeadings(headings config.StateHeadings) []string {
 // scannableHeadings(headings)'s sections in oldBody and absent, by
 // normalized-text identity, from the pooled set of newBody's own sections
 // is a drop; an empty or duplicated configured heading contributes no
-// entries, from either body (D7).
+// entries, from either body.
 //
 // The diff is pooled across the scannable headings, both for old and for
 // new, matched as one multiset: a text appearing more often in oldBody

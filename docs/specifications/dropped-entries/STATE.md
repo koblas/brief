@@ -40,10 +40,11 @@ Scenarios complete: SCENARIO-01..08. Last updated by SCENARIO-08.
   through `brief finish`/`cli.Run`**: `config.Resolve` already refuses an empty or
   pairwise-duplicate `state-headings.*` value before a `scaffold.Server` is built. It is tested
   by constructing `config.Config` directly, below the CLI (SCENARIO-08).
-- `normalizeEntryText`'s explicit `ReplaceAll(raw, "\r", "")` is load-bearing only for an
-  interior `\r` a continuation line leaves behind (SCENARIO-07 folding); a trailing-CRLF line
-  never reaches it with a `\r` still present, since `trimEOL`/`TrimSpace` strip it first
-  (SCENARIO-08).
+- `normalizeEntryText`'s explicit `ReplaceAll(raw, "\r", "")` is load-bearing only for a `\r`
+  strictly between two non-whitespace characters, on any line of an entry: `strings.Fields`
+  already splits on a lone `\r` like a space, so `\r` beside a space tokenizes the same either
+  way — proven when SCENARIO-08's first, space-adjacent fixture stayed green under a mutated
+  strip; only a mid-word placement reddened it.
 
 ## Left unbuilt
 
@@ -65,6 +66,10 @@ Scenarios complete: SCENARIO-01..08. Last updated by SCENARIO-08.
 - `dropExcerpt` cuts at 80 runes: a fixture meant to prove folding or dedup by its text content
   must stay under that, or the cut — not the behavior under test — is what the assertion
   reflects.
+- `checkArgumentHeadings` (`conform.MissingHeading`) does **not** reject an empty or duplicate
+  configured heading either — `markdown.Section(body, "")` matches the first blank line, so the
+  check trivially "passes" on the **new** body. `scannableHeadings` is the only guard; do not
+  read `FinishFS`'s validation band as a second line of defense (SCENARIO-08).
 
 ## Open debts
 

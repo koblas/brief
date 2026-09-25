@@ -199,7 +199,7 @@ func Test_finish_ignores_list_lines_that_are_not_true_entries(t *testing.T) {
 				"## Traps", "",
 				"- genuine entry", "",
 				"## Notes", "",
-				"- untouched note", "",
+				"- notes entry", "",
 				"## Open debts", "",
 			}, "\n") + "\n",
 			newState: "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Notes\n\n## Open debts\n",
@@ -310,7 +310,7 @@ func Test_finish_excludes_an_empty_configured_heading_from_scanning(t *testing.T
 // identical text ("## Shared") contribute zero entries from either
 // position — not one, per the binding decision that a duplicated heading is
 // excluded wholesale rather than "keeping the first". The Left-unbuilt
-// entry, under a distinct, undupicated heading, is still reported.
+// entry, under a distinct, non-duplicated heading, is still reported.
 func Test_finish_excludes_a_duplicated_configured_heading_from_scanning(t *testing.T) {
 	cfg := config.Default()
 	cfg.StateHeadings.BindingDecisions = "## Shared"
