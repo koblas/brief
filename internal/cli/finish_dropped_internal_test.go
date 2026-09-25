@@ -134,13 +134,14 @@ func Test_finish_complete_line_carries_the_drop_suffix_mem(t *testing.T) {
 	assert.Equal(t, wantStderr, stderr)
 }
 
-// Test_finish_reports_an_open_debts_drop_as_dropped_debt_mem proves the
-// dropped-debt rule and the untagged rendering end-to-end through the CLI
-// against "## Open debts" specifically (SCENARIO-02 of dropped-entries):
-// dropRuleFor and dropDetail's untagged branch were already unit-tested at
-// Server level by SCENARIO-01, but no CLI-level test had exercised the
-// Open debts heading or the "unowned — dies unless re-opened" text before
-// this.
+// Test_finish_reports_an_open_debts_drop_as_dropped_debt_mem proves, through
+// the CLI, that a drop under "## Open debts" renders its heading and its
+// untagged branch correctly, against the em-dash "unowned — dies unless
+// re-opened" text. Text mode never renders Rule, so dropped-debt itself
+// stays proven only at Server level
+// (internal/scaffold/finish_dropped_test.go
+// Test_finish_classifies_an_open_debts_drop_as_dropped_debt) until
+// SCENARIO-04 wires the JSON rule field.
 func Test_finish_reports_an_open_debts_drop_as_dropped_debt_mem(t *testing.T) {
 	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n\n" +
 		"- kept entry\n\n- D — unowned — dies unless re-opened\n"

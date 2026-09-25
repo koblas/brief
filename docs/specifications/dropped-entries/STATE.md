@@ -16,10 +16,11 @@ Scenarios complete: SCENARIO-01, SCENARIO-02. Last updated by SCENARIO-02.
 - `DroppedEntry.Line` is whole-body 1-based over the **old** body only. `.Heading` is display
   text (leading `#` run + one space stripped); rule classification (`dropRuleFor`) compares
   the **configured** heading string against `cfg.StateHeadings.OpenDebts`, never the display
-  text. `.Tag` is `""` untagged (SCENARIO-01). Proven end-to-end through the CLI against
-  `## Open debts` and the "unowned — dies unless re-opened" text by SCENARIO-02, with no
-  production edit needed — `dropRuleFor` and `dropDetail`'s untagged branch already handled
-  it generically.
+  text. `.Tag` is `""` untagged (SCENARIO-01). SCENARIO-02 proved the heading display and
+  `dropDetail`'s untagged branch against `## Open debts` and the "unowned — dies unless
+  re-opened" text end-to-end through the CLI, with no production edit needed — both already
+  handled it generically. `dropRuleFor`'s `dropped-debt` classification itself stays proven
+  only at Server level (text mode never renders `Rule`) until SCENARIO-04's JSON field.
 - Drops are computed only on `FinishFS`'s `refinishWrite` path, just before
   `applyFinishWrites` — pure, no error path. The R11 no-op returns a non-nil, empty
   `FinishResult.Dropped` (SCENARIO-01).
@@ -31,9 +32,6 @@ Scenarios complete: SCENARIO-01, SCENARIO-02. Last updated by SCENARIO-02.
   `docs/specifications/brief/specification.md`, plus the STATE.md decision in
   `docs/specifications/brief/STATE.md`), each now also noting `check` groups under a feature
   header while `finish` prints bare (SCENARIO-01, Product Verdict item 2).
-- The Default profile's Open debts line in `docs/specifications/brief/specification.md`
-  (line 239) now carries the same trailing `(SCENARIO-XX)` placeholder as the other three
-  state-heading lines — Product Verdict item 4, closed (SCENARIO-02).
 
 ## Left unbuilt
 
