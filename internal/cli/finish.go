@@ -18,7 +18,7 @@ handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
 from stdin; it may be given for at most one of --handoff and --state.
 
-` + jsonFieldsParagraph("feature", "step", "changed", "handoff_path", "state_path", "next", "modified")
+` + jsonFieldsParagraph("feature", "step", "changed", "handoff_path", "state_path", "next", "modified", "dropped_entries")
 
 // finishDocument is finish's --json success document: the common header
 // first, then scaffold.FinishResult's own fields, every path absolute and
@@ -28,17 +28,19 @@ from stdin; it may be given for at most one of --handoff and --state.
 // state file, the step file and the specification, in that order, when
 // Changed; empty on the no-op — and never includes handoff_path, this
 // call's own output rather than a file it found already on disk. Changed
-// is false only on R11's no-op.
+// is false only on R11's no-op. DroppedEntries is the document's last
+// field, always a non-nil slice — "[]" when Finish reports no drops.
 type finishDocument struct {
 	jsonHeader
 
-	Feature     string          `json:"feature"`
-	Step        string          `json:"step"`
-	Changed     bool            `json:"changed"`
-	HandoffPath string          `json:"handoff_path"`
-	StatePath   string          `json:"state_path"`
-	Next        *statusNextJSON `json:"next"`
-	Modified    []string        `json:"modified"`
+	Feature        string              `json:"feature"`
+	Step           string              `json:"step"`
+	Changed        bool                `json:"changed"`
+	HandoffPath    string              `json:"handoff_path"`
+	StatePath      string              `json:"state_path"`
+	Next           *statusNextJSON     `json:"next"`
+	Modified       []string            `json:"modified"`
+	DroppedEntries []finishDroppedJSON `json:"dropped_entries"`
 }
 
 // runFinish implements "brief finish <feature> <step> --handoff <path>
@@ -106,14 +108,15 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 		}
 
 		doc := finishDocument{
-			jsonHeader:  out.successHeader(),
-			Feature:     res.Feature,
-			Step:        res.Step,
-			Changed:     res.Changed,
-			HandoffPath: res.HandoffPath,
-			StatePath:   res.StatePath,
-			Next:        next,
-			Modified:    res.Modified,
+			jsonHeader:     out.successHeader(),
+			Feature:        res.Feature,
+			Step:           res.Step,
+			Changed:        res.Changed,
+			HandoffPath:    res.HandoffPath,
+			StatePath:      res.StatePath,
+			Next:           next,
+			Modified:       res.Modified,
+			DroppedEntries: finishDroppedEntries(res.Dropped, res.StatePath),
 		}
 
 		return out.document(doc)

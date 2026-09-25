@@ -6,6 +6,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -227,4 +228,116 @@ func Test_dropExcerpt(t *testing.T) {
 			assert.Equal(t, c.want, dropExcerpt(c.text))
 		})
 	}
+}
+
+// Test_finish_json_dropped_entries_key_order_and_values_mem proves
+// SCENARIO-04: --json's "dropped_entries" field is the document's last top-
+// level key, each element's own keys appear in the order
+// severity/rule/path/line/detail/heading/tag/text, the Open-debts element
+// carries "rule":"dropped-debt" and "tag":null (untagged), the Traps
+// element carries "rule":"dropped-entry" and its tag as a JSON string, and
+// an over-80-rune entry's "text" is the full literal value while its
+// "detail" is the same value cut to 80 runes plus "…". The old body keeps
+// one entry under each heading a drop is reported from — Left unbuilt,
+// Traps and Open debts — so a diff that ignored the new body entirely
+// would still fail this test.
+func Test_finish_json_dropped_entries_key_order_and_values_mem(t *testing.T) {
+	longBase := strings.Repeat("A", 90)
+	oldLines := []string{
+		"## Binding decisions", "", // 1-2
+		"- kept binding decision", "", // 3-4
+		"## Left unbuilt", "", // 5-6
+		"- kept left unbuilt", "", // 7-8
+		"- " + longBase + " (LONGTAG)", "", // 9-10
+		"## Traps", "", // 11-12
+		"- kept trap", "", // 13-14
+		"- a trap that gets dropped (TAGX)", "", // 15-16
+		"## Open debts", "", // 17-18
+		"- kept debt", "", // 19-20
+		"- an untagged debt that gets dropped", // 21
+	}
+	oldState := strings.Join(oldLines, "\n") + "\n"
+	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+	newState := "## Binding decisions\n\n- kept binding decision\n\n" +
+		"## Left unbuilt\n\n- kept left unbuilt\n\n" +
+		"## Traps\n\n- kept trap\n\n" +
+		"## Open debts\n\n- kept debt\n"
+	statePath := memWriteInput(tree, "state.md", newState)
+
+	stdout, stderr, err := runFinishArgsMem(t, tree.mem(), []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath, "--json"})
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+
+	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
+	stateFilePath := filepath.Join(featureDir, "STATE.md")
+	stepFilePath := filepath.Join(featureDir, "SCENARIO-01.md")
+	specFilePath := filepath.Join(featureDir, "specification.md")
+
+	longExcerpt := strings.Repeat("A", 80) + "…"
+	longText := longBase + " (LONGTAG)"
+
+	wantDropped := `[` +
+		`{"severity":"WARN","rule":"dropped-entry","path":` + memJSONString(t, stateFilePath) +
+		`,"line":9,"detail":` + memJSONString(t, "dropped from Left unbuilt, tagged LONGTAG: "+longExcerpt) +
+		`,"heading":"Left unbuilt","tag":"LONGTAG","text":` + memJSONString(t, longText) + `},` +
+		`{"severity":"WARN","rule":"dropped-entry","path":` + memJSONString(t, stateFilePath) +
+		`,"line":15,"detail":"dropped from Traps, tagged TAGX: a trap that gets dropped (TAGX)"` +
+		`,"heading":"Traps","tag":"TAGX","text":"a trap that gets dropped (TAGX)"},` +
+		`{"severity":"WARN","rule":"dropped-debt","path":` + memJSONString(t, stateFilePath) +
+		`,"line":21,"detail":"dropped from Open debts, untagged: an untagged debt that gets dropped"` +
+		`,"heading":"Open debts","tag":null,"text":"an untagged debt that gets dropped"}` +
+		`]`
+
+	want := `{"schema":1,"command":"finish","ok":true,"exit_code":0,"feature":"demo","step":"SCENARIO-01","changed":true,"handoff_path":` +
+		memJSONString(t, filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md")) + `,"state_path":` +
+		memJSONString(t, stateFilePath) + `,"next":null,"modified":[` +
+		memJSONString(t, stateFilePath) + `,` + memJSONString(t, stepFilePath) + `,` + memJSONString(t, specFilePath) +
+		`],"dropped_entries":` + wantDropped + `}` + "\n"
+
+	assert.Equal(t, want, stdout)
+}
+
+// Test_finish_json_dropped_entries_detail_matches_the_text_row_mem proves
+// SCENARIO-04: a "dropped_entries" element's "detail" is byte-identical to
+// the same drop's text-mode stdout row detail (the substring after the
+// "WARN  <path>:<line>  " prefix) — both render through dropDetail, never
+// through two separate string-building paths. runFinish's --json branch
+// returns before the text-mode WARN-row loop ever runs, so the two renders
+// come from two independently built fixtures rather than one shared run.
+func Test_finish_json_dropped_entries_detail_matches_the_text_row_mem(t *testing.T) {
+	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n" +
+		"- kept trap\n\n- a dropped entry (FOO)\n\n## Open debts\n"
+	newState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n- kept trap\n\n## Open debts\n"
+
+	textTree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+	textHandoffPath := memWriteInput(textTree, "handoff.md", "NEW-HANDOFF\n")
+	textStatePath := memWriteInput(textTree, "state.md", newState)
+
+	textStdout, _, textErr := runFinishArgsMem(t, textTree.mem(), []string{"finish", "demo", "SCENARIO-01", "--handoff", textHandoffPath, "--state", textStatePath})
+	require.NoError(t, textErr)
+
+	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	textLine := memOneLine(t, textStdout)
+	prefix := "WARN  " + stateRel + ":9  "
+	require.True(t, strings.HasPrefix(textLine, prefix), "line %q must start with %q", textLine, prefix)
+	wantDetail := strings.TrimPrefix(textLine, prefix)
+
+	jsonTree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+	jsonHandoffPath := memWriteInput(jsonTree, "handoff.md", "NEW-HANDOFF\n")
+	jsonStatePath := memWriteInput(jsonTree, "state.md", newState)
+
+	jsonStdout, _, jsonErr := runFinishArgsMem(t, jsonTree.mem(), []string{"finish", "demo", "SCENARIO-01", "--handoff", jsonHandoffPath, "--state", jsonStatePath, "--json"})
+	require.NoError(t, jsonErr)
+
+	var doc struct {
+		Dropped []struct {
+			Detail string `json:"detail"`
+		} `json:"dropped_entries"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(jsonStdout), &doc))
+	require.Len(t, doc.Dropped, 1)
+
+	assert.Equal(t, wantDetail, doc.Dropped[0].Detail)
 }

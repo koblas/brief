@@ -39,6 +39,53 @@ func dropDetail(d scaffold.DroppedEntry) string {
 	return fmt.Sprintf("dropped from %s, %s: %s", d.Heading, tag, dropExcerpt(d.Text))
 }
 
+// finishDroppedJSON is one finishDocument "dropped_entries" element:
+// severity, rule, path, line, detail, heading, tag and text, in that key
+// order. Path is res.StatePath verbatim, repeated per element. Detail is
+// dropDetail(d), the same string the text-mode WARN row renders after its
+// location. Tag is nil (JSON null) for an untagged entry, else a plain
+// string — never wrapped in the text row's "tagged <token>" prose. Text is
+// the entry's full normalized text, never cut.
+type finishDroppedJSON struct {
+	Severity string  `json:"severity"`
+	Rule     string  `json:"rule"`
+	Path     string  `json:"path"`
+	Line     int     `json:"line"`
+	Detail   string  `json:"detail"`
+	Heading  string  `json:"heading"`
+	Tag      *string `json:"tag"`
+	Text     string  `json:"text"`
+}
+
+// finishDroppedEntries maps dropped to finishDocument's own "dropped_entries"
+// array, path repeated on every element: a sized, non-nil slice so zero
+// drops encode as "[]" rather than "null" — mirroring checkFeatures' own
+// empty-vs-nil discipline.
+func finishDroppedEntries(dropped []scaffold.DroppedEntry, path string) []finishDroppedJSON {
+	out := make([]finishDroppedJSON, 0, len(dropped))
+
+	for _, d := range dropped {
+		var tag *string
+		if d.Tag != "" {
+			t := d.Tag
+			tag = &t
+		}
+
+		out = append(out, finishDroppedJSON{
+			Severity: dropSeverity,
+			Rule:     string(d.Rule),
+			Path:     path,
+			Line:     d.Line,
+			Detail:   dropDetail(d),
+			Heading:  d.Heading,
+			Tag:      tag,
+			Text:     d.Text,
+		})
+	}
+
+	return out
+}
+
 // dropCountSuffix renders the parenthetical the stderr success line's
 // "replaced <path>" clause gains when Finish reports one or more drops:
 // "" when n is 0, else " (dropped 1 entry, listed on stdout)" (singular)

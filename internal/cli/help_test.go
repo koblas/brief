@@ -523,7 +523,7 @@ from stdin; it may be given for at most one of --handoff and --state.
 With --json, this command writes one JSON document on stdout: the common header
 (` + "`schema`, `command`, `ok`, `exit_code`" + `; on a usage error or refusal an ` + "`error`" + `
 object carries the failure), then its own top-level fields, in document order:
-` + "`feature`, `step`, `changed`, `handoff_path`, `state_path`, `next`, `modified`" + `.
+` + "`feature`, `step`, `changed`, `handoff_path`, `state_path`, `next`, `modified`,\n`dropped_entries`" + `.
 
 Flags:
       --handoff path   the path to the step's handoff body,

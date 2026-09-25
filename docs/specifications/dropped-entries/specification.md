@@ -247,7 +247,7 @@ Scenario: SCENARIO-10 — finish --help documents drop reporting
 - [x] SCENARIO-01: A dropped state entry is reported, not refused
 - [x] SCENARIO-02: A dropped open debt is reported under its own rule
 - [x] SCENARIO-03: A finish that removes nothing prints what it prints today
-- [ ] SCENARIO-04: --json lists dropped entries in a structured field
+- [x] SCENARIO-04: --json lists dropped entries in a structured field
 - [ ] SCENARIO-05: Moving an entry between state headings is not a drop; moving it out is
 - [ ] SCENARIO-06: A reworded, re-tagged or re-ticked entry is reported as dropped
 - [ ] SCENARIO-07: A multi-line entry is one entry; a duplicate dropped once is reported once

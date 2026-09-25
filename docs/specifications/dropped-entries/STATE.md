@@ -1,6 +1,6 @@
 # dropped-entries — current state
 
-Scenarios complete: SCENARIO-01, SCENARIO-02, SCENARIO-03. Last updated by SCENARIO-03.
+Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
 
 ## Binding decisions
 
@@ -11,54 +11,54 @@ Scenarios complete: SCENARIO-01, SCENARIO-02, SCENARIO-03. Last updated by SCENA
 - The diff is **pooled**: every old entry across all four state headings and every new entry
   across all four are matched as one multiset on normalized text, sorted by **old-file line**,
   never by heading-processing order — required for SCENARIO-05's "moved between state headings
-  is not a drop" and SCENARIO-07's "duplicate dropped once, at its later occurrence"; already
-  exercised by a fixture whose file order reverses the configured heading order (SCENARIO-01).
+  is not a drop" and SCENARIO-07's "duplicate dropped once, at its later occurrence" (SCENARIO-01).
 - `DroppedEntry.Line` is whole-body 1-based over the **old** body only. `.Heading` is display
-  text (leading `#` run + one space stripped); `dropRuleFor` compares the **configured**
-  heading string against `cfg.StateHeadings.OpenDebts`, never the display text. `.Tag` is `""`
-  untagged (SCENARIO-01). SCENARIO-02 proved the heading display and `dropDetail`'s untagged
-  branch against `## Open debts` end-to-end through the CLI with no production edit needed.
-  `dropRuleFor`'s `dropped-debt` classification stays proven only at Server level (text mode
-  never renders `Rule`) until SCENARIO-04's JSON field.
-- `normalizeEntryText`'s interior whitespace-run collapse (a doubled space or a tab collapsed
-  to one space) is proven end-to-end through the CLI as of SCENARIO-03, with no production
-  edit needed — SCENARIO-01 already built it generically. Mutation-verified: swapping the
-  collapse for a plain `TrimSpace` reddens exactly that test (false-positive drops on the
-  doubled-space and tab entries, old-file lines 3 and 9). The same fixture's trailing-space
-  entry is covered but not discriminating — `entryItemText`'s `trimEOL` already strips it
-  before `normalizeEntryText` runs, so neither mutation touches it (see Traps). CR-strip is
-  still unpinned — SCENARIO-08.
+  text; `dropRuleFor` compares the **configured** heading string against
+  `cfg.StateHeadings.OpenDebts`, never the display text. `.Tag` is `""` untagged (SCENARIO-01).
 - Drops are computed only on `FinishFS`'s `refinishWrite` path, just before
   `applyFinishWrites` — pure, no error path. The R11 no-op returns a non-nil, empty
   `FinishResult.Dropped` (SCENARIO-01).
 - `cli`'s row detail (`"dropped from <heading>, tagged|untagged <tag>: <excerpt>"`) is built by
-  one helper (`dropDetail`/`dropExcerpt` in `internal/cli/finish_dropped.go`) so SCENARIO-04's
-  JSON `detail` field can reuse it verbatim instead of rebuilding the string.
+  one helper (`dropDetail`/`dropExcerpt` in `internal/cli/finish_dropped.go`), reused verbatim
+  by `finishDroppedEntries` for JSON's `detail` field — proven byte-identical to the text row
+  end-to-end (SCENARIO-04).
+- `finishDroppedJSON`/`finishDroppedEntries` (`internal/cli/finish_dropped.go`) is
+  `dropped_entries`'s element shape: `severity/rule/path/line/detail/heading/tag/text`, `Tag`
+  `*string` nil for untagged. `finishDocument.DroppedEntries` is the struct's **last** field, a
+  sized non-nil slice (mirrors `checkFeatures`' empty-vs-nil discipline) — never `omitempty`.
+  `path` is `res.StatePath` verbatim, repeated per element. `dropRuleFor`'s `dropped-debt`
+  classification is now proven end-to-end through the CLI (JSON `rule`), not just at Server
+  level (SCENARIO-04).
+- `finishLong`'s `jsonFieldsParagraph(...)` call now lists `dropped_entries` after `modified` —
+  required by pre-existing generic tests (`Test_every_command_help_names_its_json_documents_top_level_fields`,
+  `Test_help_finish_json_is_the_exact_document`, `Test_prints_finish_flag_prose_in_its_flag_table`)
+  that pin every `--json` top-level field against `finishLong`'s own text; a **prior handoff's
+  claim that no such test existed was wrong** (SCENARIO-04). SCENARIO-10 still owns the separate
+  drop-reporting *prose paragraph* before the JSON paragraph — not built here.
 - Finding shape amended to the live `<SEVERITY>  <path>[:<line>]  <detail>` in three places
-  (R14a and the Default profile's Findings paragraph in
-  `docs/specifications/brief/specification.md`, plus the STATE.md decision in
-  `docs/specifications/brief/STATE.md`), each also noting `check` groups under a feature header
-  while `finish` prints bare (SCENARIO-01, Product Verdict item 2).
+  (R14a and the Default profile's Findings paragraph in `docs/specifications/brief/specification.md`,
+  plus the STATE.md decision in `docs/specifications/brief/STATE.md`) (SCENARIO-01).
 
 ## Left unbuilt
 
-- `dropped_entries` in `finishDocument`/`jsonFieldsParagraph`, including the JSON `rule`
-  field — SCENARIO-04. That element is the first place `"rule":"dropped-debt"` is provable
-  end-to-end through the CLI (text mode never renders `Rule`); SCENARIO-04's fixture set must
-  include an Open-debts drop.
-- `finishLong`'s drop-reporting `--help` paragraph — SCENARIO-10.
+- `finishLong`'s drop-reporting **prose** paragraph (the JSON field-list part is done) —
+  SCENARIO-10.
 - Continuation lines/indented sub-items in `markdown.Entries` (SCENARIO-07); the
   empty/duplicate heading guard (SCENARIO-08); refusal/no-row assertions (SCENARIO-09);
   CR-strip's own CLI-level proof, a `\r\n` fixture (SCENARIO-08).
 
 ## Traps
 
+- **Any new `--json` top-level field must update `jsonFieldsParagraph`'s call in the same
+  change.** `Test_every_command_help_names_its_json_documents_top_level_fields` decodes the
+  live document and requires every non-header key appear as a whole word in that command's own
+  JSON paragraph — it is not deferrable to a later scenario the way prose-only copy is
+  (SCENARIO-04's own correction).
 - `markdown.Section(body, "")` / `sectionSpan(lines, "")` match the first blank line — an
   empty configured heading would scan a random region; SCENARIO-08's guard must trigger on
-  this explicitly, not rely on `Entries` failing closed.
+  this explicitly.
 - `sectionSpan` anchors on the **first** line equal to heading, so a duplicated heading reads
-  only its first section; SCENARIO-08 must detect the duplicate itself, since scanning alone
-  reports nothing wrong.
+  only its first section; SCENARIO-08 must detect the duplicate itself.
 - `checklistItemRe` (`markdown/checklist.go`) is not the entry grammar: it accepts leading
   indentation and matches only `- [ ]`/`- [x]`. `entryItemRe` is deliberately separate.
 - A drop fixture must keep at least one old entry: with nothing kept, a diff that ignores the
@@ -66,9 +66,8 @@ Scenarios complete: SCENARIO-01, SCENARIO-02, SCENARIO-03. Last updated by SCENA
 - SCENARIO-07's continuation-line folding will change today's "a line directly under an item
   is ignored" behavior — a fixture relying on that must not survive unexamined.
 - `entryItemText` trims trailing `" \t\r"` before `normalizeEntryText` ever runs, so a
-  trailing-space-only fixture doesn't exercise the collapse mutation — it's included for
-  delta coverage, not as proof. A trailing-CRLF fixture likely can't redden SCENARIO-08's own
-  CR-strip mutation either, for the same reason: only an interior bare CR is live for that one.
+  trailing-space-only fixture doesn't exercise the collapse mutation; a trailing-CRLF fixture
+  likely can't redden SCENARIO-08's own CR-strip mutation either, for the same reason.
 
 ## Open debts
 

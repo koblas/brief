@@ -788,7 +788,7 @@ func Test_finish_json_is_one_exact_document_mem(t *testing.T) {
 	want := `{"schema":1,"command":"finish","ok":true,"exit_code":0,"feature":"demo","step":"SCENARIO-01","changed":true,"handoff_path":` +
 		memJSONString(t, filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md")) + `,"state_path":` +
 		memJSONString(t, stateFilePath) + `,"next":null,"modified":[` +
-		memJSONString(t, stateFilePath) + `,` + memJSONString(t, stepFilePath) + `,` + memJSONString(t, specFilePath) + `]}` + "\n"
+		memJSONString(t, stateFilePath) + `,` + memJSONString(t, stepFilePath) + `,` + memJSONString(t, specFilePath) + `],"dropped_entries":[]}` + "\n"
 
 	assert.Equal(t, want, stdout)
 }
