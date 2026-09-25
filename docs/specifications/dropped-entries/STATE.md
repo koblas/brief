@@ -76,4 +76,5 @@ None — all ten scenarios implemented.
   an in-item blank line or thematic break sits outside the entry's own `Text` (folding already
   stopped), so an edit made only there goes unreported; an unterminated fence in the OLD body
   hides later sections; the 80-rune excerpt cut can split a grapheme cluster or leave a
-  trailing space before "…"; `headingDisplay` could move to `markdown`; misc. MINOR/NIT polish.
+  trailing space before "…"; `headingDisplay` could move to `markdown`; SIGPIPE on stdout kills the process before the
+  write-failure line prints (pre-existing, no signal handling; state already correct); misc.
