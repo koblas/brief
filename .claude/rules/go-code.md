@@ -43,9 +43,8 @@ go build ./...
 pinned in `devenv.nix` (currently `go1.27.1`). A mismatch means the command ran outside the
 environment — not that PATH is broken.
 
-**Never hardcode a `/nix/store/...` path.** They go stale on every rebuild — a pinned tool
-path silently pointed at a garbage-collectable store entry for a whole session after a
-version bump.
+**Never hardcode a `/nix/store/...` path.** They go stale on every rebuild, silently pointing at a
+garbage-collectable store entry after a version bump.
 
 If a command fails with `operation not permitted`, the shell was **sandboxed**. Re-run with
 `dangerouslyDisableSandbox: true` and check `echo $DEVENV_ROOT` plus `which -a go` before

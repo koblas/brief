@@ -82,8 +82,8 @@ All Go commands run from the repo root.
 
 `STATE.md` is the feature's current truth, and the ONLY inherited context later architects
 and developers read by default. Without it, every agent on a long feature reads every prior
-`## Handoff`, so context grows with the square of the scenario count — on one 20-scenario
-feature that growth dominated every later agent's budget.
+`## Handoff`, so context grows with the square of the scenario count and dominates every
+later agent's budget.
 
 **It is rewritten, never appended to.** That is the whole mechanism. An append-only file is
 just the handoffs again with extra steps.
@@ -200,7 +200,7 @@ Findings arrive ranked `[BLOCKER|MAJOR|MINOR|NIT] <file>:<line>` with `Failure:`
 
 11. **Every branch this pass adds is tested and proven before you return (MANDATORY).** A fix
     pass that adds a guard, an error return or a fallback without a test that reaches it hands
-    the reviewer its next MAJOR — on one feature that loop ran six fix passes. Before
+    the reviewer its next MAJOR, and the loop repeats every pass. Before
     reporting:
     - Run the Verification block in `.claude/rules/agent-briefs.md` with `<start>` = the
       commit this fix pass started from: one covered full-suite run, then

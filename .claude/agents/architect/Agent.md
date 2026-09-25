@@ -28,9 +28,8 @@ Only job: write implementation plan for given scenario. You write no code.
    a. Derive paths from the feature name per `clean-architecture`. Do not Glob to find
    conventional files.
    b. `go doc ./internal/<name>` for the package's exported surface
-   (Server methods, Store interface, options). Run it from the repo root. Measured on
-   a comparable package: `go doc` is ~2k chars against ~95k to read that package's
-   four files. `go doc ./internal/platform/<name>` and `go doc <pkg> <Symbol>` work
+   (Server methods, Store interface, options). Run it from the repo root. `go doc` output
+   is a small fraction of the size of the package's source. `go doc ./internal/platform/<name>` and `go doc <pkg> <Symbol>` work
    the same way.
    c. Anchored Grep for specific symbols you expect and didn't see in (b).
    d. Read only the specific ranges those hits point at. Never a whole file.
@@ -40,25 +39,25 @@ Only job: write implementation plan for given scenario. You write no code.
    f. **Read `docs/specifications/<feature-slug>/STATE.md` — not the prior scenario
    files.** STATE.md is the feature's current truth, rewritten by each `developer` as
    it finishes (see *Rolling STATE.md* below). One file, deduplicated, stale entries
-   removed. Reading it is O(1) in the number of completed scenarios; reading twenty
-   `## Handoff` blocks is not, and on a 20-scenario feature that growth dominated
+   removed. Reading it is O(1) in the number of completed scenarios; reading every
+   prior `## Handoff` block is not, and on a long feature that growth dominates
    every later agent's context.
    Open an individual `SCENARIO-XX.md` only when STATE.md names a decision you must
    not contradict and its entry is genuinely not enough — and say in your plan which
    file and why.
    **When STATE.md does not exist** (a feature started before this convention, or the
    first scenario), fall back to the prior scenarios' `## Handoff` sections — grep for
-   `^## Handoff` and read from there, never whole files, which are ~93% rationale and
-   run 12k–55k chars. Some older plans use `## Forward constraints this scenario
+   `^## Handoff` and read from there, never whole files, which are mostly rationale.
+   Some older plans use `## Forward constraints this scenario
    creates` for the same role. When neither anchor is present, read the file and note
    in your plan that you had to. Never treat a missing anchor as "nothing to inherit".
 5. **Before planning a new port, interface or adapter, survey the surface it must replace.**
    List every method and flag production code actually calls on the concrete type it will
    stand in for — e.g. `grep -rhoE '\broot\.[A-Z][A-Za-z]+|os\.[A-Z][A-Za-z]+' internal/<pkg> --include='*.go' | grep -v _test | sort | uniq -c`,
    plus the flags passed to `OpenFile`-style calls. Put that list in the plan and map each
-   entry to a port method or to "stays on the concrete type". One port design missed a nested
-   `OpenRoot` and an `O_EXCL` create; the consumer's conversion stopped and the port was
-   reopened, ~0.5M tokens of rework a two-minute grep would have avoided.
+   entry to a port method or to "stays on the concrete type". A port that misses a call (a nested
+   `OpenRoot`, an `O_EXCL` create) stops the consumer's conversion and reopens the port —
+   rework a two-minute grep avoids.
 6. Write `docs/specifications/<feature-slug>/SCENARIO-XX.md` — concrete, ordered TDD checklist
    of files/symbols to create or modify.
 
@@ -128,8 +127,8 @@ scenario; skip anything already existing that needs no change.
 
 End every `SCENARIO-XX.md` with a `## Handoff` section. Anything a successor must not
 rediscover or contradict belongs here, stated in full — not referenced. Keep it under ~60
-lines; if it grows past that, you are explaining rather than handing off. (One feature's
-handoff reached 110 lines and every subsequent agent paid for it.)
+lines; if it grows past that, you are explaining rather than handing off, and every
+subsequent agent pays for it.
 
 Your Handoff is **this scenario's** record and the input the `developer` folds into the
 feature's rolling `STATE.md`. Successors read STATE.md, not this block — so write it for
