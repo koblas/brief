@@ -42,7 +42,12 @@ accounted for, not prevented (R9). Today `finish` drops such an entry silently, 
   under the configured `open-debts` heading, `dropped-entry` under the other three. No
   exemption for entries tagged to the step being closed.
 - **D5 — Findings never on a failed run (R14a).** Any refusal or usage error prints no rows and
-  its JSON error document has no `dropped_entries`. Exit 0 whenever rows print.
+  its JSON error document has no `dropped_entries`. Exit 0 whenever every row is written in
+  full. The one exception is a stdout write failure partway through the row list, after the
+  state file is already replaced: whatever rows already landed stay on stdout, no further row
+  is attempted, and the run exits 1 with the standard failure line (`Surface & Copy`) — a
+  fault on the findings channel itself, distinct from a refusal or usage error decided before
+  any row is rendered.
 - **D6 — Line.** The 1-based line in the **old** state file where the entry's first line was.
 - **D7 — Empty or duplicate configured heading** contributes no entries (explicit guard:
   `markdown.Section(body, "")` matches the first blank line). A missing heading in the old body
@@ -156,8 +161,21 @@ it was before replacement. Removal is reported, never refused; a
 reworded entry counts as removed. Exit status stays 0.
 ```
 
-**Exit codes.** Unchanged: 0 success (with or without rows), 1 refusal (no rows), 2 usage (no
-rows).
+**Exit codes.** 0 success (with or without rows, every row written in full), 1 refusal (no
+rows) or a stdout write failure partway through the rows (rows already written stay; see
+*Internal error* below), 2 usage (no rows).
+
+**Internal error (stderr).** A failed stdout write partway through the WARN rows, after the
+state file is already replaced, renders through R14a's own generic-failure shape
+(`reporter.refusal`, `error.kind: "failure"` in `--json`) rather than a bare, unprinted
+error:
+
+```
+brief finish: state replaced but dropped entries could not be written: write dropped-entry row: <write error>
+```
+
+Exit 1. The rows already written stay on stdout exactly as written; no further row is
+attempted, and the ordinary success line never prints.
 
 **Outcome table.**
 
@@ -180,7 +198,7 @@ rows).
 | Any refusal | none; error doc has no `dropped_entries` | 1 |
 | Usage error | none | 2 |
 | Failure after the state rename landed | none (recorded gap) | 1 |
-| stdout write fails after state replaced | rows partially written; no success line | 1 |
+| stdout write fails after state replaced | rows already written stay; see *Internal error* | 1 |
 
 ---
 

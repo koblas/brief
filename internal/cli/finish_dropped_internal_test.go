@@ -805,62 +805,70 @@ func Test_finish_json_identical_re_finish_reports_no_dropped_entries_mem(t *test
 	assert.Equal(t, want, secondStdout)
 }
 
-// errFailAfterWriterWrite is failAfterWriter's own sentinel: the error
-// every Write call past its allowance returns.
-var errFailAfterWriterWrite = errors.New("fail after writer: write refused")
+// errRowWriteRefused is failNthWriter's own sentinel: the error its
+// configured call number returns.
+var errRowWriteRefused = errors.New("row write refused")
 
-// failAfterWriter is an io.Writer that buffers its first n Write calls,
-// then fails every one after: writeDroppedRows' write-error branch needs a
-// caller mid-write, not one that never gets to write anything at all.
-type failAfterWriter struct {
-	n   int
-	buf bytes.Buffer
+// failNthWriter is an io.Writer whose callToFail'th Write call fails,
+// buffering every other call including ones *after* the failure: a fake
+// that fails every call from some point onward cannot distinguish "stop at
+// the first failure" from "capture the first error but keep looping" —
+// both write exactly the calls before the failure and nothing after,
+// since every later call would fail anyway. Only a fake that would
+// *succeed* again on a later row, if the implementation wrongly kept
+// going, can tell the two apart.
+type failNthWriter struct {
+	callToFail int
+	calls      int
+	buf        bytes.Buffer
 }
 
-func (w *failAfterWriter) Write(p []byte) (int, error) {
-	if w.n <= 0 {
-		return 0, errFailAfterWriterWrite
+func (w *failNthWriter) Write(p []byte) (int, error) {
+	w.calls++
+	if w.calls == w.callToFail {
+		return 0, errRowWriteRefused
 	}
-
-	w.n--
 
 	return w.buf.Write(p)
 }
 
 // Test_finish_stops_at_the_first_dropped_row_write_error_and_reports_an_internal_error_mem
 // proves the MAJOR fix at internal/cli/finish.go: runFinish no longer
-// ignores a WARN-row write error. The old body carries two dropped
-// entries, so the fake stdout writer's allowance of one successful Write
-// call proves three things at once — writeDroppedRows stops after the
-// first row rather than attempting the second (only one line ever reaches
-// the buffer), runFinish never goes on to print the "replaced ..."
-// success line, and it reports the failure through the package's own
-// visible error path (reporter.refusal), stating that the state was
-// already replaced — not a bare wrapped error main.go would exit on
-// without ever printing (SilenceErrors is set on the root command, so
-// nothing but ExitCode(err) is ever read from a plain returned error).
+// ignores a WARN-row write error. The old body carries three dropped
+// entries; the fake stdout writer fails only its *second* call and would
+// succeed on a third if writeDroppedRows kept going past the failure — so
+// the buffer holding exactly the first row's bytes, and nothing from the
+// third, is proof the loop actually stops rather than merely capturing
+// the first error while continuing to write every later row that itself
+// happens to succeed. runFinish also never goes on to print the
+// "replaced ..." success line, and reports the failure through the
+// package's own visible error path (reporter.refusal), stating that the
+// state was already replaced — not a bare wrapped error main.go would
+// exit on without ever printing (SilenceErrors is set on the root
+// command, so nothing but ExitCode(err) is ever read from a plain
+// returned error).
 func Test_finish_stops_at_the_first_dropped_row_write_error_and_reports_an_internal_error_mem(t *testing.T) {
 	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n" +
-		"- first dropped\n- second dropped\n\n## Open debts\n\n"
+		"- first dropped\n- second dropped\n- third dropped\n\n## Open debts\n\n"
 	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
 	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
 	newState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n\n"
 	statePath := memWriteInput(tree, "state.md", newState)
 
-	writer := &failAfterWriter{n: 1}
+	writer := &failNthWriter{callToFail: 2}
 	var stderr strings.Builder
 
 	err := run(t.Context(), memRoot, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath},
 		nil, writer, &stderr, noBuildInfo, withRootFS(tree.mem()))
 
 	require.Error(t, err)
-	require.ErrorIs(t, err, errFailAfterWriterWrite)
+	require.ErrorIs(t, err, errRowWriteRefused)
 	assert.Equal(t, 1, ExitCode(err))
 
 	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
 	assert.Equal(t, "WARN  "+stateRel+":7  dropped from Traps, untagged: first dropped\n", writer.buf.String())
 	assert.Equal(t,
 		"brief finish: state replaced but dropped entries could not be written: write dropped-entry row: "+
-			errFailAfterWriterWrite.Error()+"\n",
+			errRowWriteRefused.Error()+"\n",
 		stderr.String())
 }

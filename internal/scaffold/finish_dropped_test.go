@@ -549,15 +549,16 @@ func Test_finish_reports_a_drop_under_a_nested_open_debts_heading_exactly_once(t
 }
 
 // Test_finish_attributes_a_drop_under_an_unconfigured_subsection_to_its_actual_ancestor
-// proves nearestHeading picks only among headings whose *own* scan really
-// reached the entry's line, not merely the nearest configured heading by
-// line number: "### Notes" (unconfigured) is a sibling of "### Open debts"
-// under "## Traps", so "### Open debts"' own section (CommonMark
-// same-or-higher-level rule) ends at "### Notes" and its scan never
-// reaches "- notes entry" — only "## Traps"' own overrunning scan does.
-// Picking "the nearest configured heading by line" instead would
-// misattribute the drop to "### Open debts", since its own anchor line
-// sits between "## Traps"' and the entry's.
+// proves poolOccurrences picks only among headings whose *own*
+// markdown.Entries scan really reached the entry's line, not merely the
+// nearest configured heading by line number: "### Notes" (unconfigured)
+// is a sibling of "### Open debts" under "## Traps", so "### Open
+// debts"' own section (CommonMark same-or-higher-level rule) ends at
+// "### Notes" and its scan never reaches "- notes entry" — only "##
+// Traps"' own overrunning scan does. Picking "the nearest configured
+// heading by line" instead would misattribute the drop to "### Open
+// debts", since its own heading line sits between "## Traps"' and the
+// entry's.
 func Test_finish_attributes_a_drop_under_an_unconfigured_subsection_to_its_actual_ancestor(t *testing.T) {
 	cfg := droppedNestedOpenDebtsConfig()
 	oldState := strings.Join([]string{
