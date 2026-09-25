@@ -36,9 +36,18 @@ Checks **code quality within a package** — well-designed, idiomatic Go? Struct
      (what it does, returns, refuses);
    - ANY history narrative — `previously`, `used to`, `now that`, a date, or a review/finding
      id used as story (`(R1 finding)`, `(audit finding M5)`, `SCENARIO-04`);
-   - in-function comments restating apparent behavior, or recording how the code got here.
+   - in-function comments restating apparent behavior, or recording how the code got here;
+   - a doc comment over the `go-code.md` budget (exported ~4 lines, unexported 1–2,
+     `const`/`var`/sentinel 1), or one that explains *how* (algorithm, slot order, branch
+     walk-through) rather than what the symbol does, returns and refuses;
+   - the same fact stated on more than one symbol — it belongs once, where the code
+     enforces it;
+   - a spec or finding id (`R7`, `BR-3`) standing in for the rule itself;
+   - on a re-gate: a comment the fix pass made longer to correct it.
 
-   MINOR when the contract is unclear from `go doc` alone, NIT for phrasing.
+   MINOR when the contract is unclear from `go doc` alone, or for any of the length, repeat,
+   id or grew-on-fix cases above; NIT for phrasing. Do not approve a comment as "reads
+   cleanly" because it is accurate — accurate and over budget is still a finding.
 4. Read the command / `Server` methods under review.
 5. Read the related domain types and the `Store` interface + adapters in the package.
 6. Read the package's tests (the behavior they pin).

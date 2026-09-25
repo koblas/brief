@@ -165,6 +165,11 @@ Rules for it:
 
 ## Planning rules
 
+- **Name tests; do not script their comments.** A step names the test (`Test_…`) so the name
+  carries the rule. Never dictate comment prose, a "document why" step, or mutation notes for
+  a test — `go-testing` → *Test comments* caps a test comment at two lines, default none. A
+  setup constraint the developer must preserve goes in the step text.
+
 - **Business logic + tests live in the feature package** (`internal/<feature>`). Never plan
   logic under `cmd/` or `internal/cli` — `cmd/brief` stays thin (config + wiring + `run()` +
   the error→exit-code mapping), and `internal/cli` only parses input and formats output.

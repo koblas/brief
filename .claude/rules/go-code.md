@@ -13,6 +13,18 @@ paths:
   is one), no history or change narrative anywhere, and no in-function comments restating
   what the code already says. Full rules in `.claude/skills/clean-architecture/SKILL.md`
   (_Documentation & comments_). Check with `go doc ./internal/<pkg>`.
+- **Doc comments are short.** Budget: exported func/type ~4 lines; unexported func/type
+  1–2 lines; `const`, `var`, sentinel error 1 line. Over budget means the extra text is
+  _how_, and _how_ belongs in the body at the line it explains
+  ([go.dev/doc/comment](https://go.dev/doc/comment), _Funcs_: doc comments "should not
+  explain internal details such as the algorithm used").
+  - The doc says what the symbol does, returns and refuses — not how it decides.
+  - **Say each fact once, where the code enforces it.** An ordering constraint is one line
+    beside the literal that sets the order, not repeated on every symbol that relies on it.
+  - **No spec or finding ids** (`R7`, `BR-3`, `SCENARIO-04`) — they point outside `go doc`.
+    State the rule itself.
+  - **Fixing a comment makes it shorter or truer, never longer.** Appending a correction to
+    a wrong comment is how a doc longer than its function happens.
 - Testing always uses `testify`; `suite` is optional.
 - The toolchain is **Go 1.27.1** (pinned in `devenv.nix` and `go.mod`). `testing/synctest`
   is available as a stable package — use it for deterministic concurrency tests instead of

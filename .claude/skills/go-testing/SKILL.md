@@ -32,6 +32,33 @@ package summarize
 
 Every test follows **Given-When-Then**, separated by blank lines, no `// Given` comments.
 
+### Test comments — the name is the documentation
+
+A test's name already says what it pins. **Default: no comment.** Tests are where comments
+should be tightest.
+
+- **Allowed:** a setup constraint the name cannot carry — why this test needs a real
+  directory and not the in-memory store, the full `run()` path and not a direct call, a
+  field left unset rather than `""`. **Max 2 lines above the func, one fact per line; max 1
+  line inside the body**, at the odd line it explains.
+- **Never:** restating the name; narrating the setup step by step; explaining how the
+  production code decides (ordering, parser internals — that is the production code's
+  job); spec, finding or review ids (`R7`, `SCENARIO-04`, `REVIEW-03`); mutation evidence
+  ("reddens when …" — it goes in the report / STATE.md handoff).
+- **A fix makes a test comment shorter, never longer.**
+
+```go
+// Bad — 10 lines on an 11-line test: restates the name, explains how flag parsing
+// orders defaults, cites what an unchanged sibling command does.
+
+// Good
+// Needs run(): calling the command directly skips flag validation.
+// Path is unset, not "": the check is for presence, so "" would reach the handler.
+func Test_check_without_a_path_is_refused_before_reading_files(t *testing.T) {
+```
+
+A test whose name says it all — `Test_status_reports_the_first_unticked_step_when_two_scenarios_are_open` — gets no comment.
+
 - **Given/When/Then must trace cleanly.** Every value When/Then references must be explicit in Given. When a test queries or asserts by a specific id, exit code, etc., setup must put that value on the seeded data — don't rely on a factory default. If a value matters to an assertion, make it an explicit arg to the test-data builder; don't bury it as a default.
 
 ```go

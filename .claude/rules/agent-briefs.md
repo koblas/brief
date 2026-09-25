@@ -76,6 +76,7 @@ Rules:
 - **Verify guards INDIVIDUALLY.** Two guards that only go red when BOTH disabled mean either can be deleted silently. Disable one at a time.
 - Mutation that breaks compilation **not** evidence. If every test fails, you proved file parses, nothing more. Make mutation surgical and still-valid.
 - Say which mutation you ran and which test it reddened. "Mutation-verified" alone not claim anyone can check.
+- Mutation results go in the report and STATE.md, never in a test comment (`go-testing` → *Test comments*).
 - **Reviewers never mutate worktree.** Reviewers run parallel; mutation in shared tree poisons every concurrent run. Mutate `git archive <sha>` export under `$TMPDIR`. Only developer (runs alone) mutates in place.
 
 ## Reviewing: scope and completeness

@@ -158,11 +158,11 @@ Findings arrive ranked `[BLOCKER|MAJOR|MINOR|NIT] <file>:<line>` with `Failure:`
    in your report.
 8. **Comments state the contract, not the change history (MANDATORY).** Every fix pass adds
    prose, and two rules keep regressing because each pass re-derives them:
-   - **No review-round citations in production code.** `(REVIEW-04's MAJOR 2)`, `(REVIEW-05's
-     own finding)` and the like belong in `_test.go` (a test is legitimately coupled to its
-     originating bug report) or in the report itself — never in a non-test file. Those reports
+   - **No review-round, finding or spec citations in any comment — tests included.**
+     `(REVIEW-04's MAJOR 2)`, `R7`, `SCENARIO-04` belong in the report or the PR. Those reports
      live under `docs/specifications/` and will be archived; the citation becomes a dead
-     reference. Production count of `REVIEW-0` must stay at zero.
+     reference. State the rule instead. Test comments follow `go-testing` → *Test comments*:
+     the name is the documentation, default no comment, max 2 lines.
    - **No diff-narration.** A comment whose subject is *what this pass changed* ("only this
      function's body changed", "the duplicate that used to live here", "round 4 type-asserted
      only X") is correct on the commit it lands in and false on the next one. Test: **does
