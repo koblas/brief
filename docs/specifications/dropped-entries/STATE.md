@@ -1,6 +1,6 @@
 # dropped-entries — current state
 
-Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
+Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
 
 ## Binding decisions
 
@@ -10,8 +10,9 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
   consumer, `assemble` needs none of it (SCENARIO-01).
 - The diff is **pooled**: every old entry across all four state headings and every new entry
   across all four are matched as one multiset on normalized text, sorted by **old-file line**,
-  never by heading-processing order — required for SCENARIO-05's "moved between state headings
-  is not a drop" and SCENARIO-07's "duplicate dropped once, at its later occurrence" (SCENARIO-01).
+  never by heading-processing order — proven end-to-end through the CLI by SCENARIO-05 (a
+  heading-keyed mutation reddens only the moved-between-headings case); still needed for
+  SCENARIO-07's "duplicate dropped once, at its later occurrence" (SCENARIO-01/05).
 - `DroppedEntry.Line` is whole-body 1-based over the **old** body only. `.Heading` is display
   text; `dropRuleFor` compares the **configured** heading string against
   `cfg.StateHeadings.OpenDebts`, never the display text. `.Tag` is `""` untagged (SCENARIO-01).
@@ -37,9 +38,8 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
   live document and requires every non-header key appear as a whole word in that command's own
   JSON paragraph. `finishLong` now lists `dropped_entries` there; SCENARIO-10 still owns the
   separate drop-reporting *prose* paragraph before it (SCENARIO-04).
-- Finding shape amended to the live `<SEVERITY>  <path>[:<line>]  <detail>` in three places
-  (R14a and the Default profile's Findings paragraph in `docs/specifications/brief/specification.md`,
-  plus the STATE.md decision in `docs/specifications/brief/STATE.md`) (SCENARIO-01).
+- Finding shape amended to the live `<SEVERITY>  <path>[:<line>]  <detail>` in
+  `docs/specifications/brief/{specification,STATE}.md` (SCENARIO-01).
 
 ## Left unbuilt
 
@@ -49,10 +49,8 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
   empty/duplicate heading guard (SCENARIO-08); CR-strip's own CLI-level proof, a `\r\n`
   fixture (SCENARIO-08).
 - A refusal-carries-no-`dropped_entries` proof for a finish that **would** drop entries —
-  SCENARIO-09. `Test_finish_json_refusal_is_unchanged_mem` does not prove this: its fixture
-  has zero entries and refuses on an unknown step before any diff ever runs, so it pins only
-  the error document's key *shape*, not D5's "a finish that would drop entries is refused with
-  no rows."
+  SCENARIO-09. `Test_finish_json_refusal_is_unchanged_mem` refuses on an unknown step before
+  any diff runs, so it pins only the error document's key *shape*, not D5's actual claim.
 
 ## Traps
 
@@ -64,7 +62,9 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
 - `checklistItemRe` (`markdown/checklist.go`) is not the entry grammar: it accepts leading
   indentation and matches only `- [ ]`/`- [x]`. `entryItemRe` is deliberately separate.
 - A drop fixture must keep at least one old entry: with nothing kept, a diff that ignores the
-  new body entirely still passes.
+  new body entirely still passes. Omitting any of the four configured headings from a new body
+  refuses with `ErrMissingStateHeading`, printing no rows — indistinguishable from zero drops
+  unless the test asserts `err` nil and exact stderr too (SCENARIO-03/05).
 - SCENARIO-07's continuation-line folding will change today's "a line directly under an item
   is ignored" behavior — a fixture relying on that must not survive unexamined.
 - `entryItemText` trims trailing `" \t\r"` before `normalizeEntryText` ever runs, so a

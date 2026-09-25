@@ -200,6 +200,93 @@ func Test_finish_reports_no_drops_when_the_new_body_only_reflows_whitespace_mem(
 	assert.Equal(t, memWantFinishCompleteLine("demo", "SCENARIO-01"), stderr)
 }
 
+// Test_finish_treats_moving_an_entry_between_state_headings_as_no_drop_but_moving_it_out_as_a_drop_mem
+// proves SCENARIO-05: droppedEntries pools old and new entries across all
+// four configured headings as one multiset keyed on normalized text alone
+// (SCENARIO-01's binding decision) — an entry's heading is not part of its
+// identity. The old body is identical in both cases: "## Traps" carries
+// "- kept trap" then "- moved entry" at old-file line 9, the other three
+// headings present and empty. Both new bodies carry all four configured
+// headings (an omitted one would refuse with ErrMissingStateHeading,
+// masking a true no-drop as an empty-stdout false positive) plus a
+// trailing "## Notes" heading, and keep "- kept trap" under "## Traps" so
+// the diff is never vacuous. When the new body carries "- moved entry"
+// under "## Binding decisions" (a state heading), moving it is not a drop.
+// When the new body carries it only under "## Notes" (not a configured
+// heading), moving it out is a drop, reported against its *old* heading
+// and *old* line — not "Notes".
+func Test_finish_treats_moving_an_entry_between_state_headings_as_no_drop_but_moving_it_out_as_a_drop_mem(t *testing.T) {
+	oldLines := []string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- kept trap", "",
+		"- moved entry", "",
+		"## Open debts", "",
+	}
+	oldState := strings.Join(oldLines, "\n") + "\n"
+
+	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	handoffRel := filepath.Join("docs", "specifications", "demo", "SCENARIO-01-HANDOFF.md")
+	specRel := filepath.Join("docs", "specifications", "demo", "specification.md")
+
+	newStateMovedBetweenStateHeadings := strings.Join([]string{
+		"## Binding decisions", "",
+		"- moved entry", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- kept trap", "",
+		"## Open debts", "",
+		"## Notes", "",
+	}, "\n") + "\n"
+
+	newStateMovedToNonStateHeading := strings.Join([]string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- kept trap", "",
+		"## Open debts", "",
+		"## Notes", "",
+		"- moved entry", "",
+	}, "\n") + "\n"
+
+	cases := []struct {
+		name       string
+		newState   string
+		wantStdout string
+		wantStderr string
+	}{
+		{
+			name:       "moved between two state headings is not a drop",
+			newState:   newStateMovedBetweenStateHeadings,
+			wantStdout: "",
+			wantStderr: memWantFinishCompleteLine("demo", "SCENARIO-01"),
+		},
+		{
+			name:       "moved to a non-state heading is a drop",
+			newState:   newStateMovedToNonStateHeading,
+			wantStdout: "WARN  " + stateRel + ":9  dropped from Traps, untagged: moved entry\n",
+			wantStderr: fmt.Sprintf(
+				"brief finish: demo SCENARIO-01 done; wrote %s, replaced %s (dropped 1 entry, listed on stdout), ticked %s; demo is complete\n",
+				handoffRel, stateRel, specRel),
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+			handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+			statePath := memWriteInput(tree, "state.md", c.newState)
+
+			stdout, stderr, err := runFinishMem(t, tree, handoffPath, statePath)
+
+			require.NoError(t, err)
+			assert.Equal(t, c.wantStdout, stdout)
+			assert.Equal(t, c.wantStderr, stderr)
+		})
+	}
+}
+
 func Test_dropExcerpt(t *testing.T) {
 	cases := []struct {
 		name string
