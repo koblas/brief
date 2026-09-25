@@ -13,11 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// dirOpenerAdapter adapts dirFS (fs.go) to rwfstest.DirOpener: the two
-// interfaces share an identical method set, but Go does not consider two
-// distinct named interface types interchangeable in a method's return
-// position, so osRoot and memDirFS — both dirFS, never rwfstest.DirOpener —
-// need this translation at every OpenRoot hop.
+// dirOpenerAdapter adapts dirFS (fs.go) to rwfstest.DirOpener: Go does not
+// consider two distinct named interface types interchangeable in a
+// method's return position.
 type dirOpenerAdapter struct{ d dirFS }
 
 func (a dirOpenerAdapter) FS() fs.FS { return a.d.FS() }
@@ -33,12 +31,8 @@ func (a dirOpenerAdapter) OpenRoot(name string) (rwfstest.DirOpener, error) {
 	return dirOpenerAdapter{d: sub}, nil
 }
 
-// seedFixtureTree lists the entries every read_contract_internal_test.go
-// fixture seeds, relative to the directory openFeatureDir opens: a
-// top-level file (rwfstest.ReadContract's own "a.txt"), a "list" directory
-// holding two files in non-sorted creation order (its own sorted-listing
-// row), and a "sub" directory holding one file (ReadOpenRootContract's own
-// descend row).
+// seedFixtureTree lists the entries every fixture in this file seeds,
+// relative to the directory openFeatureDir opens.
 var seedFixtureTree = map[string]string{
 	"a.txt":         "hello",
 	"list/b.txt":    "x",
@@ -47,9 +41,8 @@ var seedFixtureTree = map[string]string{
 	"sub/a.txt.bak": "unused", // ensures "sub" is not pruned to a single-entry edge case
 }
 
-// newOSRootFixture builds osRoot the same way Start, Check and Status
-// build it in production: through (*Server).openFeatureDir with no WithFS
-// option, over a real temp directory tree written with plain os.*.
+// newOSRootFixture builds osRoot through (*Server).openFeatureDir with no
+// WithFS option, over a real temp directory tree.
 func newOSRootFixture(t *testing.T) rwfstest.DirOpener {
 	t.Helper()
 
@@ -69,16 +62,11 @@ func newOSRootFixture(t *testing.T) rwfstest.DirOpener {
 }
 
 // memFixtureDir is the multi-segment name openFeatureDir's own fsName
-// mapping produces from an absolute OS directory — the exact shape
-// rwfs/doc.go's own ancestor-symlink divergence note is about, and the one
-// every WithFS-backed cli command test already exercises via
-// resolveRoot/openFeatureDir (assemble/fs.go, scaffold/fs.go).
+// mapping produces from an absolute OS directory.
 const memFixtureDir = "repo/docs/specifications"
 
-// newMemDirFixture builds memDirFS the same way Start, Check and Status
-// build it under WithFS: through (*Server).openFeatureDir over an
-// rwfs.Mem, opened at memFixtureDir — proving the exact call site rwfs'
-// own doc.go describes, not a hand-built memDirFS bypassing it.
+// newMemDirFixture builds memDirFS through (*Server).openFeatureDir over
+// an rwfs.Mem, opened at memFixtureDir.
 func newMemDirFixture(t *testing.T) rwfstest.DirOpener {
 	t.Helper()
 
@@ -96,13 +84,8 @@ func newMemDirFixture(t *testing.T) rwfstest.DirOpener {
 	return dirOpenerAdapter{d: d}
 }
 
-// Test_osRoot_and_memDirFS_share_the_read_contract proves assemble's own
-// hand-rolled production adapter (osRoot) and its Mem-backed test twin
-// (memDirFS) satisfy one shared read contract, the same way rwfs.OS and
-// rwfs.Mem share rwfstest.Contract — both built through the real
-// (*Server).openFeatureDir entry point Start, Check and Status all use, so
-// this also exercises the exact multi-segment name openFeatureDir's own
-// fsName mapping produces from an absolute OS directory.
+// Both fixtures are built through the real openFeatureDir entry point
+// Start, Check and Status all use.
 func Test_osRoot_and_memDirFS_share_the_read_contract(t *testing.T) {
 	t.Run("osRoot", func(t *testing.T) {
 		rwfstest.ReadContract(t, func(t *testing.T) fs.FS {

@@ -1,10 +1,6 @@
-// FeatureContaining's every test here runs against real directories: its
-// whole contract is os.Lstat and filepath.EvalSymlinks behavior — a
-// symlinked ancestor of the project root, a "." or ".." escape, a regular
-// file standing where a feature directory belongs — which an in-memory
-// fs.FS cannot reproduce, since FeatureContaining never takes an fs.FS in
-// the first place (it reads the OS path space directly, not through
-// Server's FeatureFS seam).
+// FeatureContaining's every test here runs against real directories:
+// FeatureContaining reads the OS path space directly, never through an
+// fs.FS, so an in-memory fixture cannot exercise it.
 package assemble_test
 
 import (
@@ -18,9 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newFeatureContainingServer returns a Server rooted at root, using
-// config.Default() — FeatureContaining never reads any other configured
-// value.
+// newFeatureContainingServer returns a Server rooted at root; FeatureContaining
+// never reads any other configured value.
 func newFeatureContainingServer(root string) *assemble.Server {
 	return assemble.NewServer(config.Default(), root)
 }
@@ -116,8 +111,7 @@ func Test_FeatureContaining_ReturnsFalseWhenTheFirstPathElementIsARegularFile(t 
 	featureRoot := filepath.Join(root, "docs", "specifications")
 	require.NoError(t, os.MkdirAll(featureRoot, 0o755))
 
-	// "auth" is a regular file, not a feature directory, so a path
-	// underneath it (as a string) still must not resolve to a feature.
+	// "auth" is a regular file, not a directory.
 	require.NoError(t, os.WriteFile(filepath.Join(featureRoot, "auth"), []byte("x"), 0o600))
 
 	srv := newFeatureContainingServer(root)
@@ -127,11 +121,7 @@ func Test_FeatureContaining_ReturnsFalseWhenTheFirstPathElementIsARegularFile(t 
 	assert.False(t, ok)
 }
 
-// Test_FeatureContaining_ReturnsTheFeatureNameThroughASymlinkedAncestor
-// pins the macOS trap: t.TempDir() returns a path under "/var/folders/…",
-// itself a symlink to "/private/var/…". A hook payload path arriving
-// already resolved through the symlink (as filepath.EvalSymlinks would
-// leave it) must still match a Server rooted at the unresolved form.
+// Pins the macOS trap: t.TempDir() is itself under a symlinked ancestor.
 func Test_FeatureContaining_ReturnsTheFeatureNameThroughASymlinkedAncestor(t *testing.T) {
 	root := t.TempDir()
 	featureDir := filepath.Join(root, "docs", "specifications", "auth")

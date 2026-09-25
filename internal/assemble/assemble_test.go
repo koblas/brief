@@ -17,8 +17,7 @@ import (
 )
 
 // fixtureConfig returns a Config whose every field this package reads
-// differs from config.Default(), mirroring scaffold_test.go's fixture, plus
-// the acceptance heading this scenario adds.
+// differs from config.Default().
 func fixtureConfig() config.Config {
 	cfg := config.Default()
 	cfg.FeatureDirectory = "specs"
@@ -39,11 +38,10 @@ func fixtureConfig() config.Config {
 	return cfg
 }
 
-// fixtureStep renders a step file's body byte-for-byte as
-// scaffold.stepSkeleton emits its frontmatter, with an acceptance section
+// fixtureStep renders a step file's body with an acceptance section
 // (fenced gherkin carrying a "#" comment line and acceptanceMarker) and a
-// checklist section listing checklistItems. It carries no handoff section:
-// the handoff moved to its own file, written separately by newFixtureFiles.
+// checklist section listing checklistItems. The handoff is written
+// separately by newFixtureFiles.
 func fixtureStep(cfg config.Config, id, status, title, acceptanceMarker string, checklistItems []string) string {
 	var sb strings.Builder
 
@@ -69,12 +67,9 @@ func fixtureStep(cfg config.Config, id, status, title, acceptanceMarker string, 
 }
 
 // newFixtureFiles returns fixtureConfig()'s own five step files (STEP-01,
-// STEP-02 done; STEP-03, STEP-04, STEP-05 open), a NOTES.md carrying the
-// four fixture state headings each with a marked body, and a SPEC.md whose
-// progress list carries all five entries — keyed by name relative to the
-// feature directory, so a test can delete or overwrite one entry before
-// wrapping the result with featureFS. newFixture (assemble_disk_test.go)
-// writes the byte-identical shape to real disk.
+// STEP-02 done; STEP-03, STEP-04, STEP-05 open), a NOTES.md and a SPEC.md,
+// keyed by name relative to the feature directory so a test can delete or
+// overwrite one entry before wrapping the result with featureFS.
 func newFixtureFiles(cfg config.Config) map[string]string {
 	files := map[string]string{
 		"STEP-01.md": fixtureStep(cfg, "STEP-01", "done", "STEP-01", "ACCEPTANCE-01",
@@ -107,9 +102,7 @@ func newFixtureFiles(cfg config.Config) map[string]string {
 	return files
 }
 
-// newFixtureFS wraps newFixtureFiles as a FeatureFS, the shape every
-// StartFS-based test in this file that does not need to mutate one entry
-// calls directly.
+// newFixtureFS wraps newFixtureFiles as a FeatureFS.
 func newFixtureFS(t *testing.T) (assemble.FeatureFS, config.Config) {
 	t.Helper()
 
@@ -119,9 +112,7 @@ func newFixtureFS(t *testing.T) (assemble.FeatureFS, config.Config) {
 }
 
 // allSectionText concatenates every section body a rendered brief would
-// expose: the step's acceptance and checklist sections, and every
-// inherited state section. Tests use it to make a presence or absence
-// claim against the whole brief rather than one section at a time.
+// expose, for a presence or absence claim against the whole brief.
 func allSectionText(b assemble.Brief) string {
 	var sb strings.Builder
 
@@ -165,12 +156,8 @@ func Test_returns_the_next_step_s_acceptance_criteria_and_checklist(t *testing.T
 	assert.True(t, brief.Step.Checklist.Found)
 }
 
-// Test_a_section_distinguishes_present_but_empty_from_not_found_at_all pins
-// that stepFromEntry and stateSections must not discard markdown.Section's
-// ok: a state file missing a configured heading entirely must not render
-// the same empty Body as a heading present with nothing under it.
-// Section.Found carries that distinction, which the CRLF fix depends on
-// being observable rather than silently collapsed.
+// A heading missing entirely must not render the same empty Body as one
+// present with nothing under it; Section.Found carries the distinction.
 func Test_a_section_distinguishes_present_but_empty_from_not_found_at_all(t *testing.T) {
 	cfg := fixtureConfig()
 
@@ -232,10 +219,8 @@ func Test_carries_every_state_file_section_as_inherited_context(t *testing.T) {
 	assert.Contains(t, bodies.String(), "STATE-DEBT-A")
 }
 
-// Test_reports_two_done_and_three_open also proves the naming discipline
-// from the read side: newFixtureFiles writes a handoff file for both done
-// steps, so a count of 2 done and 3 open already rules out a handoff file
-// being folded in as a sixth step file.
+// A handoff file exists for both done steps, so this count also rules out
+// one being folded in as a sixth step file.
 func Test_reports_two_done_and_three_open(t *testing.T) {
 	fsys, cfg := newFixtureFS(t)
 	srv := assemble.NewServer(cfg, "")
@@ -261,13 +246,8 @@ func Test_reads_inherited_context_from_the_state_file_not_from_the_step_handoffs
 	assert.NotContains(t, whole, "HANDOFF-ONLY-02")
 }
 
-// Test_each_finished_step_s_handoff_file_carries_its_marker is the control
-// arm for the absence claim above: it reads each handoff file directly
-// from the same fixture fsys, so the previous test's absence cannot pass
-// merely because the fixture never wrote the marker anywhere at all. With
-// the handoff moved out of the step file, Start no longer reads handoff
-// files by any path, so this control no longer proves a filter inside Start
-// discards them — only that the fixture is not vacuous. See STATE.md.
+// Control arm for the absence claim above: proves the fixture is not
+// vacuous by reading each handoff file's marker directly.
 func Test_each_finished_step_s_handoff_file_carries_its_marker(t *testing.T) {
 	fsys, cfg := newFixtureFS(t)
 
@@ -299,19 +279,8 @@ func Test_carries_no_other_step_s_acceptance_criteria(t *testing.T) {
 	assert.NotContains(t, whole, "ACCEPTANCE-05")
 }
 
-// Test_every_step_file_in_the_fixture_carries_acceptance_criteria_the_same_probe_reads
-// is the control arm for the acceptance absence claim above: it proves the
-// same probe Start uses — ParseFrontmatter to strip the YAML, then
-// markdown.Section on what is left — would in fact see every other step's
-// acceptance marker if nothing filtered them out, so its absence from the
-// previous test's brief is a real filter and not a fixture that never had
-// the marker to begin with. The probe reads through the same fsys.FS the
-// StartFS call above reads, so this control cannot silently drift from what
-// production actually reads. It parses frontmatter first because
-// stepFromEntry (assemble.go) runs markdown.Section on e.rest, never on a
-// step file's raw bytes; running it on the raw bytes here would let a "#"
-// inside the YAML front matter — or the front matter's own line shape —
-// desync this control arm from what production actually reads.
+// Control arm for the acceptance absence claim above: proves the same
+// probe Start uses would see every other step's marker unfiltered.
 func Test_every_step_file_in_the_fixture_carries_acceptance_criteria_the_same_probe_reads(t *testing.T) {
 	fsys, cfg := newFixtureFS(t)
 
@@ -375,13 +344,8 @@ func Test_returns_no_next_step_when_every_step_is_done(t *testing.T) {
 	assert.Equal(t, 0, brief.Open)
 }
 
-// Test_refuses_a_specification_that_does_not_exist is SCENARIO-13's headline
-// claim: before this scenario, an absent specification.md made Start
-// assemble and return a full brief at exit 0, silently omitting the
-// progress context every other check in this file already proves is read.
-// The fixture is otherwise newFixtureFiles's conforming shape minus the
-// specification file, so this is a single-variable change from
-// Test_returns_the_lowest_numbered_open_step_s_id_and_title's control arm.
+// Single-variable change from newFixtureFiles's conforming shape: same
+// fixture, minus the specification file.
 func Test_refuses_a_specification_that_does_not_exist(t *testing.T) {
 	cfg := fixtureConfig()
 	files := newFixtureFiles(cfg)
@@ -403,11 +367,8 @@ func Test_refuses_a_specification_that_does_not_exist(t *testing.T) {
 	assert.Empty(t, brief.Inherited)
 }
 
-// Test_refuses_a_specification_with_no_progress_heading is the second
-// structural specification check: present, readable and fence-closed, but
-// missing the configured progress heading entirely — the shape a hand-edited
-// specification.md could produce. It differs from newFixtureFiles's control
-// arm in exactly one variable, the specification body.
+// Present, readable and fence-closed, but missing the configured progress
+// heading entirely — a single-variable change from newFixtureFiles.
 func Test_refuses_a_specification_with_no_progress_heading(t *testing.T) {
 	cfg := fixtureConfig()
 	files := newFixtureFiles(cfg)
@@ -430,11 +391,8 @@ func Test_refuses_a_specification_with_no_progress_heading(t *testing.T) {
 	assert.Empty(t, brief.Inherited)
 }
 
-// Test_refuses_a_specification_whose_fence_is_unterminated mirrors
-// Test_refuses_a_state_file_whose_fence_is_unterminated: an open fence
-// before the progress heading makes that heading unreadable, indistinguishable
-// from it never having been written at all, so Start refuses rather than
-// silently reporting the heading absent.
+// An open fence before the progress heading makes it read as absent, so
+// Start refuses rather than silently reporting that.
 func Test_refuses_a_specification_whose_fence_is_unterminated(t *testing.T) {
 	cfg := fixtureConfig()
 	files := newFixtureFiles(cfg)
@@ -474,18 +432,8 @@ func Test_returns_an_error_when_the_state_file_is_missing(t *testing.T) {
 	assert.Empty(t, brief.Inherited)
 }
 
-// Test_refuses_a_state_file_whose_fence_is_unterminated pins the rule that
-// makes an unclosed fence a refusal rather than a silent omission:
-// stateSections finds each configured heading by scanning forward for a
-// terminator, the same as every other
-// caller of markdown.Section, so a fence opened before the first heading
-// and never closed puts every one of them inside it — the control arm
-// (Test_carries_every_state_file_section_as_inherited_context) already
-// proves the same four headings are readable from a balanced state file,
-// so this is a single-variable change from that fixture, not a
-// freestanding claim. Without this check Start would return a Brief with
-// every Inherited section empty at exit 0 — R10's "the worst this tool
-// could produce" — rather than refuse.
+// Single-variable change from the control arm proving the same four
+// headings readable from a balanced state file.
 func Test_refuses_a_state_file_whose_fence_is_unterminated(t *testing.T) {
 	cfg := fixtureConfig()
 
@@ -523,13 +471,8 @@ func Test_returns_an_error_when_a_step_file_has_no_frontmatter(t *testing.T) {
 	require.ErrorIs(t, err, stepfile.ErrNoFrontmatter)
 }
 
-// Test_start_names_the_step_file_whose_frontmatter_cannot_be_read is
-// SCENARIO-04's core claim: every shape of a step-file frontmatter parse
-// failure names that step file, absolute, and points at 'brief check' —
-// never the feature directory, and never scaffolding a step that already
-// exists. The "second step bad" row proves the name is not hard-coded to
-// the first file readSteps visits: STEP-01 is well-formed there and
-// STEP-02 is the one named.
+// The "second step bad" row proves the named step is not hard-coded to
+// the first file readSteps visits.
 func Test_start_names_the_step_file_whose_frontmatter_cannot_be_read(t *testing.T) {
 	cfg := fixtureConfig()
 
@@ -596,16 +539,8 @@ func Test_start_names_the_step_file_whose_frontmatter_cannot_be_read(t *testing.
 	}
 }
 
-// Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse is
-// SCENARIO-11's tripwire against readSteps becoming tolerant, sharpened by
-// SCENARIO-13: this step file's frontmatter delimiters are present and
-// well-formed — unlike the no-frontmatter fixture above — but the YAML they
-// enclose is not, so this is a single-variable change from that fixture
-// rather than a byte-for-byte duplicate exercising the same absent-delimiter
-// branch under a different name. Status's per-feature tolerance lives in
-// assemble.StatusFS, not in readSteps itself, because readSteps is shared
-// with Start (assemble.go and status.go are its only two callers). Moving
-// the tolerance down would silently make Start tolerant too.
+// The frontmatter delimiters are present and well-formed, unlike the
+// no-frontmatter fixture above, but the YAML they enclose is not.
 func Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse(t *testing.T) {
 	cfg := fixtureConfig()
 
@@ -628,12 +563,8 @@ func Test_start_still_refuses_a_step_file_whose_frontmatter_does_not_parse(t *te
 	assert.Contains(t, refusal.Detail, "yaml")
 }
 
-// Test_refuses_the_briefed_step_when_its_frontmatter_carries_no_id is check
-// 7: presence only, and only on the step Start would brief. newFixtureFiles's
-// STEP-03 is the step Start would pick (the lowest-numbered open one), so
-// blanking only its id is a single-variable change from
-// Test_returns_the_lowest_numbered_open_step_s_id_and_title's control arm —
-// STEP-01, STEP-02, STEP-04 and STEP-05 all keep a valid id.
+// Presence only, and only on the step Start would brief: blanking STEP-03's
+// id is a single-variable change from the control arm above.
 func Test_refuses_the_briefed_step_when_its_frontmatter_carries_no_id(t *testing.T) {
 	cfg := fixtureConfig()
 	files := newFixtureFiles(cfg)
@@ -659,10 +590,8 @@ func Test_refuses_the_briefed_step_when_its_frontmatter_carries_no_id(t *testing
 	assert.Nil(t, brief.Step)
 }
 
-// Test_refuses_the_briefed_step_when_its_checklist_heading_is_absent is
-// check 8: the briefed step carries an acceptance section but no line
-// matching cfg.ChecklistHeading. It is the checklist-side twin of the id
-// test above, changing the same single step in newFixtureFiles's fixture.
+// Checklist-side twin of the id test above: an acceptance section but no
+// line matching cfg.ChecklistHeading.
 func Test_refuses_the_briefed_step_when_its_checklist_heading_is_absent(t *testing.T) {
 	cfg := fixtureConfig()
 	files := newFixtureFiles(cfg)
@@ -687,12 +616,8 @@ func Test_refuses_the_briefed_step_when_its_checklist_heading_is_absent(t *testi
 	assert.Nil(t, brief.Step)
 }
 
-// Test_a_step_with_an_empty_but_present_checklist_stays_conforming is the
-// control arm for the check above: SCENARIO-13's Handoff rules a
-// present-but-empty checklist conforming, because "new step" writes an
-// empty checklist heading and start must still work against it. It reuses
-// newFixtureFiles's STEP-04 (open, not the briefed step) with STEP-03
-// marked done so STEP-04 becomes the one Start briefs.
+// Control arm for the check above: a present-but-empty checklist stays
+// conforming, since "new step" writes an empty checklist heading.
 func Test_a_step_with_an_empty_but_present_checklist_stays_conforming(t *testing.T) {
 	cfg := fixtureConfig()
 	files := newFixtureFiles(cfg)
@@ -710,10 +635,8 @@ func Test_a_step_with_an_empty_but_present_checklist_stays_conforming(t *testing
 	assert.Empty(t, brief.Step.Checklist.Body)
 }
 
-// Test_start_reports_an_absent_acceptance_heading_as_a_shortfall is
-// SCENARIO-14's degrade case: STEP-03's acceptance heading is dropped,
-// single-variable from Test_refuses_the_briefed_step_when_its_frontmatter_carries_no_id's
-// fixture, but Start still returns a Brief rather than a *RefusalError.
+// STEP-03's acceptance heading is dropped, but Start still returns a
+// Brief rather than a *RefusalError.
 func Test_start_reports_an_absent_acceptance_heading_as_a_shortfall(t *testing.T) {
 	cfg := fixtureConfig()
 	files := newFixtureFiles(cfg)

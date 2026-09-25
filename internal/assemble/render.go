@@ -11,13 +11,10 @@ import (
 )
 
 // RenderText writes b to w as the markdown payload an implementer pastes
-// straight into its own context: "<id> — <done> done, <open> open", a
-// blank line, "# <title>", then the step's acceptance-criteria and
-// checklist sections and every inherited state-file section, each under
-// its configured heading verbatim. A section whose body is empty is
-// omitted entirely rather than rendered as a bare heading. RenderText
-// writes nothing when b.Step is nil; the caller decides what to say about
-// a feature with no open step.
+// straight into its own context: a status line, "# <title>", then the
+// step's sections and every inherited state-file section under its
+// configured heading. RenderText writes nothing when b.Step is nil; the
+// caller decides what to say about a feature with no open step.
 func RenderText(w io.Writer, b Brief) error {
 	if b.Step == nil {
 		return nil
@@ -39,18 +36,14 @@ func RenderText(w io.Writer, b Brief) error {
 }
 
 // RenderJSON writes b to w as one compact JSON document followed by a
-// single newline: b.Done, b.Open, b.Step, b.Inherited and b.Shortfalls
-// exactly as Brief's json tags define them, with no field omitted
-// regardless of its zero value. Unlike RenderText, RenderJSON always
-// writes a document — including when b.Step is nil, which marshals to
-// "step":null rather than producing empty output — and it never omits a
-// Section whose body is empty. '<' and '&' in a section body are left
-// unescaped: the payload is not HTML. RenderJSON encodes into a buffer
-// before writing to w, so w sees either the complete document or nothing.
+// newline, per Brief's json tags, with no field omitted. Unlike RenderText
+// it always writes a document, including when b.Step is nil. It encodes
+// into a buffer first, so w sees either the complete document or nothing.
 func RenderJSON(w io.Writer, b Brief) error {
 	var buf bytes.Buffer
 
 	enc := json.NewEncoder(&buf)
+	// '<' and '&' in a section body are left unescaped: the payload is not HTML.
 	enc.SetEscapeHTML(false)
 
 	if err := enc.Encode(b); err != nil {
@@ -66,21 +59,9 @@ func RenderJSON(w io.Writer, b Brief) error {
 
 // RenderStatusText writes rows to w as a table for a person to read: a
 // header row "FEATURE  DONE  BLOCKED  NEXT", then one row per feature,
-// columns aligned with text/tabwriter (2-space padding, the FEATURE/DONE/
-// BLOCKED columns padded to the longest value in that column, the NEXT
-// column unpadded since it is last). RenderStatusText writes nothing at
-// all — not even the header — when rows is empty (R9): an empty table
-// still has a header, but "no rows" is a state the header must not claim
-// otherwise exists. A row whose Problem is set renders "-", "-" and
-// "(malformed, see below)" in DONE, BLOCKED and NEXT — never a real count,
-// since none was measured. A complete row (row.Complete()) renders
-// "(complete)" in NEXT. Otherwise NEXT is "-" when row.Next is nil, the
-// step's id alone when its Title is empty or equal to its ID — a freshly
-// scaffolded step file opens with "# <id>" as its only heading, so this
-// keeps that common case from doubling the id in the column — or
-// "<id>  <title>" (two literal spaces, not a tab) otherwise. A tab or
-// newline embedded in a feature name or a step title is flattened to a
-// space first, so it cannot corrupt the table's own column alignment.
+// columns aligned with text/tabwriter. It writes nothing at all, not even
+// the header, when rows is empty — an empty table still has a header, but
+// "no rows" must not look like one exists.
 func RenderStatusText(w io.Writer, rows []FeatureStatus) error {
 	if len(rows) == 0 {
 		return nil
@@ -107,8 +88,9 @@ func RenderStatusText(w io.Writer, rows []FeatureStatus) error {
 	return nil
 }
 
-// statusRowCells renders row's DONE, BLOCKED and NEXT cells per
-// RenderStatusText's contract.
+// statusRowCells renders row's DONE, BLOCKED and NEXT cells: "-", "-" and
+// "(malformed, see below)" when row.Problem is set, since no count was
+// measured.
 func statusRowCells(row FeatureStatus) (string, string, string) {
 	if row.Problem != nil {
 		return "-", "-", "(malformed, see below)"
@@ -125,6 +107,8 @@ func statusRowCells(row FeatureStatus) (string, string, string) {
 	case row.Next == nil:
 		next = "-"
 	case row.Next.Title == "" || row.Next.Title == row.Next.ID:
+		// A freshly scaffolded step file opens with "# <id>" as its only
+		// heading; this keeps that common case from doubling the id.
 		next = flattenTabwriterField(row.Next.ID)
 	default:
 		next = flattenTabwriterField(row.Next.ID) + "  " + flattenTabwriterField(row.Next.Title)
@@ -140,20 +124,11 @@ func flattenTabwriterField(s string) string {
 	return strings.NewReplacer("\t", " ", "\n", " ").Replace(s)
 }
 
-// RenderFindings writes groups to w: one blank line between feature groups
-// (none before the first, none after the last), each opening with
-// "<name>  (in flight)" or "<name>  (complete)" — from InFlight, never
-// recomputed from severity — then each finding as
-// "  <SEVERITY>  <path>[:<line>]  <detail>", two-space indented, the
-// ":<line>" suffix omitted when Line is 0 (a whole-file finding). It
-// carries no Fix: the write-path refusal's "... and retry" copy has no
-// meaning in a report about a tree scaffold.Finish was never asked to
-// write. RenderFindings renders Path verbatim — the caller relativizes it
-// for text mode — and decides nothing about grouping, severity or
-// ordering, all decided upstream; a tab or newline in the group's own Name
-// or in a finding's Detail is flattened to a single space, the same
-// tabwriter-safety stance RenderStatusText takes, even though this output
-// is not itself a tabwriter table.
+// RenderFindings writes groups to w: one blank line between feature groups,
+// each opening with "<name>  (in flight)" or "<name>  (complete)", then
+// each finding as "  <SEVERITY>  <path>[:<line>]  <detail>". It carries no
+// Fix and renders Path verbatim; grouping, severity and ordering are all
+// decided upstream.
 func RenderFindings(w io.Writer, groups []FeatureFindings) error {
 	for i, g := range groups {
 		if i > 0 {

@@ -1,10 +1,7 @@
-// This file keeps the assemble_test.go scenarios whose subject is the OS
-// adapter Start builds around one feature's own name — the os.Root
-// containment chain (an escaping or empty feature argument, a regular file
-// standing where a directory belongs) and the write-sweep control that
-// proves Start touches no file on disk, a claim an in-memory fs.FS cannot
-// make since it has no write method to omit calling. StartFS's own content
-// rules are pinned against fstest.MapFS in assemble_test.go.
+// This file keeps the scenarios whose subject is the OS adapter Start
+// builds around one feature's own name, and the write-sweep proving Start
+// touches no file on disk. StartFS's own content rules are pinned against
+// fstest.MapFS in assemble_test.go.
 package assemble_test
 
 import (
@@ -22,9 +19,7 @@ import (
 )
 
 // newFixture writes feature "demo" under a fresh temp root, using
-// fixtureConfig(): the same five step files, NOTES.md and SPEC.md
-// newFixtureFiles (assemble_test.go) builds in memory. It returns the root
-// and the config the fixture was written with.
+// newFixtureFiles (assemble_test.go), and returns the root and its config.
 func newFixture(t *testing.T) (string, config.Config) {
 	t.Helper()
 
@@ -64,11 +59,8 @@ func Test_returns_an_error_when_the_feature_name_escapes_the_feature_root(t *tes
 	require.ErrorIs(t, err, assemble.ErrNoSuchFeature)
 }
 
-// Test_returns_an_error_when_the_feature_name_is_empty pins that an empty
-// feature argument is refused the same way a traversal attempt is —
-// validFeatureArgument rejects it before either os.Root.OpenRoot call —
-// rather than reaching topRoot.OpenRoot("") and surfacing its own opaque
-// "empty path" failure, which names no feature and suggests no fix.
+// An empty feature argument is rejected before either OpenRoot call, not
+// via its own opaque "empty path" failure.
 func Test_returns_an_error_when_the_feature_name_is_empty(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -81,13 +73,8 @@ func Test_returns_an_error_when_the_feature_name_is_empty(t *testing.T) {
 	require.ErrorIs(t, err, assemble.ErrNoSuchFeature)
 }
 
-// Test_start_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_directory
-// covers Start's first os.Root.OpenRoot call — the configured feature
-// directory itself, not feature's own subdirectory — the same way
-// Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry
-// already covers the second: a regular file standing where the configured
-// feature directory belongs must fail generically, carrying that path in
-// its message, never as ErrNoSuchFeature.
+// Covers Start's first OpenRoot call (the configured feature directory
+// itself); the sibling test below covers the second.
 func Test_start_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_directory(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -103,16 +90,9 @@ func Test_start_reports_a_generic_failure_when_the_feature_root_itself_is_not_a_
 	assert.Contains(t, err.Error(), featureDirPath)
 }
 
-// Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry pins
-// that only a genuinely absent directory is ErrNoSuchFeature: a feature
-// entry that exists but cannot be opened as a
-// directory — here, a regular file standing where "demo"'s directory
-// belongs — must not read as "no such feature demo", since demo plainly
-// does exist. The portable, privilege-independent substitute for a
-// permission failure is the same technique
-// Test_status_propagates_a_feature_root_that_is_not_a_directory already
-// uses: a regular file makes os.Root.OpenRoot fail with "not a directory",
-// never fs.ErrNotExist.
+// Only a genuinely absent directory is ErrNoSuchFeature: a regular file
+// standing where "demo"'s directory belongs must not read as "no such
+// feature demo".
 func Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry(t *testing.T) {
 	cfg := fixtureConfig()
 	root := t.TempDir()
@@ -127,10 +107,8 @@ func Test_start_reports_a_generic_failure_for_an_unreadable_feature_entry(t *tes
 	assert.NotErrorIs(t, err, assemble.ErrNoSuchFeature)
 }
 
-// fileSnapshot is one file's identity for a disk-unchanged sweep: its
-// content hash, its permission bits and its modification time. mtime is
-// included because a write that reproduces identical bytes still touches
-// mtime, and a sweep that only hashed content would miss that.
+// fileSnapshot is one file's identity for a disk-unchanged sweep. mtime is
+// included because a write that reproduces identical bytes still touches it.
 type fileSnapshot struct {
 	sha256 [32]byte
 	mode   os.FileMode
@@ -138,10 +116,8 @@ type fileSnapshot struct {
 }
 
 // snapshotTree walks every regular file under root and returns its
-// fileSnapshot, keyed by its path relative to root. Reads go through an
-// *os.Root scoped to root rather than an absolute path built from the
-// walk callback, so a symlink swapped in mid-walk cannot redirect a read
-// outside root.
+// fileSnapshot, keyed by path. Reads go through an *os.Root scoped to
+// root, so a symlink swapped in mid-walk cannot redirect a read outside it.
 func snapshotTree(t *testing.T, root string) map[string]fileSnapshot {
 	t.Helper()
 
@@ -185,10 +161,7 @@ func Test_writes_nothing_to_disk(t *testing.T) {
 	assert.Equal(t, before, snapshotTree(t, root))
 }
 
-// Test_the_disk_sweep_sees_a_write is the control arm for the test above:
-// it proves snapshotTree actually detects a change, so the previous
-// test's equal snapshots are evidence Start wrote nothing rather than
-// evidence the sweep cannot see a write at all.
+// Control arm for the test above: proves snapshotTree detects a change.
 func Test_the_disk_sweep_sees_a_write(t *testing.T) {
 	root, _ := newFixture(t)
 

@@ -11,12 +11,10 @@ import (
 )
 
 // Features returns the names of every real directory under the configured
-// feature directory, in fs.ReadDir's documented byte order — the same
-// order Status relies on. A regular file or a symlink is excluded: brief
-// never treats either as a feature. A missing feature directory is zero
-// features, not an error: Features returns (nil, nil), matching Status. An
-// unreadable or non-directory feature-directory root still propagates an
-// error.
+// feature directory, in fs.ReadDir's byte order. A regular file or a
+// symlink is excluded. A missing feature directory is zero features, not
+// an error: Features returns (nil, nil). An unreadable or non-directory
+// root still propagates an error.
 func (s *Server) Features(_ context.Context) ([]string, error) {
 	topRoot, err := s.openFeatureDir(filepath.Join(s.root, s.cfg.FeatureDirectory))
 	if err != nil {
@@ -31,11 +29,9 @@ func (s *Server) Features(_ context.Context) ([]string, error) {
 	return FeaturesFS(topRoot.FS())
 }
 
-// FeaturesFS is Features' core: fsys lists a feature directory's own
-// top-level entries directly, with no nested open, so any fs.FS — real or
-// in-memory — suffices. It returns the name of every real directory
-// entry, in fsys's own ReadDir order; a regular file or a symlink is
-// excluded, matching Features' own contract.
+// FeaturesFS is Features' core: it lists fsys's own top-level entries
+// directly, with no nested open, so any fs.FS — real or in-memory —
+// suffices. Same contract as Features.
 func FeaturesFS(fsys fs.FS) ([]string, error) {
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
@@ -54,23 +50,11 @@ func FeaturesFS(fsys fs.FS) ([]string, error) {
 }
 
 // FeatureContaining reports the name of the feature directory that
-// contains path, and whether one does: path's first path component under
-// the configured feature directory, when that component is a real
-// directory (never a symlink or a regular file) and path names something
-// beneath it, not the component itself. It reports false for a path
-// outside the feature directory (including a ".." escape), the feature
-// directory itself, a file directly inside it, and a relative path — every
-// caller resolves a relative hook payload path against its own working
-// directory before calling this.
-//
-// Matching runs lexically first, against s.root/FeatureDirectory exactly
-// as configured: a feature directory that is itself a symlink must be
-// rejected as such, which resolving symlinks first would silently launder.
-// Only when the lexical match says path is outside does FeatureContaining
-// retry with both sides passed through filepath.EvalSymlinks — the one
-// case that rescues a path reached through a symlinked ancestor of the
-// project root itself (e.g. macOS's "/var" symlinked to "/private/var")
-// from being misreported as outside.
+// contains path, and whether one does: path's first component under the
+// configured feature directory, when that component is a real directory
+// (never a symlink or a regular file) and path names something beneath it.
+// It reports false for a path outside the feature directory, the feature
+// directory itself, a file directly inside it, and a relative path.
 func (s *Server) FeatureContaining(path string) (string, bool) {
 	featureRoot := filepath.Join(s.root, s.cfg.FeatureDirectory)
 
@@ -78,6 +62,11 @@ func (s *Server) FeatureContaining(path string) (string, bool) {
 		return name, true
 	}
 
+	// Retry through filepath.EvalSymlinks only after a lexical miss, and
+	// only here: a feature directory that is itself a symlink must be
+	// rejected as one, which resolving symlinks first would launder. This
+	// rescues a path reached through a symlinked ancestor of the project
+	// root (e.g. macOS's "/var" symlinked to "/private/var").
 	resolvedRoot, err := filepath.EvalSymlinks(featureRoot)
 	if err != nil {
 		return "", false
@@ -91,24 +80,17 @@ func (s *Server) FeatureContaining(path string) (string, bool) {
 	return featureContainingLexical(resolvedRoot, resolvedPath)
 }
 
-// featureContainingLexical reports path's first path component under
+// featureContainingLexical reports path's first component under
 // featureRoot, and whether it names a real directory with at least one
-// more component after it — see FeatureContaining for the full contract.
-// Neither argument is resolved for symlinks here.
-//
-// A rel of "." or ".." (path is featureRoot itself, or its direct parent)
-// is rejected by the len(parts) < 2 check below without needing its own
-// case: filepath.Separator does not appear in either string, so SplitN
-// yields one part. Only a deeper escape — rel beginning "../", which does
-// split into two — needs the explicit HasPrefix guard: without it, the
-// first part would be "..", and an os.Lstat of featureRoot's own parent
-// would pass as a plausible "feature directory".
+// more component after it. Neither argument is resolved for symlinks.
 func featureContainingLexical(featureRoot, path string) (string, bool) {
 	rel, err := filepath.Rel(featureRoot, path)
 	if err != nil {
 		return "", false
 	}
 
+	// Without this guard a "../" escape would split into two parts below,
+	// with ".." itself passing as a plausible feature directory.
 	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", false
 	}
