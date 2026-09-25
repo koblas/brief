@@ -158,6 +158,47 @@ func Test_finish_reports_an_open_debts_drop_as_dropped_debt_mem(t *testing.T) {
 	assert.Contains(t, stderr, "(dropped 1 entry, listed on stdout)")
 }
 
+// Test_finish_reports_no_drops_when_the_new_body_only_reflows_whitespace_mem
+// proves SCENARIO-03: a doubled interior space and a tab standing in for a
+// space are whitespace normalizeEntryText already collapses generically
+// (built by SCENARIO-01), never a drop. The trailing-space entry is
+// included for delta coverage, not as proof — entryItemText's trimEOL
+// already strips it before normalizeEntryText ever runs. The old body
+// carries one entry each under Binding decisions, Traps and Open debts,
+// wording and token order unchanged between old and new — only the
+// whitespace reflows.
+func Test_finish_reports_no_drops_when_the_new_body_only_reflows_whitespace_mem(t *testing.T) {
+	oldLines := []string{
+		"## Binding decisions", "",
+		"- foo  bar (TAG1)", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- foo\tbar (TAG2)", "",
+		"## Open debts", "",
+		"- foo bar (TAG3) ", "",
+	}
+	oldState := strings.Join(oldLines, "\n") + "\n"
+	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+	newLines := []string{
+		"## Binding decisions", "",
+		"- foo bar (TAG1)", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- foo bar (TAG2)", "",
+		"## Open debts", "",
+		"- foo bar (TAG3)", "",
+	}
+	newState := strings.Join(newLines, "\n") + "\n"
+	statePath := memWriteInput(tree, "state.md", newState)
+
+	stdout, stderr, err := runFinishMem(t, tree, handoffPath, statePath)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout)
+	assert.Equal(t, memWantFinishCompleteLine("demo", "SCENARIO-01"), stderr)
+}
+
 func Test_dropExcerpt(t *testing.T) {
 	cases := []struct {
 		name string
