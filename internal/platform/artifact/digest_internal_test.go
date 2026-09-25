@@ -1,14 +1,9 @@
 package artifact
 
-// White-box package: classify is digestsFor's own unexported per-Kind
-// decision extracted for combinatorial reasons — the current/older/edited
-// precedence and the in-both-lists rule are impractical to drive through
-// the public Recognize surface for a Kind whose older…Digests list is still
-// empty (every Kind but KindAgentPlanner/KindAgentImplementer today; those
-// two are covered directly, through Recognize, by agents_test.go's
-// Test_previous_release_agent_renders_classify_as_older). This file drives
-// the extracted logic directly with a synthetic older list; snippet_test.go
-// and artifact_test.go cover the public surface.
+// White-box package: classify is unexported decision logic extracted for
+// combinatorial reasons. Most Kinds ship an empty older-digest list, so
+// the current/older/edited precedence is impractical to drive through the
+// public Recognize surface; this file drives classify directly instead.
 
 import (
 	"crypto/sha256"
@@ -17,10 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Test_classify_reports_older_for_a_digest_only_in_the_older_list pins
-// classify's own precedence: a digest in current is OriginCurrent even when
-// the same digest also appears in older; a digest only in older is
-// OriginOlder; a digest in neither is OriginEdited.
 func Test_classify_reports_older_for_a_digest_only_in_the_older_list(t *testing.T) {
 	currentBody := []byte("current render")
 	olderBody := []byte("older render")

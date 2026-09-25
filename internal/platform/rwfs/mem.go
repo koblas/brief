@@ -15,9 +15,8 @@ import (
 
 var _ FS = (*Mem)(nil)
 
-// memCore is the state a Mem and every view OpenRoot returns from it share:
-// one map and one mutex, so a write through any of them is visible from all
-// the others.
+// memCore is the state a Mem and every view OpenRoot returns from it share,
+// so a write through any of them is visible from all the others.
 type memCore struct {
 	mu    sync.Mutex
 	fsys  fstest.MapFS
@@ -25,9 +24,7 @@ type memCore struct {
 }
 
 // tick returns a fresh, strictly increasing time for a new or rewritten
-// entry's ModTime, so two Snapshot calls can distinguish a write that
-// changed nothing about the bytes from no write at all — something content
-// equality alone can't do. Callers hold c.mu already.
+// entry's ModTime. Callers hold c.mu already.
 func (c *memCore) tick() time.Time {
 	c.clock++
 
@@ -35,33 +32,17 @@ func (c *memCore) tick() time.Time {
 }
 
 // Mem is an in-memory FS adapter backed by testing/fstest.MapFS, guarded by
-// its core's mutex so it is safe for concurrent use. It exists so
-// internal/scaffold and internal/setup can exercise filesystem behavior
-// without touching disk, sharing rwfs' contract test with the OS adapter.
-//
-// A Mem returned by NewMem is the root view, with prefix "". OpenRoot
-// returns a second Mem over the same core, prefix set to the subtree's full
-// map-rooted name; every name a method on that view takes is resolved
-// through full before touching the shared map, so the view addresses only
-// its own subtree while writes made through it are visible from the parent
-// and every other view, and vice versa.
-//
-// Every write replaces a map entry's *fstest.MapFile wholesale rather than
-// mutating one in place. A reader that has already opened a file keeps
-// referencing the old, now-orphaned *fstest.MapFile, so a concurrent write
-// to the same name cannot corrupt bytes a reader is midway through — the
-// same freedom from partial writes rwfs.FS.WriteFile documents.
+// its core's mutex so it is safe for concurrent use. A Mem returned by
+// NewMem is the root view; OpenRoot returns a second Mem over the same core,
+// confined to a subtree, so writes through either are visible from both.
 type Mem struct {
 	core   *memCore
 	prefix string
 }
 
-// NewMem returns a Mem seeded with fsys's entries, after adding an explicit
-// directory entry for every ancestor fsys implies but does not itself list.
-// Without that, a directory that exists in fsys only because some deeper
-// entry's path implies it — the way testing/fstest.MapFS synthesizes such
-// ancestors for reads — would disappear the moment its last explicit child
-// is Remove'd; a real directory persists independent of its children.
+// NewMem returns a Mem seeded with fsys's entries, adding an explicit
+// directory entry for every ancestor fsys implies but does not itself list,
+// so that directory persists after its last explicit child is removed.
 func NewMem(fsys fstest.MapFS) *Mem {
 	seeded := make(fstest.MapFS, len(fsys))
 	maps.Copy(seeded, fsys)
@@ -71,8 +52,7 @@ func NewMem(fsys fstest.MapFS) *Mem {
 }
 
 // materializeAncestors adds an explicit fs.ModeDir entry for every ancestor
-// directory implied by fsys's own keys, skipping any ancestor that already
-// has an entry of its own.
+// directory implied by fsys's keys that lacks one already.
 func materializeAncestors(fsys fstest.MapFS) {
 	names := make([]string, 0, len(fsys))
 	for name := range fsys {
@@ -90,19 +70,12 @@ func materializeAncestors(fsys fstest.MapFS) {
 	}
 }
 
-// Snapshot returns a copy of the whole tree m's core holds — every entry in
-// the map m shares with every other view OpenRoot has returned from it, not
-// just the subtree m's own view is confined to — a fresh map holding freshly
-// cloned *fstest.MapFile values, safe for a caller to inspect, compare, or
-// mutate without racing further calls on m or its relatives. The copy
-// includes an explicit fs.ModeDir entry for every directory materialized
-// only because some deeper entry's path implied it — the same entries
-// NewMem and MkdirAll add — not just the entries a caller wrote explicitly.
-// A ModTime on an entry a caller wrote comes from m's fake clock: WriteFile,
-// CreateExclusive and a directory freshly created by Mkdir or MkdirAll each
-// advance it, even when a WriteFile's new bytes equal the old ones, so
-// diffing two Snapshots tells "rewrote identical content" from "never
-// wrote" apart.
+// Snapshot returns a fresh copy of the whole tree m's core holds — every
+// entry shared across every view OpenRoot has returned, not just the
+// subtree m is confined to — safe for a caller to inspect, compare, or
+// mutate without racing further calls on m or its relatives. Each entry's
+// ModTime comes from m's fake clock, which advances on every write, so
+// diffing two Snapshots distinguishes a rewrite from no write at all.
 func (m *Mem) Snapshot() fstest.MapFS {
 	m.core.mu.Lock()
 	defer m.core.mu.Unlock()
@@ -120,9 +93,8 @@ func (m *Mem) Snapshot() fstest.MapFS {
 	return out
 }
 
-// full translates name, already validated by fs.ValidPath, from m's own
-// view into the map-rooted path the shared core stores it under: name
-// itself when m is the root view, and name joined onto m.prefix otherwise.
+// full translates name from m's view into the map-rooted path the shared
+// core stores it under.
 func (m *Mem) full(name string) string {
 	if m.prefix == "" {
 		return name
@@ -231,9 +203,7 @@ func (m *Mem) ReadLink(name string) (string, error) {
 }
 
 // checkName validates name and reports syscall.ENOTDIR when some proper
-// ancestor of name, within m's own view, already exists as a non-directory
-// entry — a case a bare map lookup reports as fs.ErrNotExist instead, the
-// way a real openat(2) walking that same path would not.
+// ancestor of name already exists as a non-directory entry.
 func (m *Mem) checkName(op, name string) error {
 	if !fs.ValidPath(name) {
 		return &fs.PathError{Op: op, Path: name, Err: fs.ErrInvalid}
@@ -242,12 +212,9 @@ func (m *Mem) checkName(op, name string) error {
 	return m.notDirAncestor(op, name)
 }
 
-// notDirAncestor reports whether some proper ancestor of name, within m's
-// own view, already exists as a non-directory entry, walking from the
-// view's root down so the first segment that conflicts is the one
-// reported — matching the order a real filesystem resolves path components
-// in. It returns nil, deferring to the caller's own not-exist handling, the
-// moment it reaches an ancestor that simply does not exist yet.
+// notDirAncestor reports whether some proper ancestor of name already
+// exists as a non-directory entry, walking from the view's root down so the
+// first conflicting segment is the one reported.
 func (m *Mem) notDirAncestor(op, name string) error {
 	dir := path.Dir(name)
 	if dir == "." {
@@ -450,10 +417,8 @@ func (m *Mem) Remove(name string) error {
 	return nil
 }
 
-// maxSymlinkHops bounds resolveDir's symlink-following loop, the same way a
-// real filesystem's own resolver bounds itself (Linux's own limit is also
-// 40), so a cycle of symlink entries a caller seeded fails instead of
-// spinning forever.
+// maxSymlinkHops bounds resolveDir's symlink-following loop so a symlink
+// cycle fails instead of spinning forever.
 const maxSymlinkHops = 40
 
 // OpenRoot returns name as a fresh Mem view over m's own core, confined to
@@ -474,16 +439,10 @@ func (m *Mem) OpenRoot(name string) (FS, error) {
 	return &Mem{core: m.core, prefix: full}, nil
 }
 
-// resolveDir resolves name, translated through m.full, to the map-rooted
-// path of the directory it names, following a chain of symlink entries the
-// same way os.Root.OpenRoot follows one — up to maxSymlinkHops deep, and
-// refusing a target that is absolute or, once joined onto the symlink's own
-// directory, is not fs.ValidPath. Unlike os.Root, it does not refuse a
-// target that would resolve outside m's own view: Mem has no notion of
-// "outside" (see doc.go). It normalizes a fully-resolved "." — OpenRoot(".")
-// on the root view, or a symlink chain that bottoms out there — to "", so
-// the returned view's own full still addresses the shared core correctly
-// rather than compounding a literal "./" prefix onto every later name.
+// resolveDir resolves name to the map-rooted path of the directory it
+// names, following a chain of symlink entries up to maxSymlinkHops deep and
+// refusing an absolute or invalid target. It normalizes a fully-resolved
+// "." to "".
 func (m *Mem) resolveDir(op, name string) (string, error) {
 	full := m.full(name)
 

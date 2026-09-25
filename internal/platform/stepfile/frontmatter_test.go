@@ -35,9 +35,6 @@ func Test_ParseFrontmatter_returns_an_error_for_malformed_yaml(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Test_Frontmatter_Done collects what counts as a finished step. One
-// assertion, one rule: Done trims surrounding whitespace and compares
-// case-insensitively against "done", and nothing else is finished.
 func Test_Frontmatter_Done(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -45,9 +42,7 @@ func Test_Frontmatter_Done(t *testing.T) {
 		want   bool
 	}{
 		{name: "done", status: "done", want: true},
-		// Whitespace and case are separate cases on purpose: one fixture
-		// carrying both would redden for either mutation, so neither rule
-		// would be pinned on its own.
+		// Whitespace and case are kept as separate cases so each is pinned on its own.
 		{name: "done with surrounding whitespace", status: " done ", want: true},
 		{name: "done in mixed case", status: "Done", want: true},
 		{name: "open", status: "open", want: false},
@@ -92,11 +87,6 @@ func Test_SetStatus_returns_an_error_when_the_frontmatter_has_no_status_key(t *t
 	require.ErrorIs(t, err, stepfile.ErrNoStatusField)
 }
 
-// Test_ParseFrontmatter_parses_a_CRLF_step_file reproduces the reviewer's
-// finding directly: ParseFrontmatter's opening-delimiter check used to
-// look for "---\n" only, so a CRLF step file's first line — "---\r\n" —
-// never matched and every CRLF step file was refused with
-// ErrNoFrontmatter.
 func Test_ParseFrontmatter_parses_a_CRLF_step_file(t *testing.T) {
 	body := []byte("---\r\nid: STEP-03\r\nstatus: open\r\ndepends-on: []\r\n---\r\n# STEP-03\r\n")
 
@@ -104,17 +94,10 @@ func Test_ParseFrontmatter_parses_a_CRLF_step_file(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, stepfile.Frontmatter{ID: "STEP-03", Status: "open", DependsOn: []string{}}, fm)
-	// rest keeps the leading "\r" that TrimPrefix's "\n"-only cut does not
-	// strip after a CRLF closing delimiter — a pre-existing cosmetic gap,
-	// not this fix's concern; markdown.Section's fence/heading scan
-	// already trims "\r" per line, so every reader of rest tolerates it.
+	// rest keeps a leading "\r"; readers trim it per line.
 	assert.Equal(t, "\r\n# STEP-03\r\n", string(rest))
 }
 
-// Test_SetStatus_replaces_the_status_line_in_a_CRLF_step_file mirrors the
-// ParseFrontmatter fix on SetStatus's own opening-delimiter check, and
-// pins that the opening delimiter's own line ending is preserved rather
-// than silently downgraded to LF.
 func Test_SetStatus_replaces_the_status_line_in_a_CRLF_step_file(t *testing.T) {
 	body := []byte("---\r\nid: STEP-02\r\nstatus: open\r\n---\r\n\r\n# STEP-02\r\n")
 

@@ -24,10 +24,9 @@ const statusFieldPrefix = "status:"
 // frontmatter block.
 const frontmatterDelim = "---"
 
-// frontmatterOpenLen returns the number of leading bytes of s that make up
-// an opening frontmatter delimiter line — "---\n" or "---\r\n" — so a CRLF
-// step file is recognized exactly like an LF one. It returns 0 when s does
-// not begin with either.
+// frontmatterOpenLen returns the byte length of an opening frontmatter
+// delimiter line ("---\n" or "---\r\n") at the start of s, or 0 if s does
+// not begin with one.
 func frontmatterOpenLen(s string) int {
 	switch {
 	case strings.HasPrefix(s, frontmatterDelim+"\r\n"):
@@ -56,13 +55,11 @@ func (fm Frontmatter) Done() bool {
 	return strings.EqualFold(strings.TrimSpace(fm.Status), "done")
 }
 
-// DecodeFrontmatter splits body into its YAML frontmatter and the body
-// that follows it, decoding the frontmatter onto out (a pointer, as
-// yaml.Unmarshal expects). It returns ErrNoFrontmatter when body does not
-// start with a "---" delimiter line, and a wrapped error when the
-// enclosed YAML does not decode onto out. The returned rest is body's
-// bytes after the closing delimiter line, with the delimiter's own
-// trailing newline consumed.
+// DecodeFrontmatter splits body into its YAML frontmatter and the
+// remaining body, decoding the frontmatter onto out (a pointer). It
+// returns ErrNoFrontmatter when body does not start with a "---"
+// delimiter line, or a wrapped error when the YAML does not decode onto
+// out. rest is body's bytes after the closing delimiter line.
 func DecodeFrontmatter(body []byte, out any) ([]byte, error) {
 	s := string(body)
 
@@ -87,12 +84,11 @@ func DecodeFrontmatter(body []byte, out any) ([]byte, error) {
 	return []byte(rest), nil
 }
 
-// ParseFrontmatter splits body into its YAML frontmatter and the body that
-// follows it. It returns ErrNoFrontmatter when body does not start with a
-// "---" delimiter line, and a wrapped error when the enclosed YAML does
-// not decode onto Frontmatter. The returned rest is body's bytes after the
-// closing delimiter line, with the delimiter's own trailing newline
-// consumed.
+// ParseFrontmatter splits body into its YAML frontmatter and the
+// remaining body. It returns ErrNoFrontmatter when body does not start
+// with a "---" delimiter line, or a wrapped error when the YAML does not
+// decode onto Frontmatter. rest is body's bytes after the closing
+// delimiter line.
 func ParseFrontmatter(body []byte) (Frontmatter, []byte, error) {
 	var fm Frontmatter
 
@@ -106,14 +102,8 @@ func ParseFrontmatter(body []byte) (Frontmatter, []byte, error) {
 
 // SetStatus replaces the first "status:" line inside body's YAML
 // frontmatter delimiters with "status: <status>", leaving every other
-// byte — including keys Frontmatter does not decode — identical. A
-// "status:" line outside the frontmatter, after the closing delimiter, is
-// never touched. SetStatus edits the text directly rather than decoding
-// and re-marshaling the frontmatter, because Frontmatter has no
-// KnownFields and a round trip would silently drop an unrecognized key.
-// It returns ErrNoStatusField, body unchanged, when the frontmatter has no
-// "status:" line to replace — a missing key is refused rather than
-// inserted, since where to insert one is a guess.
+// byte identical. It returns ErrNoStatusField, body unchanged, when the
+// frontmatter has no "status:" line to replace.
 func SetStatus(body []byte, status string) ([]byte, error) {
 	s := string(body)
 

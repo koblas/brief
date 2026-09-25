@@ -1,5 +1,5 @@
 // Package rwfs is a read-write filesystem port: FS composes the standard
-// library's own read-side interfaces (fs.FS, fs.ReadFileFS, fs.ReadDirFS,
+// library's read-side interfaces (fs.FS, fs.ReadFileFS, fs.ReadDirFS,
 // fs.StatFS, fs.ReadLinkFS) with the minimal write operations brief's
 // production code performs — Mkdir, MkdirAll, WriteFile, CreateExclusive,
 // Remove and OpenRoot, the last for confining a caller to one subtree of a
@@ -29,26 +29,26 @@
 //
 //   - Confinement: os.Root refuses a name, or a symbolic link, that would
 //     resolve outside its root — including one reached through a nested
-//     OpenRoot. Mem has no notion of "outside": its own OpenRoot follows a
+//     OpenRoot. Mem has no notion of "outside": its OpenRoot follows a
 //     symlink at name to wherever its target names, inside or outside the
 //     subtree the view addresses, and nothing stops one seeded with an
 //     escaping target from reporting a location that would be refused on a
 //     real filesystem.
 //   - Symlink-following through an ancestor segment: os.Root resolves a
-//     symlink anywhere in a path, not only its final segment. Mem's own
+//     symlink anywhere in a path, not only its final segment. Mem's
 //     ancestor check (notDirAncestor) only Lstats each segment, so a
 //     symlink standing in for a directory partway through name reports
 //     syscall.ENOTDIR on Mem where OS would follow it. Mem.OpenRoot is
-//     called with both single-segment names (a feature's own directory
+//     called with both single-segment names (a feature's directory
 //     name, e.g. internal/assemble's checkNamedFeature) and multi-segment
-//     ones — internal/assemble's and internal/scaffold's own
-//     openFeatureDir each map an absolute OS directory through their own
+//     ones — internal/assemble's and internal/scaffold's
+//     openFeatureDir each map an absolute OS directory through their
 //     fsName before calling OpenRoot on it, so every WithFS-backed
 //     internal/cli test exercises a multi-segment call. This divergence
-//     still has no test of its own: production never opens Mem at all
+//     still has no test: production never opens Mem at all
 //     (WithFS is test-only), and every WithFS fixture in this repository
 //     builds its ancestor directories as explicit directory entries, never
-//     a symlink standing in for one — see internal/cli's own memTree,
+//     a symlink standing in for one — see internal/cli's memTree,
 //     whose only entry constructors are dir and file.
 //   - Permission enforcement: the OS adapter's operations fail with a
 //     permission error when the underlying file or directory forbids them.
@@ -64,7 +64,7 @@
 //     the OS adapter rather than through a temp sibling, so a crash between
 //     open and the write completing can leave a concurrent reader observing
 //     a truncated file. Mem's CreateExclusive has no partial-write case at
-//     all: its write is one in-memory assignment under m's own mutex.
+//     all: its write is one in-memory assignment under m's mutex.
 //   - ModTime granularity: the OS adapter's entries carry whatever mtime the
 //     real filesystem assigns, at whatever resolution it offers. Mem instead
 //     advances a monotonic counter on every write — including a WriteFile

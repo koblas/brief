@@ -2,41 +2,31 @@ package artifact
 
 import "strings"
 
-// SnippetSpan locates one recognized marker block inside a candidate file's
-// own bytes: [Start:End) is the span itself — from the first byte of the
-// begin-marker line through the last byte of the end-marker text, excluding
-// its own line terminator — and BeginLine is the begin marker's 1-based
-// line number, the position a refusal citing this span reports.
+// SnippetSpan locates one recognized marker block inside a candidate
+// file's bytes: [Start:End) runs from the first byte of the begin-marker
+// line through the last byte of the end-marker text, excluding its line
+// terminator. BeginLine is the begin marker's 1-based line number.
 type SnippetSpan struct {
 	Start, End int
 	BeginLine  int
 }
 
-// MarkerProblem is ScanSnippetMarkers' own refusal shape: Line is the
-// 1-based line a caller-built refusal should cite, 0 for a defect (CRLF)
-// that names no line — never produced by ScanSnippetMarkers itself, which
-// reports only marker-ordering defects. Problem and Fix are that refusal's
-// own copy.
+// MarkerProblem is ScanSnippetMarkers' refusal shape: Line is the 1-based
+// line a caller-built refusal should cite, 0 for a defect naming no line.
+// Problem and Fix are that refusal's copy.
 type MarkerProblem struct {
 	Line    int
 	Problem string
 	Fix     string
 }
 
-// ScanSnippetMarkers walks body's own lines looking for SnippetBegin and
-// SnippetEnd marker lines — a whole line exactly equal to the marker — and
-// reports exactly one of: a nil span and nil problem when body carries no
-// marker at all; the one valid block's own SnippetSpan; or a MarkerProblem
-// for the first marker defect it finds, in file order — a second begin
-// marker (whether or not the first block was ever closed), a lone begin (no
-// matching end before EOF), a lone end (no begin ever preceded it), or an
-// end before any begin.
-//
-// CRLF line endings are not checked here: a CRLF file's own lines carry a
-// trailing "\r" the LF-based marker constants can never exactly match, so
-// this function reports it the same as body carrying no marker at all — a
-// caller checks CRLF separately, scoped to the one candidate it is actually
-// about to read or write.
+// ScanSnippetMarkers walks body's lines looking for SnippetBegin and
+// SnippetEnd marker lines and reports exactly one of: nil, nil when body
+// carries no marker at all; the one valid block's SnippetSpan; or a
+// MarkerProblem for the first marker-ordering defect found in file order
+// (a second begin, a lone begin, a lone end, or an end before any begin).
+// CRLF endings are not checked here — a CRLF line never exactly matches
+// the LF-based marker constants, so it is reported as no marker at all.
 func ScanSnippetMarkers(body []byte) (*SnippetSpan, *MarkerProblem) {
 	var (
 		beginLine, beginOffset int

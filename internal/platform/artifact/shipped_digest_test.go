@@ -11,14 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_render_matches_the_digest_every_install_already_carries pins each
-// fixed render to the sha256 of the bytes brief has already installed into
-// repositories. Recognize classifies an installed file by exact digest, so
-// a render whose bytes drift — a line-ending change, a trailing newline, a
-// reworded sentence — reclassifies every existing install as "edited
-// locally" and stops init and uninstall from managing it. A deliberate
-// change must move the old digest into that Kind's older list, not edit
-// this table.
+// A render whose bytes drift reclassifies every existing install as
+// "edited locally". A deliberate change must move the old digest into
+// that Kind's older list, not edit this table.
 func Test_render_matches_the_digest_every_install_already_carries(t *testing.T) {
 	tests := []struct {
 		kind artifact.Kind
@@ -43,11 +38,8 @@ func Test_render_matches_the_digest_every_install_already_carries(t *testing.T) 
 	}
 }
 
-// Test_an_earlier_release_render_is_recognized_as_older pins the earlier
-// planner and implementer renders — the bytes installs made before those
-// agents preloaded brief-workflow — to their shipped digests, and proves
-// Recognize still reports them older rather than edited, so init upgrades
-// them in place.
+// Pins the earlier planner and implementer renders to their shipped
+// digests, so init upgrades an old install in place rather than refusing it.
 func Test_an_earlier_release_render_is_recognized_as_older(t *testing.T) {
 	tests := []struct {
 		kind artifact.Kind

@@ -25,12 +25,9 @@ var ErrMissingStateHeading = errors.New("state is missing a required section")
 var ErrOpenChecklistItem = errors.New("checklist item is not ticked")
 
 // Violation is one fault a predicate in this package found in a body: the
-// 1-based line within that body it concerns (0 when the fault names the
-// whole body rather than one line in it), what is wrong, the one-line
-// remedy, and the sentinel Err wraps for errors.Is. Violation carries no
-// path: the caller — scaffold.Finish or assemble.Check — knows the file, or
-// the placeholder source, the body came from, and attaches it when
-// rendering.
+// 1-based line it concerns (0 for a whole-body fault), what is wrong, the
+// one-line remedy, and the sentinel Err wraps for errors.Is. It carries no
+// path — the caller attaches the file it came from.
 type Violation struct {
 	Line    int
 	Problem string
@@ -58,7 +55,7 @@ func OverCap(body []byte, label string, limit int) *Violation {
 }
 
 // UnterminatedFence reports a Violation when body opens a fenced code block
-// it never closes, naming label in the returned copy and the fence's own
+// it never closes, naming label in the returned copy and the fence's
 // opening line as Violation.Line.
 func UnterminatedFence(body []byte, label string) *Violation {
 	line, delim, unterminated := markdown.UnterminatedFence(string(body))

@@ -1,13 +1,12 @@
 package artifact
 
 // Every agents/<role>.md file is thin — its body names only the brief
-// invocations its own role runs, never a review policy or persona (R7). No
+// invocations its own role runs, never a review policy or persona. No
 // "model" key is ever written, so a plugin agent always inherits the
-// session's own model. The planner and implementer preload
-// WorkflowSkillName through frontmatter "skills:" (Rule 2); the reviewer
-// does not (R15).
+// session's model. The planner and implementer preload WorkflowSkillName
+// through frontmatter "skills:" (Rule 2); the reviewer does not.
 
-// WorkflowSkillName is the brief-workflow skill's own bare name, the value
+// WorkflowSkillName is the brief-workflow skill's bare name, the value
 // AgentPlanner and AgentImplementer list in frontmatter "skills:" (Rule 2)
 // so Claude Code preloads it without either agent naming its file path.
 const WorkflowSkillName = "brief-workflow"
@@ -27,9 +26,8 @@ func AgentImplementer() []byte {
 }
 
 // AgentReviewer renders "agents/reviewer.md": the "reviewer" role with
-// read-only tools and no "skills" key — R15 limits the reviewer to
-// read-only "brief start" and "brief check", and the brief-workflow skill
-// teaches and pre-approves "finish", which the reviewer never runs.
+// read-only tools and no "skills" key — limited to read-only "brief start"
+// and "brief check"; the reviewer never runs "finish".
 func AgentReviewer() []byte {
 	return mustReadFile("agents/reviewer.md")
 }

@@ -146,9 +146,6 @@ func Test_Section_returns_empty_string_for_an_empty_section(t *testing.T) {
 	assert.Empty(t, got)
 }
 
-// Test_Section_returns_its_body_when_it_is_the_last_section_in_a_file
-// pins Section against a body with no terminating heading at all — the
-// section runs to end of file.
 func Test_Section_returns_its_body_when_it_is_the_last_section_in_a_file(t *testing.T) {
 	body := "## Handoff\n\nsome content\n"
 
@@ -158,9 +155,6 @@ func Test_Section_returns_its_body_when_it_is_the_last_section_in_a_file(t *test
 	assert.Equal(t, "some content", got)
 }
 
-// Test_Section_does_not_treat_a_fenced_heading_line_as_the_anchor pins the
-// fence-aware anchor search: a heading-shaped line inside a fenced code
-// block, before the real heading, is never mistaken for the anchor.
 func Test_Section_does_not_treat_a_fenced_heading_line_as_the_anchor(t *testing.T) {
 	body := "```\n## Scenario\n```\n\n## Scenario\n\nreal body\n"
 
@@ -170,11 +164,6 @@ func Test_Section_does_not_treat_a_fenced_heading_line_as_the_anchor(t *testing.
 	assert.Equal(t, "real body", got)
 }
 
-// Test_Section_a_backtick_fence_does_not_close_an_open_tilde_fence
-// reproduces the reviewer's finding directly: a boolean inFence toggle
-// closes a ~~~ block on any ``` run, so the "## Not a heading" line inside
-// it is read as the real terminating heading and the section is truncated
-// before "## Next".
 func Test_Section_a_backtick_fence_does_not_close_an_open_tilde_fence(t *testing.T) {
 	body := "## Handoff\n\nTraps:\n\n~~~\n```\n## Not a heading\n~~~\n\n## Next\n\nafter\n"
 
@@ -184,11 +173,6 @@ func Test_Section_a_backtick_fence_does_not_close_an_open_tilde_fence(t *testing
 	assert.Equal(t, "Traps:\n\n~~~\n```\n## Not a heading\n~~~", got)
 }
 
-// Test_Section_a_shorter_fence_run_does_not_close_a_longer_opening_fence
-// mirrors SCENARIO-06's original spliceHandoff decoy: a four-backtick
-// fence containing a three-backtick line must stay open across the
-// shorter run, per CommonMark's rule that only a run at least as long as
-// the opener, of the same character, closes a fence.
 func Test_Section_a_shorter_fence_run_does_not_close_a_longer_opening_fence(t *testing.T) {
 	body := "## Handoff\n\n````\n```\nstill fenced\n````\n\n## Next\n\nafter\n"
 
@@ -198,11 +182,6 @@ func Test_Section_a_shorter_fence_run_does_not_close_a_longer_opening_fence(t *t
 	assert.Equal(t, "````\n```\nstill fenced\n````", got)
 }
 
-// Test_Section_a_closing_candidate_with_an_info_string_does_not_close_the_fence
-// pins CommonMark §4.5: only an opening fence may carry an info string, so
-// a line that looks like a closer but carries one — "```python" inside a
-// block opened with "```" — is not a valid close and stays inside the
-// fenced block as ordinary content.
 func Test_Section_a_closing_candidate_with_an_info_string_does_not_close_the_fence(t *testing.T) {
 	body := "## Handoff\n\n```\n## Not a heading\n```python\nstill fenced\n```\n\n## Next\n\nafter\n"
 
@@ -212,11 +191,6 @@ func Test_Section_a_closing_candidate_with_an_info_string_does_not_close_the_fen
 	assert.Equal(t, "```\n## Not a heading\n```python\nstill fenced\n```", got)
 }
 
-// Test_Section_recognizes_a_fence_delimiter_indented_up_to_three_spaces
-// reproduces the reviewer's second defect: fenceRe anchored at column 0
-// treats an indented fence as ordinary content, so the "## not a heading"
-// line inside it — which headingLevelOf already tolerates up to three
-// leading spaces on — is read as the terminating heading.
 func Test_Section_recognizes_a_fence_delimiter_indented_up_to_three_spaces(t *testing.T) {
 	body := "## Scenario\n\n  ```\n  ## not a heading\n  ```\n\n## Implementation Plan\n\nafter\n"
 
@@ -226,10 +200,6 @@ func Test_Section_recognizes_a_fence_delimiter_indented_up_to_three_spaces(t *te
 	assert.Equal(t, "  ```\n  ## not a heading\n  ```", got)
 }
 
-// Test_Section_finds_a_heading_line_that_ends_in_a_carriage_return
-// reproduces the CRLF finding: strings.Split(body, "\n") on a CRLF file
-// leaves a trailing "\r" on every line, and findHeading's equality check
-// right-trimmed only " \t" so it never matched the configured heading.
 func Test_Section_finds_a_heading_line_that_ends_in_a_carriage_return(t *testing.T) {
 	body := "## Scenario\r\n\r\nfirst\r\n\r\n## Implementation Plan\r\n"
 
@@ -239,9 +209,6 @@ func Test_Section_finds_a_heading_line_that_ends_in_a_carriage_return(t *testing
 	assert.Contains(t, got, "first")
 }
 
-// Test_Section_returns_empty_string_when_the_anchor_has_no_trailing_newline
-// pins the last-line-with-no-newline edge case: the anchor is the last
-// line in body and carries no trailing newline at all.
 func Test_Section_returns_empty_string_when_the_anchor_has_no_trailing_newline(t *testing.T) {
 	body := "## Handoff"
 
@@ -251,10 +218,6 @@ func Test_Section_returns_empty_string_when_the_anchor_has_no_trailing_newline(t
 	assert.Empty(t, got)
 }
 
-// Test_Section_ends_at_a_terminating_heading_indented_exactly_three_spaces
-// pins headingLevelOf's exact boundary: CommonMark tolerates up to three
-// leading spaces before an ATX heading, so a comparison of "> 3" — never
-// ">= 3" — is what keeps this indentation a heading.
 func Test_Section_ends_at_a_terminating_heading_indented_exactly_three_spaces(t *testing.T) {
 	body := "## Scenario\n\nfirst\n\n   ## Implementation Plan\n\nsecond\n"
 
@@ -264,13 +227,6 @@ func Test_Section_ends_at_a_terminating_heading_indented_exactly_three_spaces(t 
 	assert.Equal(t, "first", got)
 }
 
-// Test_Section_recognizes_a_fence_delimiter_indented_exactly_three_spaces
-// pins fenceDelim's own "> 3" boundary: a fence delimiter opened at three
-// leading spaces still opens the fence, so the zero-indent "## not a
-// heading" line inside it is never read as the terminator. The decoy
-// heading is deliberately at zero indent, not three, so this test can only
-// pass by the fence itself opening — a heading-boundary mutation on the
-// same line could otherwise mask a fence-boundary regression here.
 func Test_Section_recognizes_a_fence_delimiter_indented_exactly_three_spaces(t *testing.T) {
 	body := "## Scenario\n\n   ```\n## not a heading\n   ```\n\n## Implementation Plan\n\nafter\n"
 
@@ -280,10 +236,6 @@ func Test_Section_recognizes_a_fence_delimiter_indented_exactly_three_spaces(t *
 	assert.Equal(t, "   ```\n## not a heading\n   ```", got)
 }
 
-// Test_Section_does_not_treat_a_fence_delimiter_indented_four_spaces_as_a_fence
-// is the previous test's negative half: fenceDelim rejects a delimiter at
-// four leading spaces, so it never opens a fence, leaving the real,
-// zero-indent heading after it to terminate the section as usual.
 func Test_Section_does_not_treat_a_fence_delimiter_indented_four_spaces_as_a_fence(t *testing.T) {
 	body := "## Scenario\n\nfirst\n\n    ```\n\n## Implementation Plan\n\nafter\n"
 
@@ -293,13 +245,6 @@ func Test_Section_does_not_treat_a_fence_delimiter_indented_four_spaces_as_a_fen
 	assert.Equal(t, "first\n\n    ```", got)
 }
 
-// Test_Section_uses_the_first_occurrence_when_a_heading_appears_twice pins
-// findHeading's documented contract on a body with two identical headings:
-// the first occurrence is the anchor and the second is read as its
-// terminator, with no duplicate-heading error — a hand-edited STATE.md
-// with two "## Traps" sections silently loses the second under exactly
-// this rule, so a future change to that policy must turn this test red
-// rather than pass unnoticed.
 func Test_Section_uses_the_first_occurrence_when_a_heading_appears_twice(t *testing.T) {
 	body := "## Traps\n\nfirst copy\n\n## Traps\n\nsecond copy\n"
 
@@ -325,9 +270,6 @@ func Test_UnterminatedFence_returns_false_when_body_has_no_fence_at_all(t *testi
 	assert.False(t, ok)
 }
 
-// Test_UnterminatedFence_reports_the_line_and_delimiter_of_an_open_fence
-// reproduces the reviewer's odd-fence-count repro directly: a single
-// opening ``` with no matching close.
 func Test_UnterminatedFence_reports_the_line_and_delimiter_of_an_open_fence(t *testing.T) {
 	body := "Repro:\n\n```bash\ngo test ./...\n"
 
@@ -338,10 +280,6 @@ func Test_UnterminatedFence_reports_the_line_and_delimiter_of_an_open_fence(t *t
 	assert.Equal(t, "```", delim)
 }
 
-// Test_UnterminatedFence_treats_a_closing_delimiter_indented_four_spaces_as_unterminated
-// reproduces the reviewer's second repro shape: a closing fence indented
-// four spaces is not a fence delimiter at all per CommonMark's three-space
-// tolerance, so the opening fence is left open to end of file.
 func Test_UnterminatedFence_treats_a_closing_delimiter_indented_four_spaces_as_unterminated(t *testing.T) {
 	body := "```\nbody\n    ```\n"
 

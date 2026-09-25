@@ -11,12 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_parse_decodes_frontmatter_from_bytes pins Parse's own contract
-// (S07): the bytes-level twin of Load, for a caller (setup's own bound-agent
-// edit path) that already holds an agent file's own content in memory
-// rather than a path — it decodes the same Frontmatter, loose Skills
-// included, that LoadFS returns for identical bytes, and errors the same
-// way LoadFS does on a missing closing delimiter.
 func Test_parse_decodes_frontmatter_from_bytes(t *testing.T) {
 	body := "---\nname: planner\nskills: [\"brief-workflow\"]\n---\n\nbody\n"
 	fsys := fstest.MapFS{"agent.md": &fstest.MapFile{Data: []byte(body)}}
@@ -40,9 +34,6 @@ func Test_parse_decodes_frontmatter_from_bytes(t *testing.T) {
 	})
 }
 
-// Test_load_decodes_one_agent_files_frontmatter pins Load's own contract
-// (S05): the single-file entry point a "brief:*" role binding's own
-// resolved file uses, sharing findIn's decode.
 func Test_load_decodes_one_agent_files_frontmatter(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -100,12 +91,8 @@ func Test_load_decodes_one_agent_files_frontmatter(t *testing.T) {
 	})
 }
 
-// Test_resolve_binding_wires_dir_tree_over_root_and_home is ResolveBinding's
-// own OS-adapter smoke test: it is DirTree(root) and DirTree(home) fed
-// into ResolveBindingIn, so Binding.Path is the real absolute path found on
-// disk, one Lstat can open. ResolveBindingIn's own decision points —
-// override-over-plugin precedence, IsRegular, bare-name resolution — are
-// pinned in memory in binding_test.go.
+// Uses real directories, not the in-memory Tree: proves Binding.Path is a
+// real path Lstat can open.
 func Test_resolve_binding_wires_dir_tree_over_root_and_home(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()

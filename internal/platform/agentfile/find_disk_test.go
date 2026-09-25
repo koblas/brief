@@ -10,11 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests run Find against real directories because what they pin is
-// the OS adapter itself — DirTree's absolute Path mapping, the empty-home
-// rule, and how os.DirFS treats symlinks. An in-memory FS proves its own
-// symlink semantics, not the kernel's; FindIn's matching rules are pinned
-// in memory in find_test.go.
+// These tests run Find against real directories: they pin the OS adapter
+// itself (absolute paths, symlinks), not FindIn's matching rules.
 
 // writeAgentFile writes body at path, creating every parent directory it
 // needs.
@@ -51,10 +48,8 @@ func Test_find_resolves_a_relative_root_to_an_absolute_path(t *testing.T) {
 	assert.Equal(t, filepath.Join(cwd, "repo", ".claude", "agents", "developer.md"), defs[0].Path)
 }
 
-// Test_find_with_an_empty_home_searches_no_user_scope seeds the process's
-// own working directory with a match, since an empty home joined unguarded
-// resolves against it — so an empty result proves the empty-home rule, not
-// merely an empty tree.
+// Seeds the working directory with a match: an unguarded empty home would
+// resolve against it, so an empty result proves the empty-home rule.
 func Test_find_with_an_empty_home_searches_no_user_scope(t *testing.T) {
 	cwd := t.TempDir()
 	t.Chdir(cwd)

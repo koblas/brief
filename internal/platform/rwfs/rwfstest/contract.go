@@ -12,10 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// assertPathError requires err to be a *fs.PathError with a non-empty Op,
-// naming name — the wrapping every rwfs.FS write method promises — unless
-// o carries PathIsAbsolute, in which case Path is only required to be a
-// non-empty absolute path, per that Option's own doc comment.
+// assertPathError requires err to be a *fs.PathError with a non-empty Op
+// naming name, unless o carries PathIsAbsolute, in which case Path need
+// only be a non-empty absolute path.
 func assertPathError(t *testing.T, o options, err error, name string) {
 	t.Helper()
 
@@ -33,9 +32,7 @@ func assertPathError(t *testing.T, o options, err error, name string) {
 }
 
 // requireENOTDIR requires err to be a *fs.PathError naming name whose chain
-// matches syscall.ENOTDIR — the portable POSIX errno both os.Root.FS() (
-// confirmed on darwin) and rwfs.Mem report when a read reaches through an
-// ancestor that exists but is not a directory.
+// matches syscall.ENOTDIR.
 func requireENOTDIR(t *testing.T, o options, err error, name string) {
 	t.Helper()
 
@@ -45,20 +42,17 @@ func requireENOTDIR(t *testing.T, o options, err error, name string) {
 }
 
 // Contract exercises the rwfs.FS contract against a freshly constructed
-// filesystem from mk, called once per subtest. rwfs.OS and rwfs.Mem run it
-// with no opts and must pass every row unmodified; an adapter that
-// deliberately diverges from part of the contract declares each divergence
-// through opts instead of failing or being silently narrowed.
+// filesystem from mk, called once per subtest. rwfs.OS and rwfs.Mem must
+// pass every row with no opts; an adapter that deliberately diverges from
+// part of the contract declares each divergence through opts.
 func Contract(t *testing.T, mk func(t *testing.T) rwfs.FS, opts ...Option) {
 	t.Helper()
 
 	o := resolve(opts)
 	logExceptions(t, o)
 
-	// atomicfile's fresh-create path lets the process umask mask perm, the
-	// same as os.OpenFile. Pinning the umask keeps the perm assertions
-	// below from depending on the ambient value; nothing in this package
-	// calls t.Parallel, so the pin is not visible to any concurrent test.
+	// Pin the umask so the perm assertions below don't depend on the
+	// ambient value; safe since this package never calls t.Parallel.
 	oldMask := syscall.Umask(0o022)
 	t.Cleanup(func() { syscall.Umask(oldMask) })
 
@@ -132,11 +126,6 @@ func testContractWriteFile(t *testing.T, mk func(t *testing.T) rwfs.FS, o option
 		assert.Equal(t, fs.FileMode(0o400), info.Mode().Perm())
 	})
 
-	// replacing a symlink applies the given perm rather than the symlink's
-	// own — confirmed empirically against os.Root: renaming a fresh regular
-	// file over a symlink's name replaces the link with the new file, so
-	// replaceMode's IsRegular() gate must not treat a symlink as the
-	// "existing" case WriteFile otherwise preserves.
 	t.Run("replace over a symlink applies the given perm and turns it into a regular file", func(t *testing.T) {
 		fsys := mk(t) // pre-seeded with a-symlink -> symlink-target.txt, mode ModeSymlink|0o777
 
@@ -152,14 +141,13 @@ func testContractWriteFile(t *testing.T, mk func(t *testing.T) rwfs.FS, o option
 		require.NoError(t, err)
 		assert.Equal(t, "new contents", string(got))
 
-		// the symlink's own former target is untouched.
+		// the former target is untouched.
 		target, err := fsys.ReadFile("symlink-target.txt")
 		require.NoError(t, err)
 		assert.Equal(t, "target contents", string(target))
 	})
 
-	// confirmed empirically against os.Root: renaming a regular file over an
-	// existing directory (empty or not) fails with EEXIST, not EISDIR.
+	// A file overwritten onto an existing directory fails with EEXIST, not EISDIR.
 	t.Run("WriteFile fails when name already exists as a directory", func(t *testing.T) {
 		fsys := mk(t)
 		require.NoError(t, fsys.MkdirAll("d", 0o755))
@@ -339,8 +327,7 @@ func testContractRemove(t *testing.T, mk func(t *testing.T) rwfs.FS, o options) 
 	})
 }
 
-// testContractRead covers the read side: sorted directory listing including
-// an explicit empty directory, Stat/Lstat agreement on non-symlink entries,
+// testContractRead covers sorted directory listing, Stat/Lstat agreement,
 // and Lstat/ReadLink on a symlink entry.
 func testContractRead(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 	t.Helper()
@@ -422,10 +409,7 @@ func testContractRead(t *testing.T, mk func(t *testing.T) rwfs.FS) {
 }
 
 // testContractReadThroughFileAncestor covers every read method's response
-// to a name that reaches through a proper ancestor already occupied by a
-// regular file — confirmed empirically against os.Root.FS() on darwin to
-// report syscall.ENOTDIR, the same sentinel rwfs.Mem's notDirAncestor
-// already reports for the write side.
+// to a name that reaches through an ancestor that is a regular file.
 func testContractReadThroughFileAncestor(t *testing.T, mk func(t *testing.T) rwfs.FS, o options) {
 	t.Helper()
 
@@ -460,10 +444,7 @@ func testContractReadThroughFileAncestor(t *testing.T, mk func(t *testing.T) rwf
 }
 
 // testContractCreateExclusive covers CreateExclusive: fresh create, refusing
-// an existing entry of any type, and the missing-parent case. Confirmed
-// empirically against os.Root.OpenFile with O_EXCL: an existing file, an
-// existing directory, and a missing parent each report the same sentinel
-// this pins.
+// an existing entry of any type, and the missing-parent case.
 func testContractCreateExclusive(t *testing.T, mk func(t *testing.T) rwfs.FS, o options) {
 	t.Helper()
 
@@ -519,9 +500,7 @@ func testContractCreateExclusive(t *testing.T, mk func(t *testing.T) rwfs.FS, o 
 }
 
 // testContractInvalidNames covers every write method's response to a name
-// fs.ValidPath rejects. SkipInvalidNames skips the whole row; NoOpenRoot
-// alone, without SkipInvalidNames, skips only the OpenRoot assertion inside
-// it, so the other five write methods are still checked.
+// fs.ValidPath rejects, honoring SkipInvalidNames and NoOpenRoot.
 func testContractInvalidNames(t *testing.T, mk func(t *testing.T) rwfs.FS, o options) {
 	t.Helper()
 
@@ -578,11 +557,9 @@ func testContractOpenRootSection(t *testing.T, mk func(t *testing.T) rwfs.FS, o 
 	testContractOpenRoot(t, mk, o)
 }
 
-// testContractOpenRoot covers OpenRoot: the missing, file-in-place and
-// symlink-to-non-directory error cases; a write through a view landing in
-// the parent's own tree and vice versa; nesting a view inside a view;
-// OpenRoot("."); following a symlink to a directory; and that a view's read
-// methods use names relative to the view rather than the parent.
+// testContractOpenRoot covers OpenRoot: error cases, writes shared between
+// a view and its parent, nested views, and that a view's read methods use
+// names relative to the view.
 func testContractOpenRoot(t *testing.T, mk func(t *testing.T) rwfs.FS, o options) {
 	t.Helper()
 

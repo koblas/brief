@@ -7,17 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Test_FirstUnchecked_reports_nothing collects every shape that must NOT
-// yield an open item. They are gathered because they share one assertion —
-// found is false — and differ only in the reason, so a table names the
-// seven reasons in one place instead of repeating the same three lines
-// seven times.
-//
-// Each case must fail for its own reason, not by accident of another: every
-// body here carries the configured heading (except the absent-heading case,
-// whose whole point is that it does not), so a bug that stopped finding the
-// section would redden the positive tests below rather than silently making
-// this whole table pass.
 func Test_FirstUnchecked_reports_nothing(t *testing.T) {
 	cases := []struct {
 		name string
@@ -28,11 +17,6 @@ func Test_FirstUnchecked_reports_nothing(t *testing.T) {
 			body: "## Implementation Plan\n\n- [x] one\n- [x] two\n",
 		},
 		{
-			// Replaces an earlier "the section holds no items" case whose
-			// body carried no checklist syntax at all, so no mutation could
-			// flip it — decorative by the rule this table is written under.
-			// An empty bracket pair is the grammar point the package doc
-			// claims is prose and nothing else covered.
 			name: "an empty bracket pair is prose, not an item",
 			body: "## Implementation Plan\n\n- [] no space in the marker\n",
 		},
@@ -106,11 +90,6 @@ func Test_trims_the_carriage_return_from_an_item_in_a_CRLF_body(t *testing.T) {
 	assert.Equal(t, "two", text)
 }
 
-// Test_trims_tabs_around_an_items_text pins what the item regexp's own
-// horizontal-whitespace class has to do and nothing else did: the text is
-// returned without the tabs that separate it from the marker or trail it.
-// Before the marker and the text came from one match, a hand-rolled split
-// trimmed " \t" by hand, and nothing covered the tab half of it.
 func Test_trims_tabs_around_an_items_text(t *testing.T) {
 	body := "## Implementation Plan\n\n- [ ]\ttabbed\t\n"
 
@@ -120,16 +99,6 @@ func Test_trims_tabs_around_an_items_text(t *testing.T) {
 	assert.Equal(t, "tabbed", text)
 }
 
-// Test_trims_trailing_whitespace_before_a_carriage_return is the case the
-// tab and CRLF tests each half-cover and neither pins: horizontal
-// whitespace AND a carriage return, together, at the end of one line.
-//
-// It is what fixes the order of the item regexp's two tail elements.
-// Trimming the whitespace before consuming the "\r" yields "two"; consuming
-// the "\r" first leaves the trim class nothing to eat at the end of the
-// text, and the lazy group swallows both, yielding "two \r". Every other
-// test here is blind to that swap, because each supplies only one of the
-// two characters.
 func Test_trims_trailing_whitespace_before_a_carriage_return(t *testing.T) {
 	body := "## Implementation Plan\r\n\r\n- [ ] two \r\n"
 

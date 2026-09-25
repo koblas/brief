@@ -12,166 +12,141 @@ import (
 type Kind string
 
 const (
-	// KindConfig is ConfigFile's own Kind: the digest list Recognize checks
-	// when kind is KindConfig holds every release's own ConfigFile digest.
+	// KindConfig is ConfigFile's Kind.
 	KindConfig Kind = "config"
-	// KindPluginManifest is PluginManifest's own Kind.
+	// KindPluginManifest is PluginManifest's Kind.
 	KindPluginManifest Kind = "plugin-manifest"
-	// KindSkillStart is SkillStart's own Kind.
+	// KindSkillStart is SkillStart's Kind.
 	KindSkillStart Kind = "skill-start"
-	// KindSkillFinish is SkillFinish's own Kind.
+	// KindSkillFinish is SkillFinish's Kind.
 	KindSkillFinish Kind = "skill-finish"
-	// KindClaudeHooks is ClaudeHooks's own Kind.
+	// KindClaudeHooks is ClaudeHooks's Kind.
 	KindClaudeHooks Kind = "claude-hooks"
-	// KindAgentPlanner is AgentPlanner's own Kind.
+	// KindAgentPlanner is AgentPlanner's Kind.
 	KindAgentPlanner Kind = "agent-planner"
-	// KindAgentImplementer is AgentImplementer's own Kind.
+	// KindAgentImplementer is AgentImplementer's Kind.
 	KindAgentImplementer Kind = "agent-implementer"
-	// KindAgentReviewer is AgentReviewer's own Kind.
+	// KindAgentReviewer is AgentReviewer's Kind.
 	KindAgentReviewer Kind = "agent-reviewer"
-	// KindSkillWorkflow is SkillWorkflow's own Kind.
+	// KindSkillWorkflow is SkillWorkflow's Kind.
 	KindSkillWorkflow Kind = "skill-workflow"
-	// KindSnippet is SnippetBlock's own Kind. Unlike every other Kind, it is
-	// never passed to Render or Recognize: SnippetBlock takes a feature
-	// directory Render's own signature carries no room for, and Recognize's
-	// single compiled-in digest list has no way to check "current for which
-	// directory". SnippetBlock and RecognizeSnippet are the snippet's own
-	// render and recognize functions instead — internal/setup calls them
-	// directly, never Render(KindSnippet) or Recognize(KindSnippet, ...).
+	// KindSnippet is SnippetBlock's Kind. Unlike every other Kind it is
+	// never passed to Render or Recognize, since SnippetBlock takes a
+	// feature directory and Recognize's digest list has no per-directory
+	// notion of current; SnippetBlock and RecognizeSnippet stand in for it.
 	KindSnippet Kind = "snippet"
 )
 
 // Origin classifies an existing file's bytes against a Kind's compiled-in
-// digest lists: OriginCurrent for a byte-for-byte match against today's own
-// render (or, for KindConfig, any current render this package ships),
-// OriginOlder for a match against an earlier release's own render, and
-// OriginEdited for anything else.
+// digest lists: OriginCurrent for a match against today's render (or, for
+// KindConfig, any current render this package ships), OriginOlder for a
+// match against an earlier release's render, OriginEdited otherwise.
 type Origin string
 
 const (
-	// OriginCurrent marks bytes equal to one of this binary's own current
+	// OriginCurrent marks bytes equal to one of this binary's current
 	// renders for the given Kind.
 	OriginCurrent Origin = "current"
-	// OriginOlder marks bytes equal to an earlier release's own render for
-	// the given Kind, never today's.
+	// OriginOlder marks bytes equal to an earlier release's render for the
+	// given Kind, never today's.
 	OriginOlder Origin = "older"
-	// OriginEdited marks bytes that match no compiled-in digest, current or
-	// older, for the given Kind.
+	// OriginEdited marks bytes matching no compiled-in digest for the given Kind.
 	OriginEdited Origin = "edited"
 )
 
-// configDigests holds the sha256 digest of this release's own ConfigFile
-// render, plus ConfigFileWithRoles' own — a second render body Recognize
-// treats as OriginCurrent for KindConfig, written only by "init
-// --with-agents" when it creates a fresh config, so both an unbound and a
-// role-bound config a caller ships are recognized rather than reported
-// "edited locally". Render(KindConfig) still returns ConfigFile alone —
-// this list, not Render, is what makes ConfigFileWithRoles recognized.
+// configDigests holds this release's ConfigFile and ConfigFileWithRoles
+// digests, so both an unbound and a role-bound config are OriginCurrent
+// for KindConfig; Render(KindConfig) still returns ConfigFile alone.
 var configDigests = [][32]byte{
 	sha256.Sum256(ConfigFile()),
 	sha256.Sum256(ConfigFileWithRoles()),
 }
 
-// olderConfigDigests holds the sha256 digest of every earlier release's own
-// ConfigFile or ConfigFileWithRoles render, empty until a release changes
-// either one.
+// olderConfigDigests holds each earlier release's ConfigFile or
+// ConfigFileWithRoles digest; empty until a release changes either.
 var olderConfigDigests = [][32]byte{}
 
-// pluginManifestDigests holds the sha256 digest of this release's own
-// PluginManifest render.
+// pluginManifestDigests holds this release's PluginManifest digest.
 var pluginManifestDigests = [][32]byte{
 	sha256.Sum256(PluginManifest()),
 }
 
-// olderPluginManifestDigests holds the sha256 digest of every earlier
-// release's own PluginManifest render, empty until a release changes it.
+// olderPluginManifestDigests holds each earlier release's PluginManifest
+// digest; empty until a release changes it.
 var olderPluginManifestDigests = [][32]byte{}
 
-// skillStartDigests holds the sha256 digest of this release's own
-// SkillStart render.
+// skillStartDigests holds this release's SkillStart digest.
 var skillStartDigests = [][32]byte{
 	sha256.Sum256(SkillStart()),
 }
 
-// olderSkillStartDigests holds the sha256 digest of every earlier release's
-// own SkillStart render, empty until a release changes it.
+// olderSkillStartDigests holds each earlier release's SkillStart digest;
+// empty until a release changes it.
 var olderSkillStartDigests = [][32]byte{}
 
-// skillFinishDigests holds the sha256 digest of this release's own
-// SkillFinish render.
+// skillFinishDigests holds this release's SkillFinish digest.
 var skillFinishDigests = [][32]byte{
 	sha256.Sum256(SkillFinish()),
 }
 
-// olderSkillFinishDigests holds the sha256 digest of every earlier
-// release's own SkillFinish render, empty until a release changes it.
+// olderSkillFinishDigests holds each earlier release's SkillFinish digest;
+// empty until a release changes it.
 var olderSkillFinishDigests = [][32]byte{}
 
-// claudeHooksDigests holds the sha256 digest of this release's own
-// ClaudeHooks render.
+// claudeHooksDigests holds this release's ClaudeHooks digest.
 var claudeHooksDigests = [][32]byte{
 	sha256.Sum256(ClaudeHooks()),
 }
 
-// olderClaudeHooksDigests holds the sha256 digest of every earlier
-// release's own ClaudeHooks render, empty until a release changes it.
+// olderClaudeHooksDigests holds each earlier release's ClaudeHooks digest;
+// empty until a release changes it.
 var olderClaudeHooksDigests = [][32]byte{}
 
-// agentPlannerDigests holds the sha256 digest of this release's own
-// AgentPlanner render.
+// agentPlannerDigests holds this release's AgentPlanner digest.
 var agentPlannerDigests = [][32]byte{
 	sha256.Sum256(AgentPlanner()),
 }
 
-// olderAgentPlannerDigests holds the sha256 digest of every earlier
-// release's own AgentPlanner render, one fixed file under files/older per
-// release — never a live render, which would duplicate agentPlannerDigests
-// and make the OriginOlder arm unreachable.
+// olderAgentPlannerDigests holds each earlier release's AgentPlanner
+// digest, read from a fixed file under files/older — never a live render,
+// which would make the OriginOlder arm unreachable.
 var olderAgentPlannerDigests = [][32]byte{
 	sha256.Sum256(mustReadFile("older/agents/planner.md")),
 }
 
-// agentImplementerDigests holds the sha256 digest of this release's own
-// AgentImplementer render.
+// agentImplementerDigests holds this release's AgentImplementer digest.
 var agentImplementerDigests = [][32]byte{
 	sha256.Sum256(AgentImplementer()),
 }
 
-// olderAgentImplementerDigests holds the sha256 digest of every earlier
-// release's own AgentImplementer render, one fixed file under files/older
-// per release — never a live render, which would duplicate
-// agentImplementerDigests and make the OriginOlder arm unreachable.
+// olderAgentImplementerDigests holds each earlier release's
+// AgentImplementer digest, read from a fixed file under files/older.
 var olderAgentImplementerDigests = [][32]byte{
 	sha256.Sum256(mustReadFile("older/agents/implementer.md")),
 }
 
-// agentReviewerDigests holds the sha256 digest of this release's own
-// AgentReviewer render.
+// agentReviewerDigests holds this release's AgentReviewer digest.
 var agentReviewerDigests = [][32]byte{
 	sha256.Sum256(AgentReviewer()),
 }
 
-// olderAgentReviewerDigests holds the sha256 digest of every earlier
-// release's own AgentReviewer render, empty until a release changes it.
+// olderAgentReviewerDigests holds each earlier release's AgentReviewer
+// digest; empty until a release changes it.
 var olderAgentReviewerDigests = [][32]byte{}
 
-// skillWorkflowDigests holds the sha256 digest of this release's own
-// SkillWorkflow render.
+// skillWorkflowDigests holds this release's SkillWorkflow digest.
 var skillWorkflowDigests = [][32]byte{
 	sha256.Sum256(SkillWorkflow()),
 }
 
-// olderSkillWorkflowDigests holds the sha256 digest of every earlier
-// release's own SkillWorkflow render, empty until a release changes it.
+// olderSkillWorkflowDigests holds each earlier release's SkillWorkflow
+// digest; empty until a release changes it.
 var olderSkillWorkflowDigests = [][32]byte{}
 
-// Recognize reports body's Origin against kind's own compiled-in digest
-// lists: OriginCurrent when body's sha256 digest matches one of this
-// binary's own current renders for kind, OriginOlder when it matches only
-// an earlier release's own render, OriginEdited otherwise. An unrecognized
-// Kind reports OriginEdited, since there are no digest lists to match
-// against — including a Kind's bytes checked against a different Kind's own
-// lists, which never match.
+// Recognize reports body's Origin against kind's compiled-in digest lists:
+// OriginCurrent for a match against a current render, OriginOlder for a
+// match against only an earlier release's render, OriginEdited otherwise.
+// An unrecognized Kind always reports OriginEdited.
 func Recognize(kind Kind, body []byte) Origin {
 	current, older := digestsFor(kind)
 
@@ -179,9 +154,7 @@ func Recognize(kind Kind, body []byte) Origin {
 }
 
 // classify reports body's Origin against a current and an older digest
-// list: OriginCurrent when body's sha256 digest is in current (checked
-// first, so a digest present in both lists is always current), OriginOlder
-// when it is only in older, OriginEdited otherwise.
+// list, checking current first so a digest present in both is current.
 func classify(current, older [][32]byte, body []byte) Origin {
 	sum := sha256.Sum256(body)
 
@@ -196,8 +169,8 @@ func classify(current, older [][32]byte, body []byte) Origin {
 	return OriginEdited
 }
 
-// digestsFor returns kind's own compiled-in current and older digest
-// lists, both nil for a Kind this package does not render.
+// digestsFor returns kind's compiled-in current and older digest lists,
+// both nil for a Kind this package does not render.
 func digestsFor(kind Kind) ([][32]byte, [][32]byte) {
 	switch kind {
 	case KindConfig:

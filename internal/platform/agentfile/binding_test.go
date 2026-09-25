@@ -10,19 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// briefFile is a minimal frontmatter body ResolveBindingIn's own
-// "brief:<agent>" case resolves against — the agent name plays no part in
-// its own match, unlike FindIn's own "name:" match, so its value is
-// unconstrained here.
+// briefFile is a minimal frontmatter body for the "brief:<agent>" case.
 const briefFile = "---\nname: implementer\n---\n\nbody\n"
 
-// Test_resolve_binding_in_classifies_by_prefix pins ResolveBindingIn's own
-// shape/state split (S06), consistent with FindIn: a "" value is unbound;
-// a "brief:x" value resolves through the project's own override before its
-// own plugin path, and is unresolved when neither is a regular file, or
-// project itself carries no FS; any other "<plugin>:x" value is
-// unverified, never touching the filesystem; a bare name resolves through
-// FindIn, carrying its Path and Defs.
 func Test_resolve_binding_in_classifies_by_prefix(t *testing.T) {
 	t.Run("empty value is unbound", func(t *testing.T) {
 		project := memTree(projectDir, map[string]string{})
@@ -124,15 +114,6 @@ func Test_resolve_binding_in_classifies_by_prefix(t *testing.T) {
 		assert.Empty(t, b.Defs)
 	})
 
-	// This subtest re-confirms, at ResolveBindingIn's own level, the
-	// project-over-user precedence FindIn already owns
-	// (find_test.go's own Test_find_in_prefers_project_definitions_over_user_level):
-	// a bare name found in both trees resolves to the project one.
-	// Mutation-verified together with that test: swapping FindIn's own
-	// search order (project first, then user) reddens both this subtest
-	// and the FindIn one on the same change, since ResolveBindingIn holds
-	// no separate precedence logic of its own — it delegates to FindIn
-	// directly.
 	t.Run("bare name project shadows a same-named user definition", func(t *testing.T) {
 		project := memTree(projectDir, map[string]string{".claude/agents/developer.md": developerAgent})
 		user := memTree(userDir, map[string]string{".claude/agents/developer.md": developerAgent})
@@ -144,17 +125,6 @@ func Test_resolve_binding_in_classifies_by_prefix(t *testing.T) {
 	})
 }
 
-// Test_resolve_binding_in_refuses_a_traversal_that_escapes_the_agents_directory
-// pins resolveBriefBinding's own doc contract: a "brief:<agent>" value
-// whose cleaned name no longer sits under ".claude/agents" (the override)
-// or host.PluginDir's own "agents" (the plugin path) is never treated as a
-// match, even when a file happens to exist at the escaped location. Two
-// arms, mutated individually: "brief:../../../x" only reaches the plugin
-// guard — path.Join(".claude","agents","../../../x.md") is "../x.md",
-// already refused by fs.ValidPath before the guard runs, so it falls to
-// the plugin case, whose own join lands in-tree at ".claude/x.md"; and
-// "brief:../x" only reaches the override guard, whose join lands at that
-// same ".claude/x.md" directly.
 func Test_resolve_binding_in_refuses_a_traversal_that_escapes_the_agents_directory(t *testing.T) {
 	user := memTree(userDir, map[string]string{})
 
@@ -186,12 +156,6 @@ func Test_resolve_binding_in_refuses_a_traversal_that_escapes_the_agents_directo
 	})
 }
 
-// Test_lacking_skill_returns_each_definition_without_it pins
-// (Binding).LackingSkill's own single decision point (S06): a bare-name
-// binding filters b.Defs to the ones missing the skill; a "brief:*"
-// binding, resolved in memory, decodes its own resolved file through the
-// Tree ResolveBindingIn found it in rather than the filesystem; an
-// unbound, unresolved or unverified binding always returns nil.
 func Test_lacking_skill_returns_each_definition_without_it(t *testing.T) {
 	t.Run("bare name duplicates: only the one lacking the skill is returned", func(t *testing.T) {
 		project := memTree(projectDir, map[string]string{
@@ -219,10 +183,6 @@ func Test_lacking_skill_returns_each_definition_without_it(t *testing.T) {
 		assert.Equal(t, agentfile.ScopeProject, defs[0].Scope)
 	})
 
-	// Control for the case above: the same resolved file, this time
-	// already carrying the skill, must report no shortfall — proving
-	// LackingSkill actually reads the resolved file's own content rather
-	// than reporting "lacking" unconditionally for every BindingBrief.
 	t.Run("brief prefix file already carrying the skill returns nil (control)", func(t *testing.T) {
 		project := memTree(projectDir, map[string]string{
 			".claude/agents/implementer.md": "---\nname: implementer\nskills: [brief-workflow]\n---\n\nbody\n",

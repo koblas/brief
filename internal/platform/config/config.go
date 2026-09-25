@@ -2,17 +2,13 @@ package config
 
 import "errors"
 
-// ErrInvalidConfig is returned when a ".brief.yaml" file cannot be used as
-// configuration: malformed YAML, an unknown key, or a known key whose
-// decoded value fails its own rule (see ValueError). Callers branch on it
-// with errors.Is.
+// ErrInvalidConfig marks a ".brief.yaml" that could not be used as
+// configuration; callers branch on it with errors.Is.
 var ErrInvalidConfig = errors.New("invalid brief config")
 
-// StateHeadings holds the heading text for each of the four sections a
-// feature's state file must carry. The four are named fields rather than a
-// slice or map: a repository may retitle a section through configuration
-// but the schema never drops one. Ordered returns them in the fixed,
-// required order.
+// StateHeadings holds the heading text for each of the four required
+// sections in a feature's state file. Named fields, not a slice or map, so
+// a repository can retitle a section but never drop one.
 type StateHeadings struct {
 	BindingDecisions string `yaml:"binding-decisions"`
 	LeftUnbuilt      string `yaml:"left-unbuilt"`
@@ -27,23 +23,16 @@ func (h StateHeadings) Ordered() []string {
 }
 
 // RoleBindings names the agent bound to each of brief's three positions:
-// the planner, who turns a specification into conforming steps; the
-// implementer, who calls start and closes with finish; and the reviewer,
-// who calls start read-only and check to report on a step's own output. An
-// empty field means that position is unbound.
+// planner, implementer, and reviewer. An empty field means that position is
+// unbound.
 type RoleBindings struct {
 	Planner     string `yaml:"planner"`
 	Implementer string `yaml:"implementer"`
 	Reviewer    string `yaml:"reviewer"`
 }
 
-// Config is brief's resolved configuration: where feature directories live,
-// how step files are named, the specification and state filenames within a
-// feature directory, the heading text for the progress list, the
-// per-step checklist, the suffix a step's handoff file is named with
-// (stepPattern.ID(n) + HandoffFileSuffix, beside the step file — R21), the
-// optional acceptance-criteria section and the state file's four required
-// sections, the caps enforced at the write path, which optional
+// Config is brief's resolved configuration: feature directory layout, file
+// names and headings, the caps enforced at the write path, which optional
 // conventions a repository opts into, and the role bindings. Every field
 // has a shipped default (Default); a repository's ".brief.yaml" overrides
 // only the keys it sets.

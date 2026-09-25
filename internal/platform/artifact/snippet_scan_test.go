@@ -8,8 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_ScanSnippetMarkers_finds_no_span_in_plain_text pins the Zero case:
-// text with no marker line at all reports a nil span and no problem.
 func Test_ScanSnippetMarkers_finds_no_span_in_plain_text(t *testing.T) {
 	span, prob := artifact.ScanSnippetMarkers([]byte("just some prose\nnothing more\n"))
 
@@ -17,10 +15,6 @@ func Test_ScanSnippetMarkers_finds_no_span_in_plain_text(t *testing.T) {
 	assert.Nil(t, prob)
 }
 
-// Test_ScanSnippetMarkers_reports_a_marker_defect_with_its_line pins every
-// named refusal shape and the 1-based line number each reports: a lone
-// begin marker, a lone end marker, an end before any begin, a second begin
-// in one file, and a second begin with no closing end for the first.
 func Test_ScanSnippetMarkers_reports_a_marker_defect_with_its_line(t *testing.T) {
 	begin := artifact.SnippetBegin
 	end := artifact.SnippetEnd
@@ -48,9 +42,6 @@ func Test_ScanSnippetMarkers_reports_a_marker_defect_with_its_line(t *testing.T)
 	}
 }
 
-// Test_ScanSnippetMarkers_finds_the_span_of_one_valid_block pins the
-// happy-path span: begin marker's line through the end marker's own text,
-// excluding its line terminator.
 func Test_ScanSnippetMarkers_finds_the_span_of_one_valid_block(t *testing.T) {
 	block := artifact.SnippetBlock("docs/specifications")
 	body := "before\n\n" + string(block) + "\nafter"
