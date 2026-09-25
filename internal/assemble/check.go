@@ -251,10 +251,7 @@ func unreadableFeatureFinding(featurePath string, err error) Finding {
 // unreadable-directory findings, since those concern the entry that would
 // have named fsys, not fsys itself.
 func (s *Server) CheckFS(fsys FeatureFS, pattern stepfile.Pattern, handoffPattern stepfile.HandoffPattern) []Finding {
-	// Capacity 4 is a rough guess (C1 contributes at most one, C2-C5 at
-	// most one apiece but C2 excludes the rest, so at most three from the
-	// state block), not a hard bound — append still grows it past that for
-	// a feature whose step files contribute more.
+	// Capacity 4 is a typical-case guess, not a bound; append grows past it.
 	findings := make([]Finding, 0, 4)
 
 	findings = append(findings, s.checkSpecFindings(fsys)...)

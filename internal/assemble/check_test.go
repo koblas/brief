@@ -26,7 +26,7 @@ func checkBodyOfLines(n int) []byte {
 }
 
 // checkConformingSpec returns a specification body carrying cfg's
-// configured progress heading and nothing else Check's C1 rule requires.
+// configured progress heading and nothing else Check requires.
 func checkConformingSpec(cfg config.Config) string {
 	return "# demo\n\n" + cfg.ProgressHeading + "\n\ncontent\n"
 }

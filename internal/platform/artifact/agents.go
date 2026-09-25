@@ -4,10 +4,10 @@ package artifact
 // invocations its own role runs, never a review policy or persona. No
 // "model" key is ever written, so a plugin agent always inherits the
 // session's model. The planner and implementer preload WorkflowSkillName
-// through frontmatter "skills:" (Rule 2); the reviewer does not.
+// through frontmatter "skills:"; the reviewer does not.
 
 // WorkflowSkillName is the brief-workflow skill's bare name, the value
-// AgentPlanner and AgentImplementer list in frontmatter "skills:" (Rule 2)
+// AgentPlanner and AgentImplementer list in frontmatter "skills:"
 // so Claude Code preloads it without either agent naming its file path.
 const WorkflowSkillName = "brief-workflow"
 

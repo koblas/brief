@@ -55,14 +55,14 @@ type Binding struct {
 }
 
 // ResolveBinding classifies value (a config.RoleBindings field) against
-// root and, for a bare name, home (Rule 5): ResolveBindingIn over
+// root and, for a bare name, home: ResolveBindingIn over
 // DirTree(root) and DirTree(home).
 func ResolveBinding(root, home, value string) Binding {
 	return ResolveBindingIn(DirTree(root), DirTree(home), value)
 }
 
 // ResolveBindingIn classifies value against project and, for a bare name,
-// user (Rule 5): "" is BindingUnbound. A "brief:<name>" binding resolves
+// user: "" is BindingUnbound. A "brief:<name>" binding resolves
 // against project's ".claude/agents/<name>.md", falling back to
 // ".claude/skills/brief/agents/<name>.md". Any other "<plugin>:<name>" is
 // BindingUnverified. A bare "<name>" is BindingResolved when

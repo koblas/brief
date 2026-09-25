@@ -163,7 +163,7 @@ func DirTree(dir string) Tree {
 	return Tree{FS: os.DirFS(abs), Dir: abs}
 }
 
-// Find matches Claude Code's agent identification (Rule 5) for OS
+// Find matches a bare agent name against frontmatter name: for OS
 // directories: FindIn over DirTree(root) and DirTree(home).
 func Find(root, home, name string) []Definition {
 	return FindIn(DirTree(root), DirTree(home), name)

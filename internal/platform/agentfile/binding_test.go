@@ -28,7 +28,7 @@ func Test_resolve_binding_in_classifies_by_prefix(t *testing.T) {
 	t.Run("brief prefix prefers the project override over the plugin path", func(t *testing.T) {
 		project := memTree(projectDir, map[string]string{
 			".claude/skills/brief/agents/implementer.md": "---\nname: implementer\n---\n\nplugin body\n",
-			".claude/agents/implementer.md":               "---\nname: implementer\n---\n\noverride body\n",
+			".claude/agents/implementer.md":              "---\nname: implementer\n---\n\noverride body\n",
 		})
 		user := memTree(userDir, map[string]string{})
 

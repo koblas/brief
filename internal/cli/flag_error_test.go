@@ -726,7 +726,7 @@ func Test_classifies_dash_prefixed_tokens_consistently_across_disabled_parsing_s
 		{name: "new -x", args: []string{"new", "-x"}, wantStderr: "brief new: unknown shorthand flag: 'x' in -x; run 'brief new <type> --help'"},
 		{name: "help -x", args: []string{"help", "-x"}, wantStderr: "brief help: unknown shorthand flag: 'x' in -x; run 'brief help <command>'"},
 
-		// "-v" (R5: -v is reserved for a future --verbose, never a --version alias)
+		// -v is reserved for a future --verbose, never a --version alias.
 		{name: "root -v", args: []string{"-v"}, wantStderr: "brief: unknown shorthand flag: 'v' in -v; run 'brief <command> --help'"},
 		{name: "new -v", args: []string{"new", "-v"}, wantStderr: "brief new: unknown shorthand flag: 'v' in -v; run 'brief new <type> --help'"},
 		{name: "help -v", args: []string{"help", "-v"}, wantStderr: "brief help: unknown shorthand flag: 'v' in -v; run 'brief help <command>'"},

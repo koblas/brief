@@ -258,8 +258,7 @@ func Test_RenderStatusText_writes_nothing_for_an_empty_slice(t *testing.T) {
 	assert.Empty(t, out.String())
 }
 
-// Both the name and the title carry a tab or newline, so a fix that
-// flattens only one of the two fields still reddens this test.
+// Both fields carry a tab or newline, so flattening only one still fails.
 func Test_RenderStatusText_flattens_a_tab_or_newline_in_the_feature_name_or_title(t *testing.T) {
 	rows := []assemble.FeatureStatus{
 		{Name: "a\tb", Done: 0, Total: 1, Blocked: 0, Next: &assemble.NextStep{ID: "SCENARIO-01", Title: "Open\nthe door"}},

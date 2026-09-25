@@ -14,5 +14,5 @@
 // Frontmatter.Skills and Frontmatter.OmitClaudeMd decode loosely: an
 // unexpected shape yields nil or false rather than failing the whole
 // decode, so a malformed value never drops an otherwise well-formed agent
-// out of Find's name match (Rule 5).
+// out of Find's name match.
 package agentfile

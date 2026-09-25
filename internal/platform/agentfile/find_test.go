@@ -107,7 +107,7 @@ func Test_find_in_prefers_project_definitions_over_user_level(t *testing.T) {
 
 func Test_find_in_returns_every_project_duplicate_sorted_by_path(t *testing.T) {
 	project := memTree(projectDir, map[string]string{
-		".claude/agents/team/r.md":       "---\nname: my-reviewer\n---\n\nsecond\n",
+		".claude/agents/team/r.md":      "---\nname: my-reviewer\n---\n\nsecond\n",
 		".claude/agents/my-reviewer.md": "---\nname: my-reviewer\n---\n\nfirst\n",
 	})
 
