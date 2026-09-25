@@ -18,6 +18,10 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
 - Drops are computed only on `FinishFS`'s `refinishWrite` path, just before
   `applyFinishWrites` — pure, no error path. The R11 no-op returns a non-nil, empty
   `FinishResult.Dropped` (SCENARIO-01).
+- `normalizeEntryText`'s interior whitespace-run collapse (a doubled space or a tab collapsed
+  to one space) is proven end-to-end through the CLI. Mutation-verified: swapping the collapse
+  for a plain `TrimSpace` reddens exactly that test (false-positive drops on the doubled-space
+  and tab entries, old-file lines 3 and 9) (SCENARIO-01/03).
 - `cli`'s row detail (`"dropped from <heading>, tagged|untagged <tag>: <excerpt>"`) is built by
   one helper (`dropDetail`/`dropExcerpt` in `internal/cli/finish_dropped.go`), reused verbatim
   by `finishDroppedEntries` for JSON's `detail` field — proven byte-identical to the text row
@@ -27,14 +31,12 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
   `*string` nil for untagged. `finishDocument.DroppedEntries` is the struct's **last** field, a
   sized non-nil slice (mirrors `checkFeatures`' empty-vs-nil discipline) — never `omitempty`.
   `path` is `res.StatePath` verbatim, repeated per element. `dropRuleFor`'s `dropped-debt`
-  classification is now proven end-to-end through the CLI (JSON `rule`), not just at Server
-  level (SCENARIO-04).
-- `finishLong`'s `jsonFieldsParagraph(...)` call now lists `dropped_entries` after `modified` —
-  required by pre-existing generic tests (`Test_every_command_help_names_its_json_documents_top_level_fields`,
-  `Test_help_finish_json_is_the_exact_document`, `Test_prints_finish_flag_prose_in_its_flag_table`)
-  that pin every `--json` top-level field against `finishLong`'s own text; a **prior handoff's
-  claim that no such test existed was wrong** (SCENARIO-04). SCENARIO-10 still owns the separate
-  drop-reporting *prose paragraph* before the JSON paragraph — not built here.
+  classification is now proven end-to-end through the CLI (JSON `rule`) (SCENARIO-04).
+- **Any new `--json` top-level field must update `jsonFieldsParagraph`'s call in the same
+  change**: `Test_every_command_help_names_its_json_documents_top_level_fields` decodes the
+  live document and requires every non-header key appear as a whole word in that command's own
+  JSON paragraph. `finishLong` now lists `dropped_entries` there; SCENARIO-10 still owns the
+  separate drop-reporting *prose* paragraph before it (SCENARIO-04).
 - Finding shape amended to the live `<SEVERITY>  <path>[:<line>]  <detail>` in three places
   (R14a and the Default profile's Findings paragraph in `docs/specifications/brief/specification.md`,
   plus the STATE.md decision in `docs/specifications/brief/STATE.md`) (SCENARIO-01).
@@ -44,16 +46,16 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
 - `finishLong`'s drop-reporting **prose** paragraph (the JSON field-list part is done) —
   SCENARIO-10.
 - Continuation lines/indented sub-items in `markdown.Entries` (SCENARIO-07); the
-  empty/duplicate heading guard (SCENARIO-08); refusal/no-row assertions (SCENARIO-09);
-  CR-strip's own CLI-level proof, a `\r\n` fixture (SCENARIO-08).
+  empty/duplicate heading guard (SCENARIO-08); CR-strip's own CLI-level proof, a `\r\n`
+  fixture (SCENARIO-08).
+- A refusal-carries-no-`dropped_entries` proof for a finish that **would** drop entries —
+  SCENARIO-09. `Test_finish_json_refusal_is_unchanged_mem` does not prove this: its fixture
+  has zero entries and refuses on an unknown step before any diff ever runs, so it pins only
+  the error document's key *shape*, not D5's "a finish that would drop entries is refused with
+  no rows."
 
 ## Traps
 
-- **Any new `--json` top-level field must update `jsonFieldsParagraph`'s call in the same
-  change.** `Test_every_command_help_names_its_json_documents_top_level_fields` decodes the
-  live document and requires every non-header key appear as a whole word in that command's own
-  JSON paragraph — it is not deferrable to a later scenario the way prose-only copy is
-  (SCENARIO-04's own correction).
 - `markdown.Section(body, "")` / `sectionSpan(lines, "")` match the first blank line — an
   empty configured heading would scan a random region; SCENARIO-08's guard must trigger on
   this explicitly.
