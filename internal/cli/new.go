@@ -116,7 +116,7 @@ func runNewFeature(ctx context.Context, wd string, rest []string, out reporter, 
 	if out.json {
 		doc := newDocument{jsonHeader: out.successHeader(), Feature: res.Feature, Path: res.Path, Created: res.Created, Modified: res.Modified}
 
-		return out.document(doc)
+		return out.document(doc, true)
 	}
 
 	fmt.Fprintln(out.stdout, displayPath(wd, res.Path))
@@ -154,7 +154,7 @@ func runNewStep(ctx context.Context, wd string, rest []string, out reporter, roo
 		step := res.Step
 		doc := newDocument{jsonHeader: out.successHeader(), Feature: res.Feature, Step: &step, Path: res.Path, Created: res.Created, Modified: res.Modified}
 
-		return out.document(doc)
+		return out.document(doc, true)
 	}
 
 	specDisplay := ""

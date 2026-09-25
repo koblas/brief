@@ -499,7 +499,9 @@ func Run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout, stderr io.Writer, readBuildInfo func() (*debug.BuildInfo, bool), seams ...runSeam) error {
 	strippedArgs, jsonMode, hasJSONValue := scanJSONFlag(args)
 
-	out := reporter{stdout: stdout, stderr: stderr, json: jsonMode, wd: wd}
+	var helpFailure error
+
+	out := reporter{stdout: stdout, stderr: stderr, json: jsonMode, wd: wd, helpFailure: &helpFailure}
 
 	// cobra's RunE has no context.Context parameter; every closure below
 	// reads it via cmd.Context(), which ExecuteContext(ctx) sets on the
@@ -522,7 +524,11 @@ func run(ctx context.Context, wd string, args []string, stdin io.Reader, stdout,
 	copy(argsCopy, strippedArgs)
 	root.SetArgs(argsCopy)
 
-	return root.ExecuteContext(ctx)
+	if err := root.ExecuteContext(ctx); err != nil {
+		return err
+	}
+
+	return helpFailure
 }
 
 // newRootCommand builds brief's command tree for one Run. It is rebuilt on
@@ -756,10 +762,11 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 		}
 
 		// HelpFunc's own signature returns nothing, and cmd.Help() always
-		// returns nil, so a write failure here has no path to become a
-		// non-zero exit — the same limit cobra's own text help renders
-		// under.
-		_ = writeJSONDocument(out.stdout, doc)
+		// returns nil, so a write failure is reported here and parked in
+		// out.helpFailure for run to return.
+		if err := writeJSONDocument(out.stdout, doc); err != nil {
+			*out.helpFailure = helpStdoutFailure(out, cmd, err)
+		}
 	})
 
 	root.SetHelpCommand(newHelpCommand(out))
@@ -940,7 +947,10 @@ func runRoot(cmd *cobra.Command, args []string, out reporter, readBuildInfo func
 				}
 
 				if err := writeJSONDocument(out.stdout, doc); err != nil {
-					return fmt.Errorf("brief --version: %w", err)
+					err = stdoutWriteError(err, "brief --version --json", false)
+					fmt.Fprintf(out.stderr, "brief --version: %s\n", err)
+
+					return err
 				}
 
 				return nil
@@ -1068,4 +1078,20 @@ func ExitCode(err error) int {
 	default:
 		return 1
 	}
+}
+
+// helpStdoutFailure reports a --json help document's failed stdout write
+// for cmd on out's stderr as stdoutWriteError's line under "brief help: ",
+// re-running the help spelling that names cmd — "brief help --json" for
+// root itself — and returns that error.
+func helpStdoutFailure(out reporter, cmd *cobra.Command, cause error) error {
+	hint := "brief help --json"
+	if cmd != cmd.Root() {
+		hint = fmt.Sprintf("brief help %s --json", commandName(cmd))
+	}
+
+	err := stdoutWriteError(cause, hint, false)
+	fmt.Fprintf(out.stderr, "brief help: %s\n", err)
+
+	return err
 }

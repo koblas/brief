@@ -362,7 +362,7 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 
 	if out.json {
 		if printOnly {
-			return out.document(initPrintDocument{jsonHeader: out.successHeader(), Artifacts: printArtifactsJSON(res.Print)})
+			return out.document(initPrintDocument{jsonHeader: out.successHeader(), Artifacts: printArtifactsJSON(res.Print)}, false)
 		}
 
 		doc := initDocument{
@@ -377,7 +377,7 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 			AgentsMissingSkill: missingSkillJSONRows(res.AgentsMissingSkill),
 		}
 
-		return out.document(doc)
+		return out.document(doc, changedFiles(res))
 	}
 
 	if printOnly {
@@ -454,7 +454,7 @@ func renderUnwritable(res setup.Result, err error, wd string, out reporter) erro
 		},
 	}
 
-	_ = writeJSONDocument(out.stdout, doc)
+	out.writeErrorDocument(doc)
 
 	return err
 }

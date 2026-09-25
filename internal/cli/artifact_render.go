@@ -93,3 +93,10 @@ func renderPartialWrite(res setup.Result, err error, wd string, out reporter) er
 
 	return out.refusal(err)
 }
+
+// changedFiles reports whether an init or uninstall run changed any file:
+// created, modified or removed one. A dry run, a print-only run and a
+// re-run with nothing left to do all report false.
+func changedFiles(res setup.Result) bool {
+	return len(res.Created)+len(res.Modified)+len(res.Removed) > 0
+}

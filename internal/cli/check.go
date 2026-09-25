@@ -209,7 +209,7 @@ func runCheck(ctx context.Context, wd string, rest []string, hookHost string, st
 			Features:   checkFeatures(groups),
 		}
 
-		if err := out.document(doc); err != nil {
+		if err := out.document(doc, false); err != nil {
 			return err
 		}
 
@@ -227,7 +227,7 @@ func runCheck(ctx context.Context, wd string, rest []string, hookHost string, st
 	}
 
 	if err := assemble.RenderFindings(out.stdout, displayFindings(wd, groups)); err != nil {
-		return fmt.Errorf("brief check: %w", err)
+		return out.stdoutFailure(err, false)
 	}
 
 	fmt.Fprintf(out.stderr, "brief check: %s\n", checkSummary(groups, feature))
@@ -322,7 +322,7 @@ func runCheckHook(ctx context.Context, wd string, rest []string, hookHost string
 	summary := fmt.Sprintf("brief check: %s: %d ERROR %s; run 'brief check %s'", displayPath(wd, featurePath), errorCount, noun, feature)
 
 	if err := h.WriteHookContext(out.stdout, summary); err != nil {
-		return fmt.Errorf("brief check: %w", err)
+		return out.stdoutFailure(err, false)
 	}
 
 	return nil

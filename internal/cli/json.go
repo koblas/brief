@@ -216,16 +216,19 @@ func jsonTakesNoValueMessage(cmd *cobra.Command) string {
 }
 
 // reporter is the one per-Run output seam every command renders through:
-// stdout and stderr are Run's own writers, json is whether --json
-// detection turned JSON mode on for this run, wd is the base every
-// relative refusal path is absolutized against, and cmd is the command
-// currently rendering, set by forCommand.
+// stdout and stderr are Run's writers, json is whether --json detection
+// turned JSON mode on, wd is the base every relative refusal path is
+// absolutized against, and cmd is the command currently rendering, set by
+// forCommand. helpFailure holds a --json help document's stdout write
+// failure, since cobra's HelpFunc cannot return one; run returns it after
+// ExecuteContext.
 type reporter struct {
-	stdout io.Writer
-	stderr io.Writer
-	json   bool
-	wd     string
-	cmd    *cobra.Command
+	stdout      io.Writer
+	stderr      io.Writer
+	json        bool
+	wd          string
+	cmd         *cobra.Command
+	helpFailure *error
 }
 
 // forCommand returns r narrowed to cmd: every later usageError call
@@ -280,7 +283,7 @@ func (r reporter) usageErrorWithFix(msg, fix string) error {
 			},
 		}
 
-		_ = writeJSONDocument(r.stdout, doc)
+		r.writeErrorDocument(doc)
 
 		return fmt.Errorf("%s: %w", msg, ErrUsage)
 	}
@@ -290,13 +293,22 @@ func (r reporter) usageErrorWithFix(msg, fix string) error {
 	return fmt.Errorf("%s: %w", msg, ErrUsage)
 }
 
+// writeErrorDocument writes doc to r.stdout. If that write fails, doc's
+// message — the line text mode prints — goes to stderr instead; the
+// caller's error and exit code are unchanged.
+func (r reporter) writeErrorDocument(doc errorDocument) {
+	if err := writeJSONDocument(r.stdout, doc); err != nil {
+		fmt.Fprintln(r.stderr, doc.Error.Message)
+	}
+}
+
 // document writes v — one of status, check, start, finish, new feature or
-// new step's own success document — to r.stdout as one JSON document,
-// wrapping a write failure with "brief <path>: " naming r.cmd's own
-// command path.
-func (r reporter) document(v any) error {
+// new step's success document — to r.stdout as one JSON document,
+// reporting a write failure through stdoutFailure. filesChanged is whether
+// the run v describes changed any file.
+func (r reporter) document(v any, filesChanged bool) error {
 	if err := writeJSONDocument(r.stdout, v); err != nil {
-		return fmt.Errorf("brief %s: %w", commandName(r.cmd), err)
+		return r.stdoutFailure(err, filesChanged)
 	}
 
 	return nil
