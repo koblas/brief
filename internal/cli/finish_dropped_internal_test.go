@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/koblas/brief/internal/platform/rwfs"
+	"github.com/koblas/brief/internal/scaffold"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -620,4 +622,174 @@ func Test_finish_json_dropped_entries_detail_matches_the_text_row_mem(t *testing
 	require.Len(t, doc.Dropped, 1)
 
 	assert.Equal(t, wantDetail, doc.Dropped[0].Detail)
+}
+
+// memDroppedEntryNewState is the new-pair state body every SCENARIO-09
+// _mem test below reuses as its own diverging --state argument: the same
+// "- kept entry" survivor Test_finish_prints_a_warn_row_for_a_dropped_entry_mem's
+// own newState carries, omitting memOldStateWithDroppedEntry()'s own tagged
+// "- X (SCENARIO-02)" entry at old-file line 17.
+func memDroppedEntryNewState() string {
+	return "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n- kept entry\n\n## Open debts\n"
+}
+
+// memStateDivergedDropFixture is newMemStateDivergedDropFixture's own
+// return shape: mem already carries the fixture's first finish call, and
+// handoffPath/newStatePath are the --handoff/--state arguments every later
+// call reuses unchanged, alongside recordedHandoffPath (the step's own
+// recorded handoff file, for a test that removes it) and stateFilePath
+// (the feature's own recorded STATE.md, for a refusal's own Path
+// assertion).
+type memStateDivergedDropFixture struct {
+	mem                                                           *rwfs.Mem
+	handoffPath, newStatePath, recordedHandoffPath, stateFilePath string
+}
+
+// newMemStateDivergedDropFixture builds "demo"/SCENARIO-01 already done
+// against memOldStateWithDroppedEntry()'s own body, recording handoffPath's
+// bytes as the step's own handoff file — the shared done-step drop-bearing
+// pair SCENARIO-09's Context describes. Every later call reuses fx.mem
+// directly: tree.mem() is never called a second time, since a second call
+// would take a fresh copy of tree's own entries and silently discard this
+// first finish's own writes, turning an intended re-finish into a first
+// finish. handoffPath's bytes are supplied unchanged to every later call
+// too — only newStatePath's own body and recordedHandoffPath's own
+// presence vary — so the refusal a later call hits is provably
+// refinishStateDiverged, never refinishHandoffDiverged.
+func newMemStateDivergedDropFixture(t *testing.T) memStateDivergedDropFixture {
+	t.Helper()
+
+	tree := newMemFinishFixtureWithState("- [x] do the thing", memOldStateWithDroppedEntry())
+	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+	oldStatePath := memWriteInput(tree, "old-state.md", memOldStateWithDroppedEntry())
+	newStatePath := memWriteInput(tree, "new-state.md", memDroppedEntryNewState())
+	mem := tree.mem()
+
+	_, _, err := runFinishArgsMem(t, mem, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", oldStatePath})
+	require.NoError(t, err)
+
+	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
+
+	return memStateDivergedDropFixture{
+		mem:                 mem,
+		handoffPath:         handoffPath,
+		newStatePath:        newStatePath,
+		recordedHandoffPath: filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md"),
+		stateFilePath:       filepath.Join(featureDir, "STATE.md"),
+	}
+}
+
+// Test_finish_accepts_a_drop_bearing_re_finish_when_the_handoff_file_is_missing_mem
+// is SCENARIO-09's control arm: with the recorded handoff file removed,
+// FinishFS's row-2 exemption takes refinishWrite instead of
+// refinishStateDiverged, so the state-diverged re-finish against
+// memDroppedEntryNewState() succeeds and prints the dropped entry's WARN
+// row — proving the fixture pair really is drop-bearing on the write path,
+// the arm Test_finish_refuses_a_state_diverged_re_finish_and_prints_no_rows_mem's
+// refusal is checked against.
+func Test_finish_accepts_a_drop_bearing_re_finish_when_the_handoff_file_is_missing_mem(t *testing.T) {
+	fx := newMemStateDivergedDropFixture(t)
+	require.NoError(t, fx.mem.Remove(memKey(fx.recordedHandoffPath)))
+
+	stdout, _, err := runFinishArgsMem(t, fx.mem, []string{"finish", "demo", "SCENARIO-01", "--handoff", fx.handoffPath, "--state", fx.newStatePath})
+
+	require.NoError(t, err)
+	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	assert.Equal(t, "WARN  "+stateRel+":17  dropped from Traps, tagged SCENARIO-02: X (SCENARIO-02)\n", stdout)
+}
+
+// Test_finish_refuses_a_state_diverged_re_finish_and_prints_no_rows_mem
+// proves D5's first enforcement point at the CLI: a re-finish whose state
+// argument diverges from what is recorded (refinishStateDiverged) refuses
+// with ErrAlreadyFinished naming the state file, and prints no row on
+// stdout, even though the same pair is drop-bearing when it reaches the
+// write path (this test's own control arm, above).
+func Test_finish_refuses_a_state_diverged_re_finish_and_prints_no_rows_mem(t *testing.T) {
+	fx := newMemStateDivergedDropFixture(t)
+
+	stdout, _, err := runFinishArgsMem(t, fx.mem, []string{"finish", "demo", "SCENARIO-01", "--handoff", fx.handoffPath, "--state", fx.newStatePath})
+
+	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
+	assert.Empty(t, stdout)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, fx.stateFilePath, refusal.Path)
+	assert.Contains(t, refusal.Problem, "state differs")
+}
+
+// Test_finish_json_state_diverged_refusal_has_no_dropped_entries_key_mem is
+// Test_finish_refuses_a_state_diverged_re_finish_and_prints_no_rows_mem's
+// --json counterpart: the raw stdout bytes never carry the
+// "dropped_entries" substring at all — not merely an empty array — and the
+// decoded error document's own path names the state file.
+func Test_finish_json_state_diverged_refusal_has_no_dropped_entries_key_mem(t *testing.T) {
+	fx := newMemStateDivergedDropFixture(t)
+
+	stdout, stderr, err := runFinishArgsMem(t, fx.mem, []string{"finish", "demo", "SCENARIO-01", "--handoff", fx.handoffPath, "--state", fx.newStatePath, "--json"})
+
+	require.Error(t, err)
+	assert.Empty(t, stderr)
+	assert.NotContains(t, stdout, "dropped_entries")
+
+	decoded := memDecodeErrorDocument(t, []byte(stdout), "finish")
+	require.NotNil(t, decoded.Path)
+	assert.Equal(t, fx.stateFilePath, *decoded.Path)
+}
+
+// Test_finish_identical_re_finish_of_a_drop_bearing_step_prints_no_rows_mem
+// proves SCENARIO-09's second Gherkin clause: refinishNoop
+// (internal/scaffold/finish.go) never calls droppedEntries at all, so an
+// identical re-finish of a step whose first finish already dropped an
+// entry prints nothing the second time — even though the first call's own
+// WARN row proves the pair really is drop-bearing.
+func Test_finish_identical_re_finish_of_a_drop_bearing_step_prints_no_rows_mem(t *testing.T) {
+	tree := newMemFinishFixtureWithState("- [x] do the thing", memOldStateWithDroppedEntry())
+	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+	statePath := memWriteInput(tree, "state.md", memDroppedEntryNewState())
+	mem := tree.mem()
+	args := []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}
+
+	firstStdout, _, firstErr := runFinishArgsMem(t, mem, args)
+	require.NoError(t, firstErr)
+	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	require.Equal(t, "WARN  "+stateRel+":17  dropped from Traps, tagged SCENARIO-02: X (SCENARIO-02)\n", firstStdout)
+
+	secondStdout, secondStderr, secondErr := runFinishArgsMem(t, mem, args)
+
+	require.NoError(t, secondErr)
+	assert.Empty(t, secondStdout)
+	assert.Equal(t, "brief finish: demo SCENARIO-01 already done with identical inputs; nothing written\n", secondStderr)
+}
+
+// Test_finish_json_identical_re_finish_reports_no_dropped_entries_mem is
+// Test_finish_identical_re_finish_of_a_drop_bearing_step_prints_no_rows_mem's
+// --json counterpart: the second, identical call's document matches an
+// exact literal — "changed":false, "modified":[], "dropped_entries":[] —
+// so a coincidental write that also nets zero drops cannot pass as a
+// no-op.
+func Test_finish_json_identical_re_finish_reports_no_dropped_entries_mem(t *testing.T) {
+	tree := newMemFinishFixtureWithState("- [x] do the thing", memOldStateWithDroppedEntry())
+	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+	statePath := memWriteInput(tree, "state.md", memDroppedEntryNewState())
+	mem := tree.mem()
+	args := []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath, "--json"}
+
+	_, _, firstErr := runFinishArgsMem(t, mem, args)
+	require.NoError(t, firstErr)
+
+	secondStdout, secondStderr, secondErr := runFinishArgsMem(t, mem, args)
+
+	require.NoError(t, secondErr)
+	assert.Empty(t, secondStderr)
+
+	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
+	stateFilePath := filepath.Join(featureDir, "STATE.md")
+	handoffFilePath := filepath.Join(featureDir, "SCENARIO-01-HANDOFF.md")
+
+	want := `{"schema":1,"command":"finish","ok":true,"exit_code":0,"feature":"demo","step":"SCENARIO-01","changed":false,"handoff_path":` +
+		memJSONString(t, handoffFilePath) + `,"state_path":` + memJSONString(t, stateFilePath) +
+		`,"next":null,"modified":[],"dropped_entries":[]}` + "\n"
+
+	assert.Equal(t, want, secondStdout)
 }

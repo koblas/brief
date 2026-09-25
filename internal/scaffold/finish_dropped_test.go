@@ -397,3 +397,71 @@ func Test_finish_normalizes_an_interior_carriage_return_on_a_continuation_line(t
 		{Rule: scaffold.DropRuleDebt, Heading: "Open debts", Line: 12, Tag: "", Text: "unrelated dropped entry"},
 	}, res.Dropped)
 }
+
+// newDroppedReFinishFixtureFS builds newDroppedFixtureFS's "widgets"
+// feature (SCENARIO-02, config.Default()'s own headings) and runs one
+// FinishFS call against oldState and handoff, so the fixture opens on a
+// step already done, with oldState recorded as STATE.md and handoff
+// recorded at its own file — SCENARIO-09's shared done-step drop-bearing
+// pair, at the FinishFS level. Every later call in this file reuses the
+// returned mem directly; a second newDroppedFixtureFS build would discard
+// this first finish's own writes.
+func newDroppedReFinishFixtureFS(t *testing.T, oldState string, handoff []byte) *rwfs.Mem {
+	t.Helper()
+
+	mem := newDroppedFixtureFS(t, oldState)
+
+	cfg := config.Default()
+	pattern, err := stepfilePattern(cfg)
+	require.NoError(t, err)
+	handoffPattern, err := stepfileHandoffPattern(cfg, pattern)
+	require.NoError(t, err)
+
+	srv := scaffold.NewServer(cfg, "")
+	_, err = srv.FinishFS(mem, testFeaturePath, "widgets", "SCENARIO-02", handoff, []byte(oldState), pattern, handoffPattern)
+	require.NoError(t, err)
+
+	return mem
+}
+
+// droppedReFinishHandoffName is the recorded handoff file
+// newDroppedReFinishFixtureFS's own first finish call writes — the row-2
+// exemption's own control variable, removed by this file's control-arm
+// subtest.
+func droppedReFinishHandoffName() string {
+	return "SCENARIO-02" + config.Default().HandoffFileSuffix
+}
+
+// Test_finish_state_diverged_refusal_returns_no_dropped_entries proves D5's
+// first enforcement point (SCENARIO-09): FinishFS's refinishStateDiverged
+// case returns before droppedEntries ever runs, so a state-diverged
+// re-finish of a drop-bearing pair carries an empty FinishResult.Dropped —
+// never "computed then discarded". Its control arm, differing in exactly
+// one variable (the recorded handoff file's own presence), proves the same
+// old/new pair really is drop-bearing when the finish takes the write path
+// instead, through FinishFS's row-2 exemption.
+func Test_finish_state_diverged_refusal_returns_no_dropped_entries(t *testing.T) {
+	oldState := droppedOldStateWithEntryAtLine17()
+	newState := []byte("## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n- kept entry\n\n## Open debts\n")
+
+	t.Run("handoff file present refuses with no dropped entries", func(t *testing.T) {
+		mem := newDroppedReFinishFixtureFS(t, oldState, []byte("h"))
+
+		res, err := finishDropped(t, mem, newState)
+
+		require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
+		assert.Empty(t, res.Dropped)
+	})
+
+	t.Run("handoff file missing writes and reports the dropped entry", func(t *testing.T) {
+		mem := newDroppedReFinishFixtureFS(t, oldState, []byte("h"))
+		require.NoError(t, mem.Remove(droppedReFinishHandoffName()))
+
+		res, err := finishDropped(t, mem, newState)
+
+		require.NoError(t, err)
+		assert.Equal(t, []scaffold.DroppedEntry{
+			{Rule: scaffold.DropRuleEntry, Heading: "Traps", Line: 17, Tag: "SCENARIO-02", Text: "X (SCENARIO-02)"},
+		}, res.Dropped)
+	})
+}
