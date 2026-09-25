@@ -14,14 +14,9 @@ import (
 	"github.com/koblas/brief/internal/platform/host"
 )
 
-// fsName maps abs, an absolute OS path, onto the name fsys — every probe
-// in this package's own (*Server).rootFS, defaulting to os.DirFS("/"), or
-// a test's own fstest.MapFS standing in for it — expects: the leading path
-// separator stripped, forward-slash separated, "." for the root itself.
-// Duplicated from an identical helper in internal/platform/config and
-// internal/platform/repo rather than shared, the same reasoning those two
-// already give each other: a shared package would invert the dependency
-// for an eight-line mapping.
+// fsName maps abs, an absolute OS path, onto the name an fs.FS expects:
+// the leading path separator stripped, forward-slash separated, "." for
+// the root itself.
 func fsName(abs string) string {
 	trimmed := strings.TrimPrefix(filepath.ToSlash(abs), "/")
 	if trimmed == "" {
@@ -31,18 +26,12 @@ func fsName(abs string) string {
 	return trimmed
 }
 
-// classifyProbeError classifies err — from a failed fs.Lstat against a
-// host integration file or a CLAUDE.md candidate — into the one
-// absent-vs-unreadable decision every Lstat probe in this package renders
-// from: fs.ErrNotExist proves the path itself is not there, and so does
-// syscall.ENOTDIR, since it means some ancestor path component is a
-// regular file rather than a directory and nothing can resolve through
-// one; any other error proves nothing about absence, so it is unreadable,
-// its reason readFailureReason's own extracted cause. err is always
-// non-nil. Checked on darwin and linux, devenv.nix's own build targets,
-// where ENOTDIR carries this meaning against the production fsys
-// (os.DirFS("/"), whose Lstat is a thin os.Lstat wrapper); a windows build
-// of this package was not exercised.
+// classifyProbeError classifies a failed fs.Lstat into the
+// absent-vs-unreadable decision every probe in this package renders from:
+// fs.ErrNotExist proves absence, and so does syscall.ENOTDIR — an
+// ancestor path component is itself a regular file, so nothing can
+// resolve through it; any other error is unreadable, its reason
+// readFailureReason's own extracted cause.
 func classifyProbeError(err error) (bool, string) {
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		return true, ""
@@ -52,13 +41,10 @@ func classifyProbeError(err error) (bool, string) {
 }
 
 // integrationFileState is one Claude Code integration file's own probe
-// result, classifyProbeError's own split rendered into fields: present is
-// false only when absent; unreadable is true when the file's own Lstat or
-// ReadFile call failed without proving absence (reason carries its cause,
-// statFailed whether it was the Lstat call rather than the ReadFile call
-// that failed); regular is true only for a present, unreadable-false file
-// whose bytes were read and classified into origin. present-but-neither-
-// regular-nor-unreadable is host.go's own "not a regular file" shape.
+// result: present is false only when absent; unreadable is true when the
+// file's Lstat or ReadFile call failed without proving absence; regular
+// is true only for a present, readable file whose bytes were classified
+// into origin.
 type integrationFileState struct {
 	relPath    string
 	path       string
@@ -70,13 +56,10 @@ type integrationFileState struct {
 	statFailed bool
 }
 
-// probeIntegrationFile Lstats root/f.RelPath through fsys (fsName's own
-// mapping) and, for a regular file, reads and artifact.Recognizes its
-// bytes against f.Kind, through fsys too. A Lstat failure renders through
-// classifyProbeError; a ReadFile failure against a file Lstat itself just
-// resolved as regular is always unreadable — typically the file's own mode
-// denying read, but never reclassified as absent, since only a race
-// between the two calls could make that reclassification correct.
+// probeIntegrationFile Lstats root/f.RelPath through fsys and, for a
+// regular file, reads and artifact.Recognizes its bytes against f.Kind. A
+// ReadFile failure against a file Lstat resolved as regular is always
+// unreadable, never reclassified as absent.
 func probeIntegrationFile(fsys fs.FS, root string, f host.File) integrationFileState {
 	path := filepath.Join(root, filepath.FromSlash(f.RelPath))
 	state := integrationFileState{relPath: f.RelPath, path: path}
@@ -114,8 +97,7 @@ func probeIntegrationFile(fsys fs.FS, root string, f host.File) integrationFileS
 	return state
 }
 
-// probeIntegrationFiles probes every file in files, through fsys, in
-// order.
+// probeIntegrationFiles probes every file in files, in order.
 func probeIntegrationFiles(fsys fs.FS, root string, files []host.File) []integrationFileState {
 	out := make([]integrationFileState, 0, len(files))
 	for _, f := range files {
@@ -125,8 +107,7 @@ func probeIntegrationFiles(fsys fs.FS, root string, files []host.File) []integra
 	return out
 }
 
-// anyPresent reports whether any state in states is present, of any file
-// type.
+// anyPresent reports whether any state in states is present.
 func anyPresent(states []integrationFileState) bool {
 	for _, s := range states {
 		if s.present {
@@ -137,9 +118,8 @@ func anyPresent(states []integrationFileState) bool {
 	return false
 }
 
-// missingRelPaths returns the relPath of every state that is absent or not
-// a regular file, excluding any state classifyProbeError read as
-// unreadable (unreadableRelPaths reports those), in states' own order.
+// missingRelPaths returns the relPath of every state that is absent or
+// not a regular file, excluding any unreadable state.
 func missingRelPaths(states []integrationFileState) []string {
 	var out []string
 
@@ -156,8 +136,7 @@ func missingRelPaths(states []integrationFileState) []string {
 	return out
 }
 
-// unreadableRelPaths returns the relPath of every state classifyProbeError
-// read as unreadable, in states' own order.
+// unreadableRelPaths returns the relPath of every unreadable state.
 func unreadableRelPaths(states []integrationFileState) []string {
 	var out []string
 
@@ -171,17 +150,10 @@ func unreadableRelPaths(states []integrationFileState) []string {
 }
 
 // integrationFileRowDetail renders a multi-file host row's own Detail and
-// Fix once any of states holds an unreadable file, checked ahead of
-// missingRelPaths' own "missing" wording; the caller decides the row's
-// own Severity. Every unreadable file is named "not readable (<reason>)"
-// (notReadableReason), reason taken from the first unreadable state in
-// states' own order — every probe failure under one broken directory tree
-// shares the same cause in practice; any file still genuinely missing is
-// named too, in its own fragment, since classifyProbeError only
-// reclassifies the files it actually failed against. Fix is
-// notReadableFix against that same first unreadable state, root bounding
-// its own ancestor walk. ok is false when states holds no unreadable file
-// at all.
+// Fix once any of states holds an unreadable file: every unreadable file
+// is named "not readable (<reason>)", reason taken from the first such
+// state; any file still genuinely missing is named too, in its own
+// fragment. ok is false when states holds no unreadable file at all.
 func integrationFileRowDetail(fsys fs.FS, wd, root string, states []integrationFileState) (string, string, bool) {
 	unreadable := unreadableRelPaths(states)
 	if len(unreadable) == 0 {
@@ -208,7 +180,7 @@ func integrationFileRowDetail(fsys fs.FS, wd, root string, states []integrationF
 }
 
 // relPathsWithOrigin returns the relPath of every present, regular state
-// whose origin is origin, in states' own order.
+// whose origin is origin.
 func relPathsWithOrigin(states []integrationFileState, origin artifact.Origin) []string {
 	var out []string
 
@@ -222,21 +194,11 @@ func relPathsWithOrigin(states []integrationFileState, origin artifact.Origin) [
 }
 
 // originRow maps origin — already known to belong to a present, regular
-// subject file, never a missing one — to the (Severity, Detail, Fix) triple
-// every host row's own "older render"/"edited locally"/"current" arms
-// share: OriginOlder is WARN "installed by an older brief release" + suffix,
-// with fix olderFix; OriginEdited is OK "edited locally" + suffix;
-// OriginCurrent (and any other value) is OK "installed", plain. suffix is
-// appended verbatim — a multi-file row (host-plugin, host-agents) passes
-// ": <rel, ...>", a single-subject row (host-hook, host-skill, host-snippet)
-// passes "". This is the one place every host row's own origin precedence
-// lives, so the five can never drift from each other. The planner and
-// implementer agent renders are the one pair whose own older-digest list is
-// non-empty (Rule 6), so host-agents' own OriginOlder arm is reachable
-// through a real fixture; host-plugin's, host-hook's, host-skill's and
-// host-snippet's own OriginOlder arms are reachable only through
-// host_internal_test.go's direct, synthetic call, since every other Kind's
-// older-digest list is empty.
+// subject file — to the (Severity, Detail, Fix) triple every host row's
+// "older render"/"edited locally"/"current" arms share: OriginOlder is
+// WARN "installed by an older brief release" + suffix, fix olderFix;
+// OriginEdited is OK "edited locally" + suffix; OriginCurrent (and any
+// other value) is OK "installed", plain. suffix is appended verbatim.
 func originRow(origin artifact.Origin, olderFix, suffix string) (Severity, string, *string) {
 	switch origin {
 	case artifact.OriginOlder:
@@ -251,27 +213,20 @@ func originRow(origin artifact.Origin, olderFix, suffix string) (Severity, strin
 }
 
 // anyIntegrationFilePresent reports whether any file of h.Plugin(true) ∪
-// h.Agents() is present under root, through fsys, of any file type — the
-// predicate host-plugin's, host-hook's and host-skill's own SKIP rows
-// share (R13). h.Skills() is deliberately excluded: the skill is never an
-// install signal (Rule 1) — uninstall can leave an edited SKILL.md behind
-// after every other file is removed, and counting it here would flip
-// host-plugin back to ERROR "incomplete", host-hook to WARN and env-path
-// to ERROR after a clean uninstall.
+// h.Agents() is present under root, the predicate host-plugin's,
+// host-hook's and host-skill's own SKIP rows share.
 func anyIntegrationFilePresent(fsys fs.FS, root string, h host.Host) bool {
+	// h.Skills() is excluded: uninstall can leave an edited SKILL.md
+	// behind after every other file is removed, and it is not itself
+	// evidence of an install.
 	return anyPresent(probeIntegrationFiles(fsys, root, h.Plugin(true))) || anyPresent(probeIntegrationFiles(fsys, root, h.Agents()))
 }
 
 // hostPluginCheck builds host-plugin's own row: not installed anywhere is
-// SKIP; otherwise an unreadable subject file (h.Plugin(false)) is ERROR
-// (integrationFileRowDetail) — the same severity a missing or non-regular
-// one gets, since Claude Code cannot load the skill through a file it
-// cannot read any more than one that is not there; a missing or
-// non-regular one is ERROR "incomplete", naming every such file; an older
-// render is WARN; an edited one is OK "edited locally"; every subject
-// file current is OK "installed" — in that precedence (originRow, applied
-// across every subject file at once rather than one row at a time, since
-// a single host-plugin row must summarize all three).
+// SKIP; an unreadable, missing or non-regular subject file is ERROR
+// "incomplete", naming every such file; an older render is WARN; an
+// edited one is OK "edited locally"; every subject file current is OK
+// "installed".
 func hostPluginCheck(fsys fs.FS, wd, root string, h host.Host, installed bool) Check {
 	path := filepath.Join(root, host.PluginDir)
 
@@ -304,7 +259,7 @@ func hostPluginCheck(fsys fs.FS, wd, root string, h host.Host, installed bool) C
 	return Check{ID: "host-plugin", Severity: SeverityOK, Path: path, Detail: "installed"}
 }
 
-// hookFileOf returns h.Plugin(true)'s own trailing hook entry.
+// hookFileOf returns h.Plugin(true)'s trailing hook entry.
 func hookFileOf(h host.Host) host.File {
 	for _, f := range h.Plugin(true) {
 		if f.Hook {
@@ -318,10 +273,9 @@ func hookFileOf(h host.Host) host.File {
 // hostHookCheck builds host-hook's own row: not installed anywhere is
 // SKIP; a hook file absent while something else is installed is WARN
 // "installed without the check hook" — doctor cannot tell a lost file
-// from --no-hook, so this stays a WARN rather than an ERROR; an unreadable
-// hook file is WARN, naming the reason (notReadableReason); a present but
-// non-regular hook is ERROR; an older render is WARN; an edited one is OK
-// "edited locally"; a current one is OK "installed".
+// from --no-hook; an unreadable hook file is WARN, naming the reason; a
+// present but non-regular hook is ERROR; an older render is WARN; an
+// edited one is OK "edited locally"; a current one is OK "installed".
 func hostHookCheck(fsys fs.FS, wd, root string, h host.Host, installed bool) Check {
 	hookFile := hookFileOf(h)
 	state := probeIntegrationFile(fsys, root, hookFile)
@@ -348,16 +302,12 @@ func hostHookCheck(fsys fs.FS, wd, root string, h host.Host, installed bool) Che
 }
 
 // hostAgentsCheck builds host-agents' own row: none of the three role
-// agent files present is SKIP; otherwise an unreadable one is WARN
-// (integrationFileRowDetail); a missing or non-regular one is WARN too
-// (never ERROR — an unbound role is reported by the roles row, not
-// enforced here), naming every such file; an older render is WARN; an
-// edited one is OK "edited locally"; all three current is OK "installed".
-// Every fix here names --with-agents, except an unreadable file's own
-// shared chmod-then-reinit fix (notReadableFix): a plain "brief init"
-// never plans an agent file at all, so it can never repair a missing one
-// on its own, but a file that already exists needs no re-plan, only
-// permission repair.
+// agent files present is SKIP; an unreadable, missing or non-regular one
+// is WARN (never ERROR — an unbound role is reported by the roles row,
+// not enforced here), naming every such file; an older render is WARN;
+// an edited one is OK "edited locally"; all three current is OK
+// "installed". Every fix names --with-agents, except an unreadable
+// file's own shared chmod-then-reinit fix.
 func hostAgentsCheck(fsys fs.FS, wd, root string, h host.Host) Check {
 	agentFiles := h.Agents()
 	path := filepath.Join(root, host.PluginDir, "agents")
@@ -390,19 +340,13 @@ func hostAgentsCheck(fsys fs.FS, wd, root string, h host.Host) Check {
 	return Check{ID: "host-agents", Severity: SeverityOK, Path: path, Detail: "installed"}
 }
 
-// snippetCandidateState is one CLAUDE.md candidate's own scan result,
-// mirroring internal/setup's own candidateSnippetFile but read-only,
-// classifyProbeError's own split rendered the same way integrationFileState
-// renders it: present is false only when absent; unreadable is true when
-// classifyProbeError read the failure as neither absent nor a resolved
-// file (readErr its cause, statFailed whether it was the Lstat call
-// rather than the ReadFile call that failed); notRegular and kind are
-// populated only when Lstat itself resolved the candidate to a non-regular
-// file (nonRegularKind); body and span are populated only for a regular,
-// readable file scanned clean, prob carrying the first marker defect
-// artifact.ScanSnippetMarkers found otherwise. notRegular and unreadable
-// are mutually exclusive: only a regular candidate Lstat could itself
-// resolve is ever read at all.
+// snippetCandidateState is one CLAUDE.md candidate's own scan result:
+// present is false only when absent; unreadable is true when the read
+// failed without proving absence; notRegular and kind are populated only
+// for a non-regular file; body and span are populated only for a
+// regular, readable file scanned clean, prob carrying the first marker
+// defect found otherwise. notRegular and unreadable are mutually
+// exclusive.
 type snippetCandidateState struct {
 	path       string
 	present    bool
@@ -417,13 +361,9 @@ type snippetCandidateState struct {
 }
 
 // nonRegularKind names the file type behind a CLAUDE.md candidate Lstat
-// reports as not a regular file, for host-snippet's own WARN detail: a
-// symlink (checked first — a symlink to a directory reports both bits, and
-// "symlink" is the more useful of the two to a reader deciding what to do
-// about it) or a directory; any other mode (a fifo, a socket, a device —
-// never observed against a CLAUDE.md path in practice) falls back to "",
-// so the caller's parenthetical is dropped rather than rendering the
-// name twice ("not a regular file (not a regular file)").
+// reports as not a regular file: a symlink (checked first, since a
+// symlink to a directory reports both bits) or a directory; any other
+// mode falls back to "".
 func nonRegularKind(info os.FileInfo) string {
 	switch {
 	case info.Mode()&os.ModeSymlink != 0:
@@ -436,8 +376,8 @@ func nonRegularKind(info os.FileInfo) string {
 }
 
 // notRegularDetail renders host-snippet's own WARN detail for a candidate
-// Lstat reports as not a regular file: kind in parentheses when
-// nonRegularKind named one, the bare sentence otherwise.
+// that is not a regular file: kind in parentheses when named, the bare
+// sentence otherwise.
 func notRegularDetail(kind string) string {
 	if kind == "" {
 		return "not a regular file; brief block not installed"
@@ -448,48 +388,35 @@ func notRegularDetail(kind string) string {
 
 // readFailureReason extracts the underlying reason behind a failed
 // os.Lstat or os.ReadFile call: both fail only with a *fs.PathError, so
-// this unwraps that error's own inner cause (e.g. "permission denied" out
-// of "lstat <path>: permission denied" or "open <path>: permission
-// denied") rather than the full "<op> <path>: …" text, since host-snippet's
-// own WARN detail already names the path via the row's Path field. Every
-// caller passes a non-nil err it already knows came from one of those two
-// calls.
+// this unwraps that error's own inner cause rather than the full
+// "<op> <path>: …" text.
 func readFailureReason(err error) string {
 	pathErr, _ := errors.AsType[*fs.PathError](err)
 
 	return pathErr.Err.Error()
 }
 
-// notReadableReason renders "not readable (<reason>)" — the wording every
-// host row shares for a subject classifyProbeError read as unreadable
-// rather than absent or a resolved file. A caller appends its own suffix,
-// or none.
+// notReadableReason renders "not readable (<reason>)", the wording every
+// host row shares for an unreadable subject.
 func notReadableReason(reason string) string {
 	return fmt.Sprintf("not readable (%s)", reason)
 }
 
 // notReadableDetail renders host-snippet's own WARN detail for an
-// unreadable candidate: notReadableReason plus host-snippet's own suffix,
-// stating that the block cannot be checked rather than asserting it is
-// simply absent — a claim scanning could not actually verify.
+// unreadable candidate: notReadableReason plus a note that the block
+// could not be checked.
 func notReadableDetail(reason string) string {
 	return notReadableReason(reason) + "; cannot check for brief block"
 }
 
 // blockingDir walks from filepath.Dir(path) upward, Lstat'ing each
-// ancestor through fsys, until one resolves: that ancestor is the
-// directory actually missing its own search (+x) bit, since every
-// descendant beneath it failed to Lstat while it itself did not — Lstat
-// needs +x on a path's parent to find its directory entry, never on the
-// path itself, so an unsearchable directory still resolves its own Lstat
-// but blocks every Lstat of anything nested inside it. The walk never
-// rises above root — the one directory every host check already treats as
-// its own install boundary — and returns root itself when no ancestor
-// below it resolves, which is exactly the answer when root is the
-// unsearchable directory. A symlinked ancestor resolves its own Lstat
-// without its target being consulted, so the walk stops at the link, not
-// at an unsearchable directory behind it.
+// ancestor until one resolves: that ancestor is the directory actually
+// missing its own search (+x) bit. The walk never rises above root, and
+// returns root itself when no ancestor below it resolves.
 func blockingDir(fsys fs.FS, root, path string) string {
+	// Lstat needs +x on a path's parent to find its directory entry,
+	// never on the path itself, so an unsearchable directory still
+	// resolves its own Lstat but blocks every Lstat nested inside it.
 	dir := filepath.Dir(path)
 
 	for dir != root {
@@ -503,20 +430,11 @@ func blockingDir(fsys fs.FS, root, path string) string {
 	return root
 }
 
-// notReadableFix renders the shared WARN fix for a subject
-// classifyProbeError read as unreadable: when the failure was in the
-// Lstat call itself (statFailed — an ancestor directory not searchable),
-// the fix targets blockingDir's own result — the actual directory missing
-// its search bit, not necessarily the subject's immediate parent — with
-// both the search and write bits restored (chmod u+rwx), since init must
-// still be able to create entries under it; when it was the ReadFile call
-// instead (the file itself, present and regular, not readable), the fix
-// targets the file (chmod +r). Both then re-run
-// 'brief init --host claude-code', the same repair every "not installed"
-// row already points at. path and its fix target are rendered relative to
-// wd, the same wd Diagnose was called with, since every row's own Path is
-// rendered relative to wd too; root bounds blockingDir's own walk, run
-// against the same fsys every other probe in this package reads through.
+// notReadableFix renders the shared WARN fix for an unreadable subject:
+// a failed Lstat targets blockingDir's own result with both bits restored
+// (chmod u+rwx), since init must still create entries under it; a failed
+// ReadFile targets the file itself (chmod +r). Both then re-run
+// 'brief init --host claude-code'.
 func notReadableFix(fsys fs.FS, wd, root, path string, statFailed bool) string {
 	if statFailed {
 		return fmt.Sprintf("chmod u+rwx %s, then %s", relPath(wd, blockingDir(fsys, root, path)), runInitClaudeCode)
@@ -526,15 +444,10 @@ func notReadableFix(fsys fs.FS, wd, root, path string, statFailed bool) string {
 }
 
 // scanSnippetCandidateStates Lstats and scans every h.InstructionFiles()
-// candidate under root, in that order. A Lstat failure renders through
-// classifyProbeError, the one place this function's own absent-vs-
-// unreadable call is made. A ReadFile failure against a candidate Lstat
-// itself just resolved as regular is always unreadable — typically the
-// file's own mode denying read, but never reclassified as absent, since
-// only a race between the two calls could make that reclassification
-// correct — the same split probeIntegrationFile applies for a host
-// integration file. A candidate that exists but is not a regular file
-// reports notRegular true and kind set (nonRegularKind), never read.
+// candidate under root, in that order. A ReadFile failure against a
+// candidate Lstat resolved as regular is always unreadable, never
+// reclassified as absent. A candidate that exists but is not a regular
+// file reports notRegular true and kind set, never read.
 func scanSnippetCandidateStates(fsys fs.FS, root string, h host.Host) []snippetCandidateState {
 	rel := h.InstructionFiles()
 	out := make([]snippetCandidateState, 0, len(rel))
@@ -576,8 +489,8 @@ func scanSnippetCandidateStates(fsys fs.FS, root string, h host.Host) []snippetC
 	return out
 }
 
-// snippetBlockFound reports whether any state in states holds a recognized
-// marker span — env-path's own "or a snippet block found" clause (R13).
+// snippetBlockFound reports whether any state in states holds a
+// recognized marker span.
 func snippetBlockFound(states []snippetCandidateState) bool {
 	for _, s := range states {
 		if s.span != nil {
@@ -590,27 +503,18 @@ func snippetBlockFound(states []snippetCandidateState) bool {
 
 // hostSnippetCheck builds host-snippet's own row from states — already
 // scanned by scanSnippetCandidateStates — and dir/dirKnown, the configured
-// feature directory (dirKnown false only when ".brief.yaml" itself is
-// unparseable). A marker defect in any candidate is ERROR, citing that
-// candidate's own path and line; two candidates each holding a span is
-// ERROR on the second (".claude/CLAUDE.md" — root is the preferred
-// location). Once neither ERROR arm fires, a candidate holding a span still
-// wins regardless of the other candidate's own shape, classified by
+// feature directory (dirKnown false only when ".brief.yaml" is
+// unparseable). A marker defect in any candidate is ERROR, citing its
+// path and line; two candidates each holding a span is ERROR on the
+// second. Once neither ERROR arm fires, a candidate holding a span wins
+// regardless of the other candidate's shape, classified by
 // artifact.RecognizeSnippet: OriginEdited is OK "edited locally",
-// OriginOlder is WARN, OriginCurrent is OK "installed" when its own Dir
-// matches dir (or dirKnown is false) and WARN naming both directories
-// otherwise. Only once no candidate holds a span does existence matter,
-// and only for the one candidate planSnippet itself would then choose —
-// the first candidate present at all (states' own priority order),
-// mirroring setup's own chooseSnippetLocation: notRegular is WARN naming
-// which shape (nonRegularKind), fix pointing at --print
-// (runInitPrintSnippet) since brief can neither write nor scan through
-// it; unreadable is WARN (notReadableDetail, classifyProbeError's own
-// split), fix notReadableFix, since a stat or read failure proves nothing
-// about whether a block is actually there. No candidate present at all,
-// or the first present one is a regular, readable, blockless file, is
-// SKIP "not installed", Path naming that first-present candidate (or the
-// first candidate in priority order when none is present at all).
+// OriginOlder is WARN, OriginCurrent is OK "installed" when its Dir
+// matches dir and WARN naming both directories otherwise. Only once no
+// candidate holds a span does existence matter, for the first candidate
+// present at all: notRegular is WARN naming the shape; unreadable is WARN
+// naming the reason. No candidate present, or the first present one is a
+// regular, readable, blockless file, is SKIP "not installed".
 func hostSnippetCheck(fsys fs.FS, wd, root string, states []snippetCandidateState, dir string, dirKnown bool) Check {
 	for _, s := range states {
 		if s.prob != nil {
@@ -698,29 +602,16 @@ func hostSnippetCheck(fsys fs.FS, wd, root string, states []snippetCandidateStat
 	}
 }
 
-// resolveRoleBinding classifies value (a config.RoleBindings field) against
-// s.projectTree(root) and s.userTree() (R7) via agentfile.ResolveBindingIn
-// — the binding-classification logic setup's own missing-skill report
-// reuses (agentfile.Binding, Rule 5). doctor stays the caller here rather
-// than agentfile itself resolving home, since only doctor carries
-// s.homeDir's (and, for a test, s.homeTree's) own injectable seam
-// (setup.WithHomeDir mirrors the homeDir one independently).
+// resolveRoleBinding classifies value against s.projectTree(root) and
+// s.userTree() via agentfile.ResolveBindingIn.
 func (s *Server) resolveRoleBinding(root, value string) agentfile.Binding {
 	return agentfile.ResolveBindingIn(s.projectTree(root), s.userTree(), value)
 }
 
 // projectTree returns the agentfile.Tree a bare-name role binding's own
-// Rule 5 search runs against for the project scope: s.rootFS()'s own
-// subtree rooted at root (fs.Sub, over fsName's relative mapping), Dir set
-// to root itself — findIn's own Definition.Path is filepath.Join(tree.Dir,
-// p), and duplicateDefinitionProblem's own filepath.Rel(root, d.Path)
-// reads it back, so both render exactly as agentfile.DirTree(root) already
-// did. fs.Sub(fsys, name) is documented equivalent to os.DirFS(joined
-// path) once fsys is os.DirFS("/") itself (production's own default), so
-// production behavior is unchanged; a test's fstest.MapFS behaves the same
-// way. A root fs.Sub cannot resolve (an invalid name) falls back to the
-// zero FS, the same "nothing here" agentfile.DirTree("") already returns
-// for an unknown home.
+// search runs against for the project scope: s.rootFS()'s own subtree
+// rooted at root, Dir set to root itself. A root fs.Sub that cannot
+// resolve falls back to the zero FS.
 func (s *Server) projectTree(root string) agentfile.Tree {
 	sub, err := fs.Sub(s.rootFS(), fsName(root))
 	if err != nil {
@@ -730,33 +621,26 @@ func (s *Server) projectTree(root string) agentfile.Tree {
 	return agentfile.Tree{FS: sub, Dir: root}
 }
 
-// roleBinding names one role position alongside its own configured value,
-// the input rolesCheck's own per-role loop walks in RoleBindings' own field
-// order.
+// roleBinding names one role position alongside its own configured value.
 type roleBinding struct {
 	name, value string
 }
 
 // rolesCheckNoConfig builds roles' own row when no ".brief.yaml" was found
-// anywhere: SKIP "no roles bound", Path "" (R13's own "" when none).
+// anywhere.
 func rolesCheckNoConfig() Check {
 	return Check{ID: "roles", Severity: SeveritySkip, Detail: "no roles bound", Fix: new(runInitWithAgents)}
 }
 
-// rolesCheckUnparseable builds roles' own row when nearest exists but does
-// not parse: SKIP ".brief.yaml did not parse", Fix nil — nothing to bind
-// until the config itself is fixed.
+// rolesCheckUnparseable builds roles' own row when nearest exists but
+// does not parse.
 func rolesCheckUnparseable(nearest string) Check {
 	return Check{ID: "roles", Severity: SeveritySkip, Path: nearest, Detail: ".brief.yaml did not parse"}
 }
 
 // duplicateDefinitionProblem returns roles' own duplicate-definition WARN
-// text when defs — a bare-name binding's own agentfile.Find results —
-// names more than one project-scope definition, or "" when there is at
-// most one, or when defs' own scope is ScopeUser: the duplicate WARN is
-// project scope only, matching its own copy's "under .claude/agents".
-// <rel> is root-relative and slash-separated; defs is already in lexical
-// walk order, so the message's own path order follows it unchanged.
+// text when defs names more than one project-scope definition, or "" when
+// there is at most one, or when defs' scope is ScopeUser.
 func duplicateDefinitionProblem(root, role, value string, defs []agentfile.Definition) string {
 	if len(defs) < 2 || defs[0].Scope != agentfile.ScopeProject {
 		return ""
@@ -778,14 +662,10 @@ func duplicateDefinitionProblem(root, role, value string, defs []agentfile.Defin
 
 // rolesCheck builds roles' own row for a parsed config: every binding
 // empty is SKIP "no roles bound"; any unbound position, unresolved
-// binding, or bare-name binding with more than one project-scope
-// definition is WARN, detail listing each problem in RoleBindings' own
-// order ("planner unbound; reviewer: brief:reviewer not found"), never
-// ERROR (roles are reported, not enforced); everything else bound and
-// resolved is OK "planner, implementer, reviewer bound", with one suffix
-// per role, in RoleBindings' own order: "user-level: <role>" for a bare
-// name resolved only through the injected home, "not verified: <role>"
-// for any other "<plugin>:<name>" binding.
+// binding, or duplicated bare-name binding is WARN, never ERROR; everything
+// bound and resolved is OK, with one suffix per role: "user-level: <role>"
+// for a bare name resolved only through the injected home, "not verified:
+// <role>" for any other "<plugin>:<name>" binding.
 func (s *Server) rolesCheck(root, nearest string, bindings [3]roleBinding) Check {
 	if bindings[0].value == "" && bindings[1].value == "" && bindings[2].value == "" {
 		return Check{ID: "roles", Severity: SeveritySkip, Path: nearest, Detail: "no roles bound", Fix: new(runInitWithAgents)}
@@ -828,10 +708,7 @@ func (s *Server) rolesCheck(root, nearest string, bindings [3]roleBinding) Check
 }
 
 // hostSkillMissingDetail is host-skill's own WARN detail when the skill
-// file is absent while some other Claude Code integration file
-// (Plugin(true) ∪ Agents()) is present: a bound role names the skill by
-// its bare "brief-workflow" name and can never preload a file that is not
-// there.
+// file is absent while some other integration file is present.
 const hostSkillMissingDetail = "not installed; bound agents cannot preload it"
 
 // skillFileOf returns h.Skills()'s own first entry, host-skill's subject
@@ -847,23 +724,16 @@ func skillFileOf(h host.Host) host.File {
 }
 
 // hostSkillNotRegularFix is host-skill's own "not a regular file" ERROR
-// fix: a plain "run 'brief init'" cannot clear this state by itself,
-// since Init's own render step never overwrites an existing path of the
-// wrong kind (a directory or symlink standing where the skill file
-// belongs), so the fix names removing it first.
+// fix: init never overwrites an existing path of the wrong kind, so the
+// fix names removing it first.
 const hostSkillNotRegularFix = "remove " + host.WorkflowSkillDir + "/SKILL.md, then " + runInit
 
-// hostSkillRow builds host-skill's own row from state — already probed by
-// probeIntegrationFile against skillFileOf(h) — and installed, whether any
-// Plugin(true) ∪ Agents() file is present: absent while nothing else is
-// installed is SKIP "not installed"; absent while a plugin or agent file
-// is present is WARN (hostSkillMissingDetail); unreadable is WARN; not a
-// regular file is ERROR (hostSkillNotRegularFix), the one new ERROR arm
-// Rule 7 grants this row; everything else — present, regular, and
-// classified by origin — goes through originRow, single-subject (no
-// suffix), the same "run 'brief init'" fix host-hook and host-snippet
-// share. A present skill always classifies itself, whatever installed
-// carries: only the absent arm consults it.
+// hostSkillRow builds host-skill's own row from state and installed,
+// whether any Plugin(true) ∪ Agents() file is present: absent while
+// nothing else is installed is SKIP "not installed"; absent while
+// something else is present is WARN (hostSkillMissingDetail); unreadable
+// is WARN; not a regular file is ERROR (hostSkillNotRegularFix); everything
+// else — present and regular — goes through originRow.
 func hostSkillRow(fsys fs.FS, wd, root string, state integrationFileState, installed bool) Check {
 	if !state.present {
 		if !installed {
@@ -894,20 +764,13 @@ func hostSkillCheck(fsys fs.FS, wd, root string, h host.Host, installed bool) Ch
 
 // rolesSkillNoConfigDetail is roles-skill's own SKIP detail whenever no
 // config was found, a found config did not parse, or neither planner nor
-// implementer resolved to an agent this row could check (unbound,
-// unresolved, or bound to another plugin) — R7's arms collapse to one
-// wording: there is nothing here for the row to speak to yet.
+// implementer resolved to an agent this row could check.
 const rolesSkillNoConfigDetail = "no bound planner or implementer brief can check"
 
 // rolesSkillOKText renders roles-skill's own OK sentence for checked, the
-// roles this row actually verified — resolved and not bound to another
-// plugin — in planner-then-implementer order: unlike roles' own OK
-// detail, it never names a role it did not check, since the roles row
-// already WARNs one left unbound or unresolved, and a "; not verified:
-// <role>" suffix (rolesSkillCheck's own) covers one bound elsewhere. Both
-// checked is "planner, implementer preload brief-workflow"; exactly one is
-// "<role> preloads brief-workflow". checked is never empty here —
-// rolesSkillCheck returns SKIP first when it is.
+// roles this row actually verified, in planner-then-implementer order:
+// "planner, implementer preload brief-workflow" for both, "<role> preloads
+// brief-workflow" for one. checked is never empty here.
 func rolesSkillOKText(checked []string) string {
 	if len(checked) == 1 {
 		return fmt.Sprintf("%s preloads %s", checked[0], artifact.WorkflowSkillName)
@@ -921,23 +784,21 @@ func rolesSkillOKText(checked []string) string {
 const rolesSkillMissingFix = `add "brief-workflow" to the "skills:" list of each agent named, or run 'brief init --edit-agents' for those in the repository`
 
 // rolesSkillCheckNoConfig builds roles-skill's own row when no
-// ".brief.yaml" was found anywhere: SKIP, Path "" (R13's own "" when
-// none), Fix nil — unlike roles' own no-config SKIP, which carries a fix.
+// ".brief.yaml" was found anywhere: SKIP, Fix nil.
 func rolesSkillCheckNoConfig() Check {
 	return Check{ID: "roles-skill", Severity: SeveritySkip, Detail: rolesSkillNoConfigDetail}
 }
 
 // rolesSkillCheckUnparseable builds roles-skill's own row when nearest
-// exists but does not parse: SKIP, naming nearest, Fix nil.
+// exists but does not parse.
 func rolesSkillCheckUnparseable(nearest string) Check {
 	return Check{ID: "roles-skill", Severity: SeveritySkip, Path: nearest, Detail: rolesSkillNoConfigDetail}
 }
 
 // rolesSkillMissingEntry renders roles-skill's own WARN entry for one
-// role whose resolved agent does not preload artifact.WorkflowSkillName:
-// "<role>: <value> does not preload brief-workflow", plus, when that
-// agent's own frontmatter sets omitClaudeMd: true, a suffix naming the
-// consequence.
+// role whose resolved agent does not preload artifact.WorkflowSkillName,
+// plus, when that agent's frontmatter sets omitClaudeMd: true, a suffix
+// naming the consequence.
 func rolesSkillMissingEntry(role, value string, omitClaudeMd bool) string {
 	entry := fmt.Sprintf("%s: %s does not preload %s", role, value, artifact.WorkflowSkillName)
 	if omitClaudeMd {
@@ -947,14 +808,9 @@ func rolesSkillMissingEntry(role, value string, omitClaudeMd bool) string {
 	return entry
 }
 
-// roleLacksSkill reports whether res's own resolved agent(s) do not
-// preload artifact.WorkflowSkillName, via agentfile.Binding's own
-// LackingSkill — the single decision point every "lacks the skill"
-// question (this row and setup's own missing-skill report) shares: a
-// non-empty result means lacking, and the omitClaudeMd suffix follows
-// LackingSkill's own "any" rule, true when any returned Definition sets
-// it — a "brief:*" binding's own Load failure returns a zero Frontmatter,
-// so it never sets the suffix.
+// roleLacksSkill reports whether res's resolved agent(s) do not preload
+// artifact.WorkflowSkillName, and whether any of them sets
+// omitClaudeMd: true.
 func roleLacksSkill(res agentfile.Binding) (bool, bool) {
 	defs := res.LackingSkill(artifact.WorkflowSkillName)
 	if len(defs) == 0 {
@@ -971,18 +827,12 @@ func roleLacksSkill(res agentfile.Binding) (bool, bool) {
 }
 
 // rolesSkillCheck builds roles-skill's own row for a parsed config,
-// considering only planner and implementer (product verdict item 1 — the
-// reviewer role is deliberately excluded, R15): SKIP
-// (rolesSkillNoConfigDetail) when neither resolves
-// (agentfile.BindingResolved — a BindingUnverified binding does not itself
-// count, so two other-plugin bindings SKIP too); any resolved role whose
-// agent does not preload the skill (roleLacksSkill) is WARN, one entry per
-// lacking role (rolesSkillMissingEntry), joined "; ", in
-// planner-then-implementer order; otherwise OK, naming only checked — the
-// roles this row actually verified, in that same order (rolesSkillOKText)
-// — plus "; not verified: <role>" per role bound to another plugin. A role
-// left unbound or unresolved contributes to neither checked nor a suffix
-// here, since the roles row already reports it.
+// considering only planner and implementer: SKIP when neither resolves;
+// any resolved role whose agent does not preload the skill is WARN, one
+// entry per lacking role; otherwise OK, naming only the roles actually
+// checked, plus "; not verified: <role>" per role bound to another
+// plugin. A role left unbound or unresolved contributes neither, since
+// the roles row already reports it.
 func (s *Server) rolesSkillCheck(root, nearest string, planner, implementer roleBinding) Check {
 	bindings := [2]roleBinding{planner, implementer}
 
@@ -1025,18 +875,16 @@ func (s *Server) rolesSkillCheck(root, nearest string, planner, implementer role
 	return Check{ID: "roles-skill", Severity: SeverityOK, Path: nearest, Detail: detail}
 }
 
-// runInit is short for "run 'brief init'" — the fix text repeated across
-// host-plugin, host-hook, host-skill and host-snippet rows whenever a
-// plain re-run would repair the finding.
+// runInit is the fix text repeated whenever a plain re-run repairs the
+// finding.
 const runInit = "run 'brief init'"
 
 // runInitClaudeCode is the SKIP fix every "not installed" host row shares.
 const runInitClaudeCode = "run 'brief init --host claude-code'"
 
 // runInitPrintSnippet is host-snippet's own WARN fix for a CLAUDE.md
-// candidate that exists but is not a regular file (a symlink or a
-// directory): a plain re-run can never write through it, so the fix points
-// at --print's own manual-application path (R9) instead.
+// candidate that is not a regular file: a re-run can never write through
+// it, so the fix points at --print's manual-application path instead.
 const runInitPrintSnippet = "run 'brief init --print' and add the CLAUDE.md block by hand"
 
 // runInitWithAgents is the fix host-agents and roles share whenever the

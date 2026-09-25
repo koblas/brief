@@ -1,17 +1,9 @@
 package doctor_test
 
 // Host-integration classification tests: every case here builds its
-// subject file tree in an in-memory fstest.MapFS (newHostFixtureFS) rather
-// than on disk. Diagnose's own root-dir and env-path rows still consult
-// the real OS (root-dir os.Stats the fabricated "repo/docs/specifications"
-// that does not exist there; env-path calls exec.LookPath and reads the
-// running binary's build info) — neither row is asserted against by any
-// case here, so those incidental reads never affect a result this file
-// checks. Cases whose own subject is an OS error shape — a chmod'd file or
-// directory (classifyProbeError's own unreadable arm), or an ancestor path
-// component that is a regular file (ENOTDIR) — live in host_disk_test.go
-// instead, where the OS itself, not a fabricated fs.FS, produces the error
-// classifyProbeError has to discriminate.
+// subject file tree in an in-memory fstest.MapFS rather than on disk.
+// Cases whose own subject is an OS error shape live in host_disk_test.go
+// instead, where the OS itself produces the error.
 
 import (
 	"fmt"
@@ -80,12 +72,7 @@ func setHostDir(fsys fstest.MapFS, relPath string) {
 }
 
 // setHostSymlink sets a symlink at repo/relPath in fsys pointing at
-// target — target is resolved relative to relPath's own directory, the
-// same way fstest.MapFS resolves every symlink it holds; an absolute
-// target never resolves, mirroring the restriction fs.ReadLinkFS's own
-// production adapter (os.DirFS) does not share but this package's probes
-// never rely on: only Lstat's own non-regular classification is ever
-// exercised against a symlink here, never a followed read.
+// target, resolved relative to relPath's own directory.
 func setHostSymlink(fsys fstest.MapFS, relPath, target string) {
 	fsys["repo/"+relPath] = &fstest.MapFile{Mode: fs.ModeSymlink, Data: []byte(target)}
 }
@@ -93,11 +80,8 @@ func setHostSymlink(fsys fstest.MapFS, relPath, target string) {
 // hostFSCheckCase is one row of an in-memory host-check classification
 // table: setup mutates newHostFixtureFS's own bare baseline, and
 // Diagnose's report must carry checkID at wantSeverity, with wantDetail a
-// substring of Detail, wantFix the exact Fix text (nil when the row
-// carries none), and wantRel the row's own Path exactly, relative to
-// fsAbs("repo") — MapFS paths are deterministic, so every case pins the
-// full path rather than guessing at a suffix the way host_disk_test.go's
-// own hostCheckCase sometimes has to.
+// substring of Detail, wantFix the exact Fix text, and wantRel the row's
+// own Path exactly, relative to fsAbs("repo").
 type hostFSCheckCase struct {
 	name         string
 	setup        func(fsys fstest.MapFS, h host.Host)
@@ -109,10 +93,8 @@ type hostFSCheckCase struct {
 }
 
 // runHostFSCheckCases builds newHostFixtureFS(), applies c.setup, runs
-// Diagnose over the resulting fstest.MapFS (doctor.WithRootFS) rooted at
-// fsAbs("repo"), and asserts c.checkID's own row against c.wantSeverity,
-// c.wantDetail (substring), c.wantFix (exact) and c.wantRel (the row's own
-// Path, exactly).
+// Diagnose over the resulting fstest.MapFS rooted at fsAbs("repo"), and
+// asserts c.checkID's own row.
 func runHostFSCheckCases(t *testing.T, cases []hostFSCheckCase) {
 	t.Helper()
 
@@ -135,21 +117,8 @@ func runHostFSCheckCases(t *testing.T, cases []hostFSCheckCase) {
 	}
 }
 
-// Test_diagnose_classifies_host_plugin pins host-plugin's own precedence:
-// nothing installed anywhere is SKIP; once something is installed
-// (Plugin(true) ∪ Agents()), a missing or non-regular subject file
-// (Plugin(false)) is ERROR "incomplete", naming it; an edited one is OK
-// "edited locally"; every subject file current is OK "installed". The
-// ENOTDIR "ancestor is a regular file" arm lives in host_disk_test.go: a
-// direct probe against the stdlib shows the same fixture over
-// fstest.MapFS reports plain fs.ErrNotExist rather than ENOTDIR, so it
-// cannot exercise classifyProbeError's own ENOTDIR arm here.
-// Mutation-verified, package-wide with no -run filter: forcing
-// hostPluginCheck's own missing-file precedence branch to `false` reddens
-// exactly the three ERROR "incomplete" cases here ("manifest missing …",
-// "a skill file is a directory", "only the hook is installed") — never
-// "edited locally" or "every subject file is current" — proving this
-// table actually discriminates on it rather than passing regardless.
+// The ENOTDIR "ancestor is a regular file" arm lives in
+// host_disk_test.go: a fabricated fstest.MapFS cannot produce it.
 func Test_diagnose_classifies_host_plugin(t *testing.T) {
 	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
@@ -243,8 +212,8 @@ func Test_diagnose_classifies_host_plugin(t *testing.T) {
 	})
 }
 
-// writeHostPluginWithoutHookFS sets every h.Plugin(true) file in fsys
-// except the trailing hook entry.
+// writeHostPluginWithoutHookFS sets every h.Plugin(true) file except the
+// trailing hook entry.
 func writeHostPluginWithoutHookFS(fsys fstest.MapFS, h host.Host) {
 	for _, f := range h.Plugin(true) {
 		if f.Hook {
@@ -255,18 +224,7 @@ func writeHostPluginWithoutHookFS(fsys fstest.MapFS, h host.Host) {
 	}
 }
 
-// Test_diagnose_classifies_host_hook pins host-hook's own precedence:
-// nothing installed anywhere is SKIP; the rest of the plugin installed
-// with no hook file is WARN, since doctor cannot tell a lost file from
-// --no-hook; a hook path that is a directory is ERROR; an edited hook is
-// OK "edited locally"; a current hook is OK "installed". The ENOTDIR and
-// unreadable arms live in host_disk_test.go — see
-// Test_diagnose_classifies_host_plugin's own doc comment for why.
-// Mutation-verified, package-wide with no -run filter: inverting
-// hostHookCheck's own absent-branch condition (`if !installed` to `if
-// installed`) reddens both "nothing installed anywhere" (SKIP flips to
-// WARN) and "the rest of the plugin is installed but the hook file is
-// missing" (WARN flips to SKIP) — no other case here — restored after.
+// The ENOTDIR and unreadable arms live in host_disk_test.go.
 func Test_diagnose_classifies_host_hook(t *testing.T) {
 	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
@@ -337,21 +295,9 @@ func Test_diagnose_classifies_host_hook(t *testing.T) {
 	})
 }
 
-// Test_diagnose_classifies_host_agents pins host-agents' own precedence,
-// distinct from host-plugin's: none of the three agent files present is
-// SKIP; a missing one, given at least one of the three exists, is WARN
-// (never ERROR — an unbound agent is not itself a fault); an older render
-// is WARN naming it; an edited one is OK "edited locally"; all three
-// current is OK "installed". Every fix here names --with-agents, since a
-// plain "brief init" never touches agent files. The ENOTDIR and unreadable
-// arms live in host_disk_test.go — see Test_diagnose_classifies_host_plugin's
-// own doc comment for why. Mutation-verified, package-wide with no -run
-// filter, one precedence branch at a time: forcing hostAgentsCheck's own
-// missing branch (`len(missing) > 0`) to false reddens exactly "one of the
-// three agent files is missing"; forcing the older branch
-// (`len(older) > 0`) to false reddens exactly "an older planner render";
-// forcing the edited branch (`len(edited) > 0`) to false reddens exactly
-// "an agent file was edited locally" — each restored before the next.
+// A missing agent file is WARN, never ERROR: an unbound agent is not
+// itself a fault. The ENOTDIR and unreadable arms live in
+// host_disk_test.go.
 func Test_diagnose_classifies_host_agents(t *testing.T) {
 	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
@@ -381,13 +327,9 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 			wantRel:      host.PluginDir + "/agents",
 		},
 		{
-			// SCENARIO-02: the pre-scenario planner render, captured
-			// mechanically (%q dump) before agents.go changed — the one
-			// fixture that actually reaches host-agents' own OriginOlder
-			// arm today (every other Kind's older…Digests list still ships
-			// empty). See Test_diagnose_classifies_host_agents's own doc
-			// comment for the mutation this case is verified against (forcing
-			// hostAgentsCheck's own `len(older) > 0` branch to false).
+			// The pre-change planner render, captured mechanically — the
+			// one fixture that reaches host-agents' own OriginOlder arm
+			// today.
 			name: "an older planner render",
 			setup: func(fsys fstest.MapFS, h host.Host) {
 				for _, f := range h.Agents() {
@@ -441,28 +383,10 @@ func Test_diagnose_classifies_host_agents(t *testing.T) {
 	})
 }
 
-// Test_diagnose_classifies_host_skill pins host-skill's own precedence:
-// nothing installed anywhere is SKIP; the skill missing while some other
-// Claude Code integration file is installed is WARN, since a bound role
-// can never preload a skill that is not there; a skill path that is a
-// directory is ERROR — Rule 7's one new ERROR arm; an edited skill is OK
-// "edited locally"; a current one, alongside a full install, is OK
-// "installed"; and the skill alone, with no plugin or agent file present
-// at all, still classifies itself OK "installed" rather than SKIP — only
-// an absent skill defers to whether anything else is installed. The
-// unreadable arm (skill mode 0o000) lives in host_disk_test.go.
-// Mutation-verified, package-wide with no -run filter, one arm at a time:
-// inverting hostSkillRow's own absent-branch condition (`if !installed` to
-// `if installed`) reddens both "nothing installed anywhere" and "plugin
-// files present and skill absent"; changing the ERROR not-a-regular-file
-// arm's own Severity to WARN reddens "skill path is a directory" alone;
-// changing that same arm's own Fix to runInit (dropping
-// hostSkillNotRegularFix) reddens "skill path is a directory" alone too;
-// replacing the final originRow-derived return with a hardcoded ERROR row
-// reddens "the skill was edited locally", "the skill is current, alongside
-// a full install" and "the skill alone, with no plugin or agent file" —
-// every case that actually reaches it — together. Each restored before the
-// next.
+// The skill alone, with no plugin or agent file present, still
+// classifies itself OK "installed" rather than SKIP — only an absent
+// skill defers to whether anything else is installed. The unreadable arm
+// lives in host_disk_test.go.
 func Test_diagnose_classifies_host_skill(t *testing.T) {
 	skillPath := host.WorkflowSkillDir + "/SKILL.md"
 
@@ -544,22 +468,9 @@ func Test_diagnose_classifies_host_skill(t *testing.T) {
 	})
 }
 
-// Test_diagnose_host_plugin_stays_skip_when_only_the_skill_is_installed
-// pins anyIntegrationFilePresent's own h.Skills() exclusion (R13's own
-// doc comment on that function): the skill is never an install signal on
-// its own, so host-plugin — whose own "installed" flag is
-// anyIntegrationFilePresent's result — must stay SKIP "not installed" even
-// though the skill file itself is genuinely present and OK (pinned
-// separately by "the skill alone, with no plugin or agent file" above).
-// Control: "nothing installed anywhere" in Test_diagnose_classifies_host_plugin
-// is the same SKIP row with nothing at all present. Mutation-verified,
-// package-wide with no -run filter: adding h.Skills() to
-// anyIntegrationFilePresent's own OR reddens this case (host-plugin flips
-// to ERROR "incomplete: missing …") and, since the same result also feeds
-// (*Server).Diagnose's own integrationInstalled for env-path, doctor_test.go's
-// own Test_diagnose_classifies_env_path_by_whether_the_integration_is_installed/
-// "not on PATH, only the brief-workflow skill is installed" — no other
-// case in the package, restored after.
+// The skill is never an install signal on its own, so host-plugin must
+// stay SKIP "not installed" even though the skill file is genuinely
+// present and OK.
 func Test_diagnose_host_plugin_stays_skip_when_only_the_skill_is_installed(t *testing.T) {
 	fsys := newHostFixtureFS()
 	h := claudeCodeHost(t)
@@ -578,22 +489,9 @@ func Test_diagnose_host_plugin_stays_skip_when_only_the_skill_is_installed(t *te
 	assert.Equal(t, runInitClaudeCode, *check.Fix)
 }
 
-// Test_diagnose_classifies_host_snippet pins host-snippet's own rules: a
-// marker defect in either CLAUDE.md candidate is ERROR, naming its own
-// line; two candidates each holding a block is ERROR on ".claude/CLAUDE.md";
-// a block only in ".claude/CLAUDE.md" is OK; a current block for a
-// directory other than the configured one is WARN; a current block is OK
-// but not dir-compared when ".brief.yaml" itself is unparseable; an edited
-// block is OK "edited locally"; no CLAUDE.md at all, or a block whose line
-// endings are CRLF (which can never exactly match the LF marker), is SKIP
-// "not installed"; a candidate that exists but is not a regular file — a
-// directory or a symlink — is WARN, naming which. The unreadable-vs-absent
-// split lives in host_disk_test.go's own
-// Test_diagnose_classifies_host_snippet_unreadable. Mutation-verified,
-// package-wide with no -run filter: short-circuiting hostSnippetCheck's
-// own marker-defect loop (`for _, s := range states { if s.prob != nil
-// {…} }`) to never fire reddens "a lone begin marker" alone — the only
-// case here whose subject is a marker defect.
+// A block whose line endings are CRLF can never exactly match the LF
+// marker, so it is SKIP "not installed". The unreadable-vs-absent split
+// lives in host_disk_test.go.
 func Test_diagnose_classifies_host_snippet(t *testing.T) {
 	runHostFSCheckCases(t, []hostFSCheckCase{
 		{
@@ -691,15 +589,9 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantRel:      "CLAUDE.md",
 		},
 		{
-			// This is this table's own discriminator between fs.Lstat and
-			// fs.Stat: a dangling symlink target ("elsewhere.md" is never
-			// created in this fixture) still resolves under Lstat, since
-			// Lstat never follows it, but resolves as absent under Stat.
-			// Mutation-verified, package-wide with no -run filter: changing
-			// scanSnippetCandidateStates's own fs.Lstat call to fs.Stat
-			// reddens this case alone — Stat follows the dangling symlink,
-			// finds nothing, and the row falls to SKIP "not installed" —
-			// restored after.
+			// A dangling symlink target ("elsewhere.md" is never created
+			// here) still resolves under Lstat, since Lstat never follows
+			// it, but resolves as absent under Stat.
 			name: "CLAUDE.md is a symlink",
 			setup: func(fsys fstest.MapFS, _ host.Host) {
 				setHostSymlink(fsys, "CLAUDE.md", "elsewhere.md")
@@ -725,21 +617,8 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantRel:      ".claude/CLAUDE.md",
 		},
 		{
-			// Mutation-verified, package-wide with no -run filter: replacing
-			// the firstPresent-finding loop with an unconditional
-			// "firstPresent = &states[0] if states[0] is present, else nil"
-			// (dropping the search past states[0]) reddens this case — root
-			// CLAUDE.md is absent here, so firstPresent never reaches
-			// ".claude/CLAUDE.md" and the row falls to the fallback SKIP "not
-			// installed" — together with every other case whose own
-			// first-present candidate is not states[0]: "no root CLAUDE.md
-			// but .claude/CLAUDE.md is a regular file with no block" below,
-			// host_disk_test.go's own
-			// Test_diagnose_classifies_host_snippet_unreadable/"no root
-			// CLAUDE.md, .claude itself cannot be Lstat'd", and doctor_test.go's
-			// own
-			// Test_diagnose_treats_an_unreadable_host_snippet_directory_as_present_not_absent.
-			// Restored after.
+			// Root CLAUDE.md is absent here, so firstPresent must reach
+			// past states[0] to ".claude/CLAUDE.md".
 			name: "no root CLAUDE.md but .claude/CLAUDE.md is a directory",
 			setup: func(fsys fstest.MapFS, _ host.Host) {
 				setHostDir(fsys, ".claude/CLAUDE.md")
@@ -751,14 +630,10 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantRel:      ".claude/CLAUDE.md",
 		},
 		{
-			// Pins C1's fix: planSnippet would choose root CLAUDE.md here
-			// (chooseSnippetLocation's own "first candidate that exists at
-			// all" rule) and merge into it, never touching the directory at
-			// ".claude/CLAUDE.md" — doctor must agree, not WARN about a
-			// candidate init would never look at. wantRel's own exact-path
-			// assertion is the stronger check here: it fails both if the
-			// SKIP row ever named ".claude/CLAUDE.md" instead and if it
-			// named neither candidate.
+			// planSnippet would choose root CLAUDE.md here and merge into
+			// it, never touching the directory at ".claude/CLAUDE.md" —
+			// doctor must agree, not WARN about a candidate init would
+			// never look at.
 			name: "root CLAUDE.md exists with no block, .claude/CLAUDE.md is a directory",
 			setup: func(fsys fstest.MapFS, _ host.Host) {
 				setHostFile(fsys, "CLAUDE.md", []byte("unrelated prose\n"))
@@ -771,13 +646,8 @@ func Test_diagnose_classifies_host_snippet(t *testing.T) {
 			wantRel:      "CLAUDE.md",
 		},
 		{
-			// Mutation-verified, package-wide with no -run filter: collapsing
-			// the SKIP row's own Path selection (the firstPresent/states[0]
-			// switch) to always use states[0].path reddens this case alone
-			// — it would name root's own missing "CLAUDE.md" instead of the
-			// regular, blockless ".claude/CLAUDE.md" that
-			// chooseSnippetLocation, and so planSnippet, would actually choose
-			// here — restored after.
+			// The SKIP row's Path must name the regular, blockless
+			// ".claude/CLAUDE.md" here, not root's missing "CLAUDE.md".
 			name: "no root CLAUDE.md but .claude/CLAUDE.md is a regular file with no block",
 			setup: func(fsys fstest.MapFS, _ host.Host) {
 				setHostFile(fsys, ".claude/CLAUDE.md", []byte("unrelated prose\n"))
@@ -820,22 +690,10 @@ func setAgentFrontmatter(fsys fstest.MapFS, relPath, name string) {
 	setHostFile(fsys, relPath, []byte("---\nname: "+name+"\n---\n\nbody\n"))
 }
 
-// Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions
-// pins duplicateDefinitionProblem's own WARN, exercised through
-// (*Server).projectTree's own fs.Sub-backed project tree: two project
-// agent files under ".claude/agents" both declare frontmatter "name:
-// my-reviewer" — the bare binding the reviewer role names — so
-// duplicateDefinitionProblem's own WARN fires once, naming both paths in
-// findIn's own Path order, never twice and never silently picking one.
-// Mutation-verified, package-wide with no -run filter: raising
-// duplicateDefinitionProblem's own `len(defs) < 2` threshold to `< 3`
-// reddens this case alone (two definitions no longer count as a
-// duplicate); reverting (*Server).resolveRoleBinding to call
-// agentfile.DirTree(root) directly, bypassing projectTree, also reddens
-// this case alone (root/.claude/agents then reads through the real "/"
-// filesystem instead of fsys, and the injected fixture is never on disk)
-// — proving projectTree is the path actually exercised here, not merely
-// present in the call graph. Both restored after.
+// Two project agent files under ".claude/agents" both declare frontmatter
+// "name: my-reviewer", so the WARN fires once, naming both paths, never
+// twice and never silently picking one. Exercised through
+// (*Server).projectTree's own fs.Sub-backed project tree.
 func Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions(t *testing.T) {
 	fsys := newHostFixtureFS()
 	h := claudeCodeHost(t)
@@ -862,9 +720,8 @@ func Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions
 }
 
 // homeAgentTree returns a roles test's own home field: an agentfile.Tree
-// over an in-memory fstest.MapFS holding one agent file at relPath (rooted
-// the way agentfile.DirTree roots a real "~/.claude/agents" directory, so
-// relPath is always ".claude/agents/…") whose contents are body.
+// over an in-memory fstest.MapFS holding one agent file at relPath (always
+// ".claude/agents/…") whose contents are body.
 func homeAgentTree(relPath, body string) func(t *testing.T) agentfile.Tree {
 	return func(t *testing.T) agentfile.Tree {
 		t.Helper()
@@ -889,9 +746,7 @@ func setRolesConfig(fsys fstest.MapFS, planner, implementer, reviewer string) {
 }
 
 // homeTreeOption builds the doctor.WithHomeTree option a roles/roles-skill
-// case's own home field selects: home(t) when set, else the zero Tree,
-// searched by nothing — the same "nothing here" a real, empty home
-// directory would produce.
+// case's home field selects: home(t) when set, else the zero Tree.
 func homeTreeOption(t *testing.T, home func(t *testing.T) agentfile.Tree) doctor.Option {
 	t.Helper()
 
@@ -917,19 +772,10 @@ type rolesCase struct {
 	wantFix      *string
 }
 
-// Test_diagnose_classifies_roles pins roles' own resolution rules (R7,
-// Rule 5): no config, or every binding empty, is SKIP "no roles bound"; an
-// unparseable config is SKIP naming why; a bound "brief:<name>" resolves
-// through the plugin agent file or a project ".claude/agents/<name>.md"
-// override; a bound bare "<name>" resolves through a project or injected
-// home agent file under ".claude/agents/" whose frontmatter "name:"
-// matches; any other "<plugin>:<name>" counts as bound but unverified; any
-// unbound or unresolved position is WARN, never ERROR; everything bound
-// and resolved is OK. Test_diagnose_roles_resolves_by_frontmatter_name
-// covers the frontmatter rule's own nested-layout, shadowing, duplicate
-// and user-level cases; this test's own bare-name fixtures stay flat,
-// named after the bound role, with frontmatter added only so they still
-// resolve.
+// Test_diagnose_roles_resolves_by_frontmatter_name covers the frontmatter
+// rule's own nested-layout, shadowing, duplicate and user-level cases;
+// this test's own bare-name fixtures stay flat, named after the bound
+// role.
 func Test_diagnose_classifies_roles(t *testing.T) {
 	h := claudeCodeHost(t)
 	cases := []rolesCase{
@@ -1072,12 +918,10 @@ type rolesFrontmatterCase struct {
 // unbound, unresolved or duplicated (host.go's own rolesCheck).
 const rolesUnresolvedFix = "bind each role to an existing agent in .brief.yaml, or " + runInitWithAgents
 
-// Test_diagnose_roles_resolves_by_frontmatter_name pins Rule 5: a bare
-// binding matches frontmatter "name:" anywhere under ".claude/agents/"
-// (nested layout, any filename), a project definition shadows a
-// same-named "~/.claude/agents" one, and a user-level-only resolution adds
-// "; user-level: <role>". Test_diagnose_roles_warns_once_when_a_bare_name_has_two_project_definitions
-// pins the duplicate-definition WARN, via (*Server).projectTree.
+// A bare binding matches frontmatter "name:" anywhere under
+// ".claude/agents/", a project definition shadows a same-named
+// "~/.claude/agents" one, and a user-level-only resolution adds
+// "; user-level: <role>".
 func Test_diagnose_roles_resolves_by_frontmatter_name(t *testing.T) {
 	h := claudeCodeHost(t)
 	cases := []rolesFrontmatterCase{
@@ -1189,9 +1033,7 @@ func agentBody(name string, fragments ...string) string {
 // mutates newHostFixtureFS's own bare baseline, home overrides WithHomeTree,
 // and the roles-skill row must carry wantSeverity, wantDetail (exact) and
 // wantFix (exact). wantRolesDetail, when non-empty, also asserts the
-// sibling "roles" row's own exact Detail — the scalar-skills guard's own
-// control, proving a loose decode never drops the agent out of Rule 5
-// resolution.
+// sibling "roles" row's own exact Detail.
 type rolesSkillCase struct {
 	name            string
 	setup           func(fsys fstest.MapFS, h host.Host)
@@ -1203,20 +1045,8 @@ type rolesSkillCase struct {
 	wantRolesDetail string
 }
 
-// Test_diagnose_classifies_roles_skill pins roles-skill's own resolution
-// rules (S05): only the planner and implementer bindings are considered
-// (product verdict item 1 — reviewer is excluded); no config, an
-// unparseable config, or neither role bound and resolved is SKIP "no
-// bound planner or implementer brief can check", Fix nil; any resolved
-// role whose agent does not preload "brief-workflow" is WARN, one entry
-// per lacking role joined "; ", in planner-then-implementer order, with
-// an omitClaudeMd suffix only on an entry whose own agent sets it;
-// otherwise OK, naming only the roles actually checked (resolved, not
-// bound to another plugin) — "planner, implementer preload brief-workflow"
-// when both, "<role> preloads brief-workflow" when one — plus "; not
-// verified: <role>" per role bound to another plugin: a role the row
-// never verified never appears in the leading clause, whether it is
-// unresolved (the roles row already WARNs it) or bound elsewhere.
+// Only the planner and implementer bindings are considered; reviewer is
+// excluded.
 func Test_diagnose_classifies_roles_skill(t *testing.T) {
 	cases := []rolesSkillCase{
 		{
@@ -1314,16 +1144,9 @@ func Test_diagnose_classifies_roles_skill(t *testing.T) {
 	runRolesSkillCases(t, cases)
 }
 
-// Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases
-// continues Test_diagnose_classifies_roles_skill's own table — split into a
-// second function only to keep golangci-lint's maintidx metric, driven by
-// the table literal's own size, under threshold; the two functions pin one
-// rule set (roles-skill's own resolution rules, S05) and share
-// runRolesSkillCases. This half covers the "not verified" suffix (both role
-// names — a hardcoded role literal in rolesSkillOKText must fail here even
-// if it passes the sibling "planner" case), the omitClaudeMd suffix, the
-// reviewer exclusion, user-level resolution, the loose-decode and
-// duplicate-definition guards, and a lone unbound role.
+// Continues Test_diagnose_classifies_roles_skill's own table — split into
+// a second function only to keep golangci-lint's maintidx metric under
+// threshold.
 func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testing.T) {
 	cases := []rolesSkillCase{
 		{
@@ -1337,11 +1160,8 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 			wantFix:      nil,
 		},
 		{
-			// Mirrors the "planner preloads…; not verified: implementer"
-			// case above with the roles swapped, so the singular branch of
-			// rolesSkillOKText is pinned against both role names, not just
-			// "planner" — a hardcoded "planner" literal would still pass
-			// the sibling case above but fail here.
+			// Roles swapped from the case above, so rolesSkillOKText's
+			// singular branch is pinned against both role names.
 			name: "implementer resolved with the skill, planner is an other-plugin binding",
 			setup: func(fsys fstest.MapFS, h host.Host) {
 				setRolesConfig(fsys, "acme:planner", "brief:implementer", "")
@@ -1396,11 +1216,8 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 			wantFix:      nil,
 		},
 		{
-			// Control for the loose-decode contract: a scalar "skills:"
-			// value must not fail findIn's own whole-file decode — if it
-			// did, the implementer would resolve as "not found" and the
-			// roles row's own detail would gain an "implementer: … not
-			// found" problem instead of staying silent about it.
+			// A scalar "skills:" value must not fail findIn's own
+			// whole-file decode.
 			name: "scalar skills guards the loose decode",
 			setup: func(fsys fstest.MapFS, _ host.Host) {
 				setRolesConfig(fsys, "", "my-implementer", "")
@@ -1412,10 +1229,8 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 			wantRolesDetail: "planner unbound; reviewer unbound",
 		},
 		{
-			// Duplicate guard: two project definitions share the same
-			// frontmatter name, sorted second (path order) lacks the
-			// skill — the WARN must appear once for implementer, not
-			// twice.
+			// Two project definitions share the same frontmatter name;
+			// the WARN must appear once for implementer, not twice.
 			name: "a duplicate definition WARNs once",
 			setup: func(fsys fstest.MapFS, _ host.Host) {
 				setRolesConfig(fsys, "", "dup-implementer", "")
@@ -1442,11 +1257,8 @@ func Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases(t *testin
 }
 
 // runRolesSkillCases runs each rolesSkillCase in cases as its own subtest,
-// diagnosing a fresh newHostFixtureFS and asserting roles-skill's own row
-// (and, where wantRolesDetail is set, the sibling roles row) against it —
-// the execution loop Test_diagnose_classifies_roles_skill and
-// Test_diagnose_classifies_roles_skill_verified_and_duplicate_cases both
-// share.
+// asserting roles-skill's own row (and, where wantRolesDetail is set, the
+// sibling roles row) against it.
 func runRolesSkillCases(t *testing.T, cases []rolesSkillCase) {
 	t.Helper()
 

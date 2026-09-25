@@ -3,38 +3,14 @@ package doctor
 // White-box package. This file pins three unexported units host_test.go's
 // own black-box table cannot reach economically:
 //
-//   - originRow is host.go's own unexported origin→row mapping. Every
-//     compiled-in older digest list but the planner and implementer agents'
-//     own (internal/platform/artifact) still ships empty, so no real
-//     host-plugin, host-hook or host-snippet fixture's bytes ever classify
-//     as artifact.OriginOlder through artifact.Recognize or
-//     artifact.RecognizeSnippet — those three rows' own OriginOlder arm is
-//     reachable only by calling originRow directly with a synthetic
-//     artifact.OriginOlder value, as this file does. host-agents' own
-//     OriginOlder arm is covered black-box instead, in host_test.go's
-//     Test_diagnose_classifies_host_agents ("an older planner render"),
-//     through the real artifact.Recognize path. Every other arm
-//     (present/missing, edited, current) is covered black-box in
-//     host_test.go the same way.
-//   - hostSkillRow is host.go's own unexported state→row mapping for
-//     host-skill. olderSkillWorkflowDigests ships empty, the same as every
-//     other Kind but the planner and implementer agents', so its own
-//     OriginOlder arm is reachable only by calling hostSkillRow directly
-//     with a synthetic integrationFileState carrying artifact.OriginOlder,
-//     mirroring originRow's own case above. Every other arm is covered
-//     black-box: host_test.go's Test_diagnose_classifies_host_skill covers
-//     the MapFS-reachable arms, host_disk_test.go's
-//     Test_diagnose_classifies_host_skill_unreadable the chmod'd one.
-//   - nonRegularKind's own default (neither-symlink-nor-directory) arm needs
-//     a mode a black-box fixture cannot portably construct: os.Symlink and
-//     os.Mkdir work on every platform this project targets, but a named
-//     pipe requires syscall.Mkfifo, which is POSIX-only and would make
-//     host_test.go itself platform-conditional. A fake os.FileInfo reaches
-//     the same branch without that dependency.
-//   - notRegularDetail's own empty-kind fold depends directly on
-//     nonRegularKind's default arm reporting "" — calling it with "" here
-//     pins the fold itself without needing the fifo fixture nonRegularKind's
-//     own test already stands in for.
+//   - originRow: every compiled-in older-digest list but the planner and
+//     implementer agents' own ships empty, so host-plugin's, host-hook's
+//     and host-snippet's own OriginOlder arm is reachable only by a
+//     synthetic call.
+//   - hostSkillRow: same reason, for host-skill's own OriginOlder arm.
+//   - nonRegularKind's default arm needs a mode (a named pipe) a
+//     black-box fixture cannot portably construct; a fake os.FileInfo
+//     reaches the same branch without that platform dependency.
 
 import (
 	"os"
@@ -47,9 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeFIFOInfo is a minimal os.FileInfo reporting a named-pipe mode — the
-// one non-symlink, non-directory shape nonRegularKind's own default arm
-// falls through to, without depending on syscall.Mkfifo's platform support.
+// fakeFIFOInfo is a minimal os.FileInfo reporting a named-pipe mode, the
+// one non-symlink, non-directory shape nonRegularKind's default arm falls
+// through to.
 type fakeFIFOInfo struct{}
 
 func (fakeFIFOInfo) Name() string       { return "CLAUDE.md" }
@@ -59,13 +35,6 @@ func (fakeFIFOInfo) ModTime() time.Time { return time.Time{} }
 func (fakeFIFOInfo) IsDir() bool        { return false }
 func (fakeFIFOInfo) Sys() any           { return nil }
 
-// Test_originRow_reports_older_as_warn_with_the_init_fix pins the one arm
-// no black-box test can reach: OriginOlder is WARN, "installed by an older
-// brief release" with suffix appended, and the caller-supplied olderFix —
-// exercised once per shape a real row calls it with: host-hook/host-snippet's
-// own single-subject call (no suffix, "run 'brief init'") and host-plugin/
-// host-agents' own multi-file call (a joined-relpath suffix, each with its
-// own fix).
 func Test_originRow_reports_older_as_warn_with_the_init_fix(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -105,10 +74,8 @@ func Test_originRow_reports_older_as_warn_with_the_init_fix(t *testing.T) {
 	}
 }
 
-// Test_hostSkillRow_reports_an_older_render_as_warn pins host-skill's own
-// OriginOlder arm, reachable only through this synthetic call. The empty
-// fstest.MapFS passed as fsys is never read: OriginOlder resolves through
-// originRow, never reaching the unreadable branch that would consult it.
+// The empty fstest.MapFS passed as fsys is never read: OriginOlder
+// resolves through originRow, never reaching the unreadable branch.
 func Test_hostSkillRow_reports_an_older_render_as_warn(t *testing.T) {
 	state := integrationFileState{
 		path:    "/repo/.claude/skills/brief-workflow/SKILL.md",
@@ -126,25 +93,12 @@ func Test_hostSkillRow_reports_an_older_render_as_warn(t *testing.T) {
 	assert.Equal(t, runInit, *check.Fix)
 }
 
-// Test_nonRegularKind_reports_no_kind_for_a_fifo pins nonRegularKind's own
-// default arm: a mode that is neither a symlink nor a directory (a fifo,
-// standing in for the one shape a real CLAUDE.md candidate could take that
-// is neither) reports "", the value notRegularDetail's own bare-sentence
-// arm depends on for reachability. Mutation-verified: changing the default
-// case to return a non-empty string (e.g. "fifo") reddens this test alone,
-// restored after.
 func Test_nonRegularKind_reports_no_kind_for_a_fifo(t *testing.T) {
 	got := nonRegularKind(fakeFIFOInfo{})
 
 	assert.Empty(t, got)
 }
 
-// Test_notRegularDetail_omits_the_parenthetical_when_kind_is_empty pins the
-// fold notRegularKind's fifo case (above) reaches in practice: an empty
-// kind renders the bare sentence, never a doubled parenthetical ("not a
-// regular file (); brief block not installed"). Mutation-verified:
-// unconditionally formatting with kind (dropping the `if kind == ""`
-// guard) reddens this test alone, restored after.
 func Test_notRegularDetail_omits_the_parenthetical_when_kind_is_empty(t *testing.T) {
 	got := notRegularDetail("")
 
