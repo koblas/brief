@@ -134,6 +134,29 @@ func Test_finish_complete_line_carries_the_drop_suffix_mem(t *testing.T) {
 	assert.Equal(t, wantStderr, stderr)
 }
 
+// Test_finish_reports_an_open_debts_drop_as_dropped_debt_mem proves the
+// dropped-debt rule and the untagged rendering end-to-end through the CLI
+// against "## Open debts" specifically (SCENARIO-02 of dropped-entries):
+// dropRuleFor and dropDetail's untagged branch were already unit-tested at
+// Server level by SCENARIO-01, but no CLI-level test had exercised the
+// Open debts heading or the "unowned — dies unless re-opened" text before
+// this.
+func Test_finish_reports_an_open_debts_drop_as_dropped_debt_mem(t *testing.T) {
+	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n\n" +
+		"- kept entry\n\n- D — unowned — dies unless re-opened\n"
+	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+	newState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n\n- kept entry\n"
+	statePath := memWriteInput(tree, "state.md", newState)
+
+	stdout, stderr, err := runFinishMem(t, tree, handoffPath, statePath)
+
+	require.NoError(t, err)
+	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	assert.Equal(t, "WARN  "+stateRel+":11  dropped from Open debts, untagged: D — unowned — dies unless re-opened\n", stdout)
+	assert.Contains(t, stderr, "(dropped 1 entry, listed on stdout)")
+}
+
 func Test_dropExcerpt(t *testing.T) {
 	cases := []struct {
 		name string

@@ -1,6 +1,6 @@
 # dropped-entries — current state
 
-Scenarios complete: SCENARIO-01. Last updated by SCENARIO-01.
+Scenarios complete: SCENARIO-01, SCENARIO-02. Last updated by SCENARIO-02.
 
 ## Binding decisions
 
@@ -16,7 +16,10 @@ Scenarios complete: SCENARIO-01. Last updated by SCENARIO-01.
 - `DroppedEntry.Line` is whole-body 1-based over the **old** body only. `.Heading` is display
   text (leading `#` run + one space stripped); rule classification (`dropRuleFor`) compares
   the **configured** heading string against `cfg.StateHeadings.OpenDebts`, never the display
-  text. `.Tag` is `""` untagged (SCENARIO-01).
+  text. `.Tag` is `""` untagged (SCENARIO-01). Proven end-to-end through the CLI against
+  `## Open debts` and the "unowned — dies unless re-opened" text by SCENARIO-02, with no
+  production edit needed — `dropRuleFor` and `dropDetail`'s untagged branch already handled
+  it generically.
 - Drops are computed only on `FinishFS`'s `refinishWrite` path, just before
   `applyFinishWrites` — pure, no error path. The R11 no-op returns a non-nil, empty
   `FinishResult.Dropped` (SCENARIO-01).
@@ -28,18 +31,19 @@ Scenarios complete: SCENARIO-01. Last updated by SCENARIO-01.
   `docs/specifications/brief/specification.md`, plus the STATE.md decision in
   `docs/specifications/brief/STATE.md`), each now also noting `check` groups under a feature
   header while `finish` prints bare (SCENARIO-01, Product Verdict item 2).
+- The Default profile's Open debts line in `docs/specifications/brief/specification.md`
+  (line 239) now carries the same trailing `(SCENARIO-XX)` placeholder as the other three
+  state-heading lines — Product Verdict item 4, closed (SCENARIO-02).
 
 ## Left unbuilt
 
-- `dropped_entries` in `finishDocument`/`jsonFieldsParagraph` — SCENARIO-04.
+- `dropped_entries` in `finishDocument`/`jsonFieldsParagraph`, including the JSON `rule`
+  field — SCENARIO-04. That element is the first place `"rule":"dropped-debt"` is provable
+  end-to-end through the CLI (text mode never renders `Rule`); SCENARIO-04's fixture set must
+  include an Open-debts drop.
 - `finishLong`'s drop-reporting `--help` paragraph — SCENARIO-10.
-- Continuation lines and indented sub-items in `markdown.Entries` — SCENARIO-07; today's
-  scanner recognizes only single-line column-0 items, and an indented line is simply ignored.
-- The empty/duplicate configured-heading guard — SCENARIO-08.
-- Assertions that a refusal or usage error prints no rows/no `dropped_entries` — SCENARIO-09.
-- The Open debts line's own trailing tag in the Default profile (Product Verdict item 4) —
-  SCENARIO-02, expected green on arrival for the rule and for `untagged` (both built by
-  SCENARIO-01); don't manufacture a red there.
+- Continuation lines/indented sub-items in `markdown.Entries`, the empty/duplicate heading
+  guard, refusal/no-row assertions — SCENARIO-07/08/09, unchanged from SCENARIO-01's handoff.
 
 ## Traps
 
@@ -52,7 +56,7 @@ Scenarios complete: SCENARIO-01. Last updated by SCENARIO-01.
 - `checklistItemRe` (`markdown/checklist.go`) is not the entry grammar: it accepts leading
   indentation and matches only `- [ ]`/`- [x]`. `entryItemRe` is deliberately separate.
 - CR stripping and whitespace collapse are built (`normalizeEntryText`) but unpinned by any
-  SCENARIO-01 assertion — SCENARIO-03 and SCENARIO-08 own that red.
+  assertion — SCENARIO-03 and SCENARIO-08 own that red.
 - A drop fixture must keep at least one old entry: with nothing kept, a diff that ignores the
   new body entirely still passes.
 - SCENARIO-07's continuation-line folding will change today's "a line directly under an item

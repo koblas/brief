@@ -236,7 +236,7 @@ in full.
 ## Binding decisions   <decision> — <the constraint that forces it> (SCENARIO-XX)
 ## Left unbuilt        <exact symbol/route/method> — <who owns it, or "unowned"> (SCENARIO-XX)
 ## Traps               <the trap> — <what it breaks> (SCENARIO-XX)
-## Open debts          <debt> — <step that must close it, or "unowned — dies unless re-opened">
+## Open debts          <debt> — <step that must close it, or "unowned — dies unless re-opened"> (SCENARIO-XX)
 ```
 
 Cap ~80 lines. The *unowned debt* wording is load-bearing: it is the entry R9 must never let
