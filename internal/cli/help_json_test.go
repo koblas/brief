@@ -40,9 +40,7 @@ type helpDocumentDecode struct {
 }
 
 // decodeHelpDocument unmarshals stdout into helpDocumentDecode and asserts
-// the common header: schema 1, command "help", ok true, exit_code 0 —
-// every help document's own header, whatever spelling asked and whether
-// full index or filtered to one entry.
+// the common header: schema 1, command "help", ok true, exit_code 0.
 func decodeHelpDocument(t *testing.T, stdout []byte) helpDocumentDecode {
 	t.Helper()
 
@@ -57,11 +55,6 @@ func decodeHelpDocument(t *testing.T, stdout []byte) helpDocumentDecode {
 	return doc
 }
 
-// Test_help_json_lists_every_listed_command_and_new_itself pins the full
-// index's membership and order: depth-first, registration order, with
-// "new" itself inserted ahead of its own two children — root and the
-// hidden "help" stub are never entries, while hidden-but-listed
-// "completion" is (the control arm this test's name calls out).
 func Test_help_json_lists_every_listed_command_and_new_itself(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -83,11 +76,6 @@ func Test_help_json_lists_every_listed_command_and_new_itself(t *testing.T) {
 	assert.NotContains(t, names, "help")
 	assert.NotContains(t, names, "brief")
 
-	// "brief help --json" dispatches to the help stub itself, so cobra's
-	// own Execute() never calls InitDefaultHelpFlag on any index entry —
-	// "status" (never the resolved command) only carries a "help" row here
-	// because helpEntry calls it itself; "json" is status's own registered
-	// pflag (S14), sorted after "help".
 	var status helpCommandJSONDecode
 	for _, c := range doc.Commands {
 		if c.Name == "status" {
@@ -100,14 +88,11 @@ func Test_help_json_lists_every_listed_command_and_new_itself(t *testing.T) {
 	assert.Equal(t, helpFlagJSONDecode{Name: "json", Type: "bool", Usage: "print one JSON document on stdout"}, status.Flags[1])
 }
 
-// usageLineRE extracts a leaf's own generated "Usage:" line from its text
-// help — the one line between the "Usage:\n  " marker and the following
-// blank line.
+// usageLineRE matches the line between the "Usage:\n  " marker and the
+// following blank line.
 var usageLineRE = regexp.MustCompile(`(?s)Usage:\n  (.*?)\n\n`)
 
-// extractUsageLine returns text's own generated Usage line, the oracle
-// Test_help_json_entries_agree_with_each_commands_text_help checks a
-// help document's "usage" field against.
+// extractUsageLine returns text's own generated Usage line.
 func extractUsageLine(t *testing.T, text string) string {
 	t.Helper()
 
@@ -117,14 +102,11 @@ func extractUsageLine(t *testing.T, text string) string {
 	return m[1]
 }
 
-// flagNameRE extracts a flag table row's own long name, skipping any
-// shorthand ("-h, ") ahead of it.
+// flagNameRE matches a flag table row's long name, skipping any shorthand
+// ("-h, ") ahead of it.
 var flagNameRE = regexp.MustCompile(`(?m)^\s*(?:-\w, )?--([\w-]+)`)
 
-// extractFlagNames returns text's own Flags: table row names, in the
-// order pflag's own FlagUsages renders them — the same order
-// cmd.LocalFlags().VisitAll (pflag's sorted order) walks, so it is also a
-// help document's "flags" oracle.
+// extractFlagNames returns text's own Flags: table row names, in render order.
 func extractFlagNames(t *testing.T, text string) []string {
 	t.Helper()
 
@@ -140,14 +122,8 @@ func extractFlagNames(t *testing.T, text string) []string {
 	return names
 }
 
-// Test_help_json_entries_agree_with_each_commands_text_help checks every
-// leaf's filtered document against its own text "--help" render, captured
-// in the same test run rather than pinned to a literal: usage equals the
-// generated Usage line, flags[].name equals the flag table's own rows,
-// summary/description are non-empty, and flags is never null. "new"
-// renders the group template instead of a Usage line and flag table, so
-// its entry is checked by literal usage ("brief new") in
-// Test_help_json_spellings_produce_identical_documents instead.
+// Checks every leaf's filtered document against its own text "--help"
+// render, captured in the same test run rather than pinned to a literal.
 func Test_help_json_entries_agree_with_each_commands_text_help(t *testing.T) {
 	tests := []struct {
 		name string
@@ -210,13 +186,7 @@ func Test_help_json_entries_agree_with_each_commands_text_help(t *testing.T) {
 	}
 }
 
-// Test_help_json_spellings_produce_identical_documents pins ≡ across every
-// spelling that names the same command: full index (4 spellings), start
-// (4, "help --json start" included per the deleted pre-S13 pin), new (2),
-// new feature (2) and completion (2) — byte-equal stdout within each
-// group, empty stderr, exit 0, "command" "help" in every group. The "new"
-// group additionally pins Step 5a: exactly one entry named "new" with
-// usage "brief new", not "brief new [flags]".
+// Pins byte-equal stdout across every spelling that names the same command.
 func Test_help_json_spellings_produce_identical_documents(t *testing.T) {
 	type group struct {
 		name     string
@@ -327,10 +297,9 @@ func Test_help_json_spellings_produce_identical_documents(t *testing.T) {
 	}
 }
 
-// Test_help_flag_as_sole_argument_json_yields_the_help_stubs_own_entry
-// pins "help -h --json": the filter is the command asked about, not the
-// index-membership predicate, so it yields one entry describing the help
-// stub itself even though the stub is never an index member.
+// The filter is the command asked about, not the index-membership
+// predicate, so "help -h --json" yields an entry for the stub itself even
+// though it is never an index member.
 func Test_help_flag_as_sole_argument_json_yields_the_help_stubs_own_entry(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -345,11 +314,8 @@ func Test_help_flag_as_sole_argument_json_yields_the_help_stubs_own_entry(t *tes
 	assert.Equal(t, "help", doc.Commands[0].Name)
 }
 
-// Test_help_finish_json_is_the_exact_document is the exact-bytes golden
-// for "help finish --json": finish is chosen because its own document
-// pins a string-typed flag, pflag.UnquoteUsage's backquote stripping
-// ("path"), a multi-line usage string, and the auto-registered help flag
-// row, all in one document.
+// finish is chosen because its document pins a string-typed flag, backquote
+// stripping, a multi-line usage string, and the help flag row together.
 func Test_help_finish_json_is_the_exact_document(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -392,11 +358,8 @@ func Test_help_finish_json_is_the_exact_document(t *testing.T) {
 	assert.Equal(t, want, stdout.String())
 }
 
-// Test_completion_with_a_shell_under_json_is_a_usage_error_document pins
-// R11: a valid shell under --json is a usage-error document, not the
-// script — exit 2, stderr empty, no script bytes precede the document on
-// stdout. The control arm proves the same shell, without --json, still
-// writes a non-empty script at exit 0.
+// A valid shell under --json is a usage-error document, not the script; the
+// control arm proves the same shell, without --json, still writes a script.
 func Test_completion_with_a_shell_under_json_is_a_usage_error_document(t *testing.T) {
 	shells := []string{"bash", "zsh", "fish", "powershell"}
 
