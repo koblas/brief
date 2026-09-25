@@ -55,6 +55,33 @@ func Test_Entries_excludes_lines_that_are_not_column_zero_items(t *testing.T) {
 	}
 }
 
+// Test_Entries_excludes_a_column_zero_thematic_break pins D1's thematic-
+// break exclusion: a line made only of one marker character repeated
+// three or more times, space-separated, starts with what looks like a
+// valid bullet marker ("* " or "- ") but is a horizontal rule (CommonMark
+// §4.1), never an entry. Test_Entries_recognizes_every_column_zero_marker
+// is this test's own control arm, proving the same marker characters
+// still open a genuine entry when they are not a thematic break.
+func Test_Entries_excludes_a_column_zero_thematic_break(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+	}{
+		{name: "asterisks separated by spaces", line: "* * *"},
+		{name: "hyphens separated by spaces", line: "- - -"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body := "## Heading\n\n" + c.line + "\n"
+
+			got := markdown.Entries(body, "## Heading")
+
+			assert.Empty(t, got)
+		})
+	}
+}
+
 // Test_Entries_returns_nothing_when_the_heading_is_absent matches
 // Section's own ("", false) contract for a heading that never appears.
 func Test_Entries_returns_nothing_when_the_heading_is_absent(t *testing.T) {

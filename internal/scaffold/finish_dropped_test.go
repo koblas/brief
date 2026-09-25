@@ -465,3 +465,124 @@ func Test_finish_state_diverged_refusal_returns_no_dropped_entries(t *testing.T)
 		}, res.Dropped)
 	})
 }
+
+// droppedNestedOpenDebtsConfig returns config.Default() with OpenDebts
+// reconfigured to "### Open debts" — a heading one level deeper than
+// "## Traps", so a body writing the four configured headings in Ordered()
+// order (as scaffold's own stateSkeleton does) nests Open debts' own
+// section inside Traps' rather than after it: "## Traps" only ends at the
+// next heading of the *same or higher* level, and "###" is neither.
+func droppedNestedOpenDebtsConfig() config.Config {
+	cfg := config.Default()
+	cfg.StateHeadings.OpenDebts = "### Open debts"
+
+	return cfg
+}
+
+// droppedNestedOldState is every nested-heading test's shared old body:
+// "### Open debts" sits inside "## Traps"' own section (nested per
+// droppedNestedOpenDebtsConfig), holding one entry, "- debt entry", at
+// whole-body line 11; "## Traps" itself holds one entry of its own,
+// "- trap entry", at line 7 — kept unchanged in every case below, so a
+// scan that ignores the new body entirely cannot pass by reporting it.
+func droppedNestedOldState() string {
+	return strings.Join([]string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- trap entry", "",
+		"### Open debts", "",
+		"- debt entry", "",
+	}, "\n") + "\n"
+}
+
+// Test_finish_treats_an_entry_moved_out_of_a_nested_open_debts_heading_as_no_drop
+// proves the nested-heading MAJOR fix: pre-fix, droppedEntries scanned "##
+// Traps" and "### Open debts" independently, so "- debt entry" — physically
+// inside both sections — was pooled twice on the old side; moving it to
+// "## Binding decisions" (a single, non-nested new occurrence) then read as
+// a surplus of one and reported a false drop. With each old-body line
+// attributed to its one nearest-enclosing configured heading, old and new
+// counts agree and nothing is reported.
+func Test_finish_treats_an_entry_moved_out_of_a_nested_open_debts_heading_as_no_drop(t *testing.T) {
+	cfg := droppedNestedOpenDebtsConfig()
+	mem := newDroppedFixtureFS(t, droppedNestedOldState())
+	newState := []byte(strings.Join([]string{
+		"## Binding decisions", "",
+		"- debt entry", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- trap entry", "",
+		"### Open debts", "",
+	}, "\n") + "\n")
+
+	res, err := finishDroppedWithConfig(t, mem, newState, cfg)
+
+	require.NoError(t, err)
+	assert.Empty(t, res.Dropped)
+}
+
+// Test_finish_reports_a_drop_under_a_nested_open_debts_heading_exactly_once
+// is the same nested fixture's drop case: "- debt entry" is omitted
+// entirely rather than moved. Pre-fix, the same double pooling reported it
+// twice, at the same old-file line, under both "Traps" and "Open debts"
+// (unstable relative order). The fix reports it once, under its own
+// nearest-enclosing heading, "### Open debts" — dropped-debt, not
+// dropped-entry.
+func Test_finish_reports_a_drop_under_a_nested_open_debts_heading_exactly_once(t *testing.T) {
+	cfg := droppedNestedOpenDebtsConfig()
+	mem := newDroppedFixtureFS(t, droppedNestedOldState())
+	newState := []byte(strings.Join([]string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"- trap entry", "",
+		"### Open debts", "",
+	}, "\n") + "\n")
+
+	res, err := finishDroppedWithConfig(t, mem, newState, cfg)
+
+	require.NoError(t, err)
+	assert.Equal(t, []scaffold.DroppedEntry{
+		{Rule: scaffold.DropRuleDebt, Heading: "Open debts", Line: 11, Tag: "", Text: "debt entry"},
+	}, res.Dropped)
+}
+
+// Test_finish_reports_a_drop_once_when_a_configured_heading_carries_no_hash
+// proves the MAJOR fix's second overlap source: cfg.StateHeadings.Traps set
+// to the plain string "Traps" (config.Resolve's own validateHeading rule
+// requires only non-empty and pairwise-distinct, no "#"). Matched against a
+// body line that is not an ATX heading, its own headingLevelOf is 0, so the
+// pre-fix section scan for "Traps" never finds a terminating heading and
+// reads to end of file — overrunning into "## Open debts"' own section and
+// pooling "- debt entry" a second time, under "Traps", alongside "## Open
+// debts"' own correct scan. The fix reports the drop once, under its true
+// nearest-enclosing heading.
+func Test_finish_reports_a_drop_once_when_a_configured_heading_carries_no_hash(t *testing.T) {
+	cfg := config.Default()
+	cfg.StateHeadings.Traps = "Traps"
+
+	oldState := strings.Join([]string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"Traps", "",
+		"- trap entry", "",
+		"## Open debts", "",
+		"- debt entry", "",
+	}, "\n") + "\n"
+	mem := newDroppedFixtureFS(t, oldState)
+	newState := []byte(strings.Join([]string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"Traps", "",
+		"- trap entry", "",
+		"## Open debts", "",
+	}, "\n") + "\n")
+
+	res, err := finishDroppedWithConfig(t, mem, newState, cfg)
+
+	require.NoError(t, err)
+	assert.Equal(t, []scaffold.DroppedEntry{
+		{Rule: scaffold.DropRuleDebt, Heading: "Open debts", Line: 11, Tag: "", Text: "debt entry"},
+	}, res.Dropped)
+}

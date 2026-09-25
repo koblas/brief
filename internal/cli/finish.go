@@ -136,8 +136,8 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 
 	handoffRel, stateRel, specRel := displayPath(wd, res.HandoffPath), displayPath(wd, res.StatePath), displayPath(wd, res.SpecPath)
 
-	for _, d := range res.Dropped {
-		fmt.Fprintf(out.stdout, "%s  %s:%d  %s\n", dropSeverity, stateRel, d.Line, dropDetail(d))
+	if err := writeDroppedRows(out.stdout, res.Dropped, stateRel); err != nil {
+		return fmt.Errorf("brief finish: state replaced but dropped entries could not be written: %w", err)
 	}
 
 	replacedClause := stateRel + dropCountSuffix(len(res.Dropped))

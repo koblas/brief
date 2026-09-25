@@ -83,6 +83,24 @@ the first scenario that renders a row. Item 4 (the Open debts tag) is left to SC
   - (c) in the scaffold heading-display helper, return the configured heading unstripped → `Test_finish_prints_a_warn_row_for_a_dropped_entry_mem` goes red (`dropped from ## Traps`);
   - (d) in the rule classification, always return `dropped-entry` → `Test_finish_classifies_an_open_debts_drop_as_dropped_debt` goes red.
 
+Follow-up note (fix pass 1, MINOR test finding 8) — the mutation each table case rules out,
+one line per table:
+- `Test_trailing_tag_extraction` (`internal/scaffold/dropped_internal_test.go`): "a trailing
+  token in parens" rules out never matching a trailing group at all; "no parens at all" rules
+  out matching without one; "empty parens" rules out accepting an empty token; "whitespace
+  inside the parens" rules out accepting a token containing whitespace; "parens in the middle"
+  rules out matching anywhere but the string's own tail.
+- `Test_dropExcerpt` (`internal/cli/finish_dropped_internal_test.go`): "exactly eighty runes"
+  rules out cutting at or under the limit; "eighty-one runes" rules out never cutting (an
+  off-by-one on the boundary); "multibyte text" rules out counting bytes instead of runes.
+- `Test_Entries_recognizes_every_column_zero_marker`
+  (`internal/platform/markdown/entries_test.go`): each of the three marker grammars rules out
+  `entryItemRe` recognizing only one of "- ", "* " or "N. " instead of all three.
+- `Test_Entries_excludes_lines_that_are_not_column_zero_items`
+  (`internal/platform/markdown/entries_test.go`): "a paragraph line" rules out treating any
+  non-blank line as an item; "an indented list item" rules out dropping entryItemRe's
+  column-0 anchor.
+
 ## Handoff
 
 **Binding decisions** — a later scenario must not contradict these without saying so:

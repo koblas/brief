@@ -182,6 +182,22 @@ func lineOffsets(lines []string) []int {
 	return offsets
 }
 
+// HeadingLine returns the 1-based line number of the first line in body,
+// outside any fenced code block, that equals heading after right-trimming
+// — the same anchor Section and Entries match against, exposed for a
+// caller (scaffold's drop-entry scan) that needs a heading's own position
+// rather than its section body, so it can tell which of several configured
+// headings most narrowly encloses a given line. It returns ok == false
+// when no such line exists, matching Section's own ("", false) contract.
+func HeadingLine(body, heading string) (int, bool) {
+	idx, _ := findHeading(strings.Split(body, "\n"), heading)
+	if idx == -1 {
+		return 0, false
+	}
+
+	return idx + 1, true
+}
+
 // Title returns the text of the first level-1 ("# ") heading in body, with
 // the leading "#" and surrounding whitespace stripped. A line inside a
 // fenced code block is never treated as a heading. Title returns

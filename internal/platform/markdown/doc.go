@@ -21,10 +21,9 @@
 // checklist-item scanner, fence-aware like Section, so an unticked item is
 // found the same way whether the caller is writing (scaffold.Finish) or
 // reading (check). Entries is the one column-0 list-item scanner —
-// "- ", "* " or "N. " markers only, fence-aware like the rest — that
-// scaffold's own drop-reporting diff builds on; a line that is not itself
-// a column-0 item folds into the preceding item as continuation text
-// instead of being ignored, an indented sub-item's own marker kept
-// verbatim, until a blank line, the next column-0 item, a heading of any
-// level, or a fence delimiter ends it.
+// "- ", "* " or "N. " markers only, fence-aware like the rest, with its own
+// continuation-folding and thematic-break rules — that scaffold's own
+// drop-reporting diff builds on. HeadingLine is the one heading-position
+// lookup, letting a caller juggling several configured headings tell which
+// one most narrowly encloses a given line.
 package markdown

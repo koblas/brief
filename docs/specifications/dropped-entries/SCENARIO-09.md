@@ -141,8 +141,9 @@ for a rolling state file:
 
 **Traps**:
 - `refinishNoop` never calls `droppedEntries` at all — it returns a literal
-  `Dropped: []DroppedEntry{}`. Steps 6/7 prove that contract; Steps 3/4/5 prove the
-  state-diverged refusal's contract. They are not redundant — do not drop either pair.
+  `Dropped: []DroppedEntry{}` (read directly from `internal/scaffold/finish.go`). Steps 6/7
+  exercise the identical-re-finish path and its stderr line; Steps 3/4/5 prove the
+  state-diverged refusal's own contract. They are not redundant — do not drop either pair.
 - `Test_finish_json_refusal_is_unchanged_mem` (existing) stays valid but stays weak — it
   refuses before `state` is even read as `stateBytes`, so it can never distinguish "never
   computed" from "computed and suppressed". Do not delete it; do not treat it as covering D5.

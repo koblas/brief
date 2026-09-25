@@ -24,7 +24,10 @@ accounted for, not prevented (R9). Today `finish` drops such an entry silently, 
   the section of one of the four configured `state-headings`, plus its continuation lines: every
   following non-blank line that is neither a column-0 list item nor a heading (indented sub-items
   belong to their parent). An entry ends at a blank line, the next column-0 item, or a heading.
-  Paragraph lines are not entries. List lines inside a fenced code block are not entries.
+  Paragraph lines are not entries. List lines inside a fenced code block are not entries. A
+  column-0 thematic break (a line made only of one marker character — `-`, `_` or `*` —
+  repeated three or more times, optionally space-separated, e.g. `* * *`, `- - -`, `***`,
+  `---`) is not an entry either, even though `* ` or `- ` reads as its own bullet marker.
   Sections other than the four configured headings are not scanned, in either body.
 - **D2 — Identity.** An entry's identity is its whitespace-normalized text: lines joined, every
   whitespace run collapsed to one space, trimmed; CR stripped first. A `- [ ]` / `- [x]` marker
@@ -175,6 +178,7 @@ rows).
 | Any refusal | none; error doc has no `dropped_entries` | 1 |
 | Usage error | none | 2 |
 | Failure after the state rename landed | none (recorded gap) | 1 |
+| stdout write fails after state replaced | rows partially written; no success line | 1 |
 
 ---
 

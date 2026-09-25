@@ -2,13 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/koblas/brief/internal/scaffold"
 )
-
-// dropSeverity is the fixed severity every dropped-entry row and JSON
-// element carries: every drop is reported as a WARN, never an ERROR.
-const dropSeverity = "WARN"
 
 // dropExcerptRunes is the rune length a dropped entry's text is cut to
 // before "…" is appended.
@@ -72,7 +69,7 @@ func finishDroppedEntries(dropped []scaffold.DroppedEntry, path string) []finish
 		}
 
 		out = append(out, finishDroppedJSON{
-			Severity: dropSeverity,
+			Severity: string(d.Rule.Severity()),
 			Rule:     string(d.Rule),
 			Path:     path,
 			Line:     d.Line,
@@ -101,4 +98,21 @@ func dropCountSuffix(n int) string {
 	}
 
 	return fmt.Sprintf(" (dropped %d %s, listed on stdout)", n, noun)
+}
+
+// writeDroppedRows writes one WARN row per entry in dropped to w, in the
+// order dropped already carries (old-file line order): "<severity>
+// <stateRel>:<line>  <detail>\n", detail from dropDetail. It returns the
+// first write error, stopping before any later row — the state file is
+// already replaced by the time a caller reaches this point, so a partial
+// write here must not be papered over by going on to print a success
+// line that claims the drop report reached the user.
+func writeDroppedRows(w io.Writer, dropped []scaffold.DroppedEntry, stateRel string) error {
+	for _, d := range dropped {
+		if _, err := fmt.Fprintf(w, "%s  %s:%d  %s\n", d.Rule.Severity(), stateRel, d.Line, dropDetail(d)); err != nil {
+			return fmt.Errorf("write dropped-entry row: %w", err)
+		}
+	}
+
+	return nil
 }

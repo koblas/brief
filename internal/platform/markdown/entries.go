@@ -11,6 +11,14 @@ import (
 // "\s*": an indented line is never an entry.
 var entryItemRe = regexp.MustCompile(`^(?:[-*] |\d+\. )`)
 
+// thematicBreakRe matches a CommonMark thematic break line (CommonMark
+// §4.1): a run of three or more of the same marker character — "-", "_"
+// or "*" — each optionally followed by spaces or tabs, and nothing else
+// on the line. "* * *" and "- - -" both start with what entryItemRe reads
+// as a bullet marker; this is checked first so a horizontal rule is never
+// mistaken for one.
+var thematicBreakRe = regexp.MustCompile(`^(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$`)
+
 // Entry is one list item Entries found under a configured heading: Line is
 // its 1-based line number counted over the whole body it was scanned from,
 // matching FirstUnchecked's own convention, fixed at the item's own first
@@ -115,11 +123,15 @@ func isContinuationLine(line string) bool {
 // item, with the marker stripped and the remainder trimmed of trailing
 // " \t\r" (trimEOL) — the marker match is already anchored at column 0, so
 // no leading-whitespace trim is needed or wanted. It returns ("", false)
-// for anything else: an indented line, a paragraph line, or a line that
-// merely starts with a marker character without the space that makes it
-// one.
+// for anything else: an indented line, a paragraph line, a thematic break
+// (thematicBreakRe), or a line that merely starts with a marker character
+// without the space that makes it one.
 func entryItemText(line string) (string, bool) {
 	trimmed := trimEOL(line)
+
+	if thematicBreakRe.MatchString(trimmed) {
+		return "", false
+	}
 
 	loc := entryItemRe.FindStringIndex(trimmed)
 	if loc == nil {

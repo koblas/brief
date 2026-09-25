@@ -48,11 +48,10 @@ type FinishNext struct {
 // can still be Next; the zero FinishNext when every other step is done. A
 // sibling whose frontmatter cannot be read or does not parse counts as not
 // done, so it can be named Next too. Dropped is every state entry the
-// replacement body no longer carries (R9), in old-file line order, empty
-// but never nil when nothing was dropped; it is computed only on the
-// write path — refinishWrite — never on the no-op or a refusal, since a
-// no-op writes nothing to diff against and a refusal returns no
-// FinishResult at all.
+// replacement body no longer carries, in old-file line order, empty but
+// never nil when nothing was dropped; it is computed only on a genuine
+// write, never on the no-op or a refusal, since a no-op writes nothing to
+// diff against and a refusal returns no FinishResult at all.
 type FinishResult struct {
 	Feature, Step                    string
 	Changed                          bool
@@ -322,9 +321,10 @@ func (s *Server) FinishFS(fsys rwfs.FS, featurePath, feature, step string, hando
 		// Falls through to the four writes below.
 	}
 
-	// R9: computed against the state already on disk and the incoming
-	// replacement, before the write lands — a post-decision report, not a
-	// validation-band check, so it never disturbs R14a's refusal ordering.
+	// dropped is computed against the state already on disk and the
+	// incoming replacement, before the write lands — a post-decision
+	// report, not part of the validation band above, so it never changes
+	// which fault a refusal names first.
 	dropped := droppedEntries(stateBytes, state, s.cfg.StateHeadings)
 
 	if err := applyFinishWrites(fsys, s.cfg, feature, step, handoffName, handoff, stepFileName, newStepBody, newSpec, state); err != nil {

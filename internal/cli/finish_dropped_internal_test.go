@@ -6,7 +6,9 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -701,16 +703,21 @@ func Test_finish_accepts_a_drop_bearing_re_finish_when_the_handoff_file_is_missi
 // Test_finish_refuses_a_state_diverged_re_finish_and_prints_no_rows_mem
 // proves D5's first enforcement point at the CLI: a re-finish whose state
 // argument diverges from what is recorded (refinishStateDiverged) refuses
-// with ErrAlreadyFinished naming the state file, and prints no row on
-// stdout, even though the same pair is drop-bearing when it reaches the
-// write path (this test's own control arm, above).
+// with ErrAlreadyFinished naming the state file — the same pair is
+// drop-bearing when it reaches the write path (this test's own control
+// arm, above). It does not itself assert stdout is empty: runFinish's
+// refusal branch returns before the WARN-row loop is reachable at all
+// (see runFinish's own doc comment), so no mutation of this feature's own
+// code could ever make this refusal print a row; that is proven instead by
+// D5's dedicated scaffold-level test
+// (internal/scaffold/finish_dropped_test.go
+// Test_finish_state_diverged_refusal_returns_no_dropped_entries).
 func Test_finish_refuses_a_state_diverged_re_finish_and_prints_no_rows_mem(t *testing.T) {
 	fx := newMemStateDivergedDropFixture(t)
 
-	stdout, _, err := runFinishArgsMem(t, fx.mem, []string{"finish", "demo", "SCENARIO-01", "--handoff", fx.handoffPath, "--state", fx.newStatePath})
+	_, _, err := runFinishArgsMem(t, fx.mem, []string{"finish", "demo", "SCENARIO-01", "--handoff", fx.handoffPath, "--state", fx.newStatePath})
 
 	require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
-	assert.Empty(t, stdout)
 
 	var refusal *scaffold.RefusalError
 	require.ErrorAs(t, err, &refusal)
@@ -738,11 +745,17 @@ func Test_finish_json_state_diverged_refusal_has_no_dropped_entries_key_mem(t *t
 }
 
 // Test_finish_identical_re_finish_of_a_drop_bearing_step_prints_no_rows_mem
-// proves SCENARIO-09's second Gherkin clause: refinishNoop
-// (internal/scaffold/finish.go) never calls droppedEntries at all, so an
-// identical re-finish of a step whose first finish already dropped an
-// entry prints nothing the second time — even though the first call's own
-// WARN row proves the pair really is drop-bearing.
+// proves SCENARIO-09's second Gherkin clause: an identical re-finish of a
+// step whose first finish already dropped an entry prints the existing
+// "already done with identical inputs" line the second time — even though
+// the first call's own WARN row proves the pair really is drop-bearing.
+// refinishNoop (internal/scaffold/finish.go) never calls droppedEntries at
+// all and returns a literal empty Dropped slice, which is why there is no
+// row to print; this test does not itself assert the second call's stdout
+// is empty, since runFinish's success path only ever writes a row per
+// res.Dropped element (writeDroppedRows), so an empty Dropped slice
+// already guarantees empty stdout regardless of any mutation this
+// feature's own row-writing code could introduce.
 func Test_finish_identical_re_finish_of_a_drop_bearing_step_prints_no_rows_mem(t *testing.T) {
 	tree := newMemFinishFixtureWithState("- [x] do the thing", memOldStateWithDroppedEntry())
 	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
@@ -755,10 +768,9 @@ func Test_finish_identical_re_finish_of_a_drop_bearing_step_prints_no_rows_mem(t
 	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
 	require.Equal(t, "WARN  "+stateRel+":17  dropped from Traps, tagged SCENARIO-02: X (SCENARIO-02)\n", firstStdout)
 
-	secondStdout, secondStderr, secondErr := runFinishArgsMem(t, mem, args)
+	_, secondStderr, secondErr := runFinishArgsMem(t, mem, args)
 
 	require.NoError(t, secondErr)
-	assert.Empty(t, secondStdout)
 	assert.Equal(t, "brief finish: demo SCENARIO-01 already done with identical inputs; nothing written\n", secondStderr)
 }
 
@@ -792,4 +804,57 @@ func Test_finish_json_identical_re_finish_reports_no_dropped_entries_mem(t *test
 		`,"next":null,"modified":[],"dropped_entries":[]}` + "\n"
 
 	assert.Equal(t, want, secondStdout)
+}
+
+// errFailAfterWriterWrite is failAfterWriter's own sentinel: the error
+// every Write call past its allowance returns.
+var errFailAfterWriterWrite = errors.New("fail after writer: write refused")
+
+// failAfterWriter is an io.Writer that buffers its first n Write calls,
+// then fails every one after: writeDroppedRows' write-error branch needs a
+// caller mid-write, not one that never gets to write anything at all.
+type failAfterWriter struct {
+	n   int
+	buf bytes.Buffer
+}
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.n <= 0 {
+		return 0, errFailAfterWriterWrite
+	}
+
+	w.n--
+
+	return w.buf.Write(p)
+}
+
+// Test_finish_stops_at_the_first_dropped_row_write_error_and_reports_an_internal_error_mem
+// proves the MAJOR fix at internal/cli/finish.go: runFinish no longer
+// ignores a WARN-row write error. The old body carries two dropped
+// entries, so the fake stdout writer's allowance of one successful Write
+// call proves both halves of the fix at once — writeDroppedRows stops
+// after the first row rather than attempting the second (only one line
+// ever reaches the buffer), and runFinish returns the write error instead
+// of going on to print the "replaced ..." success line to stderr.
+func Test_finish_stops_at_the_first_dropped_row_write_error_and_reports_an_internal_error_mem(t *testing.T) {
+	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n" +
+		"- first dropped\n- second dropped\n\n## Open debts\n\n"
+	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
+	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
+	newState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n\n"
+	statePath := memWriteInput(tree, "state.md", newState)
+
+	writer := &failAfterWriter{n: 1}
+	var stderr strings.Builder
+
+	err := run(t.Context(), memRoot, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath},
+		nil, writer, &stderr, noBuildInfo, withRootFS(tree.mem()))
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, errFailAfterWriterWrite)
+	assert.Equal(t, 1, ExitCode(err))
+
+	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	assert.Equal(t, "WARN  "+stateRel+":7  dropped from Traps, untagged: first dropped\n", writer.buf.String())
+	assert.Empty(t, stderr.String())
 }
