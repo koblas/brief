@@ -41,7 +41,8 @@ accounted for, not prevented (R9). Today `finish` drops such an entry silently, 
 - **D6 — Line.** The 1-based line in the **old** state file where the entry's first line was.
 - **D7 — Empty or duplicate configured heading** contributes no entries (explicit guard:
   `markdown.Section(body, "")` matches the first blank line). A missing heading in the old body
-  contributes nothing. No old state file, or an empty one, yields no drops.
+  contributes nothing. An empty old state file yields no drops. A missing old state file is
+  refused by `finish` before any drop is computed (pre-existing behavior; exit 1, no rows).
 
 ---
 
@@ -164,7 +165,8 @@ rows).
 | Reworded or re-tagged | a row (old text) | 0 |
 | Checkbox toggled inside state | a row | 0 |
 | Old file lacks a heading | that section contributes nothing | 0 |
-| No old state file, or empty | none | 0 |
+| Empty old state file | none | 0 |
+| No old state file | refused before diffing (pre-existing); no rows | 1 |
 | Old file CRLF | CR stripped before normalizing; line numbers unchanged | 0 |
 | List line inside a fence | none | 0 |
 | Paragraph line under a heading | none | 0 |
