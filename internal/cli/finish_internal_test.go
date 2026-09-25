@@ -1,16 +1,5 @@
-// finish's scenarios — every one except the two that plant a real
-// directory at atomicfile's own temp-sibling name to block a write
-// (finish_json_disk_test.go's own os.Mkdir trick, real filesystem rename
-// behavior no seam replaces) — run against rwfs.Mem here, reaching run()
-// directly since withRootFS is unexported. readSource (finish.go) reads a
-// non-"-" --handoff/--state argument through rootFS, mapped through
-// fsName the same way scaffold's and assemble's own writes and reads are,
-// so a finish test's flag arguments live in the same Mem fixture as its
-// feature tree — this file never touches real disk.
-// finish_test.go keeps only newFinishCLIFixture and writeInput, and
-// finish_json_disk_test.go only its two os.Mkdir cases: flag_error_test.go,
-// help_test.go, json_refusal_test.go and invalid_config_test.go still call
-// the two former.
+// White-box: finish's scenarios run against rwfs.Mem, reaching run()
+// directly since withRootFS is unexported. This file never touches real disk.
 
 package cli
 
@@ -26,15 +15,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// memFinishInputDir is the virtual directory every finish _mem test's own
-// --handoff/--state argument lives under — distinct from
-// memRoot/docs/specifications, so a relative-path assertion computed via
-// filepath.Rel(memRoot, ...) never collides with a feature path.
+// memFinishInputDir is the virtual directory every finish _mem test's
+// --handoff/--state argument lives under, distinct from the feature tree.
 var memFinishInputDir = filepath.Join(memRoot, "in")
 
 // memWriteInput adds path (a fresh file under memFinishInputDir) to tree
-// holding contents, and returns its absolute path — mirroring
-// finish_test.go's own writeInput.
+// holding contents, and returns its absolute path.
 func memWriteInput(tree *memTree, name, contents string) string {
 	path := filepath.Join(memFinishInputDir, name)
 	tree.file(path, contents)
@@ -43,11 +29,7 @@ func memWriteInput(tree *memTree, name, contents string) string {
 }
 
 // newMemFinishFixture builds a memTree holding one open step,
-// "SCENARIO-01", for feature "demo" under memRoot's default layout, with
-// checklistItem as its own sole checklist line and a bare handoff anchor —
-// mirroring finish_test.go's own newFinishCLIFixture, parameterized on the
-// one line that distinguishes the ticked control fixture
-// ("- [x] do the thing") from the unticked-item refusal fixture.
+// "SCENARIO-01", for feature "demo", with checklistItem as its sole line.
 func newMemFinishFixture(checklistItem string) *memTree {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"), memFinishInputDir)
 	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
@@ -77,18 +59,13 @@ func newMemFinishFixture(checklistItem string) *memTree {
 }
 
 // memFinishStep names one step file newMemFinishFixtureWithSteps writes:
-// id, status ("open" or "done"), and dependsOn, its frontmatter
-// depends-on list rendered verbatim ("[]" or "[SCENARIO-01]") — mirroring
-// finish_test.go's own finishStep.
+// id, status ("open" or "done"), and dependsOn rendered verbatim.
 type memFinishStep struct {
 	id, status, dependsOn string
 }
 
 // newMemFinishFixtureWithSteps builds a memTree holding one step file per
-// spec for feature "demo" under memRoot's default layout, each with a
-// fully ticked checklist and a bare handoff anchor, and a progress entry
-// in specification.md for every one — mirroring finish_test.go's own
-// newFinishCLIFixtureWithSteps.
+// spec, each fully ticked, with a progress entry for every one.
 func newMemFinishFixtureWithSteps(specs ...memFinishStep) *memTree {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"), memFinishInputDir)
 	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
@@ -129,8 +106,7 @@ func newMemFinishFixtureWithSteps(specs ...memFinishStep) *memTree {
 }
 
 // memWantFinishCompleteLine renders the "wrote …, ticked …; <feature> is
-// complete" success line newMemFinishFixture's single-step tree always
-// produces — mirroring finish_test.go's own wantFinishCompleteLine.
+// complete" success line newMemFinishFixture's single-step tree produces.
 func memWantFinishCompleteLine(feature, step string) string {
 	return fmt.Sprintf(
 		"brief finish: %s %s done; wrote %s, replaced %s, ticked %s; %s is complete\n",
@@ -142,7 +118,7 @@ func memWantFinishCompleteLine(feature, step string) string {
 }
 
 // memOverCapBody returns a handoff/state body of exactly n lines, with a
-// trailing newline — mirroring finish_test.go's own overCapBody.
+// trailing newline.
 func memOverCapBody(n int) string {
 	lines := make([]string, n)
 	for i := range lines {
@@ -404,10 +380,8 @@ func Test_refuses_a_re_finish_whose_handoff_differs_from_the_recorded_one_mem(t 
 		before[name] = data
 	}
 
-	// Written directly into mem, not tree: tree.mem() takes a fresh copy of
-	// tree's own entries on every call (rwfs.NewMem's own contract), so a
-	// second snapshot would silently lose the first finish call's own
-	// writes, landing only in mem's own internal map.
+	// Written directly into mem, not tree: a second tree.mem() snapshot
+	// would silently lose the first finish call's own writes.
 	differentHandoffPath := filepath.Join(memFinishInputDir, "different-handoff.md")
 	require.NoError(t, mem.WriteFile(memKey(differentHandoffPath), []byte("DIFFERENT-HANDOFF\n"), 0o600))
 
@@ -902,10 +876,8 @@ func Test_finish_json_refusal_is_unchanged_mem(t *testing.T) {
 	assert.ElementsMatch(t, []string{"schema", "command", "ok", "exit_code", "error"}, memJSONKeys(doc))
 }
 
-// Test_finish_next_agrees_with_start_mem is SCENARIO-11's agreement pin
-// between scaffold.Finish's next and assemble.Start's own next-open-step
-// rule, plus assemble.Status's own — mirroring finish_start_agreement_test.go's
-// own Test_finish_next_agrees_with_start.
+// Agreement pin between scaffold.Finish's next and assemble.Start's own
+// next-open-step rule, plus assemble.Status's own.
 func Test_finish_next_agrees_with_start_mem(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -1,6 +1,5 @@
-// Every check --json scenario runs against rwfs.Mem in check_internal_test.go.
-// newCheckJSONFixture stays here rather than moving with them: help_test.go
-// still calls it.
+// check --json scenarios run against rwfs.Mem in check_internal_test.go;
+// newCheckJSONFixture stays here since help_test.go still calls it.
 
 package cli_test
 
@@ -12,13 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newCheckJSONFixture writes two features under wd, named so fs.ReadDir's
-// byte order is also Check's and the golden's own feature order: "alpha"
-// is still in flight (an open step) with an over-cap state file — one
-// ERROR finding carrying a line — and "beta" is fully done, with its
-// state file missing entirely — one WARN, whole-file finding (line 0,
-// "in_flight":false, the "missing STATE" shape rather than a feature-level
-// producer, which always hard-codes in_flight true).
+// newCheckJSONFixture writes two features under wd: "alpha" in flight
+// with an over-cap state file, "beta" fully done with its state missing.
 func newCheckJSONFixture(t *testing.T) string {
 	t.Helper()
 

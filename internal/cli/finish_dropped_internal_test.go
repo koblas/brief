@@ -1,7 +1,5 @@
-// finish's dropped-entry rows (SCENARIO-01 of dropped-entries): the text
-// branch's stdout WARN rows and its stderr "(dropped N ...)" suffix,
-// against rwfs.Mem the same way finish_internal_test.go's own _mem tests
-// do, plus a white-box table for the unexported excerpt helper.
+// White-box: finish's dropped-entry rows against rwfs.Mem, plus a table
+// for the unexported dropExcerpt helper.
 
 package cli
 
@@ -21,8 +19,7 @@ import (
 )
 
 // newMemFinishFixtureWithState mirrors newMemFinishFixture, parameterized
-// additionally on the old STATE.md body: every dropped-entry _mem test
-// needs its own state shape, unlike newMemFinishFixture's fixed prose.
+// additionally on the old STATE.md body.
 func newMemFinishFixtureWithState(checklistItem, state string) *memTree {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"), memFinishInputDir)
 	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
@@ -47,10 +44,7 @@ func newMemFinishFixtureWithState(checklistItem, state string) *memTree {
 }
 
 // memOldStateWithDroppedEntry returns an old STATE.md body whose "## Traps"
-// section holds one entry the new body keeps ("- kept entry") and one it
-// drops ("- X (SCENARIO-02)") at whole-body line 17 — the same fixture
-// shape SCENARIO-01's own Gherkin scenario names, reached by padding with
-// prose filler lines that contribute no entry of their own.
+// section holds one kept entry and one dropped entry, at line 17.
 func memOldStateWithDroppedEntry() string {
 	lines := []string{
 		"## Binding decisions", "",
@@ -139,14 +133,8 @@ func Test_finish_complete_line_carries_the_drop_suffix_mem(t *testing.T) {
 	assert.Equal(t, wantStderr, stderr)
 }
 
-// Test_finish_reports_an_open_debts_drop_as_dropped_debt_mem proves, through
-// the CLI, that a drop under "## Open debts" renders its heading and its
-// untagged branch correctly, against the em-dash "unowned — dies unless
-// re-opened" text. Text mode never renders Rule, so dropped-debt itself
-// stays proven only at Server level
-// (internal/scaffold/finish_dropped_test.go
-// Test_finish_classifies_an_open_debts_drop_as_dropped_debt) until
-// SCENARIO-04 wires the JSON rule field.
+// A drop under "## Open debts" renders its heading and untagged branch
+// correctly.
 func Test_finish_reports_an_open_debts_drop_as_dropped_debt_mem(t *testing.T) {
 	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n\n" +
 		"- kept entry\n\n- D — unowned — dies unless re-opened\n"
@@ -163,15 +151,8 @@ func Test_finish_reports_an_open_debts_drop_as_dropped_debt_mem(t *testing.T) {
 	assert.Contains(t, stderr, "(dropped 1 entry, listed on stdout)")
 }
 
-// Test_finish_reports_no_drops_when_the_new_body_only_reflows_whitespace_mem
-// proves SCENARIO-03: a doubled interior space and a tab standing in for a
-// space are whitespace normalizeEntryText already collapses generically
-// (built by SCENARIO-01), never a drop. The trailing-space entry is
-// included for delta coverage, not as proof — entryItemText's trimEOL
-// already strips it before normalizeEntryText ever runs. The old body
-// carries one entry each under Binding decisions, Traps and Open debts,
-// wording and token order unchanged between old and new — only the
-// whitespace reflows.
+// A doubled interior space and a tab standing in for a space are
+// whitespace normalizeEntryText already collapses generically, never a drop.
 func Test_finish_reports_no_drops_when_the_new_body_only_reflows_whitespace_mem(t *testing.T) {
 	oldLines := []string{
 		"## Binding decisions", "",
@@ -204,21 +185,8 @@ func Test_finish_reports_no_drops_when_the_new_body_only_reflows_whitespace_mem(
 	assert.Equal(t, memWantFinishCompleteLine("demo", "SCENARIO-01"), stderr)
 }
 
-// Test_finish_treats_moving_an_entry_between_state_headings_as_no_drop_but_moving_it_out_as_a_drop_mem
-// proves SCENARIO-05: droppedEntries pools old and new entries across all
-// four configured headings as one multiset keyed on normalized text alone
-// (SCENARIO-01's binding decision) — an entry's heading is not part of its
-// identity. The old body is identical in both cases: "## Traps" carries
-// "- kept trap" then "- moved entry" at old-file line 9, the other three
-// headings present and empty. Both new bodies carry all four configured
-// headings (an omitted one would refuse with ErrMissingStateHeading,
-// masking a true no-drop as an empty-stdout false positive) plus a
-// trailing "## Notes" heading, and keep "- kept trap" under "## Traps" so
-// the diff is never vacuous. When the new body carries "- moved entry"
-// under "## Binding decisions" (a state heading), moving it is not a drop.
-// When the new body carries it only under "## Notes" (not a configured
-// heading), moving it out is a drop, reported against its *old* heading
-// and *old* line — not "Notes".
+// droppedEntries pools entries across all four configured headings as one
+// multiset keyed on text alone — an entry's heading is not its identity.
 func Test_finish_treats_moving_an_entry_between_state_headings_as_no_drop_but_moving_it_out_as_a_drop_mem(t *testing.T) {
 	oldLines := []string{
 		"## Binding decisions", "",
@@ -291,20 +259,8 @@ func Test_finish_treats_moving_an_entry_between_state_headings_as_no_drop_but_mo
 	}
 }
 
-// Test_finish_reports_a_reworded_re_tagged_or_re_ticked_entry_as_dropped_mem
-// proves SCENARIO-06: droppedEntries keys its pooled multiset diff on
-// normalizeEntryText(e.Text) alone (SCENARIO-01's binding decision), and
-// markdown.Entries' entryItemText strips only the "- "/"* "/"N. " marker,
-// never a leading "[ ]"/"[x]" checkbox — so a reworded, re-tagged, or
-// re-ticked entry already normalizes to a different string from its old
-// occurrence and is reported as a drop carrying the *old* text/tag/line.
-// The shared old body's "## Traps" section holds "- kept entry" at line 7
-// then "- [x] Fix the thing (TAG1)" at line 9 — the same layout
-// Test_finish_treats_moving_an_entry_between_state_headings_... uses — and
-// only the new body's line 9 varies per case, so each drop case differs
-// from the old body, and from the whitespace-reflow control, by exactly
-// one variable. "kept entry" is unchanged in every new body so the diff is
-// never vacuous.
+// entryItemText strips only the "- "/"* "/"N. " marker, never a leading
+// checkbox, so a reworded, re-tagged, or re-ticked entry is a drop.
 func Test_finish_reports_a_reworded_re_tagged_or_re_ticked_entry_as_dropped_mem(t *testing.T) {
 	oldLines := []string{
 		"## Binding decisions", "",
@@ -383,13 +339,7 @@ func Test_finish_reports_a_reworded_re_tagged_or_re_ticked_entry_as_dropped_mem(
 }
 
 // memOldStateWithMultilineTrapEntry returns an old STATE.md body whose
-// "## Traps" section holds a multi-line entry — an unindented wrapped
-// continuation line plus an indented sub-item, the sub-item's own marker
-// kept (SCENARIO-07's folding rule) — at whole-body line 9, and whose "##
-// Binding decisions" section holds a second, single-line entry kept
-// unchanged, so a diff that ignored the new body entirely cannot pass by
-// accident. The folded, normalized text is "wrap item text continued
-// words - sub item text" (well under dropExcerpt's 80-rune cut).
+// "## Traps" section holds a multi-line entry, at whole-body line 9.
 func memOldStateWithMultilineTrapEntry() string {
 	lines := []string{
 		"## Binding decisions", "",
@@ -405,12 +355,8 @@ func memOldStateWithMultilineTrapEntry() string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// Test_finish_reports_no_drop_when_a_wrapped_entry_is_reflowed_to_one_line_mem
-// proves SCENARIO-07: markdown.Entries folds a multi-line entry's
-// continuation and indented sub-item into one Text, so a new body that
-// reflows the same words onto a single physical line normalizes to the
-// same identity as the old multi-line entry and is never reported as a
-// drop.
+// markdown.Entries folds a multi-line entry's continuation and indented
+// sub-item into one Text, so reflowing to one line is never a drop.
 func Test_finish_reports_no_drop_when_a_wrapped_entry_is_reflowed_to_one_line_mem(t *testing.T) {
 	oldState := memOldStateWithMultilineTrapEntry()
 	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
@@ -433,12 +379,8 @@ func Test_finish_reports_no_drop_when_a_wrapped_entry_is_reflowed_to_one_line_me
 	assert.Equal(t, memWantFinishCompleteLine("demo", "SCENARIO-01"), stderr)
 }
 
-// Test_finish_reports_a_dropped_multiline_entry_at_its_first_line_mem is
-// Test_finish_reports_no_drop_when_a_wrapped_entry_is_reflowed_to_one_line_mem's
-// control arm, differing in exactly one variable: the new body omits the
-// multi-line entry entirely instead of reflowing it. The reported row's
-// line is the entry's own first old-file line (D6, line 9) and its excerpt
-// carries the fully folded text, continuation and sub-item words included.
+// Control arm: the new body omits the multi-line entry entirely instead
+// of reflowing it; the reported row's line is the entry's first old line.
 func Test_finish_reports_a_dropped_multiline_entry_at_its_first_line_mem(t *testing.T) {
 	oldState := memOldStateWithMultilineTrapEntry()
 	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
@@ -454,13 +396,8 @@ func Test_finish_reports_a_dropped_multiline_entry_at_its_first_line_mem(t *test
 	assert.Contains(t, stderr, "(dropped 1 entry, listed on stdout)")
 }
 
-// Test_finish_reports_a_duplicated_entry_dropped_once_at_its_later_occurrence_mem
-// proves D2's "surplus old occurrences — the last ones in old-file order —
-// are dropped": the old body carries the identical normalized text as two
-// separate column-0 items under "## Traps", at old-file lines 7 and 9, and
-// the new body carries it once, so exactly one of the two is a surplus.
-// dropped.go's idxs[len(idxs)-surplus:] already selects the tail of the
-// line-ordered group — this test is expected green on arrival.
+// Surplus old occurrences — the last ones in old-file order — are dropped;
+// old carries the identical text twice, new carries it once.
 func Test_finish_reports_a_duplicated_entry_dropped_once_at_its_later_occurrence_mem(t *testing.T) {
 	oldLines := []string{
 		"## Binding decisions", "",
@@ -514,17 +451,8 @@ func Test_dropExcerpt(t *testing.T) {
 	}
 }
 
-// Test_finish_json_dropped_entries_key_order_and_values_mem proves
-// SCENARIO-04: --json's "dropped_entries" field is the document's last top-
-// level key, each element's own keys appear in the order
-// severity/rule/path/line/detail/heading/tag/text, the Open-debts element
-// carries "rule":"dropped-debt" and "tag":null (untagged), the Traps
-// element carries "rule":"dropped-entry" and its tag as a JSON string, and
-// an over-80-rune entry's "text" is the full literal value while its
-// "detail" is the same value cut to 80 runes plus "…". The old body keeps
-// one entry under each heading a drop is reported from — Left unbuilt,
-// Traps and Open debts — so a diff that ignored the new body entirely
-// would still fail this test.
+// --json's "dropped_entries" is the document's last top-level key; each
+// element's keys appear in order severity/rule/path/line/detail/heading/tag/text.
 func Test_finish_json_dropped_entries_key_order_and_values_mem(t *testing.T) {
 	longBase := strings.Repeat("A", 90)
 	oldLines := []string{
@@ -583,13 +511,8 @@ func Test_finish_json_dropped_entries_key_order_and_values_mem(t *testing.T) {
 	assert.Equal(t, want, stdout)
 }
 
-// Test_finish_json_dropped_entries_detail_matches_the_text_row_mem proves
-// SCENARIO-04: a "dropped_entries" element's "detail" is byte-identical to
-// the same drop's text-mode stdout row detail (the substring after the
-// "WARN  <path>:<line>  " prefix) — both render through dropDetail, never
-// through two separate string-building paths. runFinish's --json branch
-// returns before the text-mode WARN-row loop ever runs, so the two renders
-// come from two independently built fixtures rather than one shared run.
+// A "dropped_entries" element's "detail" is byte-identical to the same
+// drop's text-mode stdout row detail; both render through dropDetail.
 func Test_finish_json_dropped_entries_detail_matches_the_text_row_mem(t *testing.T) {
 	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n" +
 		"- kept trap\n\n- a dropped entry (FOO)\n\n## Open debts\n"
@@ -626,38 +549,22 @@ func Test_finish_json_dropped_entries_detail_matches_the_text_row_mem(t *testing
 	assert.Equal(t, wantDetail, doc.Dropped[0].Detail)
 }
 
-// memDroppedEntryNewState is the new-pair state body every SCENARIO-09
-// _mem test below reuses as its own diverging --state argument: the same
-// "- kept entry" survivor Test_finish_prints_a_warn_row_for_a_dropped_entry_mem's
-// own newState carries, omitting memOldStateWithDroppedEntry()'s own tagged
-// "- X (SCENARIO-02)" entry at old-file line 17.
+// memDroppedEntryNewState is the new-pair state body the tests below reuse
+// as their diverging --state argument.
 func memDroppedEntryNewState() string {
 	return "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n- kept entry\n\n## Open debts\n"
 }
 
-// memStateDivergedDropFixture is newMemStateDivergedDropFixture's own
-// return shape: mem already carries the fixture's first finish call, and
-// handoffPath/newStatePath are the --handoff/--state arguments every later
-// call reuses unchanged, alongside recordedHandoffPath (the step's own
-// recorded handoff file, for a test that removes it) and stateFilePath
-// (the feature's own recorded STATE.md, for a refusal's own Path
-// assertion).
+// memStateDivergedDropFixture is newMemStateDivergedDropFixture's return
+// shape: mem already carries the fixture's first finish call.
 type memStateDivergedDropFixture struct {
 	mem                                                           *rwfs.Mem
 	handoffPath, newStatePath, recordedHandoffPath, stateFilePath string
 }
 
-// newMemStateDivergedDropFixture builds "demo"/SCENARIO-01 already done
-// against memOldStateWithDroppedEntry()'s own body, recording handoffPath's
-// bytes as the step's own handoff file — the shared done-step drop-bearing
-// pair SCENARIO-09's Context describes. Every later call reuses fx.mem
-// directly: tree.mem() is never called a second time, since a second call
-// would take a fresh copy of tree's own entries and silently discard this
-// first finish's own writes, turning an intended re-finish into a first
-// finish. handoffPath's bytes are supplied unchanged to every later call
-// too — only newStatePath's own body and recordedHandoffPath's own
-// presence vary — so the refusal a later call hits is provably
-// refinishStateDiverged, never refinishHandoffDiverged.
+// newMemStateDivergedDropFixture builds "demo"/SCENARIO-01 already done.
+// Every later call reuses fx.mem directly: tree.mem() taking a fresh copy
+// would silently discard this first finish's own writes.
 func newMemStateDivergedDropFixture(t *testing.T) memStateDivergedDropFixture {
 	t.Helper()
 
@@ -681,14 +588,8 @@ func newMemStateDivergedDropFixture(t *testing.T) memStateDivergedDropFixture {
 	}
 }
 
-// Test_finish_accepts_a_drop_bearing_re_finish_when_the_handoff_file_is_missing_mem
-// is SCENARIO-09's control arm: with the recorded handoff file removed,
-// FinishFS's row-2 exemption takes refinishWrite instead of
-// refinishStateDiverged, so the state-diverged re-finish against
-// memDroppedEntryNewState() succeeds and prints the dropped entry's WARN
-// row — proving the fixture pair really is drop-bearing on the write path,
-// the arm Test_finish_refuses_a_state_diverged_re_finish_mem's
-// refusal is checked against.
+// Control arm: with the recorded handoff file removed, FinishFS's row-2
+// exemption takes refinishWrite instead of refinishStateDiverged.
 func Test_finish_accepts_a_drop_bearing_re_finish_when_the_handoff_file_is_missing_mem(t *testing.T) {
 	fx := newMemStateDivergedDropFixture(t)
 	require.NoError(t, fx.mem.Remove(memKey(fx.recordedHandoffPath)))
@@ -700,17 +601,8 @@ func Test_finish_accepts_a_drop_bearing_re_finish_when_the_handoff_file_is_missi
 	assert.Equal(t, "WARN  "+stateRel+":17  dropped from Traps, tagged SCENARIO-02: X (SCENARIO-02)\n", stdout)
 }
 
-// Test_finish_refuses_a_state_diverged_re_finish_mem
-// proves D5's first enforcement point at the CLI: a re-finish whose state
-// argument diverges from what is recorded (refinishStateDiverged) refuses
-// with ErrAlreadyFinished naming the state file — the same pair is
-// drop-bearing when it reaches the write path (this test's own control
-// arm, above). It does not itself assert stdout is empty: runFinish's
-// `srv.Finish` error branch returns before the WARN-row loop is reachable
-// at all, so no mutation of this feature's own code could ever make this
-// refusal print a row; that is proven instead by D5's dedicated
-// scaffold-level test (internal/scaffold/finish_dropped_test.go
-// Test_finish_state_diverged_refusal_returns_no_dropped_entries).
+// A re-finish whose state argument diverges from what is recorded refuses
+// with ErrAlreadyFinished naming the state file.
 func Test_finish_refuses_a_state_diverged_re_finish_mem(t *testing.T) {
 	fx := newMemStateDivergedDropFixture(t)
 
@@ -724,11 +616,8 @@ func Test_finish_refuses_a_state_diverged_re_finish_mem(t *testing.T) {
 	assert.Contains(t, refusal.Problem, "state differs")
 }
 
-// Test_finish_json_state_diverged_refusal_has_no_dropped_entries_key_mem is
-// Test_finish_refuses_a_state_diverged_re_finish_mem's
-// --json counterpart: the raw stdout bytes never carry the
-// "dropped_entries" substring at all — not merely an empty array — and the
-// decoded error document's own path names the state file.
+// The raw stdout bytes never carry the "dropped_entries" substring at
+// all, not merely an empty array.
 func Test_finish_json_state_diverged_refusal_has_no_dropped_entries_key_mem(t *testing.T) {
 	fx := newMemStateDivergedDropFixture(t)
 
@@ -743,18 +632,8 @@ func Test_finish_json_state_diverged_refusal_has_no_dropped_entries_key_mem(t *t
 	assert.Equal(t, fx.stateFilePath, *decoded.Path)
 }
 
-// Test_finish_identical_re_finish_of_a_drop_bearing_step_reports_the_noop_line_mem
-// proves SCENARIO-09's second Gherkin clause: an identical re-finish of a
-// step whose first finish already dropped an entry prints the existing
-// "already done with identical inputs" line the second time — even though
-// the first call's own WARN row proves the pair really is drop-bearing.
-// refinishNoop (internal/scaffold/finish.go) never calls droppedEntries at
-// all and returns a literal empty Dropped slice, which is why there is no
-// row to print; this test does not itself assert the second call's stdout
-// is empty, since runFinish's success path only ever writes a row per
-// res.Dropped element (writeDroppedRows), so an empty Dropped slice
-// already guarantees empty stdout regardless of any mutation this
-// feature's own row-writing code could introduce.
+// An identical re-finish of a step whose first finish already dropped an
+// entry prints the existing "already done" line the second time.
 func Test_finish_identical_re_finish_of_a_drop_bearing_step_reports_the_noop_line_mem(t *testing.T) {
 	tree := newMemFinishFixtureWithState("- [x] do the thing", memOldStateWithDroppedEntry())
 	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
@@ -773,12 +652,8 @@ func Test_finish_identical_re_finish_of_a_drop_bearing_step_reports_the_noop_lin
 	assert.Equal(t, "brief finish: demo SCENARIO-01 already done with identical inputs; nothing written\n", secondStderr)
 }
 
-// Test_finish_json_identical_re_finish_reports_no_dropped_entries_mem is
-// Test_finish_identical_re_finish_of_a_drop_bearing_step_reports_the_noop_line_mem's
-// --json counterpart: the second, identical call's document matches an
-// exact literal — "changed":false, "modified":[], "dropped_entries":[] —
-// so a coincidental write that also nets zero drops cannot pass as a
-// no-op.
+// The second, identical call's document matches an exact literal, so a
+// coincidental write that also nets zero drops cannot pass as a no-op.
 func Test_finish_json_identical_re_finish_reports_no_dropped_entries_mem(t *testing.T) {
 	tree := newMemFinishFixtureWithState("- [x] do the thing", memOldStateWithDroppedEntry())
 	handoffPath := memWriteInput(tree, "handoff.md", "NEW-HANDOFF\n")
@@ -805,18 +680,11 @@ func Test_finish_json_identical_re_finish_reports_no_dropped_entries_mem(t *test
 	assert.Equal(t, want, secondStdout)
 }
 
-// errRowWriteRefused is failNthWriter's own sentinel: the error its
-// configured call number returns.
+// errRowWriteRefused is the error failNthWriter's configured call returns.
 var errRowWriteRefused = errors.New("row write refused")
 
 // failNthWriter is an io.Writer whose callToFail'th Write call fails,
-// buffering every other call including ones *after* the failure: a fake
-// that fails every call from some point onward cannot distinguish "stop at
-// the first failure" from "capture the first error but keep looping" —
-// both write exactly the calls before the failure and nothing after,
-// since every later call would fail anyway. Only a fake that would
-// *succeed* again on a later row, if the implementation wrongly kept
-// going, can tell the two apart.
+// buffering every other call including ones after the failure.
 type failNthWriter struct {
 	callToFail int
 	calls      int
@@ -832,27 +700,8 @@ func (w *failNthWriter) Write(p []byte) (int, error) {
 	return w.buf.Write(p)
 }
 
-// Test_finish_stops_writing_dropped_rows_on_the_first_write_error_mem
-// pins writeDroppedRows' (internal/cli/finish_dropped.go) own contract: it
-// stops at the first row-write error rather than continuing past it, and
-// runFinish (internal/cli/finish.go) surfaces that error as a refusal —
-// exit 1, naming how many of the three dropped rows actually reached
-// stdout before the write failed — rather than a bare wrapped error
-// main.go would exit on without ever printing (SilenceErrors is set on
-// the root command, so nothing but ExitCode(err) is ever read from a
-// plain returned error). The old body carries three dropped entries; the
-// fake stdout writer fails only its *second* call and would succeed on a
-// third if writeDroppedRows kept going past the failure — so the buffer
-// holding exactly the first row's bytes, and nothing from the third, is
-// proof the loop actually stops rather than merely capturing the first
-// error while continuing to write every later row that itself happens to
-// succeed. The reported count ("after 1 of 3 rows") is proof the same
-// stop point is what the user-facing line names, not just what the
-// buffer holds. runFinish also never goes on to print the "replaced ..."
-// success line, and the returned error wraps scaffold.ErrPartialWrite —
-// the state file was already replaced before this failure — the sentinel
-// filesChangedFor (internal/cli/json.go) reads for a --json "files_changed"
-// value, even though this branch is unreachable under --json today.
+// writeDroppedRows stops at the first row-write error rather than
+// continuing past it; runFinish surfaces that error as an exit-1 refusal.
 func Test_finish_stops_writing_dropped_rows_on_the_first_write_error_mem(t *testing.T) {
 	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n" +
 		"- first dropped\n- second dropped\n- third dropped\n\n## Open debts\n\n"

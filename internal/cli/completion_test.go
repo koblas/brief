@@ -9,12 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_prints_a_completion_script_for_each_supported_shell pins SCENARIO-12:
 // "brief completion <shell>" writes that shell's generated script to
-// stdout, nothing to stderr, and exits 0. Each marker is the header line
-// cobra's own generator writes for that shell (observed against the real
-// generated output, not a golden of the whole script — cobra owns the
-// bytes).
+// stdout, nothing to stderr, and exits 0.
 func Test_prints_a_completion_script_for_each_supported_shell(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -41,10 +37,6 @@ func Test_prints_a_completion_script_for_each_supported_shell(t *testing.T) {
 	}
 }
 
-// Test_completion_without_exactly_one_shell_is_a_one_line_usage_error pins
-// R2's arg-count shapes (start's own "no feature given" / "too many
-// arguments" pattern) for "brief completion": no shell named, and more than
-// one.
 func Test_completion_without_exactly_one_shell_is_a_one_line_usage_error(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -78,23 +70,8 @@ func Test_completion_without_exactly_one_shell_is_a_one_line_usage_error(t *test
 	}
 }
 
-// Test_completion_of_an_unknown_shell_is_a_one_line_usage_error pins
-// SCENARIO-13: a single positional that names none of completionShells is a
-// one-line usage error, "expected one of:" naming the table in order. Three
-// rows, each pinning a decision a plausible refactor would flip:
-//   - "tcsh": the ordinary unknown-shell case.
-//   - "ZSH": matching is case-sensitive; folding case would turn this
-//     row into exit 0 with a generated script.
-//   - "" (empty name): an unknown shell, not "no shell given" — folding an
-//     empty positional into the zero-args guard would turn this row into
-//     that other message.
-//
-// Mutation-verified: reordering completionShells reddens every row (list
-// derives from the table's order, not a literal); %q -> %s in the miss
-// branch's Sprintf reddens every row (quoting is part of the contract);
-// strings.EqualFold-ing the match reddens only the "ZSH" row; folding
-// len(rest) == 0 || rest[0] == "" into the zero-args guard reddens only the
-// "" row.
+// A single positional naming none of completionShells is a one-line usage
+// error; matching is case-sensitive ("ZSH" is unknown, not "zsh").
 func Test_completion_of_an_unknown_shell_is_a_one_line_usage_error(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -133,12 +110,8 @@ func Test_completion_of_an_unknown_shell_is_a_one_line_usage_error(t *testing.T)
 	}
 }
 
-// Test_completion_is_absent_from_every_expected_command_list pins that
 // "completion" never appears in an "expected one of:" list even though it
-// is a real, dispatchable command: hiding it from listings is
-// IsAvailableCommand-driven (Hidden), not a name-based exclusion.
-// Mutation-verified: temporarily removing completion's Hidden field turns
-// every row below red (a trailing ", completion" appears in each stderr).
+// is a real, dispatchable command: hiding it is Hidden-driven.
 func Test_completion_is_absent_from_every_expected_command_list(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -176,13 +149,8 @@ func Test_completion_is_absent_from_every_expected_command_list(t *testing.T) {
 	}
 }
 
-// Test_the_hidden_complete_command_answers_for_generated_scripts is a
-// regression pin, not new wiring: cobra's initCompleteCmd adds the hidden
-// "__complete" command to every tree on Execute regardless of
-// CompletionOptions.DisableDefaultCmd, and it must keep answering once
-// "completion" is registered. Cobra writes its own
-// "Completion ended with directive: …" line to stderr on every run, so
-// stderr is deliberately not asserted empty here.
+// Cobra writes its own "Completion ended with directive: …" line to
+// stderr on every run, so stderr is deliberately not asserted empty here.
 func Test_the_hidden_complete_command_answers_for_generated_scripts(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer
@@ -194,12 +162,8 @@ func Test_the_hidden_complete_command_answers_for_generated_scripts(t *testing.T
 	assert.Regexp(t, `:\d+\n?$`, stdout.String())
 }
 
-// Test_the_hidden_complete_command_describes_new_with_its_own_short pins
-// that "new"'s Short reaches a user somewhere despite root help never
-// rendering it (helpTemplate always expands "new" into its children's rows
-// instead): cobra's generated completion scripts call back into
-// "__complete" at runtime rather than baking descriptions into the script
-// bytes, so this is the one place newShort is observable.
+// "new"'s Short is never rendered by root help, only observable here via
+// the generated completion script's runtime callback.
 func Test_the_hidden_complete_command_describes_new_with_its_own_short(t *testing.T) {
 	wd := t.TempDir()
 	var stdout, stderr bytes.Buffer

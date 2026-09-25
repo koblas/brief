@@ -1,10 +1,5 @@
-// check's plain scenarios — every one, except the one symlink case — run
-// against an rwfs.Mem through withRootFS, reaching run() directly since
-// that seam is unexported. check_disk_test.go keeps its own symlink case
-// plus every helper this file and check_hook_disk_test.go/json_refusal_test.go
-// still call. check --hook itself stays entirely on disk
-// (check_hook_disk_test.go): runCheckHook's own FeatureContaining resolves
-// through real os.Lstat/filepath.EvalSymlinks with no seam.
+// White-box: reaches the unexported run and withRootFS seam so check's
+// plain scenarios can run against an rwfs.Mem instead of real disk.
 
 package cli
 
@@ -52,8 +47,7 @@ func memOverCapState(n int) string {
 }
 
 // memCheckStep writes one step file under featureDir into tree, using the
-// default step-file-pattern's naming — mirroring check_test.go's own
-// writeCheckStep.
+// default step-file-pattern's naming.
 func memCheckStep(tree *memTree, featureDir, id, status string, checklistItems []string) {
 	var checklist strings.Builder
 	for _, item := range checklistItems {
@@ -286,11 +280,8 @@ func Test_prints_usage_to_stdout_when_help_is_requested_for_check_mem(t *testing
 	assert.Contains(t, stdout, "brief check")
 }
 
-// newMemCheckJSONFixture mirrors check_json_test.go's own
-// newCheckJSONFixture: two features named so fs.ReadDir's byte order is
-// also Check's and the golden's own feature order — "alpha" still in
-// flight (an open step) with an over-cap state file, "beta" fully done
-// with no handoff or cap issue.
+// newMemCheckJSONFixture returns two features: "alpha" in flight with an
+// over-cap state file, "beta" fully done.
 func newMemCheckJSONFixture() *memTree {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
 
@@ -307,13 +298,8 @@ func newMemCheckJSONFixture() *memTree {
 	return tree
 }
 
-// Test_check_json_document_golden_mem is the exact-bytes golden pinning
-// checkDocument's key order: an in-flight feature's ERROR finding
-// carrying a line ("alpha") and a done feature's WARN, whole-file finding
-// ("beta", "line":null). detail and path are captured from
-// assemble.NewServer(...).Check against the same fixture, never a
-// production literal — mirroring check_json_test.go's own
-// Test_check_json_document_golden.
+// Exact-bytes golden pinning checkDocument's key order. detail and path
+// are captured from assemble's own Check, never a production literal.
 func Test_check_json_document_golden_mem(t *testing.T) {
 	tree := newMemCheckJSONFixture()
 	mem := tree.mem()
@@ -437,9 +423,7 @@ func Test_check_json_scopes_to_the_named_feature_mem(t *testing.T) {
 }
 
 // memFindFinding returns the one finding in findings whose Path contains
-// substr, failing the test when there is not exactly one — mirroring
-// check_drift_test.go's own findFinding, duplicated since that is a
-// package cli_test symbol.
+// substr, failing the test when there is not exactly one.
 func memFindFinding(t *testing.T, findings []assemble.Finding, substr string) assemble.Finding {
 	t.Helper()
 

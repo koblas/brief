@@ -8,9 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// errFixtureUsage and errFixtureOther are static fixtures standing in for
-// "some usage error" and "some other error" — their text is not asserted
-// anywhere, only their classification.
+// errFixtureUsage and errFixtureOther stand in for a usage and a non-usage
+// error; only their classification is asserted, never their text.
 var (
 	errFixtureUsage = errors.New("brief: no command given; expected one of: new, start, finish")
 	errFixtureOther = errors.New("boom")

@@ -1,7 +1,5 @@
-// Every plain check scenario runs against rwfs.Mem in check_internal_test.go.
-// This file keeps its own symlink case (real containment: a symlink entry
-// in the feature root, never followed) plus every helper check_hook_disk_test.go
-// and json_refusal_test.go still call.
+// Plain check scenarios run against rwfs.Mem in check_internal_test.go; this
+// file keeps the symlink case, which needs real containment.
 
 package cli_test
 
@@ -45,9 +43,7 @@ const conformingSpec = "# demo\n\n## BDD Acceptance Progress\n\n- [x] SCENARIO-0
 const overCapStateLines = 81
 
 // overCapState returns a state body of exactly n lines, carrying the
-// default profile's four required headings, padded with filler past
-// config.Default's state-cap-lines so conform.OverCap's rule fires —
-// mirrors internal/assemble's own checkStateOfLines test helper.
+// default profile's four required headings, padded with filler.
 func overCapState(n int) string {
 	headings := []string{"## Binding decisions", "## Left unbuilt", "## Traps", "## Open debts"}
 
@@ -85,11 +81,8 @@ func writeCheckStep(t *testing.T, featureDir, id, status string, checklistItems 
 	require.NoError(t, os.WriteFile(filepath.Join(featureDir, id+".md"), []byte(step), 0o600))
 }
 
-// Test_check_labels_a_symlinked_feature_directory_under_its_own_name pins
-// the feature-level producer's own group: a symlink where a feature
-// directory is expected groups under its own link name, always
-// "(in flight)" — InFlight is hard-coded true for a feature-level finding
-// regardless of what the link's target would have measured.
+// A symlinked feature directory groups under its own link name, always
+// "(in flight)" regardless of what the link's target would measure.
 func Test_check_labels_a_symlinked_feature_directory_under_its_own_name(t *testing.T) {
 	wd := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(wd, "docs", "specifications"), 0o755))

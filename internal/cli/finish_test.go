@@ -1,8 +1,5 @@
-// Every finish scenario except finish_json_disk_test.go's own two os.Mkdir
-// cases runs against rwfs.Mem in finish_internal_test.go. newFinishCLIFixture
-// and writeInput stay here rather than moving with them: flag_error_test.go,
-// help_test.go, json_refusal_test.go and invalid_config_test.go still call
-// them.
+// Most finish scenarios run against rwfs.Mem in finish_internal_test.go;
+// newFinishCLIFixture and writeInput stay here since other files call them.
 
 package cli_test
 
@@ -14,10 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newFinishCLIFixture writes one open step, "SCENARIO-01", for feature
-// "demo" under the default profile's layout, with a fully ticked checklist
-// and a bare handoff anchor, and returns the working directory Run should
-// be called with.
+// newFinishCLIFixture writes one open, fully ticked step, "SCENARIO-01",
+// for feature "demo", and returns the working directory Run should use.
 func newFinishCLIFixture(t *testing.T) string {
 	t.Helper()
 
