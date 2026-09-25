@@ -255,4 +255,4 @@ Scenario: SCENARIO-10 — finish --help documents drop reporting
 - [x] SCENARIO-07: A multi-line entry is one entry; a duplicate dropped once is reported once
 - [x] SCENARIO-08: Only list items under the configured state headings are entries
 - [x] SCENARIO-09: A refused finish and an identical re-finish report no drops
-- [ ] SCENARIO-10: finish --help documents drop reporting
+- [x] SCENARIO-10: finish --help documents drop reporting

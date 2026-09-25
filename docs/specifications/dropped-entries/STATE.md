@@ -1,6 +1,7 @@
 # dropped-entries — current state
 
-Scenarios complete: SCENARIO-01..09. Last updated by SCENARIO-09.
+Scenarios complete: SCENARIO-01..10. Feature done — every BDD scenario checked. Last updated
+by SCENARIO-10.
 
 ## Binding decisions
 
@@ -33,22 +34,20 @@ Scenarios complete: SCENARIO-01..09. Last updated by SCENARIO-09.
   `--json` top-level field must update `jsonFieldsParagraph`'s call in the same change.**
 - `droppedEntries` scans only `scannableHeadings(headings)`, never raw `headings.Ordered()`: an
   empty or duplicate-valued configured heading contributes zero entries (D7) — the *only*
-  guard, since `checkArgumentHeadings` (`markdown.Section(body, "")` matches the first blank
-  line) does not reject one and is itself **unreachable through `brief finish`/`cli.Run`**:
-  `config.Resolve` already refuses an empty or duplicate `state-headings.*` value first. Tested
-  by constructing `config.Config` directly, below the CLI (SCENARIO-08).
-- `normalizeEntryText`'s `ReplaceAll(raw, "\r", "")` only matters for a `\r` strictly between
-  two non-whitespace characters — `strings.Fields` already splits a space-adjacent `\r` like a
-  space (SCENARIO-08).
+  guard, since `config.Resolve` already refuses an empty or duplicate `state-headings.*` value
+  before `brief finish`/`cli.Run` can reach it (SCENARIO-08).
 - D5 is enforced at **two independent points**, neither substituting for the other:
-  `FinishFS`'s refinish switch never computes `dropped` before a refusal branch returns
-  (Server-level state-diverged table), and `runFinish`'s `srv.Finish` error branch never
-  renders `res` on a non-nil `err` (CLI-level refusal and its `--json` counterpart) (SCENARIO-09).
+  `FinishFS`'s refinish switch never computes `dropped` before a refusal branch returns, and
+  `runFinish`'s `srv.Finish` error branch never renders `res` on a non-nil `err` (SCENARIO-09).
+- `finishLong` (`internal/cli/finish.go`) carries the ruled drop-reporting paragraph as its own
+  paragraph, between the flag-body prose and `jsonFieldsParagraph(...)`'s output — pinned
+  byte-identical in two independent goldens (`help_test.go`'s `finishHelp`, `help_json_test.go`'s
+  `description` literal); an edit to one without the other leaves a golden silently stale
+  (SCENARIO-10).
 
 ## Left unbuilt
 
-- `finishLong`'s drop-reporting **prose** paragraph (the JSON field-list part is done) —
-  SCENARIO-10.
+None — all ten scenarios implemented.
 
 ## Traps
 
@@ -56,21 +55,12 @@ Scenarios complete: SCENARIO-01..09. Last updated by SCENARIO-09.
   indentation and matches only `- [ ]`/`- [x]`. `entryItemRe` is deliberately column-0-only —
   never relax it to fold an indented item into its own `Entry` (SCENARIO-07 mutation-guards
   this); sub-items must stay continuation text of their parent.
-- A drop fixture must keep at least one old entry: with nothing kept, a diff that ignores the
-  new body entirely still passes. Omitting any of the four configured headings from a new body
-  refuses with `ErrMissingStateHeading`, printing no rows (SCENARIO-03/05).
 - `dropExcerpt` cuts at 80 runes: a fixture meant to prove folding or dedup by its text content
   must stay under that, or the cut — not the behavior under test — is what the assertion
   reflects.
 - A CLI-level re-finish test must reuse one `*rwfs.Mem` across every call — a second
   `tree.mem()` call takes a fresh copy of `tree`'s entries and silently discards an earlier
-  finish's writes, turning an intended re-finish into a first finish; every `--state`/
-  `--handoff` input must be written into `tree` before the one `tree.mem()` call, or the
-  missing-input path refuses inside `readSource` before `srv.Finish` runs at all (SCENARIO-08/09).
-- `Test_finish_json_refusal_is_unchanged_mem` (pre-SCENARIO-09) stays valid but weak alone: it
-  refuses on `ErrNoSuchStep` before `state` is read, pinning only the error document's key
-  *shape*. SCENARIO-09's state-diverged pair plus its handoff-missing control arm is what
-  proves D5 against a refusal that would otherwise have had entries to report.
+  finish's writes (SCENARIO-08/09).
 
 ## Open debts
 

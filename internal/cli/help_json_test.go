@@ -363,6 +363,11 @@ func Test_help_finish_json_is_the_exact_document(t *testing.T) {
 		"handoff file, replaces the feature's state file with the body at --state,\n" +
 		"and marks the step done in the progress list. \"-\" reads a flag's body\n" +
 		"from stdin; it may be given for at most one of --handoff and --state.\n\n" +
+		"Each entry under the four state headings that is missing from the new\n" +
+		"body is listed on stdout as a WARN finding (rule dropped-debt under the\n" +
+		"open-debts heading, dropped-entry otherwise); its line is in the file as\n" +
+		"it was before replacement. Removal is reported, never refused; a\n" +
+		"reworded entry counts as removed. Exit status stays 0.\n\n" +
 		"With --json, this command writes one JSON document on stdout: the common header\n" +
 		"(`schema`, `command`, `ok`, `exit_code`; on a usage error or refusal an `error`\n" +
 		"object carries the failure), then its own top-level fields, in document order:\n" +

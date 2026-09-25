@@ -18,6 +18,12 @@ handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
 from stdin; it may be given for at most one of --handoff and --state.
 
+Each entry under the four state headings that is missing from the new
+body is listed on stdout as a WARN finding (rule dropped-debt under the
+open-debts heading, dropped-entry otherwise); its line is in the file as
+it was before replacement. Removal is reported, never refused; a
+reworded entry counts as removed. Exit status stays 0.
+
 ` + jsonFieldsParagraph("feature", "step", "changed", "handoff_path", "state_path", "next", "modified", "dropped_entries")
 
 // finishDocument is finish's --json success document: the common header
