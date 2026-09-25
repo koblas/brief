@@ -1,7 +1,5 @@
-// Test_new_feature_json_is_one_exact_document and
-// Test_new_step_json_names_the_step_and_its_file run against rwfs.Mem in
-// new_internal_test.go. This file keeps only the ENAMETOOLONG case: a
-// real filesystem name-length limit rwfs.Mem does not model.
+// This file keeps only the ENAMETOOLONG case, a real filesystem
+// name-length limit rwfs.Mem does not model.
 
 package cli_test
 
@@ -17,15 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_new_feature_json_files_changed_is_true_when_the_state_write_fails
-// exercises "new feature"'s own write-site gap at the CLI boundary: a
-// .brief.yaml naming a state-file over 255 bytes long passes R1's own
-// validation (it is a plain file name with no path separator) but the
-// filesystem itself refuses it with ENAMETOOLONG, so the specification's
-// write lands first and the state write fails after it. files_changed
-// must report true, not false, since the specification did land. The
-// control arm reads that file back: it still carries the specification
-// skeleton, proving files_changed's "true" is not vacuous.
+// The state-file name is valid but over the filesystem's ENAMETOOLONG
+// limit, so the specification write lands and the state write fails after it.
 func Test_new_feature_json_files_changed_is_true_when_the_state_write_fails(t *testing.T) {
 	wd := t.TempDir()
 	longStateFile := strings.Repeat("A", 256) + ".md"

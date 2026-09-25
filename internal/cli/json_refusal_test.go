@@ -15,10 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// decodedError is the JSON shape of a --json error document's "error"
-// member, decoded directly rather than field by field: jsonKeys still
-// pins the document's and the error object's exact key sets before this
-// decode runs, the same two-step decodeUsageErrorDocument uses.
+// decodedError is the JSON shape of a --json error document's "error" member.
 type decodedError struct {
 	Kind         string  `json:"kind"`
 	Message      string  `json:"message"`
@@ -30,11 +27,7 @@ type decodedError struct {
 }
 
 // decodeErrorDocument asserts stdout holds exactly one --json error
-// document matching R1/R3's shape (schema 1, ok false, exit_code 1, the
-// exact key set of both the document and its error object) for
-// wantCommand, and returns the document's own error object for the
-// caller's own kind/message/path/line/problem/fix/files_changed
-// assertions.
+// document for wantCommand and returns its error object.
 func decodeErrorDocument(t *testing.T, stdout []byte, wantCommand string) decodedError {
 	t.Helper()
 
@@ -68,9 +61,8 @@ func decodeErrorDocument(t *testing.T, stdout []byte, wantCommand string) decode
 	return decoded
 }
 
-// jsonString marshals s the same way testify's assert.Equal would compare
-// it, for building a golden literal around a dynamically computed value
-// (an absolute path, an OS-native error string) without hand-escaping it.
+// jsonString marshals s the way assert.Equal compares it, for building a
+// golden literal around a dynamically computed value.
 func jsonString(t *testing.T, s string) string {
 	t.Helper()
 
@@ -80,13 +72,8 @@ func jsonString(t *testing.T, s string) string {
 	return string(b)
 }
 
-// Test_json_mode_renders_a_refusal_as_one_document is the golden-bytes
-// proof of the Gherkin row: "brief start demo --json" against a feature
-// whose state file is missing renders assemble.Start's *RefusalError as
-// one compact document, key order pinned, "line" and "files_changed" both
-// null. wantMessage and wantProblem are captured rather than hardcoded —
-// the OS-native "file does not exist" text they embed is not this
-// scenario's contract, path/fix are.
+// wantMessage and wantProblem are captured from a real run, not hardcoded:
+// the OS-native text they embed isn't this test's own contract.
 func Test_json_mode_renders_a_refusal_as_one_document(t *testing.T) {
 	wd := newStartFixture(t, "open")
 	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
@@ -124,16 +111,10 @@ func Test_json_mode_renders_a_refusal_as_one_document(t *testing.T) {
 // noStdin is a refusalCase's newStdin for a row that never reads stdin.
 func noStdin() io.Reader { return nil }
 
-// unclosedFenceLine is the line both the "finish --state relative path
-// fails conformance" and "finish --state - fails conformance" rows' own
-// fixtures leave an unclosed fenced code block on: each fixture opens its
-// fence as the third line of its own body.
+// unclosedFenceLine is the line the shared unclosed-fence fixtures open their fence on.
 const unclosedFenceLine = 3
 
-// refusalCase is one Test_json_mode_refusal_matrix row's own fixture and
-// expectation, built by that row's setup so every row's wd, args and
-// expected path/line come from the same fixture rather than being
-// guessed independently.
+// refusalCase is one refusal-matrix row's fixture and expected values.
 type refusalCase struct {
 	wd       string
 	args     []string
@@ -145,9 +126,8 @@ type refusalCase struct {
 	wantFix  string
 }
 
-// refusalMatrixRow is one Test_json_mode_refusal_matrix row: setup builds
-// that row's own fixture and argv, command and filesChanged are its
-// static, fixture-independent expectations.
+// refusalMatrixRow is one refusal-matrix row: setup builds its fixture
+// and argv; command and filesChanged are static expectations.
 type refusalMatrixRow struct {
 	name         string
 	setup        func(t *testing.T) refusalCase
@@ -155,13 +135,8 @@ type refusalMatrixRow struct {
 	filesChanged *bool
 }
 
-// newStartEmptyFeatureCase is refusalMatrixRows' "start empty feature" row,
-// split out to a named function rather than an inline closure so that
-// list's own length does not grow with every row added to it. An empty
-// feature argument refuses through the same *unknownFeatureError path a
-// genuinely absent name does (classifyRefusal's errorKindRefusal branch),
-// not the errorKindFailure a raw os.Root.OpenRoot("") failure would render
-// as.
+// newStartEmptyFeatureCase is the "start empty feature" row: an empty
+// feature name refuses as not-found, not a raw open failure.
 func newStartEmptyFeatureCase(t *testing.T) refusalCase {
 	t.Helper()
 
@@ -179,10 +154,9 @@ func newStartEmptyFeatureCase(t *testing.T) refusalCase {
 	}
 }
 
-// refusalMatrixRows is Test_json_mode_refusal_matrix's own test list: one
-// representative failure per command, and every classifyRefusal shape —
-// config, an enriched not-found (*unknownFeatureError), scaffold, assemble,
-// and a generic failure.
+// refusalMatrixRows lists one representative failure per command, covering
+// every refusal classification: config, not-found, scaffold, assemble and
+// a generic failure.
 func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 	return []refusalMatrixRow{
 		{
@@ -318,9 +292,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 			filesChanged: falseVal,
 		},
 		{
-			// The relative --state path is resolved against t.Chdir(wd), so
-			// both readSource's real os.ReadFile and the JSON document's
-			// path-joined-onto-wd see the same file.
+			// --state is relative to t.Chdir(wd), matched by the path below.
 			name: "finish --state relative path fails conformance",
 			setup: func(t *testing.T) refusalCase {
 				t.Helper()
@@ -331,7 +303,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 					[]byte("## Binding decisions\n\n```\nunterminated\n"), 0o600))
 				t.Chdir(wd)
 				wantPath := filepath.Join(wd, "state.md")
-				wantLine := unclosedFenceLine // this fixture's own unclosed "```" line
+				wantLine := unclosedFenceLine // this fixture's unclosed fence
 
 				return refusalCase{
 					wd:       wd,
@@ -354,7 +326,7 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 
 				wd := newFinishCLIFixture(t)
 				handoffPath := writeInput(t, "handoff.md", "NEW-HANDOFF\n")
-				wantLine := unclosedFenceLine // the piped body's own unclosed "```bash" line
+				wantLine := unclosedFenceLine // the piped body's unclosed fence
 
 				return refusalCase{
 					wd:       wd,
@@ -450,9 +422,8 @@ func refusalMatrixRows(falseVal *bool) []refusalMatrixRow {
 	}
 }
 
-// newFeatureInvalidConfigCase is refusalMatrixRows' "new feature invalid
-// config value" row: a repository whose ".brief.yaml" fails R1's cap rule
-// refuses at load before "new feature" ever reaches scaffold.
+// newFeatureInvalidConfigCase is the "new feature invalid config value"
+// row: an invalid .brief.yaml refuses at load before scaffold runs.
 func newFeatureInvalidConfigCase(t *testing.T) refusalCase {
 	t.Helper()
 
@@ -471,10 +442,9 @@ func newFeatureInvalidConfigCase(t *testing.T) refusalCase {
 	}
 }
 
-// newFinishInvalidConfigCase is refusalMatrixRows' "finish invalid config
-// value" row: --handoff and --state name real, readable files so
-// readSource never intervenes ahead of resolveRoot's own refusal against
-// the same failing ".brief.yaml" newFeatureInvalidConfigCase uses.
+// newFinishInvalidConfigCase is the "finish invalid config value" row:
+// --handoff and --state name real, readable files so resolveRoot's own
+// refusal is reached first.
 func newFinishInvalidConfigCase(t *testing.T) refusalCase {
 	t.Helper()
 
@@ -495,25 +465,8 @@ func newFinishInvalidConfigCase(t *testing.T) refusalCase {
 	}
 }
 
-// Test_json_mode_refusal_matrix runs one representative failure per
-// command, and every classifyRefusal shape (config, scaffold, assemble,
-// the bare not-found sentinel, and a generic failure), through cli.Run
-// with and without --json against the same fixture and argv. Every row
-// shares one assertion tuple — kind, message equal to the text-mode
-// line, path/line as the fixture predicts, problem non-empty and a
-// substring of message, fix equal to that row's own wantFix, files_changed
-// per command — so each row discriminates only through its own setup's
-// fixture and expectations in refusalMatrixRows, never through branching
-// in the loop body. fix's presence inside message is not asserted here: a
-// generic failure's fix is a --json-only fallback that never appears in
-// the text-mode line, so that containment does not hold uniformly across
-// every row.
-//
-// Mutation-verified: closing the fence in the "finish --state relative
-// path fails conformance" row's own state.md fixture reddens exactly that
-// row's subtest (it falls through to a missing-heading refusal instead),
-// leaving every other row green — proving each row's own fixture, not the
-// loop body, is what the assertions actually exercise.
+// fix's containment in message isn't asserted here: a generic failure's
+// fix is a --json-only fallback absent from the text-mode line.
 func Test_json_mode_refusal_matrix(t *testing.T) {
 	falseVal := false
 
@@ -547,16 +500,8 @@ func Test_json_mode_refusal_matrix(t *testing.T) {
 	}
 }
 
-// Test_json_mode_check_findings_are_not_an_error_document is R4: check
-// --json renders an ERROR-carrying run as one success-shaped document —
-// ok false, exit_code 1, no "error" key, counts.error greater than zero —
-// never as an error document, and writes zero stderr bytes; the text-mode
-// summary that would otherwise carry this same information lives in the
-// document's own "counts", not on a stream check_json_test.go's golden
-// already pins byte-for-byte. The control arm — the same fixture, an
-// unknown feature named instead — proves --json is not silently disabled
-// for check altogether: it still renders an error document when the
-// failure is a refusal rather than a findings run.
+// The control arm — the same fixture, an unknown feature instead — proves
+// --json still renders an error document for a refusal.
 func Test_json_mode_check_findings_are_not_an_error_document(t *testing.T) {
 	wd := t.TempDir()
 	featureDir := filepath.Join(wd, "docs", "specifications", "demo")
@@ -598,13 +543,8 @@ func Test_json_mode_check_findings_are_not_an_error_document(t *testing.T) {
 	decodeErrorDocument(t, controlStdout.Bytes(), "check")
 }
 
-// Test_json_mode_status_with_a_malformed_feature_is_a_success_document is
-// R4: status --json with a malformed feature is still a success document —
-// ok true, exit_code 0, no "error" key — with the fault reported as payload
-// (the row's own "problem" object) instead. The control arm is the same
-// fixture without --json: the text path still writes the malformed line and
-// the summary to stderr, so the --json empty stderr above is the branch,
-// not a coincidence of this fixture.
+// The control arm is the same fixture without --json: text mode still
+// writes the malformed line and summary to stderr.
 func Test_json_mode_status_with_a_malformed_feature_is_a_success_document(t *testing.T) {
 	wd := t.TempDir()
 	writeMalformedStatusFeature(t, wd, "delta")

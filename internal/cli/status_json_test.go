@@ -9,11 +9,8 @@ import (
 	"testing"
 )
 
-// newStatusJSONFixture writes four features under wd's default layout, named
-// so fs.ReadDir's byte order is also the golden order: "alpha" (1/4 done,
-// next SCENARIO-02, one step blocked on its own unfinished SCENARIO-02),
-// "beta" (2/2 done, complete), "delta" (malformed — no frontmatter) and
-// "epsilon" (a bare feature directory with no step files at all).
+// newStatusJSONFixture writes four features named so fs.ReadDir's byte
+// order is also the golden order.
 func newStatusJSONFixture(t *testing.T) string {
 	t.Helper()
 

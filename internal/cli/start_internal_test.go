@@ -1,8 +1,5 @@
-// start's scenarios — every one, none of them OS-subject — run against
-// rwfs.Mem here, reaching run() directly since withRootFS is unexported.
-// start_test.go keeps only newStartFixture: flag_error_test.go,
-// help_test.go and json_refusal_test.go still call it, so it cannot move
-// with the tests that used to be its only callers.
+// start's scenarios run against rwfs.Mem here, reaching run() directly.
+// start_test.go keeps newStartFixture: other test files still call it.
 
 package cli
 
@@ -18,10 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newMemStartFixture builds an rwfs.Mem holding one step, "SCENARIO-01",
-// for feature "demo" under the default profile's layout, with its
-// frontmatter status field set to status — mirroring start_test.go's own
-// newStartFixture.
+// newMemStartFixture builds an rwfs.Mem holding one step for feature
+// "demo" with its frontmatter status field set to status.
 func newMemStartFixture(status string) *memTree {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
 	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
@@ -80,12 +75,6 @@ func Test_start_refuses_a_specification_with_no_progress_heading_mem(t *testing.
 	assert.Contains(t, lines[0], "## BDD Acceptance Progress")
 }
 
-// Test_start_refuses_a_feature_with_no_specification_file_mem is the
-// missing-specification half of assemble's own specFault: a feature
-// directory that exists but carries no specification.md at all refuses,
-// naming that file — the ErrNotExist branch specFault takes before ever
-// reaching the no-progress-heading branch
-// Test_start_refuses_a_specification_with_no_progress_heading_mem covers.
 func Test_start_refuses_a_feature_with_no_specification_file_mem(t *testing.T) {
 	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"), featureDir)
@@ -226,11 +215,7 @@ func Test_start_says_nothing_about_a_present_but_empty_convention_mem(t *testing
 }
 
 func Test_start_on_a_freshly_scaffolded_feature_names_only_the_absent_acceptance_heading_mem(t *testing.T) {
-	// A single shared *rwfs.Mem, reused across all three run() calls: unlike
-	// runStartMem's own tree.mem(), called fresh per call, "new feature" and
-	// "new step" must land where "start" then reads them — tree.mem() copies
-	// its own fixture on every call (rwfs.NewMem's own contract), so three
-	// independent Mem instances would never see one another's writes.
+	// One shared *rwfs.Mem across all three calls, so "start" reads what "new" wrote.
 	mem := newMemTree(memRoot).mem()
 	var discard strings.Builder
 
@@ -454,13 +439,8 @@ func Test_returns_an_error_for_an_unknown_feature_on_start_mem(t *testing.T) {
 	assert.NotEmpty(t, stderr)
 }
 
-// Test_returns_an_error_naming_the_known_feature_on_start_mem is
-// enrichUnknownFeature's own control arm: the assemble.Server it builds to
-// list known features (assemble.WithFS(rootFS)) must read the same Mem
-// fixture as srv.Start itself, not real disk — every other unknown-feature
-// _mem test above has zero other features on its own tree, so "known:
-// none" there is identical to what a real, empty root would also produce
-// and proves nothing about this seam specifically.
+// Control arm: the server enrichUnknownFeature builds to list known
+// features must read the same Mem fixture, not real disk.
 func Test_returns_an_error_naming_the_known_feature_on_start_mem(t *testing.T) {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
 	memConformingFeatureFiles(tree, filepath.Join(memRoot, "docs", "specifications", "alpha"))
@@ -473,9 +453,7 @@ func Test_returns_an_error_naming_the_known_feature_on_start_mem(t *testing.T) {
 }
 
 // memWriteStartMalformedFixture adds a conforming specification and empty
-// state file for "demo" under root's default layout, plus one step file,
-// SCENARIO-01.md, with no frontmatter at all — mirroring start_test.go's
-// own writeStartMalformedFixture.
+// state file for "demo", plus one step file with no frontmatter at all.
 func memWriteStartMalformedFixture(tree *memTree, featureDir string) {
 	tree.
 		file(filepath.Join(featureDir, "specification.md"), "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n").
@@ -537,10 +515,8 @@ func Test_start_names_the_malformed_step_file_relative_to_the_working_directory_
 	})
 }
 
-// startJSONDocument is start's --json success document, decoded field by
-// field: the common header (schema, command, ok, exit_code) precedes
-// assemble.Brief's own fields, flattened by embedding — mirroring
-// start_test.go's own startJSONDocument.
+// startJSONDocument is start's --json success document, the common header
+// fields alongside assemble.Brief's own, flattened by embedding.
 type startJSONDocument struct {
 	assemble.Brief
 
@@ -756,22 +732,13 @@ func Test_start_without_json_is_byte_identical_to_the_text_brief_mem(t *testing.
 		stdout)
 }
 
-// Test_json_mode_renders_a_refusal_as_one_document_mem is the golden-bytes
-// proof of the Gherkin row: "brief start demo --json" against a feature
-// whose state file is missing renders assemble.Start's *RefusalError as
-// one compact document, key order pinned, "line" and "files_changed" both
-// null — mirroring json_refusal_test.go's own
-// Test_json_mode_renders_a_refusal_as_one_document.
 func Test_json_mode_renders_a_refusal_as_one_document_mem(t *testing.T) {
 	tree := newMemStartFixture("open")
 	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
 	statePath := filepath.Join(featureDir, "STATE.md")
 	delete(tree.entries, memKey(statePath))
 
-	// wantProblem is captured from the same fixture's own rwfs.Mem adapter
-	// (fstest.MapFS's own missing-file wording), rather than hardcoded —
-	// see status_internal_test.go's own missingFileDetail for the same
-	// capture.
+	// wantProblem is captured from the fixture's own rwfs.Mem adapter, not hardcoded.
 	_, missingErr := tree.mem().ReadFile(memKey(statePath))
 	var missingPathErr *fs.PathError
 	require.ErrorAs(t, missingErr, &missingPathErr)

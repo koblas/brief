@@ -12,17 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// invalidConfigRefusalLine is the one stderr line every command in
-// Test_every_command_refuses_an_invalid_config_value must render,
-// verbatim, for %s the command's own path (R1, R14a): the repository's
-// ".brief.yaml" sets handoff-cap-lines to 0, which fails validate's cap
-// rule before any command-specific logic runs.
+// invalidConfigRefusalLine is the stderr line every command renders for an invalid config value, %s the command's own path.
 const invalidConfigRefusalLine = "brief %s: .brief.yaml: handoff-cap-lines is 0, must be at least 1; " +
 	"correct the value, or delete the key to use its default (no files changed)\n"
 
-// finishInvalidConfigArgs is Test_every_command_refuses_an_invalid_config_value's
-// "finish" row: --handoff and --state name real, readable files so
-// readSource never intervenes ahead of resolveRoot's own refusal.
+// finishInvalidConfigArgs points --handoff and --state at real, readable
+// files so resolveRoot's own refusal is reached first.
 func finishInvalidConfigArgs(t *testing.T) []string {
 	t.Helper()
 
@@ -32,13 +27,6 @@ func finishInvalidConfigArgs(t *testing.T) []string {
 	return []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath}
 }
 
-// Test_every_command_refuses_an_invalid_config_value is R1's own
-// cross-command contract: status, start, check, finish, new feature and
-// new step all resolve configuration the same way (resolveRoot), so an
-// invalid value refuses identically regardless of which command reaches
-// it first. finish's own args point at real, readable --handoff/--state
-// files so readSource never intervenes ahead of resolveRoot's own
-// refusal.
 func Test_every_command_refuses_an_invalid_config_value(t *testing.T) {
 	cases := []struct {
 		name    string

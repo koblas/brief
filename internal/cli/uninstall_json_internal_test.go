@@ -1,10 +1,5 @@
-// This file reaches the unexported run directly to inject newMemSetupSeam
-// (mem_internal_test.go), the same rwfs.Mem seam uninstall_internal_test.go
-// uses. uninstall_json_test.go's own remaining case
-// (Test_uninstall_json_failure_reports_files_changed_false) stays
-// black-box and disk: a real chmod'd, unwritable wd forces os.Remove to
-// fail, and it decodes through decodeErrorDocument (json_refusal_test.go),
-// a shared package cli_test helper this white-box package cannot import.
+// This file reaches the unexported run directly to inject newMemSetupSeam,
+// the same rwfs.Mem seam uninstall_internal_test.go uses.
 
 package cli
 
@@ -18,10 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_uninstall_json_is_one_exact_document pins uninstallDocument's exact
-// shape and key order for the happy path: removed names the config's own
-// absolute path, created and modified are both "[]" — uninstall never
-// writes — and artifacts carries the one "removed" row.
 func Test_uninstall_json_is_one_exact_document(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -48,12 +39,6 @@ func Test_uninstall_json_is_one_exact_document(t *testing.T) {
 	assert.Equal(t, want, stdout.String())
 }
 
-// Test_uninstall_json_for_claude_code_removes_plugin_and_hook_files pins
-// the same "kind" vocabulary on removal: "snippet" for CLAUDE.md, "skill"
-// for the brief-workflow skill, "hook" for hooks.json, "plugin" for the
-// rest, "host" echoing "claude-code", and removed naming files only, in
-// removal order (CLAUDE.md first) — never the pruned, now-empty plugin
-// directory.
 func Test_uninstall_json_for_claude_code_removes_plugin_and_hook_files(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -104,10 +89,6 @@ func Test_uninstall_json_for_claude_code_removes_plugin_and_hook_files(t *testin
 	assert.Equal(t, "snippet", kindByPath[claudeMD])
 }
 
-// Test_uninstall_json_nothing_installed_is_an_empty_document pins the
-// zero-artifact shape: artifacts "[]", every path slice "[]", and no
-// stderr line at all — R11's "nothing installed" text-mode line has no
-// JSON equivalent to write.
 func Test_uninstall_json_nothing_installed_is_an_empty_document(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)
@@ -124,9 +105,6 @@ func Test_uninstall_json_nothing_installed_is_an_empty_document(t *testing.T) {
 	assert.Equal(t, want, stdout.String())
 }
 
-// Test_uninstall_json_dry_run_reports_empty_removed pins R9's JSON shape:
-// dry_run true, removed "[]" even though the plan's own artifact row says
-// "removed", and nothing written.
 func Test_uninstall_json_dry_run_reports_empty_removed(t *testing.T) {
 	wd := fsAbs("repo")
 	mem := newVirtualMem(wd)

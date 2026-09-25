@@ -1,14 +1,5 @@
-// Test_resolveRootFS_matches_resolveRoot_on_an_invalid_config proves
-// resolveRootFS (cli.go) is a faithful twin of production's own
-// resolveRoot → config.Resolve path, rather than merely compiling against
-// the same signature: the same ".brief.yaml" content, read once through
-// real disk (nil rootFS) and once through an rwfs.Mem fixture (withRootFS),
-// must produce byte-identical stderr, stdout and exit code for "status" —
-// the command that reaches resolveRoot before anything command-specific
-// runs. Both cases stay off the exact wording of config's own decode/
-// validation error: pinning it here would duplicate internal/platform/
-// config's own tests and drift the moment that package's wording changes.
-// White-box package: run and withRootFS are both unexported.
+// resolveRootFS must produce byte-identical output to resolveRoot for the
+// same config, read once from real disk and once from an rwfs.Mem fixture.
 
 package cli
 

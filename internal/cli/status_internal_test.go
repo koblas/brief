@@ -1,14 +1,6 @@
-// status's plain scenarios — every one that only reads feature content a
-// fixture controls, no real containment or permission behavior — run
-// against an rwfs.Mem through withRootFS, reaching run() directly since
-// that seam is unexported. status_disk_test.go's own symlink case (real
-// containment: a symlink entry in the feature root, never followed) stays
-// on disk; its own helpers (writeConformingFeatureFiles, stepTitle,
-// writeStatusStep, writeMalformedStatusFeature) and status_json_test.go's
-// own newStatusJSONFixture stay defined there too — json_refusal_test.go
-// and help_test.go still call them. This file builds its own mem*
-// equivalents rather than reusing those: a package cli_test symbol is not
-// visible from this package cli file.
+// status's plain scenarios run against an rwfs.Mem through withRootFS,
+// reaching run() directly. This file builds its own mem* fixture helpers
+// since the package cli_test equivalents aren't visible here.
 
 package cli
 
@@ -24,17 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// memStepTitle mirrors status_test.go's own stepTitle: the heading a step
-// fixture carries, deliberately distinct from its id.
+// memStepTitle is the heading a step fixture carries, deliberately
+// distinct from its id.
 func memStepTitle(id string) string {
 	return "Implement " + id
 }
 
-// memConformingSpec and memConformingState mirror check_test.go's own
-// conformingSpec/conformingState — duplicated here since a package
-// cli_test constant is not visible from this package cli file.
-// memStateWithUnterminatedFence mirrors check_drift_test.go's own
-// stateWithUnterminatedFence the same way.
 const (
 	memConformingSpec  = "# demo\n\n## BDD Acceptance Progress\n\n- [x] SCENARIO-01\n"
 	memConformingState = "## Binding decisions\n\nsome decision\n\n" +
@@ -48,9 +35,8 @@ const (
 		"```\nunterminated\n"
 )
 
-// memConformingFeatureFiles adds featureDir's specification and state file
-// to tree, conforming to every read-side check assemble.Start applies —
-// mirroring status_test.go's own writeConformingFeatureFiles.
+// memConformingFeatureFiles adds featureDir's specification and state
+// file to tree, conforming to every read-side check assemble.Start applies.
 func memConformingFeatureFiles(tree *memTree, featureDir string) {
 	tree.
 		file(filepath.Join(featureDir, "specification.md"), memConformingSpec).
@@ -58,8 +44,7 @@ func memConformingFeatureFiles(tree *memTree, featureDir string) {
 }
 
 // memStepBody renders one step file's body: id echoed as both frontmatter
-// id and title (memStepTitle), status and depends-on as given — mirroring
-// status_test.go's own writeStatusStep body shape.
+// id and title, status and depends-on as given.
 func memStepBody(id, status string, dependsOn []string) string {
 	deps := "depends-on: []\n"
 	if len(dependsOn) > 0 {
@@ -83,12 +68,8 @@ func memStepBody(id, status string, dependsOn []string) string {
 		"## Implementation Plan\n\n- [ ] a task\n"
 }
 
-// memStatusStep adds one step file for feature, under root's default
-// feature-directory layout, after seeding a conforming specification and
-// state file for feature if neither is already present — mirroring
-// status_test.go's own writeStatusStep, MAJOR 1's own requirement that a
-// status fixture carry the same two files assemble.Start's read-side
-// checks require.
+// memStatusStep adds one step file for feature, after seeding a
+// conforming specification and state file for it.
 func memStatusStep(tree *memTree, root, feature, name, id, status string, dependsOn []string) {
 	featureDir := filepath.Join(root, "docs", "specifications", feature)
 	memConformingFeatureFiles(tree, featureDir)
@@ -96,11 +77,8 @@ func memStatusStep(tree *memTree, root, feature, name, id, status string, depend
 	tree.file(filepath.Join(featureDir, name), memStepBody(id, status, dependsOn))
 }
 
-// newMemStatusFixture builds an rwfs.Mem holding three features under
-// memRoot's default layout — mirroring status_test.go's own
-// newStatusFixture: "alpha" (1/3 done, next SCENARIO-02, nothing
-// blocked), "beta" (3/3 done, complete) and "gamma" (1/4 done, next
-// SCENARIO-02, one step blocked on gamma's own unfinished SCENARIO-02).
+// newMemStatusFixture builds an rwfs.Mem holding three features: alpha
+// (in progress), beta (complete) and gamma (one step blocked).
 func newMemStatusFixture() *memTree {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
 
@@ -121,11 +99,7 @@ func newMemStatusFixture() *memTree {
 }
 
 // memMalformedStatusFeature adds a conforming specification and state
-// file, then one step file with no frontmatter at all, under feature's
-// default layout — mirroring status_test.go's own
-// writeMalformedStatusFeature: the row's Problem must land on the step
-// file's own frontmatter fault, not on a spec/state fault this fixture
-// does not mean to exercise.
+// file, then one step file with no frontmatter at all.
 func memMalformedStatusFeature(tree *memTree, root, feature string) {
 	featureDir := filepath.Join(root, "docs", "specifications", feature)
 	memConformingFeatureFiles(tree, featureDir)
@@ -214,10 +188,8 @@ func Test_status_says_no_features_were_found_when_the_feature_root_is_empty_mem(
 		stderr)
 }
 
-// Test_status_reports_the_other_features_unchanged_when_one_is_malformed_mem
-// is the control arm for SCENARIO-11's core claim: two runs differing in
-// exactly one variable — the malformed feature present or absent — both
-// asserted against literal expected stdout strings.
+// Two runs differing in exactly one variable — the malformed feature
+// present or absent — both asserted against literal expected stdout.
 func Test_status_reports_the_other_features_unchanged_when_one_is_malformed_mem(t *testing.T) {
 	stdoutWithout, _, errWithout := runStatusMem(t, newMemStatusFixture(), []string{"status"})
 
@@ -320,9 +292,8 @@ func Test_status_writes_one_stderr_line_per_malformed_feature_then_the_summary_m
 	assert.Equal(t, "brief status: 5 features: 2 in progress, 1 complete, 2 malformed", lines[2])
 }
 
-// Test_status_writes_the_table_before_the_malformed_lines_and_the_summary_mem
-// passes ONE shared buffer as both stdout and stderr: only a shared buffer
-// pins that the table is fully written before any stderr byte.
+// Passes ONE shared buffer as both stdout and stderr: only a shared
+// buffer pins that the table is fully written before any stderr byte.
 func Test_status_writes_the_table_before_the_malformed_lines_and_the_summary_mem(t *testing.T) {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
 	memStatusStep(tree, memRoot, "alpha", "SCENARIO-01.md", "SCENARIO-01", "open", nil)
@@ -478,12 +449,7 @@ func Test_status_text_marks_a_feature_missing_its_state_file_mem(t *testing.T) {
 }
 
 func Test_status_json_marks_a_feature_for_each_of_major_1s_three_conditions_mem(t *testing.T) {
-	// missingFileDetail is captured from the same rwfs.Mem adapter the
-	// fixture below reads through, rather than hardcoded: it is
-	// fstest.MapFS's own missing-file wording, reached through rwfs.Mem's
-	// own ReadFile wrap and newProblem's own *fs.PathError unwrap, not the
-	// real OS's "no such file or directory" — this fixture never touches
-	// real disk.
+	// missingFileDetail is captured from the same rwfs.Mem adapter, not hardcoded.
 	_, missingErr := newMemTree(memRoot).mem().ReadFile("does-not-exist")
 	var missingPathErr *fs.PathError
 	require.ErrorAs(t, missingErr, &missingPathErr)
@@ -607,12 +573,8 @@ func Test_status_json_reports_the_line_of_a_state_file_s_unclosed_fence_mem(t *t
 	assert.Equal(t, 17, *problem.Line)
 }
 
-// newMemStatusJSONFixture mirrors status_json_test.go's own
-// newStatusJSONFixture: four features named so fs.ReadDir's byte order is
-// also the golden order — "alpha" (1/4 done, next SCENARIO-02, one step
-// blocked on its own unfinished SCENARIO-02), "beta" (2/2 done, complete),
-// "delta" (malformed — no frontmatter) and "epsilon" (a bare feature
-// directory with no step files at all).
+// newMemStatusJSONFixture writes four features named so fs.ReadDir's byte
+// order is also the golden order.
 func newMemStatusJSONFixture() *memTree {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
 
@@ -631,11 +593,6 @@ func newMemStatusJSONFixture() *memTree {
 	return tree
 }
 
-// Test_status_json_document_golden_mem is the exact-bytes golden pinning
-// statusDocument's key order: an in-progress feature with a blocked step
-// and a non-null next, a complete feature (next null), a malformed feature
-// (counts null, a problem object, line null) and a well-formed zero-step
-// feature (0/0/0, complete false, next null).
 func Test_status_json_document_golden_mem(t *testing.T) {
 	mem := newMemStatusJSONFixture().mem()
 
@@ -678,12 +635,8 @@ func Test_status_json_document_golden_mem(t *testing.T) {
 	assert.Equal(t, want, stdout.String())
 }
 
-// Test_status_json_with_no_features_mem covers R9's empty discriminator in
-// JSON form for both zero-row causes: the feature root missing entirely and
-// the feature root present but empty — both render "features":[], never
-// null, with zero stderr bytes. The control arm proves the empty stderr is
-// the --json branch, not the zero-rows notice going missing for some other
-// reason: the same fixture's text-mode run still writes the notice.
+// The control arm proves the empty stderr is the --json branch: the same
+// fixture's text-mode run still writes the notice.
 func Test_status_json_with_no_features_mem(t *testing.T) {
 	cases := []struct {
 		name string
@@ -712,11 +665,8 @@ func Test_status_json_with_no_features_mem(t *testing.T) {
 	assert.NotEmpty(t, textStderr)
 }
 
-// Test_status_json_keeps_the_next_title_raw_mem pins that --json's
-// next.title carries the step heading exactly as markdown.Title returns
-// it, interior tab included, while the text-mode NEXT column flattens that
-// same tab to a space — the control arm proving the two render
-// differently for the identical fixture, only --json differing.
+// --json's next.title carries the interior tab raw; text mode's NEXT
+// column flattens the same tab to a space.
 func Test_status_json_keeps_the_next_title_raw_mem(t *testing.T) {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
 	rawTitle := "Implement\tSCENARIO-01"
@@ -754,12 +704,7 @@ func Test_status_json_keeps_the_next_title_raw_mem(t *testing.T) {
 	assert.Equal(t, rawTitle, doc.Features[0].Next.Title)
 }
 
-// Test_status_json_counts_are_null_only_on_a_malformed_row_mem decodes
-// each row into a map so "null" is distinguishable from the number 0: a
-// malformed row's done/total/blocked are literally null and its path is
-// still the absolute feature directory; a well-formed zero-step row's are
-// literally 0, the one variable — malformed or not — the two rows differ
-// on.
+// Decodes each row into a map so "null" is distinguishable from the number 0.
 func Test_status_json_counts_are_null_only_on_a_malformed_row_mem(t *testing.T) {
 	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
 	memMalformedStatusFeature(tree, memRoot, "delta")

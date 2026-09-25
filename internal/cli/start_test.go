@@ -12,9 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newStartFixture writes one step, "SCENARIO-01", for feature "demo" under
-// the default profile's layout, with its frontmatter status field set to
-// status, and returns the working directory Run should be called with.
+// newStartFixture writes one step for feature "demo" with its frontmatter
+// status field set to status, and returns the working directory.
 func newStartFixture(t *testing.T, status string) string {
 	t.Helper()
 

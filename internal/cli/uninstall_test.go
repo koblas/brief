@@ -1,12 +1,6 @@
-// OS-subject: both cases below chmod a real directory unwritable (0o555)
-// to force setup's own R10 pre-write check to refuse partway through
-// Uninstall's removal order — an rwfs.Mem target has no permission model
-// to fail against (uninstall_internal_test.go's own newMemSetupSeam always
-// passes a no-op WithWritableCheck), so this stays the one place that
-// exercises a real partial write. Every other uninstall scenario in this
-// package moved to uninstall_internal_test.go (rwfs.Mem) or
-// uninstall_bound_agent_internal_test.go (a real bound agent file,
-// OS-subject for a different reason).
+// OS-subject: chmods a real directory unwritable to force a partial write
+// partway through Uninstall's removal order, which rwfs.Mem has no
+// permission model to reproduce.
 
 package cli_test
 
@@ -22,13 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_uninstall_partial_write_prints_the_rows_that_landed pins the
-// partial-write case (setup.ErrPartialWrite): the CLAUDE.md block is
-// removed before the agents directory — made unwritable — blocks the next
-// removal, so text mode prints the CLAUDE.md "removed" row that actually
-// landed on stdout before the refusal line on stderr; no agent row, which
-// never landed, is ever printed. Skipped under root, which ignores
-// directory write permission.
+// The CLAUDE.md block removes before the agents directory, made
+// unwritable, blocks the next removal.
 func Test_uninstall_partial_write_prints_the_rows_that_landed(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory write permission")
@@ -54,13 +43,8 @@ func Test_uninstall_partial_write_prints_the_rows_that_landed(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr))
 }
 
-// Test_uninstall_partial_write_with_json is
-// Test_uninstall_partial_write_prints_the_rows_that_landed's own --json
-// sibling: the same partial write reports the standard error document —
-// files_changed true, since the CLAUDE.md block did land, and no
-// "artifacts" field, the same contract a partial write's text mode observes
-// by printing landed rows instead. Skipped under root, which ignores
-// directory write permission.
+// The --json sibling of the test above: the same partial write reports
+// files_changed true and no "artifacts" field.
 func Test_uninstall_partial_write_with_json(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory write permission")

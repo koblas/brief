@@ -1,10 +1,5 @@
-// OS-subject: the one case below chmod's a real wd unwritable to force a
-// real os.Remove failure — an rwfs.Mem target has no permission model to
-// fail against (uninstall_json_internal_test.go's own newMemSetupSeam
-// always passes a no-op WithWritableCheck, and Uninstall's own os.Remove
-// calls go through the same fsRoot seam regardless). Every other
-// uninstall --json scenario in this package moved to
-// uninstall_json_internal_test.go (rwfs.Mem).
+// OS-subject: chmods a real wd unwritable to force a real os.Remove
+// failure, which rwfs.Mem has no permission model to reproduce.
 
 package cli_test
 
@@ -18,11 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test_uninstall_json_failure_reports_files_changed_false pins
-// writesFilesAnnotation on the uninstall leaf: an os.Remove failure (an
-// unwritable parent directory) is a generic failure document whose
-// files_changed is non-null false, since nothing was actually removed
-// before it. Skipped under root, which ignores directory write permission.
 func Test_uninstall_json_failure_reports_files_changed_false(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory write permission")
