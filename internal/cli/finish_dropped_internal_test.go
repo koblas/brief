@@ -836,17 +836,23 @@ func (w *failNthWriter) Write(p []byte) (int, error) {
 // pins writeDroppedRows' (internal/cli/finish_dropped.go) own contract: it
 // stops at the first row-write error rather than continuing past it, and
 // runFinish (internal/cli/finish.go) surfaces that error as a refusal —
-// exit 1, stating the state was already replaced — rather than a bare
-// wrapped error main.go would exit on without ever printing (SilenceErrors
-// is set on the root command, so nothing but ExitCode(err) is ever read
-// from a plain returned error). The old body carries three dropped
-// entries; the fake stdout writer fails only its *second* call and would
-// succeed on a third if writeDroppedRows kept going past the failure — so
-// the buffer holding exactly the first row's bytes, and nothing from the
-// third, is proof the loop actually stops rather than merely capturing
-// the first error while continuing to write every later row that itself
-// happens to succeed. runFinish also never goes on to print the
-// "replaced ..." success line.
+// exit 1, naming how many of the three dropped rows actually reached
+// stdout before the write failed — rather than a bare wrapped error
+// main.go would exit on without ever printing (SilenceErrors is set on
+// the root command, so nothing but ExitCode(err) is ever read from a
+// plain returned error). The old body carries three dropped entries; the
+// fake stdout writer fails only its *second* call and would succeed on a
+// third if writeDroppedRows kept going past the failure — so the buffer
+// holding exactly the first row's bytes, and nothing from the third, is
+// proof the loop actually stops rather than merely capturing the first
+// error while continuing to write every later row that itself happens to
+// succeed. The reported count ("after 1 of 3 rows") is proof the same
+// stop point is what the user-facing line names, not just what the
+// buffer holds. runFinish also never goes on to print the "replaced ..."
+// success line, and the returned error wraps scaffold.ErrPartialWrite —
+// the state file was already replaced before this failure — the sentinel
+// filesChangedFor (internal/cli/json.go) reads for a --json "files_changed"
+// value, even though this branch is unreachable under --json today.
 func Test_finish_stops_writing_dropped_rows_on_the_first_write_error_mem(t *testing.T) {
 	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n" +
 		"- first dropped\n- second dropped\n- third dropped\n\n## Open debts\n\n"
@@ -862,12 +868,14 @@ func Test_finish_stops_writing_dropped_rows_on_the_first_write_error_mem(t *test
 		nil, writer, &stderr, noBuildInfo, withRootFS(tree.mem()))
 
 	require.ErrorIs(t, err, errRowWriteRefused)
+	require.ErrorIs(t, err, scaffold.ErrPartialWrite)
 	assert.Equal(t, 1, ExitCode(err))
 
 	stateRel := filepath.Join("docs", "specifications", "demo", "STATE.md")
 	assert.Equal(t, "WARN  "+stateRel+":7  dropped from Traps, untagged: first dropped\n", writer.buf.String())
 	assert.Equal(t,
-		"brief finish: state replaced but dropped entries could not be written: write dropped-entry row: "+
-			errRowWriteRefused.Error()+"\n",
+		"brief finish: demo SCENARIO-01 done, but the dropped-entries report failed after 1 of 3 rows: "+
+			errRowWriteRefused.Error()+"; compare "+stateRel+
+			" with its previous version to see what was removed — a retry reports nothing\n",
 		stderr.String())
 }

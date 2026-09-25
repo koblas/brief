@@ -136,8 +136,8 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 
 	handoffRel, stateRel, specRel := displayPath(wd, res.HandoffPath), displayPath(wd, res.StatePath), displayPath(wd, res.SpecPath)
 
-	if err := writeDroppedRows(out.stdout, res.Dropped, stateRel); err != nil {
-		return out.refusal(fmt.Errorf("state replaced but dropped entries could not be written: %w", err))
+	if written, err := writeDroppedRows(out.stdout, res.Dropped, stateRel); err != nil {
+		return out.refusal(newDroppedWriteError(feature, step, written, len(res.Dropped), stateRel, err))
 	}
 
 	replacedClause := stateRel + dropCountSuffix(len(res.Dropped))

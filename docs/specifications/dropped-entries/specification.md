@@ -45,9 +45,10 @@ accounted for, not prevented (R9). Today `finish` drops such an entry silently, 
   its JSON error document has no `dropped_entries`. Exit 0 whenever every row is written in
   full. The one exception is a stdout write failure partway through the row list, after the
   state file is already replaced: whatever rows already landed stay on stdout, no further row
-  is attempted, and the run exits 1 with the standard failure line (`Surface & Copy`) — a
-  fault on the findings channel itself, distinct from a refusal or usage error decided before
-  any row is rendered.
+  is attempted, and the run exits 1 with a one-line failure, text mode only (`Surface & Copy`),
+  naming how many of the total dropped rows reached stdout before the write failed — a fault on
+  the findings channel itself, distinct from a refusal or usage error decided before any row is
+  rendered.
 - **D6 — Line.** The 1-based line in the **old** state file where the entry's first line was.
 - **D7 — Empty or duplicate configured heading** contributes no entries (explicit guard:
   `markdown.Section(body, "")` matches the first blank line). A missing heading in the old body
@@ -165,17 +166,20 @@ reworded entry counts as removed. Exit status stays 0.
 rows) or a stdout write failure partway through the rows (rows already written stay; see
 *Internal error* below), 2 usage (no rows).
 
-**Internal error (stderr).** A failed stdout write partway through the WARN rows, after the
-state file is already replaced, renders through R14a's own generic-failure shape
-(`reporter.refusal`, `error.kind: "failure"` in `--json`) rather than a bare, unprinted
-error:
+**Internal error (stderr, text mode only).** A failed stdout write partway through the WARN
+rows, after the state file is already replaced, renders through R14a's own generic-failure
+shape (`reporter.refusal`) rather than a bare, unprinted error. The branch is unreachable
+under `--json`: the WARN rows are written only from the text branch, so there is no
+`error.kind: "failure"` document for this case to render.
 
 ```
-brief finish: state replaced but dropped entries could not be written: write dropped-entry row: <write error>
+brief finish: <feature> <step> done, but the dropped-entries report failed after <k> of <n> rows: <write error>; compare <state-rel> with its previous version to see what was removed — a retry reports nothing
 ```
 
-Exit 1. The rows already written stay on stdout exactly as written; no further row is
-attempted, and the ordinary success line never prints.
+`<k>` is how many rows reached stdout before the write failed; `<n>` is the total dropped-entry
+count; `<write error>` is the raw writer error, never wrapped. Exit 1. The rows already written
+stay on stdout exactly as written; no further row is attempted, and the ordinary success line
+never prints.
 
 **Outcome table.**
 
@@ -198,7 +202,7 @@ attempted, and the ordinary success line never prints.
 | Any refusal | none; error doc has no `dropped_entries` | 1 |
 | Usage error | none | 2 |
 | Failure after the state rename landed | none (recorded gap) | 1 |
-| stdout write fails after state replaced | rows already written stay; see *Internal error* | 1 |
+| stdout write fails after state replaced | rows already written stay; text-mode-only failure line names k of n rows; see *Internal error* | 1 |
 
 ---
 

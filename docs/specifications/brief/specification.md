@@ -173,7 +173,12 @@ no per-step files, no carried state — is out of scope rather than degraded int
   the reader did not ask. **Refusals** (exit 1, stderr) and **findings** (R9, exit 0, the
   profile's `<SEVERITY>  <path>[:<line>]  <detail>` shape) are deliberately different shapes so
   that a script tells "finished with reported drops" from "refused" by exit code alone. That
-  holds only because findings never appear on a failed run. In `--json` mode a refusal is the
+  holds only because findings never appear on a failed run. The one exception is a fault on the
+  findings channel itself: if writing the rows to stdout fails after the writes they report
+  have already landed, the rows already written stay, no further row is written, the success
+  line is not printed, and the command exits 1 with a one-line failure — not a refusal, no
+  `(no files changed)` tail — that says the step is done. A script must not read that exit 1 as
+  "nothing changed". In `--json` mode a refusal is the
   common error document on stdout (`error.kind: "refusal"`, same path/line/problem/fix slots);
   text mode is unchanged (see `docs/specifications/human-output/`).
 

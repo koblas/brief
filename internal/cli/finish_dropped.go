@@ -102,17 +102,48 @@ func dropCountSuffix(n int) string {
 
 // writeDroppedRows writes one WARN row per entry in dropped to w, in the
 // order dropped already carries (old-file line order): "<severity>
-// <stateRel>:<line>  <detail>\n", detail from dropDetail. It returns the
-// first write error, stopping before any later row — the state file is
-// already replaced by the time a caller reaches this point, so a partial
-// write here must not be papered over by going on to print a success
-// line that claims the drop report reached the user.
-func writeDroppedRows(w io.Writer, dropped []scaffold.DroppedEntry, stateRel string) error {
-	for _, d := range dropped {
+// <stateRel>:<line>  <detail>\n", detail from dropDetail. It returns how
+// many rows were written in full and, on failure, the raw write error,
+// wrapped with no added text so its Error() string is unchanged — so
+// runFinish (internal/cli/finish.go) can pass it to newDroppedWriteError
+// and report exactly what the writer refused — stopping before any later
+// row: the state file is already replaced by the time a caller reaches
+// this point, so a partial write here must not be papered over by going
+// on to print a success line that claims the drop report reached the
+// user.
+func writeDroppedRows(w io.Writer, dropped []scaffold.DroppedEntry, stateRel string) (int, error) {
+	for i, d := range dropped {
 		if _, err := fmt.Fprintf(w, "%s  %s:%d  %s\n", scaffold.SeverityWarn, stateRel, d.Line, dropDetail(d)); err != nil {
-			return fmt.Errorf("write dropped-entry row: %w", err)
+			return i, fmt.Errorf("%w", err)
 		}
 	}
 
-	return nil
+	return len(dropped), nil
+}
+
+// droppedWriteError is runFinish's error when writeDroppedRows fails
+// partway through the WARN rows, after the state file has already been
+// replaced. Its Error() is R14a's own generic-failure line, rendered
+// verbatim by reporter.refusal; it also carries scaffold.ErrPartialWrite,
+// unreachable under --json today (writeDroppedRows runs only from the
+// text branch) but consulted by filesChangedFor if that ever changes, so
+// files_changed would still report true rather than silently false.
+type droppedWriteError struct {
+	err error
+}
+
+func (e *droppedWriteError) Error() string   { return e.err.Error() }
+func (e *droppedWriteError) Unwrap() []error { return []error{e.err, scaffold.ErrPartialWrite} }
+
+// newDroppedWriteError builds droppedWriteError's message: "<feature>
+// <step> done, but the dropped-entries report failed after <written> of
+// <total> rows: <cause>; compare <stateRel> with its previous version to
+// see what was removed — a retry reports nothing". cause is the raw error
+// writeDroppedRows returned.
+func newDroppedWriteError(feature, step string, written, total int, stateRel string, cause error) error {
+	msg := fmt.Errorf("%s %s done, but the dropped-entries report failed after %d of %d rows: %w; "+
+		"compare %s with its previous version to see what was removed — a retry reports nothing",
+		feature, step, written, total, cause, stateRel)
+
+	return &droppedWriteError{err: msg}
 }

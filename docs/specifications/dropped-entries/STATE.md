@@ -1,11 +1,8 @@
 # dropped-entries — current state
 
-Scenarios complete: SCENARIO-01..10. Feature done. Fix pass 1 closed two MAJORs (overlapping
-configured headings, an ignored stdout write error) then corrected its own fixes: a
-nested-subsection mis-attribution and a silently-unprintable error. Fix pass 2 closed two
-mutation-confirmed MAJORs (`thematicBreakRe` marker/indentation, `poolOccurrences` new-body
-dedup); fix pass 3 (final, capped) closed two more: `thematicBreakRe`'s `^ {0,3}` upper bound
-and `HeadingLine`'s found/not-found branches.
+Scenarios complete: SCENARIO-01..10. Feature done through three capped fix passes (overlapping
+headings; ignored stdout write error; `thematicBreakRe`/`poolOccurrences`/`HeadingLine`
+mutation gaps) plus a product-vision pass rewriting the stdout-write-failure copy (below).
 
 ## Binding decisions
 
@@ -36,12 +33,14 @@ and `HeadingLine`'s found/not-found branches.
   constant `scaffold.SeverityWarn`. Drops are computed only on `FinishFS`'s `refinishWrite` path,
   before `applyFinishWrites`; `refinishNoop` returns its own literal `Dropped: []DroppedEntry{}`.
   D5 holds at the refinish switch and at `runFinish`'s error branch, which never renders `res`.
-- `cli`'s row detail is built by one helper (`dropDetail`/`dropExcerpt`, cut at 80 runes) and
-  one row writer (`writeDroppedRows`, both in `internal/cli/finish_dropped.go`), reused
-  verbatim by `finishDroppedEntries` for JSON's `detail`. `writeDroppedRows` stops at the first
-  failed stdout write; `runFinish` (`internal/cli/finish.go`) reports it via `out.refusal(...)`,
-  never a bare `fmt.Errorf`. `finishDocument.DroppedEntries` is the last field, never
-  `omitempty`; a new `--json` field must update `jsonFieldsParagraph` too.
+- `cli`'s row detail is one helper (`dropDetail`/`dropExcerpt`, cut at 80 runes) plus one row
+  writer (`writeDroppedRows`, both in `internal/cli/finish_dropped.go`), reused verbatim by
+  `finishDroppedEntries` for JSON's `detail`. `writeDroppedRows` returns rows-written count and
+  stops at the first failed stdout write; `runFinish` wraps that into `droppedWriteFailure`
+  (names `<feature> <step>`, `k` of `n` rows, raw cause, `scaffold.ErrPartialWrite` — unreached
+  under `--json` today, `writeDroppedRows` runs only from text mode), via `out.refusal(...)`.
+  `finishDocument.DroppedEntries` is last, never `omitempty`; a new field updates
+  `jsonFieldsParagraph` too.
 - `droppedEntries` scans only `scannableHeadings(headings)`, computed once per call: an empty
   or duplicate-valued configured heading contributes zero entries, since `config.Resolve`
   already refuses that before `brief finish`/`cli.Run` can reach it. `finishLong` carries the
