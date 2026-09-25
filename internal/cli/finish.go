@@ -116,7 +116,7 @@ func runFinish(ctx context.Context, wd string, rest []string, handoffPath, state
 			Modified:    res.Modified,
 		}
 
-		return out.document(doc)
+		return out.document(doc, res.Changed)
 	}
 
 	if !res.Changed {

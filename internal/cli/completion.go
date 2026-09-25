@@ -77,7 +77,11 @@ func runCompletion(cmd *cobra.Command, rest []string, out reporter) error {
 			return out.usageError(completionJSONUnsupportedMessage)
 		}
 
-		return s.gen(cmd.Root(), out.stdout)
+		if err := s.gen(cmd.Root(), out.stdout); err != nil {
+			return out.stdoutFailure(err, false)
+		}
+
+		return nil
 	}
 
 	return out.usageError(fmt.Sprintf("brief completion: unknown shell %q; expected one of: %s", shell, completionShellList()))

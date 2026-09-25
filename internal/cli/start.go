@@ -77,7 +77,7 @@ func runStart(ctx context.Context, wd string, rest []string, out reporter, rootF
 	if out.json {
 		doc := startDocument{jsonHeader: out.successHeader(), Brief: brief}
 
-		return out.document(doc)
+		return out.document(doc, false)
 	}
 
 	for _, s := range brief.Shortfalls {
@@ -97,7 +97,7 @@ func runStart(ctx context.Context, wd string, rest []string, out reporter, rootF
 	}
 
 	if err := assemble.RenderText(out.stdout, brief); err != nil {
-		return fmt.Errorf("brief start: %w", err)
+		return out.stdoutFailure(err, false)
 	}
 
 	return nil

@@ -131,7 +131,7 @@ func runStatus(ctx context.Context, wd string, rest []string, out reporter, root
 	if out.json {
 		doc := statusDocument{jsonHeader: out.successHeader(), Features: statusFeatures(rows)}
 
-		return out.document(doc)
+		return out.document(doc, false)
 	}
 
 	if len(rows) == 0 {
@@ -141,7 +141,7 @@ func runStatus(ctx context.Context, wd string, rest []string, out reporter, root
 	}
 
 	if err := assemble.RenderStatusText(out.stdout, rows); err != nil {
-		return fmt.Errorf("brief status: %w", err)
+		return out.stdoutFailure(err, false)
 	}
 
 	// A malformed feature always yields a row, never dropped, so this loop

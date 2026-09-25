@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"strings"
 
@@ -367,7 +368,7 @@ func (r reporter) refusal(err error) error {
 			},
 		}
 
-		_ = writeJSONDocument(r.stdout, doc)
+		r.writeErrorDocument(doc)
 
 		return err
 	}
@@ -375,4 +376,36 @@ func (r reporter) refusal(err error) error {
 	fmt.Fprintf(r.stderr, "brief %s: %s\n", command, c.textLine(r.wd))
 
 	return err
+}
+
+// stdoutWriteError renders cause — a failed write of a command's own
+// output to stdout — as R14's one-line generic failure: the fix re-runs
+// hint when filesChanged is false, and warns that files already changed
+// when it is true, never carrying R14a's "(no files changed)" tail. cause
+// is narrowed to the *fs.PathError the writer returned, when there is
+// one, dropping the "assemble: render: "-style prefixes a renderer wraps
+// it in.
+func stdoutWriteError(cause error, hint string, filesChanged bool) error {
+	if pathErr, ok := errors.AsType[*fs.PathError](cause); ok {
+		cause = pathErr
+	}
+
+	fix := fmt.Sprintf("fix the output destination, then run '%s' again", hint)
+	if filesChanged {
+		fix = fmt.Sprintf("files were already changed, check them with 'git status' before running '%s' again", hint)
+	}
+
+	return fmt.Errorf("writing to stdout failed: %w; %s", cause, fix)
+}
+
+// stdoutFailure reports cause through stdoutWriteError, re-running r.cmd's
+// own usageHint, on stderr in text and --json mode alike: stdout is the
+// stream that just failed, so --json's error document has nowhere to go,
+// and main prints nothing a command returns. filesChanged is whether this
+// run changed any file before its output failed.
+func (r reporter) stdoutFailure(cause error, filesChanged bool) error {
+	text := r
+	text.json = false
+
+	return text.refusal(stdoutWriteError(cause, usageHint(r.cmd), filesChanged))
 }
