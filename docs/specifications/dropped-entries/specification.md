@@ -253,6 +253,6 @@ Scenario: SCENARIO-10 — finish --help documents drop reporting
 - [x] SCENARIO-05: Moving an entry between state headings is not a drop; moving it out is
 - [x] SCENARIO-06: A reworded, re-tagged or re-ticked entry is reported as dropped
 - [x] SCENARIO-07: A multi-line entry is one entry; a duplicate dropped once is reported once
-- [ ] SCENARIO-08: Only list items under the configured state headings are entries
+- [x] SCENARIO-08: Only list items under the configured state headings are entries
 - [ ] SCENARIO-09: A refused finish and an identical re-finish report no drops
 - [ ] SCENARIO-10: finish --help documents drop reporting

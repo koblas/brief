@@ -86,14 +86,43 @@ func dropRuleFor(heading, openDebts string) DropRule {
 	return DropRuleEntry
 }
 
+// scannableHeadings filters headings.Ordered() to the heading strings D7
+// allows a scan to use: non-empty and appearing exactly once. An empty
+// value would match markdown.Section's first-blank-line fallback and a
+// value shared by more than one configured field would scan its section
+// twice; both are excluded wholesale, from every position they occupy, not
+// just narrowed to their first occurrence.
+func scannableHeadings(headings config.StateHeadings) []string {
+	all := headings.Ordered()
+
+	counts := make(map[string]int, len(all))
+	for _, h := range all {
+		counts[h]++
+	}
+
+	out := make([]string, 0, len(all))
+
+	for _, h := range all {
+		if h == "" || counts[h] > 1 {
+			continue
+		}
+
+		out = append(out, h)
+	}
+
+	return out
+}
+
 // droppedEntries computes FinishResult.Dropped: oldBody is the state file
 // bytes already on disk, newBody is Finish's incoming state argument, and
-// headings is cfg.StateHeadings. An entry present under one of headings'
-// four sections in oldBody and absent, by normalized-text identity, from
-// the pooled set of newBody's own four sections is a drop.
+// headings is cfg.StateHeadings. An entry present under one of
+// scannableHeadings(headings)'s sections in oldBody and absent, by
+// normalized-text identity, from the pooled set of newBody's own sections
+// is a drop; an empty or duplicated configured heading contributes no
+// entries, from either body (D7).
 //
-// The diff is pooled across all four headings, both for old and for new,
-// matched as one multiset: a text appearing more often in oldBody
+// The diff is pooled across the scannable headings, both for old and for
+// new, matched as one multiset: a text appearing more often in oldBody
 // than in the pooled newBody set has its surplus occurrences — the last
 // ones in old-file order — reported as drops, so an entry moved between
 // two state headings is never a drop, and a text duplicated in oldBody but
@@ -109,7 +138,7 @@ func droppedEntries(oldBody, newBody []byte, headings config.StateHeadings) []Dr
 
 	var old []occurrence
 
-	for _, h := range headings.Ordered() {
+	for _, h := range scannableHeadings(headings) {
 		for _, e := range markdown.Entries(string(oldBody), h) {
 			old = append(old, occurrence{heading: h, entry: e, text: normalizeEntryText(e.Text)})
 		}
@@ -119,7 +148,7 @@ func droppedEntries(oldBody, newBody []byte, headings config.StateHeadings) []Dr
 
 	newCounts := map[string]int{}
 
-	for _, h := range headings.Ordered() {
+	for _, h := range scannableHeadings(headings) {
 		for _, e := range markdown.Entries(string(newBody), h) {
 			newCounts[normalizeEntryText(e.Text)]++
 		}
