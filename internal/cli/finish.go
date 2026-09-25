@@ -26,16 +26,12 @@ reworded entry counts as removed. Exit status stays 0.
 
 ` + jsonFieldsParagraph("feature", "step", "changed", "handoff_path", "state_path", "next", "modified", "dropped_entries")
 
-// finishDocument is finish's --json success document: the common header
-// first, then scaffold.FinishResult's own fields, every path absolute and
-// passed through verbatim. Next is statusNextJSON, the identical
-// id/title/path object status's own "next" renders — nil (JSON
-// null) when nothing is open. Modified is res.Modified verbatim — the
-// state file, the step file and the specification, in that order, when
-// Changed; empty on the no-op — and never includes handoff_path, this
-// call's own output rather than a file it found already on disk. Changed
-// is false only on R11's no-op. DroppedEntries is the document's last
-// field, always a non-nil slice — "[]" when Finish reports no drops.
+// finishDocument is finish's --json success document: the common header,
+// then scaffold.FinishResult's fields, every path absolute. Next is nil
+// when nothing is open. Modified names the state, step and specification
+// files rewritten when Changed, empty on the no-op, and never includes
+// handoff_path since that is this call's own output rather than a file it
+// found already on disk. DroppedEntries is always a non-nil slice.
 type finishDocument struct {
 	jsonHeader
 
@@ -51,10 +47,8 @@ type finishDocument struct {
 
 // runFinish implements "brief finish <feature> <step> --handoff <path>
 // --state <path>"; rest is its positional arguments and handoffPath and
-// statePath its flag values, "" when the flag was not given. rootFS is nil
-// in production (resolveRoot, scaffold.NewServer and readSource all read
-// real disk); a test's withRootFS runSeam substitutes an rwfs.Mem for all
-// three — a "-" argument still always reads stdin, never rootFS.
+// statePath its flag values, "" when the flag was not given. A "-"
+// argument always reads stdin, never rootFS.
 func runFinish(ctx context.Context, wd string, rest []string, handoffPath, statePath string, stdin io.Reader, out reporter, rootFS rwfs.FS) error {
 	switch {
 	case len(rest) == 0:
@@ -169,12 +163,8 @@ func sourceLocator(path string) string {
 }
 
 // readSource returns the bytes at path, or stdin's contents when path is
-// "-". rootFS is nil in production: path reads through os.ReadFile,
-// exactly as before this seam existed. A test's withRootFS runSeam
-// substitutes an rwfs.Mem instead, read through fsName's own "/"-rooted
-// mapping after path is resolved to absolute the same way os.ReadFile's
-// own relative-path lookup resolves against the process's current
-// directory (filepath.Abs).
+// "-". rootFS is nil in production, reading through os.ReadFile; a test's
+// withRootFS runSeam substitutes an rwfs.Mem instead.
 func readSource(path string, stdin io.Reader, rootFS rwfs.FS) ([]byte, error) {
 	if path == "-" {
 		data, err := io.ReadAll(stdin)

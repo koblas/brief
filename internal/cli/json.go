@@ -13,31 +13,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// schemaVersion is the one global integer every --json document's
-// "schema" field carries (R2). It is bumped only on a breaking change to
-// a document's shape.
+// schemaVersion is every --json document's "schema" field, bumped only on
+// a breaking change to a document's shape.
 const schemaVersion = 1
 
 // errorKindUsage is the "error.kind" value for a usage error's JSON
 // document: an invocation mistake caught before any command ran, always
-// exit code 2 (R3).
+// exit code 2.
 const errorKindUsage = "usage"
 
 // errorKindRefusal is the "error.kind" value for a refusal's JSON
-// document: a *config.InvalidConfigError, an enriched not-found
-// (*unknownFeatureError), a *scaffold.RefusalError, or a
-// *assemble.RefusalError — every case classifyRefusal recognizes by type,
-// always exit code 1 (R3).
+// document — every case classifyRefusal recognizes by type — always exit code 1.
 const errorKindRefusal = "refusal"
 
-// errorKindFailure is the "error.kind" value for every other non-nil error
-// a command returns: an infrastructure fault or anything else
-// classifyRefusal does not recognize, always exit code 1 (R3).
+// errorKindFailure is the "error.kind" value for every other non-nil
+// error a command returns, always exit code 1.
 const errorKindFailure = "failure"
 
 // jsonHeader is embedded, first, in every --json document: schema,
 // command, ok and exit_code precede any command-specific field, with no
-// "data" wrapper (R2). command is the failing or succeeding command's own
+// "data" wrapper. command is the failing or succeeding command's own
 // path, as commandName renders it — "brief" at the root.
 type jsonHeader struct {
 	Schema   int    `json:"schema"`
@@ -57,9 +52,9 @@ func newJSONHeader(command string, exitCode int) jsonHeader {
 	}
 }
 
-// jsonError is the "error" member of a failing --json document (R3).
-// Every field is a pointer, or a plain string for one that is always
-// filled, so an unused member marshals to null rather than being omitted:
+// jsonError is the "error" member of a failing --json document. Every
+// field is a pointer, or a plain string for one that is always filled, so
+// an unused member marshals to null rather than being omitted:
 // path, line and problem stay null for a usage error; a refusal or
 // failure (reporter.refusal) leaves problem always filled, path null only
 // for "<stdin>", a bare not-found or a generic failure, and line null
@@ -78,7 +73,7 @@ type jsonError struct {
 }
 
 // errorDocument is the JSON document a failing run writes to stdout: the
-// common header plus the error object as R3's only payload.
+// common header plus the error object as its only payload.
 type errorDocument struct {
 	jsonHeader
 
@@ -107,15 +102,12 @@ func writeJSONDocument(w io.Writer, v any) error {
 	return nil
 }
 
-// scanJSONFlag scans args for an exact "--json" token, and for a
-// "--json=<v>" token (any value, including an empty one), both only
-// before the first "--" — pflag's own flag-parsing terminator, never a
-// flag itself, and the boundary R5 draws: nothing at or after it is ever
-// inspected. It returns three values: args with every exact "--json"
-// token removed ("--json=<v>" tokens are left in place, since the caller
-// reports that shape as a usage error before any command ever sees the
-// result); whether an exact "--json" token was found; and whether a
-// "--json=<v>" token was found.
+// scanJSONFlag scans args for an exact "--json" token and for a
+// "--json=<v>" token, both only before the first "--" (pflag's
+// end-of-flags terminator; nothing at or after it is inspected). It
+// returns args with every exact "--json" token removed ("--json=<v>" is
+// left in place, since the caller reports that shape as a usage error),
+// whether an exact "--json" token was found, and whether "--json=<v>" was.
 func scanJSONFlag(args []string) ([]string, bool, bool) {
 	stripped := make([]string, 0, len(args))
 
@@ -172,12 +164,10 @@ func usageHint(cmd *cobra.Command) string {
 
 // usageFix names msg's own "; run '<hint>'" clause, stripped of the
 // leading "; ", when msg ends with one — so a document's "fix" always
-// names the same action as its "message" (R3) — else cmd's usageHint
-// fallback. A message that merely contains "; run '" without ending in
-// the closing quote (a run-hint clause followed by more prose) also
-// falls back: the fallback and the clause happen to agree whenever cmd
-// is the leaf that clause names, but usageFix never parses the clause
-// out of message text that continues past it.
+// names the same action as its "message" — else cmd's usageHint fallback.
+// A message that merely contains "; run '" without ending in the closing
+// quote also falls back, rather than parsing a clause out of text that
+// continues past it.
 func usageFix(msg string, cmd *cobra.Command) string {
 	const marker = "; run '"
 
@@ -188,14 +178,11 @@ func usageFix(msg string, cmd *cobra.Command) string {
 	return "run '" + usageHint(cmd) + "'"
 }
 
-// filesChangedFor reports R3's "files_changed" value for cmd: nil (JSON
-// null) for any command not carrying writesFilesAnnotation, since a read
-// command never changes anything to report on; for a write command, what
-// actually happened on disk — true when err wraps scaffold.ErrPartialWrite
-// or setup.ErrPartialWrite (at least one write landed before the failure
-// that reached cli), false otherwise (a usage error, a refusal that
-// changed nothing, or a failure before the first write). err is nil for a
-// usage error, which never reaches a write at all.
+// filesChangedFor reports the "files_changed" value for cmd: nil for any
+// command not carrying writesFilesAnnotation, since a read command never
+// changes anything to report on; for a write command, whether err wraps
+// scaffold.ErrPartialWrite or setup.ErrPartialWrite — true only when at
+// least one write landed before the failure that reached cli.
 func filesChangedFor(cmd *cobra.Command, err error) *bool {
 	if cmd.Annotations[writesFilesAnnotation] == "" {
 		return nil
@@ -207,15 +194,12 @@ func filesChangedFor(cmd *cobra.Command, err error) *bool {
 }
 
 // jsonTakesNoValueMessage renders "--json=<v>"'s always-text usage line
-// (R5) for cmd: root's own bare "brief: '--json' takes no value; run
-// '<hint>'" when cmd is root itself, else "brief <path>: '--json' takes
-// no value; run '<hint>'" naming cmd's own resolved command path. hint
-// names the form that would actually have worked: usageHint's own
-// invocation with " --json" appended, when cmd carries one
-// (cmd.Annotations[invocationAnnotation] — status, check, start, finish,
-// new feature, new step). usageHint's own generic fallbacks ("brief
-// --help", "brief new --help", "brief help <command>") stay bare: none of
-// those three names one JSON-capable leaf invocation to append --json to.
+// for cmd: root's own bare "brief: '--json' takes no value; run '<hint>'"
+// when cmd is root itself, else "brief <path>: '--json' takes no value;
+// run '<hint>'" naming cmd's own resolved command path. hint appends
+// " --json" to usageHint's invocation only when cmd carries one
+// (cmd.Annotations[invocationAnnotation]) — usageHint's generic fallbacks
+// name no JSON-capable leaf invocation to append it to.
 func jsonTakesNoValueMessage(cmd *cobra.Command) string {
 	path := commandName(cmd)
 	hint := usageHint(cmd)
@@ -232,12 +216,10 @@ func jsonTakesNoValueMessage(cmd *cobra.Command) string {
 }
 
 // reporter is the one per-Run output seam every command renders through:
-// stdout and stderr are Run's own writers, json is whether R5's --json
-// detection turned JSON mode on for this run, wd is Run's own working
-// directory (R6: the base every relative refusal path is absolutized
-// against), and cmd is the command currently rendering, set by forCommand.
-// Every RunE closure and the root FlagErrorFunc narrow the base reporter
-// built in run with forCommand before rendering anything.
+// stdout and stderr are Run's own writers, json is whether --json
+// detection turned JSON mode on for this run, wd is the base every
+// relative refusal path is absolutized against, and cmd is the command
+// currently rendering, set by forCommand.
 type reporter struct {
 	stdout io.Writer
 	stderr io.Writer
@@ -256,9 +238,9 @@ func (r reporter) forCommand(cmd *cobra.Command) reporter {
 
 // headerFor builds the jsonHeader a success-shaped document embeds first,
 // at exitCode: command from r.cmd, ok derived from exitCode by
-// newJSONHeader — the one place that derivation happens. A document with
-// findings-as-data (R4), like check --json's, uses this directly at a
-// non-zero exitCode; successHeader is the exitCode-0 special case.
+// newJSONHeader. A document with findings-as-data, like check --json's,
+// uses this directly at a non-zero exitCode; successHeader is the
+// exitCode-0 special case.
 func (r reporter) headerFor(exitCode int) jsonHeader {
 	return newJSONHeader(commandName(r.cmd), exitCode)
 }
@@ -269,12 +251,11 @@ func (r reporter) successHeader() jsonHeader {
 	return r.headerFor(0)
 }
 
-// usageError renders msg as R3's usage-error document: in JSON mode, one
+// usageError renders msg as a usage-error document: in JSON mode, one
 // compact document on stdout (kind "usage", exit_code 2, message msg,
 // path/line/problem null, fix from usageFix, files_changed from
 // filesChangedFor) and zero bytes on stderr; otherwise msg plus a
-// trailing newline on stderr, byte-identical to brief's plain-text usage
-// error. Both modes return the same error satisfying
+// trailing newline on stderr. Both modes return the same error satisfying
 // errors.Is(err, ErrUsage).
 func (r reporter) usageError(msg string) error {
 	return r.usageErrorWithFix(msg, usageFix(msg, r.cmd))
@@ -282,15 +263,10 @@ func (r reporter) usageError(msg string) error {
 
 // usageErrorWithFix renders msg exactly like usageError, but uses fix
 // verbatim for JSON's own "fix" field rather than deriving it from msg via
-// usageFix. usageFix's own "; run '...'" extraction assumes msg ends at the
-// closing quote — true of every ordinary usage line — and falls back to
-// r.cmd's own invocation otherwise (pinned behavior:
-// Test_json_mode_usage_error_fix_stops_at_the_quote_when_the_line_has_trailing_prose).
-// init's own unknown-host line is the one message that both carries a
-// "; run '...'" clause and trails prose after its closing quote ("... to
-// wire it by hand"), so that fallback would silently substitute a
-// different fix than the one the message itself names; this lets that one
-// call site supply the correct fix directly instead.
+// usageFix. It exists for a message, such as init's unknown-host line,
+// that carries a "; run '...'" clause but also trails prose after its
+// closing quote: usageFix's extraction would stop at that quote and
+// silently substitute the wrong fix, so the call site supplies it directly.
 func (r reporter) usageErrorWithFix(msg, fix string) error {
 	if r.json {
 		command := commandName(r.cmd)
@@ -315,9 +291,9 @@ func (r reporter) usageErrorWithFix(msg, fix string) error {
 }
 
 // document writes v — one of status, check, start, finish, new feature or
-// new step's own success document — to r.stdout as R1/R2's one JSON
-// document, wrapping a write failure with "brief <path>: " naming r.cmd's
-// own command path, the one place every such write's error is wrapped.
+// new step's own success document — to r.stdout as one JSON document,
+// wrapping a write failure with "brief <path>: " naming r.cmd's own
+// command path.
 func (r reporter) document(v any) error {
 	if err := writeJSONDocument(r.stdout, v); err != nil {
 		return fmt.Errorf("brief %s: %w", commandName(r.cmd), err)

@@ -36,13 +36,9 @@ func dropDetail(d scaffold.DroppedEntry) string {
 	return fmt.Sprintf("dropped from %s, %s: %s", d.Heading, tag, dropExcerpt(d.Text))
 }
 
-// finishDroppedJSON is one finishDocument "dropped_entries" element:
-// severity, rule, path, line, detail, heading, tag and text, in that key
-// order. Path is res.StatePath verbatim, repeated per element. Detail is
-// dropDetail(d), the same string the text-mode WARN row renders after its
-// location. Tag is nil (JSON null) for an untagged entry, else a plain
-// string — never wrapped in the text row's "tagged <token>" prose. Text is
-// the entry's full normalized text, never cut.
+// finishDroppedJSON is one finishDocument "dropped_entries" element. Detail
+// is dropDetail(d), the same string the text-mode WARN row renders. Tag is
+// nil for an untagged entry. Text is the entry's full text, never cut.
 type finishDroppedJSON struct {
 	Severity string  `json:"severity"`
 	Rule     string  `json:"rule"`
@@ -54,10 +50,9 @@ type finishDroppedJSON struct {
 	Text     string  `json:"text"`
 }
 
-// finishDroppedEntries maps dropped to finishDocument's own "dropped_entries"
+// finishDroppedEntries maps dropped to finishDocument's "dropped_entries"
 // array, path repeated on every element: a sized, non-nil slice so zero
-// drops encode as "[]" rather than "null" — mirroring checkFeatures' own
-// empty-vs-nil discipline.
+// drops encode as "[]" rather than "null".
 func finishDroppedEntries(dropped []scaffold.DroppedEntry, path string) []finishDroppedJSON {
 	out := make([]finishDroppedJSON, 0, len(dropped))
 
@@ -100,17 +95,11 @@ func dropCountSuffix(n int) string {
 	return fmt.Sprintf(" (dropped %d %s, listed on stdout)", n, noun)
 }
 
-// writeDroppedRows writes one WARN row per entry in dropped to w, in the
-// order dropped already carries (old-file line order): "<severity>
-// <stateRel>:<line>  <detail>\n", detail from dropDetail. It returns how
-// many rows were written in full and, on failure, the raw write error,
-// wrapped with no added text so its Error() string is unchanged — so
-// runFinish (internal/cli/finish.go) can pass it to newDroppedWriteError
-// and report exactly what the writer refused — stopping before any later
-// row: the state file is already replaced by the time a caller reaches
-// this point, so a partial write here must not be papered over by going
-// on to print a success line that claims the drop report reached the
-// user.
+// writeDroppedRows writes one WARN row per entry in dropped to w, in
+// dropped's own order: "<severity> <stateRel>:<line>  <detail>\n". It
+// stops at the first write failure and returns how many rows landed plus
+// the raw write error, unwrapped, so runFinish can report exactly what
+// the writer refused instead of claiming the drop report reached the user.
 func writeDroppedRows(w io.Writer, dropped []scaffold.DroppedEntry, stateRel string) (int, error) {
 	for i, d := range dropped {
 		if _, err := fmt.Fprintf(w, "%s  %s:%d  %s\n", scaffold.SeverityWarn, stateRel, d.Line, dropDetail(d)); err != nil {
@@ -123,11 +112,9 @@ func writeDroppedRows(w io.Writer, dropped []scaffold.DroppedEntry, stateRel str
 
 // droppedWriteError is runFinish's error when writeDroppedRows fails
 // partway through the WARN rows, after the state file has already been
-// replaced. Its Error() is R14a's own generic-failure line, rendered
-// verbatim by reporter.refusal; it also carries scaffold.ErrPartialWrite,
-// unreachable under --json today (writeDroppedRows runs only from the
-// text branch) but consulted by filesChangedFor if that ever changes, so
-// files_changed would still report true rather than silently false.
+// replaced. It carries scaffold.ErrPartialWrite so filesChangedFor still
+// reports true even though writeDroppedRows runs only from the text
+// branch today.
 type droppedWriteError struct {
 	err error
 }

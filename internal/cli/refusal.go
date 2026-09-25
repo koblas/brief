@@ -23,27 +23,11 @@ func flattenOneLine(s string) string {
 }
 
 // noFilesChangedTail is the "nothing changed on disk" promise a refusal's
-// text line appends. classifyRefusal decides it per error, never by type
-// alone: every typed refusal carries it except the named exceptions —
-// *setup.RefusalError drops it only when the specific error means a write
-// already partially landed (setup.ErrPartialWrite); *config.InvalidConfigError
-// always carries it, whether or not the command that hit it writes anything
-// itself, since config resolution runs before every command's own writes,
-// never after; a bare not-found or a generic failure carries none, having
-// nothing to promise about. A *unknownFeatureError inherits its own promise
-// from the sentinel it wraps rather than always carrying one:
-// scaffold.ErrNoSuchFeature's own callers ("new step", "finish") write and
-// refused before touching disk, so it carries the tail; assemble.ErrNoSuchFeature's
-// own callers ("start", "check") are read-only, so it never does.
+// text line appends; classifyRefusal decides per error whether it applies.
 const noFilesChangedTail = " (no files changed)"
 
-// refusalTextLayout selects which of refusalClassification.textLine's three
-// shapes a classification renders through: layoutPathProblem (the default,
-// zero value) for every ordinary refusal, layoutProblemInPath for
-// *unknownFeatureError, whose ruled copy puts the problem before the path
-// it names rather than after it, and layoutProblemOnly for scaffold's
-// unknown-step refusal, whose Problem already names the feature by its own
-// argument — never a path — so path renders in JSON only.
+// refusalTextLayout selects which of refusalClassification.textLine's
+// three shapes a classification renders through.
 type refusalTextLayout int
 
 const (
@@ -56,11 +40,11 @@ const (
 	layoutProblemOnly
 )
 
-// refusalClassification is classifyRefusal's pure output: the R14a
-// text-mode line's own ingredients (path, line, problem, fix, tail, layout)
-// and R3's error.kind, both built from err alone with no knowledge of the
-// failing command or the working directory a relative path is resolved
-// against — (reporter).refusal supplies both.
+// refusalClassification is classifyRefusal's pure output: the text-mode
+// line's own ingredients (path, line, problem, fix, tail, layout) and the
+// error.kind, both built from err alone with no knowledge of the failing
+// command or the working directory a relative path is resolved against —
+// (reporter).refusal supplies both.
 type refusalClassification struct {
 	// kind is errorKindRefusal or errorKindFailure.
 	kind string
@@ -88,25 +72,14 @@ type refusalClassification struct {
 	layout refusalTextLayout
 }
 
-// classifyRefusal renders err into the R14a text-mode line's ingredients
-// and R3's error.kind. *setup.RefusalError is checked first, ahead of
-// *config.InvalidConfigError: init's own config refusal
-// (setup.configRefusal) wraps a *config.InvalidConfigError as its Err, and
-// errors.AsType would reach that inner error through *setup.RefusalError's
-// own Unwrap if the InvalidConfigError branch ran first — silently
-// replacing init's "run 'brief init --force'" fix with the generic
-// "remove it" copy every other command's own bare InvalidConfigError
-// carries. *unknownFeatureError is checked next, ahead of the two other
-// typed refusals: scaffold's own not-found (noSuchFeatureRefusal) is
-// itself a *scaffold.RefusalError wrapping scaffold.ErrNoSuchFeature, so a
-// *unknownFeatureError built around one — enrichUnknownFeature wraps the
-// original error unchanged — would be silently reclassified by the
-// scaffold.RefusalError branch below it if checked in the other order,
-// keeping its old path-less copy for "new step"/"finish" while "start"
-// (whose not-found is the bare assemble.ErrNoSuchFeature sentinel, never a
-// *scaffold.RefusalError) looked fixed. Anything else falls to the generic
-// errorKindFailure case.
+// classifyRefusal renders err into the text-mode line's ingredients and
+// its error.kind, checking the typed refusals below in a fixed order:
+// anything else falls to the generic errorKindFailure case.
 func classifyRefusal(err error) refusalClassification {
+	// Checked ahead of *config.InvalidConfigError: init's own config
+	// refusal wraps one as its Err, and checking that branch first would
+	// silently reach the inner error through Unwrap, replacing init's own
+	// "run 'brief init --force'" fix with the generic "remove it" copy.
 	if refusal, ok := errors.AsType[*setup.RefusalError](err); ok {
 		tail := noFilesChangedTail
 		if errors.Is(err, setup.ErrPartialWrite) {
@@ -133,8 +106,15 @@ func classifyRefusal(err error) refusalClassification {
 		}
 	}
 
+	// Checked ahead of *scaffold.RefusalError: scaffold's own not-found is
+	// itself a *scaffold.RefusalError wrapping scaffold.ErrNoSuchFeature,
+	// so checking that branch first would silently reclassify an enriched
+	// *unknownFeatureError back to its path-less copy.
 	if unknown, ok := errors.AsType[*unknownFeatureError](err); ok {
 		tail := ""
+		// scaffold's callers ("new step", "finish") write and refused
+		// before touching disk; assemble's callers ("start", "check") are
+		// read-only and never carry the tail.
 		if errors.Is(unknown.err, scaffold.ErrNoSuchFeature) {
 			tail = noFilesChangedTail
 		}
@@ -190,12 +170,8 @@ func classifyRefusal(err error) refusalClassification {
 // unknownFeatureError enriches a not-found sentinel — scaffold.ErrNoSuchFeature
 // or assemble.ErrNoSuchFeature, bare or wrapped — with the feature
 // directory's own known list, so classifyRefusal's copy can name what does
-// exist rather than only what doesn't. name is the feature argument as
-// given (never resolved against dir), dir is the absolute feature
-// directory, known is assemble.Features' own result (fs.ReadDir order,
-// real directories only), and err is the original error unchanged, so
-// Unwrap keeps errors.Is(scaffold.ErrNoSuchFeature) /
-// errors.Is(assemble.ErrNoSuchFeature) reachable through this wrapper.
+// exist rather than only what doesn't. err is the original error
+// unchanged, so Unwrap keeps it reachable through this wrapper.
 type unknownFeatureError struct {
 	name  string
 	dir   string
@@ -228,13 +204,9 @@ func knownFeaturesFix(known []string, name string) string {
 // enrichUnknownFeature recognizes a scaffold.ErrNoSuchFeature or
 // assemble.ErrNoSuchFeature carried anywhere in err's chain, for feature
 // under the configuration cfg resolves root against, and returns a
-// *unknownFeatureError naming every known feature (assemble.Features,
-// fs.ReadDir order). A failure listing the feature directory itself is
-// returned in its place — never rendered as "known: none". Any other err,
-// including nil, passes through unchanged. rootFS is nil in production
-// (the assemble.Server this builds reads real disk); a test's withRootFS
-// runSeam substitutes an rwfs.Mem, the same fixture the caller's own
-// scaffold.Server or assemble.Server already reads.
+// *unknownFeatureError naming every known feature. A failure listing the
+// feature directory itself is returned in its place, never rendered as
+// "known: none". Any other err, including nil, passes through unchanged.
 func enrichUnknownFeature(ctx context.Context, cfg config.Config, root, feature string, err error, rootFS rwfs.FS) error {
 	if !errors.Is(err, scaffold.ErrNoSuchFeature) && !errors.Is(err, assemble.ErrNoSuchFeature) {
 		return err
@@ -255,16 +227,14 @@ func enrichUnknownFeature(ctx context.Context, cfg config.Config, root, feature 
 	}
 }
 
-// displayPath renders p the way every text-mode line names a path (R6): ""
-// and "<stdin>" pass through unchanged — neither is a real path to
-// relativize — a path that is already relative (finish rewrites a refusal's
-// Path to the user's own, possibly relative, "--state"/"--handoff" argument)
-// also passes through unchanged, and an absolute path is rendered relative
-// to wd via filepath.Rel, falling back to p itself on error. A path outside
-// wd renders as a "../" chain rather than being clamped to p: a working
-// directory below the configuration root that owns p is expected to see
-// one, and clamping it would make status.go/start.go's own text line diverge
-// from what --json's absolute "path" names.
+// displayPath renders p the way every text-mode line names a path: "" and
+// "<stdin>" pass through unchanged, as does a path that is already
+// relative (finish rewrites a refusal's Path to the user's own, possibly
+// relative, "--state"/"--handoff" argument); an absolute path renders
+// relative to wd via filepath.Rel, falling back to p itself on error. A
+// path outside wd renders as a "../" chain rather than being clamped to
+// p, so the text line never diverges from what --json's absolute "path"
+// names.
 func displayPath(wd, p string) string {
 	if p == "" || p == "<stdin>" || !filepath.IsAbs(p) {
 		return p
@@ -278,15 +248,14 @@ func displayPath(wd, p string) string {
 	return rel
 }
 
-// textLine renders c's R14a text-mode line, minus the "brief <command>: "
-// prefix: c.problem alone when c.path is "" — a generic failure names no
-// path in text and never appends c.fix there either —
-// "<problem>; <fix>[<tail>]" when c.layout is layoutProblemOnly, which
-// ignores c.path in text regardless of whether it is set (c.path still
-// flows to jsonPath for --json), else one of two shapes selected by
-// c.layout, both with c.path rendered relative to wd through displayPath:
-// layoutPathProblem's default "<path>[:<line>]: <problem>; <fix>[<tail>]",
-// or layoutProblemInPath's "<problem> in <path>; <fix>[<tail>]".
+// textLine renders c's text-mode line, minus the "brief <command>: "
+// prefix: c.problem alone when c.path is "" (a generic failure names no
+// path in text), "<problem>; <fix>[<tail>]" when c.layout is
+// layoutProblemOnly (c.path still flows to jsonPath for --json), else one
+// of two shapes selected by c.layout, both with c.path rendered relative
+// to wd through displayPath: layoutPathProblem's default
+// "<path>[:<line>]: <problem>; <fix>[<tail>]", or layoutProblemInPath's
+// "<problem> in <path>; <fix>[<tail>]".
 func (c refusalClassification) textLine(wd string) string {
 	if c.layout == layoutProblemOnly {
 		return fmt.Sprintf("%s; %s%s", c.problem, c.fix, c.tail)
@@ -309,9 +278,8 @@ func (c refusalClassification) textLine(wd string) string {
 }
 
 // jsonPath renders c.path for --json's "path" field: null for "" or
-// "<stdin>" (R6 never names a placeholder or piped source as a real
-// path), else c.path joined onto wd when relative, unchanged when already
-// absolute.
+// "<stdin>", neither a real path to name, else c.path joined onto wd when
+// relative, unchanged when already absolute.
 func (c refusalClassification) jsonPath(wd string) *string {
 	if c.path == "" || c.path == "<stdin>" {
 		return nil
@@ -338,11 +306,10 @@ func (c refusalClassification) jsonLine() *int {
 }
 
 // refusal renders err — a refusal that changed nothing on disk, or any
-// other non-nil error a command returns — as R14a's one-line text-mode
-// message on stderr, or R3's error document on stdout under --json, and
-// returns err unchanged for ExitCode to classify. path absolutizes against
-// r.wd (R6); a JSON document's "message" is always the same text-mode line
-// R14a would have printed, byte for byte.
+// other non-nil error a command returns — as a one-line text-mode message
+// on stderr, or an error document on stdout under --json, and returns err
+// unchanged for ExitCode to classify. A JSON document's "message" is
+// always the same text-mode line, byte for byte.
 func (r reporter) refusal(err error) error {
 	c := classifyRefusal(err)
 	command := commandName(r.cmd)

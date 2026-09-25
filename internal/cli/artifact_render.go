@@ -34,9 +34,8 @@ func artifactsJSON(artifacts []setup.Artifact) []artifactJSON {
 	return out
 }
 
-// artifactRow renders one artifact as R11's text-mode line, minus the
-// trailing newline: "<action> <relative path>[/][ (<detail>)]" — a
-// trailing "/" on the feature root's own row, never on the config file's.
+// artifactRow renders one artifact as a text-mode line (no trailing
+// newline): "<action> <relative path>[/][ (<detail>)]".
 func artifactRow(wd string, a setup.Artifact) string {
 	path := displayPath(wd, a.Path)
 	if a.Kind == setup.KindFeatureRoot {
@@ -51,12 +50,8 @@ func artifactRow(wd string, a setup.Artifact) string {
 	return line
 }
 
-// landedArtifacts filters res.Artifacts down to the ones res.Created,
-// res.Modified or res.Removed actually names, in res.Artifacts' own order —
-// init's or uninstall's own partial-write report (renderPartialWrite) must
-// print only what really landed on disk, never the full plan: res.Artifacts
-// on a partial write still carries the row for the write that failed,
-// Action and all, exactly as it would have read had that write succeeded.
+// landedArtifacts filters res.Artifacts to the ones res.Created,
+// res.Modified or res.Removed actually name, in res.Artifacts' order.
 func landedArtifacts(res setup.Result) []setup.Artifact {
 	landed := make(map[string]bool, len(res.Created)+len(res.Modified)+len(res.Removed))
 
@@ -83,17 +78,14 @@ func landedArtifacts(res setup.Result) []setup.Artifact {
 	return out
 }
 
-// renderPartialWrite renders a write command's own partial-write failure
-// (setup.ErrPartialWrite, R3/R11): text mode prints every row that
-// actually landed (landedArtifacts) on stdout — the same shape a
-// successful run would print — before the ordinary refusal line on
-// stderr; JSON mode is the standard error document (out.refusal),
-// unchanged: files_changed is already true through filesChangedFor's own
-// errors.Is(setup.ErrPartialWrite) check, and R3's own envelope carries no
-// artifacts field for a failing run, matching R10's own ErrUnwritable
-// contract above.
+// renderPartialWrite reports setup.ErrPartialWrite: in text mode it prints
+// every artifact that actually landed on disk, in the same shape a
+// successful run would use, before the refusal line; it returns the
+// standard refusal document either way.
 func renderPartialWrite(res setup.Result, err error, wd string, out reporter) error {
 	if !out.json {
+		// The artifact for the write that failed still lists what its
+		// Action would have been had the write succeeded.
 		for _, a := range landedArtifacts(res) {
 			fmt.Fprintln(out.stdout, artifactRow(wd, a))
 		}

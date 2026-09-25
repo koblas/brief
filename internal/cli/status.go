@@ -28,21 +28,18 @@ one line on stderr saying so. brief status reads; it never writes.
 // error names as how to fix it.
 const statusInvocation = "brief status"
 
-// statusDocument is status's --json success document: the common header
-// first, then one row per feature, no "data" wrapper (R2).
+// statusDocument is status's --json success document: the common header,
+// then one row per feature, no "data" wrapper.
 type statusDocument struct {
 	jsonHeader
 
 	Features []statusFeatureJSON `json:"features"`
 }
 
-// statusFeatureJSON is one row of statusDocument's "features" array: Done,
-// Total and Blocked are nil (JSON null) exactly when Problem is non-nil — a
-// malformed row measured nothing, so it reports no counts rather than
-// zeroes that would look measured. Complete is
-// (assemble.FeatureStatus).Complete(), Next is nil when the row has no open
-// step (including a malformed or a zero-step feature), and Problem is nil
-// on every row that read cleanly.
+// statusFeatureJSON is one row of statusDocument's "features" array. Done,
+// Total and Blocked are nil exactly when Problem is non-nil, so a
+// malformed row reports no counts rather than zeroes that would look
+// measured. Next is nil when the row has no open step.
 type statusFeatureJSON struct {
 	Name     string             `json:"name"`
 	Path     string             `json:"path"`
@@ -75,8 +72,7 @@ type statusProblemJSON struct {
 }
 
 // statusFeatures maps rows to statusDocument's "features" array: a sized,
-// non-nil slice so zero rows encode as "[]" rather than "null" (R9's empty
-// discriminator, in JSON form).
+// non-nil slice so zero rows encode as "[]" rather than "null".
 func statusFeatures(rows []assemble.FeatureStatus) []statusFeatureJSON {
 	out := make([]statusFeatureJSON, 0, len(rows))
 
@@ -105,9 +101,7 @@ func statusFeatures(rows []assemble.FeatureStatus) []statusFeatureJSON {
 }
 
 // runStatus implements "brief status"; rest is its positional arguments,
-// flags already parsed away, and must be empty. rootFS is nil in
-// production (resolveRoot and assemble.NewServer both read real disk); a
-// test's withRootFS runSeam substitutes an rwfs.Mem for both.
+// flags already parsed away, and must be empty.
 func runStatus(ctx context.Context, wd string, rest []string, out reporter, rootFS rwfs.FS) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief status: too many arguments; run '%s'", statusInvocation))
@@ -125,9 +119,8 @@ func runStatus(ctx context.Context, wd string, rest []string, out reporter, root
 		return out.refusal(err)
 	}
 
-	// R1: --json writes zero stderr bytes on success, including the
-	// zero-rows and malformed-row cases below, so this branch runs before
-	// either ever writes anything.
+	// A successful --json run writes zero stderr bytes, so this branch
+	// runs before the zero-rows and malformed-row cases below can write.
 	if out.json {
 		doc := statusDocument{jsonHeader: out.successHeader(), Features: statusFeatures(rows)}
 

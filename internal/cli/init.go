@@ -56,18 +56,14 @@ applied by hand.
 	wrapWords("With --print --json, the document carries only `artifacts`, each "+
 		"{`path`, `action` (create|merge), `body`}.", jsonParagraphWidth)
 
-// initDocument is init's --json success document: the common header first,
-// then the request's own host, detected_by (null unless host was detected
-// rather than given — the same provenance initNextAction's own stderr line
-// names) and dry_run, every path this call created or modified (absolute,
-// never nil, both empty under --dry-run), then one row per artifact in
-// setup.Result's own order — config, feature root — then roles_to_add,
-// always present, empty unless --with-agents left roles unbound in a
-// config this run did not write, and finally agents_missing_skill, always
-// present (Surface & Copy), empty unless the resolved host is claude-code
-// and at least one bare-name planner or implementer binding lacks the
-// skill. Never written for --print, which renders initPrintDocument
-// instead.
+// initDocument is init's --json success document: the common header, the
+// request's host, detected_by (null unless host was detected rather than
+// given) and dry_run, every path created or modified (never nil, both
+// empty under --dry-run), one row per artifact, roles_to_add (empty
+// unless --with-agents left roles unbound in a config this run did not
+// write), and agents_missing_skill (empty unless the resolved host is
+// claude-code and a bound planner or implementer lacks the skill). Never
+// written for --print, which renders initPrintDocument instead.
 type initDocument struct {
 	jsonHeader
 
@@ -137,7 +133,7 @@ func printArtifactsJSON(artifacts []setup.PrintArtifact) []printArtifactJSON {
 	return out
 }
 
-// renderPrint writes R9's --print text-mode body to w: one
+// renderPrint writes --print's text-mode body to w: one
 // "# <path> (create|merge)" header per artifact, path relative to wd,
 // followed by its own body — a trailing newline appended only when the
 // body does not already end with one — with one blank line between
@@ -157,22 +153,12 @@ func renderPrint(w io.Writer, wd string, artifacts []setup.PrintArtifact) {
 	}
 }
 
-// initNextAction renders init's own stderr next-action line, minus the
-// "brief init: " prefix: dryRun's own line when set; else, with nothing
-// ActionCreated or ActionMerged, "already installed; nothing changed"; else, for
-// host != setup.HostClaudeCode, "installed config and feature root; run
-// 'brief new feature <name>'"; else "installed for claude-code[ (detected
-// <signal>; use --host none to skip)][ in <rel>]; start Claude Code in
-// <dir> (or run /reload-plugins in a session already <here/there>), then
-// 'brief new feature <name>'" — Claude Code loads a project
-// skills-directory plugin only from the session's own working directory,
-// no walk-up, so the line names root whenever it differs from wd (rel =
-// displayPath(wd, root), "this directory"/"here" when root == wd, else rel
-// itself and "there"). The detected clause appears only when detectedBy is
-// non-empty (setup.Result.DetectedBy) — an explicit --host claude-code
-// never carries one, so it never grows this clause; a detected install
-// otherwise looked identical to an explicit one, leaving --host none's own
-// escape hatch undiscoverable.
+// initNextAction renders init's stderr next-action line, minus the
+// "brief init: " prefix: dryRun's own line when set; "already installed;
+// nothing changed" when nothing was created or merged; a config-only
+// message for a non-claude-code host; otherwise an "installed for
+// claude-code" message naming the detection signal, if any, and Claude
+// Code's own startup step.
 func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, root, detectedBy string) string {
 	if dryRun {
 		return "dry run, no files changed; rerun without --dry-run to apply"
@@ -196,10 +182,16 @@ func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, ro
 	}
 
 	label := "installed for claude-code"
+	// The detected clause appears only when host was inferred rather than
+	// given explicitly, so --host none's own escape hatch stays
+	// discoverable on a detected install.
 	if detectedBy != "" {
 		label = fmt.Sprintf("installed for claude-code (detected %s; use --host none to skip)", detectedBy)
 	}
 
+	// Claude Code loads a project skills-directory plugin only from the
+	// session's own working directory, no walk-up, so the line names root
+	// whenever it differs from wd.
 	if root == wd {
 		return label + "; start Claude Code in this directory (or run /reload-plugins in a session already here), then 'brief new feature <name>'"
 	}
@@ -209,23 +201,13 @@ func initNextAction(host string, dryRun bool, artifacts []setup.Artifact, wd, ro
 	return fmt.Sprintf("%s in %s; start Claude Code in %s (or run /reload-plugins in a session already there), then 'brief new feature <name>'", label, rel, rel)
 }
 
-// missingSkillHeaderBase is init's own missing-skill stderr block header's
-// invariant prefix (Surface & Copy), minus the "brief init: " prefix every
-// stderr line in this file shares.
+// missingSkillHeaderBase is the missing-skill stderr block header's invariant prefix.
 const missingSkillHeaderBase = `bound agents do not preload the brief-workflow skill; add "brief-workflow" to the "skills:" list in each`
 
 // missingSkillFixable reports whether a is a row "--edit-agents" could
-// still reach — setup's own planBoundAgent verdict (setup.ReachFixable),
-// never re-derived here: cli only maps setup.MissingSkillAgent.Reach to
-// display text and grouping. A ScopeProject row whose Reach is anything
-// other than the three setup ever assigns a row planBoundAgent itself
-// cannot merge (setup.ReachNotRegular, setup.ReachUneditable,
-// setup.ReachEscaped) is treated as fixable too — the fallback every other
-// group's own filter needs so a row can never silently vanish from the
-// report if that invariant is ever broken elsewhere. A ScopeUser row is
-// never fixable regardless of Reach — "--edit-agents" never targets one
-// (Rule 3) — which is what keeps setup.ReachNone, the legitimate value
-// every ScopeUser row carries, out of this fallback.
+// still reach: a ScopeProject row whose Reach is not one of the three
+// setup marks unmergeable. A ScopeUser row is never fixable regardless of
+// Reach, since --edit-agents never targets one.
 func missingSkillFixable(a setup.MissingSkillAgent) bool {
 	if a.Scope != agentfile.ScopeProject {
 		return false
@@ -237,16 +219,18 @@ func missingSkillFixable(a setup.MissingSkillAgent) bool {
 	case setup.ReachFixable, setup.ReachNone:
 		return true
 	default:
+		// Any Reach value setup does not yet assign a row falls back to
+		// fixable, so a row can never silently vanish from the report if
+		// that invariant is broken elsewhere.
 		return true
 	}
 }
 
-// missingSkillHeader renders init's own missing-skill stderr block header
-// (Surface & Copy): the suffix ", or rerun with --edit-agents:" is
-// appended only when editAgents was not given on this run and at least one
-// listed agent is one it could still reach (missingSkillFixable) —
-// otherwise the header ends plain ":", since suggesting a flag that either
-// already ran, or cannot help any row left, would be a dead end.
+// missingSkillHeader renders init's missing-skill stderr block header: the
+// suffix ", or rerun with --edit-agents:" is appended only when editAgents
+// was not given on this run and at least one listed agent is one it could
+// still reach (missingSkillFixable); otherwise the header ends plain ":",
+// since suggesting a flag that cannot help any row left would be a dead end.
 func missingSkillHeader(editAgents bool, agents []setup.MissingSkillAgent) string {
 	if !editAgents && slices.ContainsFunc(agents, missingSkillFixable) {
 		return missingSkillHeaderBase + `, or rerun with --edit-agents:`
@@ -255,23 +239,12 @@ func missingSkillHeader(editAgents bool, agents []setup.MissingSkillAgent) strin
 	return missingSkillHeaderBase + `:`
 }
 
-// missingSkillLines renders one line per agents entry (Surface & Copy), in
-// four groups, each in agents' own relative order, so the rows an adopter
-// can fix by rerunning init with --edit-agents come before the ones always
-// left for them to edit by hand: (1) every row "--edit-agents" could still
-// reach (setup.ReachFixable), "  <displayPath(wd, path)> (<role>)"; (2) a
-// ScopeProject row setup.planBoundAgent itself cannot reach — not a
-// regular file (setup.ReachNotRegular), "  <displayPath(wd, path)>
-// (<role>; not a regular file, edit by hand)", and an unrecognized
-// "skills:" shape (setup.ReachUneditable), "  <displayPath(wd, path)>
-// (<role>; skills: is not a list brief can edit, edit by hand)" — rendered
-// together, in that combined relative order; (3) a ScopeProject row whose
-// own resolved path escapes the repository (setup.ReachEscaped), "
-// <displayPath(wd, path)> (<role>; outside the repository, edit by
-// hand)"; (4) every ScopeUser row, "  ~/<home-relative slash path>
-// (<role>; user-level, edit by hand)". This grouping is a display concern
-// only — setup.Result.AgentsMissingSkill itself stays in role-major order
-// (setup's own missing_skill.go).
+// missingSkillLines renders one line per agents entry, in four groups —
+// fixable, unreachable project-scope, escaped project-scope, then
+// user-scope — each in agents' own relative order, so the rows an adopter
+// can fix by rerunning init with --edit-agents come before the ones
+// always left for them to edit by hand. The grouping is a display concern
+// only; setup.Result.AgentsMissingSkill itself stays in role-major order.
 func missingSkillLines(wd string, agents []setup.MissingSkillAgent) []string {
 	lines := make([]string, 0, len(agents))
 
@@ -307,10 +280,9 @@ func missingSkillLines(wd string, agents []setup.MissingSkillAgent) []string {
 	return lines
 }
 
-// unwrittenLine renders R9/R10's own "printed only" or "already installed"
-// stderr line for --print, minus the "brief init: " prefix: the
-// nothing-pending line when artifacts is empty, else the "printed only"
-// line.
+// unwrittenLine renders --print's "printed only" or "already installed"
+// stderr line, minus the "brief init: " prefix: the nothing-pending line
+// when artifacts is empty, else the "printed only" line.
 func unwrittenLine(artifacts []setup.PrintArtifact) string {
 	if len(artifacts) == 0 {
 		return "already installed; nothing changed"
@@ -319,10 +291,7 @@ func unwrittenLine(artifacts []setup.PrintArtifact) string {
 	return "printed only, no files changed; apply the output above by hand, or rerun without --print"
 }
 
-// editAgentsNothingToEditLine is --edit-agents' own exit-0 stderr line
-// (Surface & Copy), minus the "brief init: " prefix, rendered when editAgents
-// is set and res.Artifacts carries no KindBoundAgent row — text mode only,
-// including --dry-run and --print, never --json.
+// editAgentsNothingToEditLine is --edit-agents' exit-0 stderr line, text mode only, never --json.
 const editAgentsNothingToEditLine = `--edit-agents: no planner or implementer bound to an agent under .claude/agents; nothing to edit`
 
 // hasBoundAgentArtifact reports whether artifacts carries a
@@ -351,9 +320,8 @@ func printEditAgentsNothingToEdit(out reporter, editAgents bool, artifacts []set
 // [--with-agents] [--edit-agents] [--dry-run | --print] [--force] [--json]";
 // rest is its positional arguments, flags already parsed away and must be
 // empty. host is "" when --host was not given, passed through unchanged to
-// setup.InitRequest.Host — setup.Init treats "" as "detect" (R8) rather
-// than defaulting it here. extraSetupOpts threads a test's own
-// setup.WithHomeDir override (withSetupOpts) to setup.NewServer.
+// setup.InitRequest.Host: setup.Init treats "" as "detect" rather than
+// defaulting it here.
 func runInit(ctx context.Context, wd string, rest []string, host string, noHook, withAgents, editAgents, dryRun, printOnly, force bool, out reporter, extraSetupOpts ...setup.Option) error {
 	if len(rest) > 0 {
 		return out.usageError(fmt.Sprintf("brief init: too many arguments; run '%s'", initInvocation))
@@ -455,13 +423,12 @@ func runInit(ctx context.Context, wd string, rest []string, host string, noHook,
 	return nil
 }
 
-// renderUnwritable renders R10's own refusal for setup.ErrUnwritable: text
-// mode renders the ordinary refusal line on stderr (out.refusal handles
-// *setup.RefusalError generically) and then res.Print's own body on
-// stdout, byte for byte what --print would have shown; JSON mode writes
-// the standard error document with its fix overridden to point at
-// "brief init --print --json" — R10's own JSON contract carries no
-// artifacts field at all, unlike the print-only success document above.
+// renderUnwritable renders the refusal for setup.ErrUnwritable: text mode
+// renders the ordinary refusal line on stderr and then res.Print's body
+// on stdout, byte for byte what --print would have shown; JSON mode
+// writes the standard error document with its fix overridden to point at
+// "brief init --print --json", carrying no artifacts field at all, unlike
+// the print-only success document above.
 func renderUnwritable(res setup.Result, err error, wd string, out reporter) error {
 	if !out.json {
 		_ = out.refusal(err)
