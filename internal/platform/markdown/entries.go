@@ -12,12 +12,12 @@ import (
 var entryItemRe = regexp.MustCompile(`^(?:[-*] |\d+\. )`)
 
 // thematicBreakRe matches a CommonMark thematic break line (CommonMark
-// §4.1): a run of three or more of the same marker character — "-", "_"
-// or "*" — each optionally followed by spaces or tabs, and nothing else
-// on the line. "* * *" and "- - -" both start with what entryItemRe reads
-// as a bullet marker; this is checked first so a horizontal rule is never
-// mistaken for one.
-var thematicBreakRe = regexp.MustCompile(`^(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$`)
+// §4.1): up to three leading spaces, then a run of three or more of the
+// same marker character — "-", "_" or "*" — each optionally followed by
+// spaces or tabs, and nothing else on the line. "* * *" and "- - -" both
+// start with what entryItemRe reads as a bullet marker; this is checked
+// first so a horizontal rule is never mistaken for one.
+var thematicBreakRe = regexp.MustCompile(`^ {0,3}(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$`)
 
 // Entry is one list item Entries found under a configured heading: Line is
 // its 1-based line number counted over the whole body it was scanned from,

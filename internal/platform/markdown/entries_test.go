@@ -110,7 +110,10 @@ func Test_Entries_folds_a_wrapped_continuation_line_into_the_entry_text(t *testi
 // continuation line between the item and the boundary in every case, and
 // asserts the exact resulting Entries rather than only an absence — an
 // implementation that folds nothing would otherwise pass this table
-// vacuously.
+// vacuously. The underscore, compact (no interior spaces) and up-to-three-
+// leading-space cases pin thematicBreakRe's other two marker characters and
+// CommonMark's own indentation tolerance, none of which
+// Test_Entries_excludes_a_column_zero_thematic_break exercises on its own.
 func Test_Entries_continuation_stops_at_blank_line_next_item_heading_and_fence(t *testing.T) {
 	cases := []struct {
 		name string
@@ -140,6 +143,21 @@ func Test_Entries_continuation_stops_at_blank_line_next_item_heading_and_fence(t
 		{
 			name: "a thematic break directly after the continuation stops it immediately and is not itself an entry",
 			body: "## Heading\n\n- item one\ncontinuation\n* * *\n",
+			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}},
+		},
+		{
+			name: "an underscore thematic break directly after the continuation stops it immediately",
+			body: "## Heading\n\n- item one\ncontinuation\n___\n",
+			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}},
+		},
+		{
+			name: "a compact thematic break with no spaces between markers directly after the continuation stops it immediately",
+			body: "## Heading\n\n- item one\ncontinuation\n---\n",
+			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}},
+		},
+		{
+			name: "a thematic break indented up to three spaces directly after the continuation still stops it immediately",
+			body: "## Heading\n\n- item one\ncontinuation\n   ***\n",
 			want: []markdown.Entry{{Line: 3, Text: "item one continuation"}},
 		},
 	}

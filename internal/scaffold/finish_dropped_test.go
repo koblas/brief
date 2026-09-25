@@ -649,6 +649,50 @@ func Test_finish_attributes_a_drop_to_the_physically_deeper_heading_even_when_sc
 // pooling "- debt entry" a second time, under "Traps", alongside "## Open
 // debts"' own correct scan. The fix reports the drop once, under its true
 // nearest-enclosing heading.
+// Test_finish_dedupes_a_new_bodys_nested_heading_overlap_before_diffing
+// proves poolOccurrences' by-line dedup is applied to the *new* body, not
+// only the old one: droppedEntries calls poolOccurrences twice
+// (internal/scaffold/dropped.go), once per body, and a fix that pooled the
+// old side correctly while reverting the new side to a raw, un-deduped
+// per-heading markdown.Entries loop would still pass every other test in
+// this file, since none of them give the new body its own nested-heading
+// overlap. Here "### Open debts" nests inside "## Traps"' own section in
+// the *new* body only — "## Traps" only ends at a heading of the same or
+// higher level, so its own scan overruns into the nested "### Open debts"
+// section and finds "- dup text" a second time — while the old body holds
+// the identical normalized text twice, under two ordinary, non-nested
+// headings, so old-side counting is never in question. A raw, un-deduped
+// new-side count reads "dup text" as present twice in the new body
+// (matching the old count of two) and reports no drop at all; the correct,
+// deduped count of one reports exactly one surplus, at the old body's later
+// occurrence.
+func Test_finish_dedupes_a_new_bodys_nested_heading_overlap_before_diffing(t *testing.T) {
+	cfg := droppedNestedOpenDebtsConfig()
+	oldState := strings.Join([]string{
+		"## Binding decisions", "",
+		"- dup text", "",
+		"## Left unbuilt", "",
+		"- dup text", "",
+		"## Traps", "",
+		"### Open debts", "",
+	}, "\n") + "\n"
+	mem := newDroppedFixtureFS(t, oldState)
+	newState := []byte(strings.Join([]string{
+		"## Binding decisions", "",
+		"## Left unbuilt", "",
+		"## Traps", "",
+		"### Open debts", "",
+		"- dup text", "",
+	}, "\n") + "\n")
+
+	res, err := finishDroppedWithConfig(t, mem, newState, cfg)
+
+	require.NoError(t, err)
+	assert.Equal(t, []scaffold.DroppedEntry{
+		{Rule: scaffold.DropRuleEntry, Heading: "Left unbuilt", Line: 7, Tag: "", Text: "dup text"},
+	}, res.Dropped)
+}
+
 func Test_finish_reports_a_drop_once_when_a_configured_heading_carries_no_hash(t *testing.T) {
 	cfg := config.Default()
 	cfg.StateHeadings.Traps = "Traps"

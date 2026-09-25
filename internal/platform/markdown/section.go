@@ -188,7 +188,8 @@ func lineOffsets(lines []string) []int {
 // caller (scaffold's drop-entry scan) that needs a heading's own position
 // rather than its section body, so it can tell which of several configured
 // headings most narrowly encloses a given line. It returns ok == false
-// when no such line exists, matching Section's own ("", false) contract.
+// when no such line exists — the same not-found convention as Section's
+// own, which there returns ("", false).
 func HeadingLine(body, heading string) (int, bool) {
 	idx, _ := findHeading(strings.Split(body, "\n"), heading)
 	if idx == -1 {

@@ -103,6 +103,22 @@ one line per table:
   (`internal/platform/markdown/entries_test.go`): "a paragraph line" rules out treating any
   non-blank line as an item; "an indented list item" rules out dropping entryItemRe's
   column-0 anchor.
+- `Test_Entries_excludes_a_column_zero_thematic_break`
+  (`internal/platform/markdown/entries_test.go`): "asterisks separated by spaces" rules out
+  the asterisk alternative never matching a thematic break; "hyphens separated by spaces"
+  rules out the hyphen alternative never matching one.
+
+Follow-up note (fix pass 2, MAJOR test finding 1) — the same table for the three cases added
+to `Test_Entries_continuation_stops_at_blank_line_next_item_heading_and_fence`
+(`internal/platform/markdown/entries_test.go`): "an underscore thematic break" rules out the
+underscore alternative being absent from `thematicBreakRe`, confirmed by deleting it and
+watching only that case redden; "a compact thematic break with no spaces" rules out a
+mandatory interior separator between marker characters, confirmed by requiring one on the
+hyphen alternative and watching only that case redden (the pre-existing spaced-form case in
+`Test_Entries_excludes_a_column_zero_thematic_break` stays green under that mutation); "a
+thematic break indented up to three spaces" rules out `thematicBreakRe` anchoring at column 0
+with no leading-space tolerance, confirmed by removing the `{0,3}` prefix and watching only
+that case redden.
 
 ## Handoff
 

@@ -32,13 +32,6 @@ type Severity string
 // refused.
 const SeverityWarn Severity = "WARN"
 
-// Severity returns the urgency a drop under r carries — SeverityWarn for
-// both DropRuleEntry and DropRuleDebt: a drop is always reported, never
-// refused.
-func (r DropRule) Severity() Severity {
-	return SeverityWarn
-}
-
 // DroppedEntry is one state-file entry Finish's replacement body no longer
 // carries: Rule classifies it, Heading is the display text of the
 // configured heading it was found under (its leading "#" run and one
@@ -143,16 +136,8 @@ type occurrence struct {
 
 // poolOccurrences scans every heading in scannable's own section of body
 // for entries and pools them into one line-ordered list, each physical
-// line kept once. When more than one heading's own markdown.Entries scan
-// reaches the same line — because their sections nest, or a heading
-// configured with no leading "#" never terminates its own section
-// (markdown.Section ends only at a heading of the same or higher level) —
-// the line is attributed to whichever of those heading's own scan
-// actually reached it (never one whose section had already ended before
-// that line) with the greatest markdown.HeadingLine: the most specific
-// heading that genuinely encloses it, not merely the configured heading
-// nearest to it by line number, which can sit inside a *different*,
-// already-closed subsection.
+// line kept once: attributeByLine's own attribution, ordered by
+// sortedByLine.
 func poolOccurrences(body []byte, scannable []string) []occurrence {
 	text := string(body)
 
@@ -163,6 +148,22 @@ func poolOccurrences(body []byte, scannable []string) []occurrence {
 		}
 	}
 
+	return sortedByLine(attributeByLine(text, scannable, headingLine))
+}
+
+// attributeByLine scans every heading in scannable for entries under its
+// own section of text and attributes each physical line to at most one
+// heading. When more than one heading's own markdown.Entries scan reaches
+// the same line — because their sections nest, or a heading configured
+// with no leading "#" never terminates its own section (markdown.Section
+// ends only at a heading of the same or higher level) — the line is
+// attributed to whichever of those heading's own scan actually reached it
+// (never one whose section had already ended before that line) with the
+// greatest headingLine[...] (markdown.HeadingLine): the most specific
+// heading that genuinely encloses it, not merely the configured heading
+// nearest to it by line number, which can sit inside a *different*,
+// already-closed subsection.
+func attributeByLine(text string, scannable []string, headingLine map[string]int) map[int]occurrence {
 	byLine := make(map[int]occurrence)
 
 	for _, h := range scannable {
@@ -179,6 +180,12 @@ func poolOccurrences(body []byte, scannable []string) []occurrence {
 		}
 	}
 
+	return byLine
+}
+
+// sortedByLine returns byLine's occurrences as a slice ordered by each
+// occurrence's own entry.Line.
+func sortedByLine(byLine map[int]occurrence) []occurrence {
 	out := make([]occurrence, 0, len(byLine))
 	for _, o := range byLine {
 		out = append(out, o)

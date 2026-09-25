@@ -69,7 +69,7 @@ func finishDroppedEntries(dropped []scaffold.DroppedEntry, path string) []finish
 		}
 
 		out = append(out, finishDroppedJSON{
-			Severity: string(d.Rule.Severity()),
+			Severity: string(scaffold.SeverityWarn),
 			Rule:     string(d.Rule),
 			Path:     path,
 			Line:     d.Line,
@@ -109,7 +109,7 @@ func dropCountSuffix(n int) string {
 // line that claims the drop report reached the user.
 func writeDroppedRows(w io.Writer, dropped []scaffold.DroppedEntry, stateRel string) error {
 	for _, d := range dropped {
-		if _, err := fmt.Fprintf(w, "%s  %s:%d  %s\n", d.Rule.Severity(), stateRel, d.Line, dropDetail(d)); err != nil {
+		if _, err := fmt.Fprintf(w, "%s  %s:%d  %s\n", scaffold.SeverityWarn, stateRel, d.Line, dropDetail(d)); err != nil {
 			return fmt.Errorf("write dropped-entry row: %w", err)
 		}
 	}

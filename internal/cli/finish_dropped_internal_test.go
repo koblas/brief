@@ -832,7 +832,7 @@ func (w *failNthWriter) Write(p []byte) (int, error) {
 	return w.buf.Write(p)
 }
 
-// Test_finish_stops_at_the_first_dropped_row_write_error_and_reports_an_internal_error_mem
+// Test_finish_stops_writing_dropped_rows_on_the_first_write_error_mem
 // proves the MAJOR fix at internal/cli/finish.go: runFinish no longer
 // ignores a WARN-row write error. The old body carries three dropped
 // entries; the fake stdout writer fails only its *second* call and would
@@ -847,7 +847,7 @@ func (w *failNthWriter) Write(p []byte) (int, error) {
 // exit on without ever printing (SilenceErrors is set on the root
 // command, so nothing but ExitCode(err) is ever read from a plain
 // returned error).
-func Test_finish_stops_at_the_first_dropped_row_write_error_and_reports_an_internal_error_mem(t *testing.T) {
+func Test_finish_stops_writing_dropped_rows_on_the_first_write_error_mem(t *testing.T) {
 	oldState := "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n" +
 		"- first dropped\n- second dropped\n- third dropped\n\n## Open debts\n\n"
 	tree := newMemFinishFixtureWithState("- [x] do the thing", oldState)
@@ -861,7 +861,6 @@ func Test_finish_stops_at_the_first_dropped_row_write_error_and_reports_an_inter
 	err := run(t.Context(), memRoot, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath},
 		nil, writer, &stderr, noBuildInfo, withRootFS(tree.mem()))
 
-	require.Error(t, err)
 	require.ErrorIs(t, err, errRowWriteRefused)
 	assert.Equal(t, 1, ExitCode(err))
 
