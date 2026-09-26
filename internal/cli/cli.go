@@ -48,8 +48,8 @@ const rootShort = "brief manages feature specifications as files in your reposit
 // rootLifecycleParagraph is root's second Long paragraph, naming the
 // feature lifecycle from opening a feature through its last step.
 const rootLifecycleParagraph = `A feature is a specification, ordered step files and one state file. Open one
-with 'brief new feature', write its specification, add steps with 'brief new
-step', then take each step from 'brief start' to 'brief finish'.`
+with 'brief new feature', write its specification, add steps with
+'brief new step', then take each step from 'brief start' to 'brief finish'.`
 
 // resolveRoot resolves wd's configuration and the directory every path in
 // that configuration is relative to: source's directory when a config file

@@ -58,8 +58,8 @@ func Test_prints_start_help_as_usage_line_prose_and_flag_table(t *testing.T) {
 const rootHelp = `brief manages feature specifications as files in your repository.
 
 A feature is a specification, ordered step files and one state file. Open one
-with 'brief new feature', write its specification, add steps with 'brief new
-step', then take each step from 'brief start' to 'brief finish'.
+with 'brief new feature', write its specification, add steps with
+'brief new step', then take each step from 'brief start' to 'brief finish'.
 
 Usage:
   brief new feature <name>         scaffold a new feature's specification and state file

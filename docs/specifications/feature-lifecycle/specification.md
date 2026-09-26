@@ -147,8 +147,8 @@ No change. Open or done step with no checklist heading or zero items: no row, in
 
 ```
 A feature is a specification, ordered step files and one state file. Open one
-with 'brief new feature', write its specification, add steps with 'brief new
-step', then take each step from 'brief start' to 'brief finish'.
+with 'brief new feature', write its specification, add steps with
+'brief new step', then take each step from 'brief start' to 'brief finish'.
 ```
 
 No flag help strings change.
