@@ -1,7 +1,7 @@
 ---
 name: triage
 description: Scopes a request against the actual codebase before any design happens. Locates the affected commands and packages, finds prior art already in the repo, reproduces a bug when there is one, and reports what exists vs what must be built. Read-only and cheap. Invoke FIRST on any request that might be a feature or a behavior change — before asking the user anything and before product-vision — so the conversation starts from facts, not guesses. Also the right first move when it is unclear whether a request needs the full pipeline at all.
-tools: Read, Glob, Grep, Bash, Agent
+tools: Read, Glob, Grep, Bash, Agent, LSP
 model: sonnet
 effort: medium
 ---
@@ -14,18 +14,26 @@ design. Answer: *what exists, what is affected, what is genuinely unknown.*
 
 ## Delegating the search
 
-Broad "where does X live / what calls Y / what touches Z" sweeps go to the
-`caveman:cavecrew-investigator` subagent, not to your own `Grep`. It is read-only, runs on
+Broad "where does X live / what touches Z / which commands print this string" sweeps go to
+the `caveman:cavecrew-investigator` subagent, not to your own `Grep`. **Go callers and
+implementers are not a sweep** — see `LSP` paragraph below. It is read-only, runs on
 Haiku, and returns a compressed `path:line` table — so the fan-out burns its context
 instead of yours, and you keep room for the files that actually matter.
 
-Dispatch it when the question is *locate*: unknown blast radius across `internal/**`,
-"is there prior art for this shape", "what calls this exported function". Send one prompt
+Dispatch it when the question is *locate* and has no single symbol to anchor on: unknown
+blast radius across `internal/**`, "is there prior art for this shape", "where is this flag
+name or output string used". Send one prompt
 per independent question; several independent sweeps go in one message so they run
 concurrently.
 
 Do it yourself when you already know the file, when one targeted `Grep` answers it, or
 when you need the surrounding code rather than its address — a summary is not a reading.
+
+**Go callers and implementers are yours, via `LSP`, not the investigator's.** Caller table
+for exported function, `Store` or port method is `findReferences` / `goToImplementation`, per
+`.claude/briefs/navigation.md` (read it once) — one call, complete through interfaces, where
+grep sweep is not. Investigator stays the tool for strings and pattern sweeps. Tag each
+caller-table row `LSP` or `grep`.
 
 **Its table is a set of candidates, not evidence.** Before any `path:line` reaches your
 brief, `Read` that range yourself and confirm the symbol is what the table claims. This is
@@ -90,6 +98,17 @@ Verdict: reproduced | not reproduced (<what was tried>)
 
 ## Must be built
 - <the genuinely new pieces, one line each>
+
+## Callers                 (when a command, flag, output shape, exported API or on-disk format changes shape)
+| Symbol | Caller (path:line) | Via |
+| <symbol or string> | <path:line> | LSP \| grep |
+(across `cmd/**` and `internal/**`; symbols via LSP, strings via grep; product-vision prices
+the change from this table)
+
+## Becomes dead if this ships
+- <symbol at path:line> — <its only callers today, and why they go away>
+(omit if nothing does; "nothing becomes dead" is a real answer — say it rather
+than leaving the section out silently)
 
 ## Open questions
 - <question — and what each answer would change about the work>

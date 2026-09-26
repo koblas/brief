@@ -3,7 +3,7 @@ name: arch-reviewer
 description: Chief Architecture Officer for brief — the cmd/internal layout, the dependency rule (what may import what), the thin-main + feature-package split, Store-interface + adapters placement, and functional-options wiring. Invoke at design time when deciding where code lives and what it may import, and again on the finished diff. Returns ranked findings; it does not rewrite the code.
 type: reviewer
 triggers: ["cmd/**/*.go", "internal/**/*.go", "*.go"]
-tools: Read, Glob, Grep, Bash
+tools: Read, Glob, Grep, Bash, LSP
 model: sonnet
 effort: medium
 color: red
@@ -21,6 +21,11 @@ Strict architecture reviewer for `brief` — a single Go binary, one module at t
 boundaries, placement conventions? Code quality + design improvements → refactor-advisor.
 Behavior wrong under concurrency or retry → correctness-reviewer. Tests → test-reviewer
 (though you flag business logic living where it can't be tested).
+
+## Navigation
+
+Read `.claude/briefs/review.md` once. Confirm a caller or an implementer with `LSP`
+(`findReferences`, `goToImplementation`), not by reading packages — `.claude/briefs/navigation.md`.
 
 ## Review procedure
 

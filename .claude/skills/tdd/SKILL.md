@@ -1,13 +1,23 @@
 ---
 name: tdd
-description: Use when writing any new code or feature to enforce the TDD red-green-refactor cycle.
+description: The red-green-refactor cycle. Use for a scenario's acceptance test, and for every unit test on the mandatory test-first set named in .claude/briefs/build.md → Build cadence.
 argument-hint: <what-to-implement>
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 Implement using strict TDD: **$ARGUMENTS**
 
-## Iron Law
+## Where this applies
+
+`.claude/briefs/build.md` → *Build cadence* decides. Short form:
+
+- **Always** — scenario's one acceptance test, at its boundary, before any production code.
+- **Always** — inner-loop unit tests on the mandatory test-first set that section names.
+- **Otherwise** — code-first small batches: code one behaviour, test it in same batch, refactor
+  while green. *Iron Law* below not apply to those unit tests; refactor step and every
+  test-quality rule still do.
+
+## Iron Law (on the test-first set)
 
 **No production code without failing test first.** No watch test fail = no know if test right thing. Code before test must die + reimplement from test — no exceptions.
 
@@ -73,7 +83,7 @@ Return to RED for next behavior.
 
 Architect plan tell *which* tests + *what order*. No tell setup, assertions, fake API — those design decisions made during cycle, one test at a time.
 
-## Rationalization prevention
+## Rationalization prevention (test-first set)
 
 LLMs generate plausible excuses for skip/defer TDD. Common ones + why fail:
 
@@ -88,7 +98,7 @@ LLMs generate plausible excuses for skip/defer TDD. Common ones + why fail:
 
 Catch self composing excuse not on list = still excuse.
 
-## Red flags — stop and restart from RED
+## Red flags — stop and restart from RED (test-first set)
 
 - Writing implementation before test.
 - Test pass immediately without new code.

@@ -1,7 +1,7 @@
 ---
 description: The scoping procedure for any new feature or behavior change — triage the request against the codebase, refine the intent, get a product verdict, generate Gherkin scenarios with IDs, and create a Source of Truth (SoT) specification file. CLAUDE.md enters this automatically whenever the user asks for new or changed behavior; type it to force it.
 argument-hint: <optional — brief description of the feature; omit to use the conversation>
-allowed-tools: Read, Write, Glob, Grep, Skill, Agent
+allowed-tools: Read, Write, Glob, Grep, Skill, Agent, Bash(.claude/scripts/spec-check.py *)
 ---
 
 ## The request
@@ -65,11 +65,14 @@ Intent confirmed → automatically:
 ### Scenario format
 
 ```gherkin
-Scenario: <clear description>
+Scenario: SCENARIO-NN — <clear description>
   Given <precondition>
   When <action>
   Then <expected outcome>
 ```
+
+For a numeric bound or an exit-code matrix, use `Scenario Outline:` with an `Examples:` table
+rather than one scenario per row — still one `When`.
 
 ### What to cover
 
@@ -81,29 +84,39 @@ Scenario: <clear description>
 ### Scenario rules
 
 - Business-domain language; avoid generic CRUD wording.
-- One behavior per scenario.
+- **One behavior per scenario — exactly one `When`.** Second `When` is second scenario; split
+  it before approval. `.claude/scripts/spec-check.py <slug>` enforces this after spec is
+  written, and each scenario later gets exactly one acceptance test.
 - Reuse existing domain objects where possible.
 - No implementation details or architecture in this phase.
 
 ## Phase 3: SoT Creation
 
-On approval create `docs/specifications/<feature-slug>/` and write the specification inside it.
+On approval, first run **one `architect` sizing pass** over the whole approved scenario list —
+a size verdict per scenario (OWNS A RUN / SPLIT with seam / FOLD into named neighbour), no
+checklists. Apply its merges and splits to the scenario list, then create
+`docs/specifications/<feature-slug>/` and write the specification inside it. A merge or split
+changes scenario boundaries, not behaviour; if one would change what a scenario asserts, put it
+back to the user.
 
 ### Folder structure
 
 ```
 docs/specifications/<feature-slug>/
   specification.md          # SoT — intent, rules, scenarios, progress
+  METRICS.md                # Cost ledger, appended by the orchestrator (.claude/briefs/metrics.md)
   SCENARIO-01.md            # Created later by the architect agent
   SCENARIO-02.md            # Created later by the architect agent
 ```
 
-Only `specification.md` in this phase. Scenario plan files come from the architect agent.
+Only `specification.md` and `METRICS.md` (from the `.claude/briefs/metrics.md` template) in this phase. Scenario plan files come from the architect agent.
 
 ### Specification Template
 
 ```markdown
 # Specification: <Feature Name>
+
+<!-- spec-check: v1 -->
 
 ## Intent & Goal
 
@@ -144,3 +157,9 @@ a line nobody ruled on — the final pass will send it back.>
 - [ ] SCENARIO-01: <Title>
 - [ ] SCENARIO-02: <Title>
 ```
+
+The developer appends each scenario's acceptance test when ticking it
+(`- [x] SCENARIO-01: <Title> — \`<test file>\` \`<test name>\``; `.claude/briefs/build.md` →
+*Scenario traceability*). Also create `METRICS.md` from the template in
+`.claude/briefs/metrics.md`. After writing, run `.claude/scripts/spec-check.py <slug>`: at this
+point only the one-`When` check can fail, and if it does the spec is not done.

@@ -73,7 +73,9 @@ Spawn all matching reviewers in a **single message** via `Agent`:
 
 ```
 Agent(subagent_type="<name>", prompt="Review <commit range, or the listed paths>. Read
-.claude/rules/agent-briefs.md first. Scope: <the matched files, listed>. Start from the diff
+.claude/briefs/review.md first<, and .claude/briefs/proof.md — only for test-reviewer and
+correctness-reviewer><, and .claude/briefs/navigation.md — only for arch-reviewer and
+correctness-reviewer>. Scope: <the matched files, listed>. Start from the diff
 and read only what it touches; widen only when the diff cannot settle a question, and say
 which finding forced it. Report every finding you have in this round — a MINOR held back for
 a later pass costs a whole extra gate. <On a re-gate: your prior findings were X; confirm each
@@ -141,6 +143,12 @@ Merge into one severity-ranked list, deduplicating findings two reviewers raised
   developer as fix-if-cheap, not a mandatory round trip.
 - **PASS** — no findings.
 ```
+
+**Pipeline mode: persist the report.** Write it to
+`docs/specifications/<feature-slug>/REVIEW-<NN>.md` (next unused two-digit round) before
+dispatching any fix pass. Fix-pass prompt cites that file instead of pasting findings, the
+`METRICS.md` round row counts from it, and `pipeline-reviewer`'s retro reads it; report left
+only in conversation is gone.
 
 Style preferences never fail the gate. A `refactor-advisor` suggestion alone is
 **PASS WITH FOLLOW-UPS**, not FAIL.
