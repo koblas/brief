@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/koblas/brief/internal/platform/config"
 	"github.com/koblas/brief/internal/platform/stepfile"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/stretchr/testify/assert"
@@ -204,6 +205,56 @@ func Test_re_finishing_a_done_step_whose_progress_title_contains_an_unticked_mar
 	require.NoError(t, err)
 
 	assert.Equal(t, before, fx.mem.Snapshot(), "a re-finish with identical inputs must write nothing")
+}
+
+// Green on arrival: guards the done-status gate that keeps checkStepPlanned
+// from running on a re-finish.
+func Test_re_finishing_a_done_step_with_no_checklist_items_and_the_same_inputs_is_a_noop(t *testing.T) {
+	cases := []struct {
+		name string
+		body func(config.Config) string
+	}{
+		{name: "no checklist heading", body: doneNoHeadingStep02Body},
+		{name: "zero checklist items", body: doneZeroItemStep02Body},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fx := newFinishedFixtureFS(t)
+			putStepFS(t, fx, "STEP-02.md", c.body(fx.cfg))
+			before := fx.mem.Snapshot()
+
+			_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
+
+			require.NoError(t, err)
+			assert.Equal(t, before, fx.mem.Snapshot())
+		})
+	}
+}
+
+// Green on arrival: guards the done-status gate that keeps checkStepPlanned
+// from running on a re-finish.
+func Test_re_finishing_a_done_step_with_no_checklist_items_and_a_different_handoff_is_refused_as_already_finished(t *testing.T) {
+	cases := []struct {
+		name string
+		body func(config.Config) string
+	}{
+		{name: "no checklist heading", body: doneNoHeadingStep02Body},
+		{name: "zero checklist items", body: doneZeroItemStep02Body},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fx := newFinishedFixtureFS(t)
+			putStepFS(t, fx, "STEP-02.md", c.body(fx.cfg))
+			differentHandoff := []byte("DIFFERENT-HANDOFF-02\n")
+
+			_, err := fx.finish(t, "STEP-02", differentHandoff, fx.newState)
+
+			require.ErrorIs(t, err, scaffold.ErrAlreadyFinished)
+			assert.NotErrorIs(t, err, scaffold.ErrUnplannedStep)
+		})
+	}
 }
 
 func Test_a_step_whose_frontmatter_is_still_open_is_marked_done_even_when_every_input_matches_what_is_on_disk(t *testing.T) {

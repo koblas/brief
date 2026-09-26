@@ -153,6 +153,12 @@ func (s *Server) FinishFS(fsys rwfs.FS, featurePath, feature, step string, hando
 		return FinishResult{}, refusal
 	}
 
+	if !fm.Done() {
+		if refusal := checkStepPlanned(stepBody, stepPath, s.cfg.ChecklistHeading); refusal != nil {
+			return FinishResult{}, refusal
+		}
+	}
+
 	if err := checkStepDependencies(fsys, pattern, fm, step, stepPath); err != nil {
 		return FinishResult{}, err
 	}
@@ -304,10 +310,40 @@ func checkArgumentHeadings(body []byte, source, label string, headings config.St
 // checkStepChecklist refuses when stepBody's checklist section (under
 // heading) holds an item not ticked with "[x]"/"[X]", naming stepPath and
 // the item's 1-based line number. stepBody must be the whole step file as
-// read from disk, since the line number is counted from its top. A
-// checklist with no items, or an absent heading, is never refused.
+// read from disk, since the line number is counted from its top. An open
+// step with no checklist items, or no checklist heading at all, is refused
+// separately by checkStepPlanned (ErrUnplannedStep).
 func checkStepChecklist(stepBody []byte, stepPath, heading string) *RefusalError {
 	return refusalFromViolation(stepPath, conform.OpenChecklistItem(stepBody, heading))
+}
+
+// checkStepPlanned refuses (ErrUnplannedStep) an open step whose checklist
+// section under heading is absent or holds zero items, counting with
+// conform.ChecklistItemCount like assemble.StartFS's own shortfall.
+func checkStepPlanned(stepBody []byte, stepPath, heading string) *RefusalError {
+	count, found := conform.ChecklistItemCount(stepBody, heading)
+	if !found {
+		return &RefusalError{
+			Path:    stepPath,
+			Problem: fmt.Sprintf("no %q heading found", heading),
+			Fix:     "add it with the step's checklist items, tick them, and retry",
+			Err:     ErrUnplannedStep,
+		}
+	}
+
+	if count > 0 {
+		return nil
+	}
+
+	line, _ := markdown.HeadingLine(string(stepBody), heading)
+
+	return &RefusalError{
+		Path:    stepPath,
+		Line:    line,
+		Problem: fmt.Sprintf("%q has 0 checklist items, needs at least 1", heading),
+		Fix:     `add the step's items as "- [x]" lines once done, and retry`,
+		Err:     ErrUnplannedStep,
+	}
 }
 
 // refusalFromViolation renders v into a *RefusalError naming path. It

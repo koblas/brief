@@ -1,14 +1,12 @@
 package scaffold_test
 
 import (
-	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/koblas/brief/internal/platform/config"
-	"github.com/koblas/brief/internal/platform/stepfile"
+	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/scaffold"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -30,6 +28,124 @@ func doneStep02BodyWithOpenItem(cfg config.Config) string {
 // carrying no text at all, landing at the same line 13.
 func bareOpenItemStep02Body(cfg config.Config) string {
 	return openItemStep02Body(cfg, "open", "")
+}
+
+// noHeadingStep02Body is step02BodyWithOpenItem with its checklist heading
+// renamed away, so no line in the body matches cfg.ChecklistHeading.
+func noHeadingStep02Body(cfg config.Config) string {
+	return strings.Replace(step02BodyWithOpenItem(cfg), cfg.ChecklistHeading, "## Not The Checklist", 1)
+}
+
+// zeroItemStep02Body is newFinishFixtureFS's STEP-02 body with an empty
+// checklist section, its heading landing at line 10.
+func zeroItemStep02Body(cfg config.Config) string {
+	return "---\n" +
+		"id: STEP-02\n" +
+		"status: open\n" +
+		"depends-on: [STEP-01]\n" +
+		"owner: planner\n" +
+		"---\n" +
+		"\n" +
+		"# STEP-02 Assemble the thing\n" +
+		"\n" +
+		cfg.ChecklistHeading + "\n" +
+		"\n" +
+		"## Fixture Handoff" + "\n"
+}
+
+// fencedZeroItemStep02Body is zeroItemStep02Body with a fenced block of
+// ticked items under the checklist heading, which the counter must not see.
+func fencedZeroItemStep02Body(cfg config.Config) string {
+	return "---\n" +
+		"id: STEP-02\n" +
+		"status: open\n" +
+		"depends-on: [STEP-01]\n" +
+		"owner: planner\n" +
+		"---\n" +
+		"\n" +
+		"# STEP-02 Assemble the thing\n" +
+		"\n" +
+		cfg.ChecklistHeading + "\n" +
+		"\n" +
+		"```\n" +
+		"- [x] fenced decoy\n" +
+		"```\n" +
+		"\n" +
+		"## Fixture Handoff" + "\n"
+}
+
+// crlfZeroItemStep02Body is zeroItemStep02Body with every line after its
+// LF frontmatter converted to CRLF, proving the heading's line is still
+// counted from the whole file rather than shifted by the line ending.
+func crlfZeroItemStep02Body(cfg config.Config) string {
+	frontmatter := "---\n" +
+		"id: STEP-02\n" +
+		"status: open\n" +
+		"depends-on: [STEP-01]\n" +
+		"owner: planner\n" +
+		"---\n"
+	rest := "\n" +
+		"# STEP-02 Assemble the thing\n" +
+		"\n" +
+		cfg.ChecklistHeading + "\n" +
+		"\n" +
+		"## Fixture Handoff" + "\n"
+
+	return frontmatter + strings.ReplaceAll(rest, "\n", "\r\n")
+}
+
+// doneNoHeadingStep02Body is noHeadingStep02Body with its frontmatter
+// already saying done.
+func doneNoHeadingStep02Body(cfg config.Config) string {
+	return strings.Replace(noHeadingStep02Body(cfg), "status: open\n", "status: done\n", 1)
+}
+
+// doneZeroItemStep02Body is zeroItemStep02Body with its frontmatter already
+// saying done.
+func doneZeroItemStep02Body(cfg config.Config) string {
+	return strings.Replace(zeroItemStep02Body(cfg), "status: open\n", "status: done\n", 1)
+}
+
+// acceptanceAbsentStep02Body is step02BodyWithOpenItem's shape, one item
+// ticked, carrying no acceptance heading at all.
+func acceptanceAbsentStep02Body(cfg config.Config) string {
+	return "---\n" +
+		"id: STEP-02\n" +
+		"status: open\n" +
+		"depends-on: [STEP-01]\n" +
+		"owner: planner\n" +
+		"---\n" +
+		"\n" +
+		"# STEP-02 Assemble the thing\n" +
+		"\n" +
+		cfg.ChecklistHeading + "\n" +
+		"\n" +
+		"- [x] first thing\n" +
+		"\n" +
+		"## Fixture Handoff" + "\n"
+}
+
+// acceptanceWhitespaceStep02Body is acceptanceAbsentStep02Body with
+// cfg.AcceptanceHeading added, its section holding only whitespace.
+func acceptanceWhitespaceStep02Body(cfg config.Config) string {
+	return "---\n" +
+		"id: STEP-02\n" +
+		"status: open\n" +
+		"depends-on: [STEP-01]\n" +
+		"owner: planner\n" +
+		"---\n" +
+		"\n" +
+		"# STEP-02 Assemble the thing\n" +
+		"\n" +
+		cfg.AcceptanceHeading + "\n" +
+		"\n" +
+		"   \n" +
+		"\n" +
+		cfg.ChecklistHeading + "\n" +
+		"\n" +
+		"- [x] first thing\n" +
+		"\n" +
+		"## Fixture Handoff" + "\n"
 }
 
 func openItemStep02Body(cfg config.Config, status, item string) string {
@@ -76,57 +192,126 @@ func Test_finish_refuses_a_step_with_an_open_checklist_item(t *testing.T) {
 	assert.Equal(t, before, fx.mem.Snapshot())
 }
 
-// Stays on disk: exercises NewFeature, NewStep and Finish end to end, and
-// asserts the four writes landed, so it cannot pass on a silent no-op.
-func Test_finish_accepts_a_step_whose_checklist_is_empty(t *testing.T) {
-	cfg := fixtureConfig()
-	root := t.TempDir()
-	srv := scaffold.NewServer(cfg, root)
-
-	featureRes, err := srv.NewFeature(context.Background(), "widgets")
-	require.NoError(t, err)
-
-	_, err = srv.NewStep(context.Background(), "widgets")
-	require.NoError(t, err)
-
-	pattern, err := stepfile.Compile(cfg.StepFilePattern)
-	require.NoError(t, err)
-
-	stateBody, err := os.ReadFile(filepath.Join(featureRes.Path, cfg.StateFile))
-	require.NoError(t, err)
-
-	id := pattern.ID(1)
-	stepPath := filepath.Join(featureRes.Path, pattern.Name(1))
-
-	_, err = srv.Finish(context.Background(), "widgets", id, []byte("handoff body\n"), stateBody)
-	require.NoError(t, err)
-
-	stepGot, readErr := os.ReadFile(stepPath)
-	require.NoError(t, readErr)
-	assert.Contains(t, string(stepGot), "status: done")
-
-	specGot, readErr := os.ReadFile(filepath.Join(featureRes.Path, cfg.SpecificationFile))
-	require.NoError(t, readErr)
-	assert.Contains(t, string(specGot), "- [x] "+id)
-
-	stateGot, readErr := os.ReadFile(filepath.Join(featureRes.Path, cfg.StateFile))
-	require.NoError(t, readErr)
-	assert.Equal(t, string(stateBody), string(stateGot))
-
-	handoffPath := filepath.Join(featureRes.Path, id+cfg.HandoffFileSuffix)
-	handoffGot, readErr := os.ReadFile(handoffPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, "handoff body\n", string(handoffGot))
-}
-
-func Test_finish_accepts_a_step_with_no_checklist_heading(t *testing.T) {
+func Test_finish_refuses_an_open_step_with_no_checklist_heading(t *testing.T) {
 	fx := newFinishFixtureFS(t)
-	noHeading := strings.Replace(step02BodyWithOpenItem(fx.cfg), fx.cfg.ChecklistHeading, "## Not The Checklist", 1)
-	putStepFS(t, fx, "STEP-02.md", noHeading)
+	putStepFS(t, fx, "STEP-02.md", noHeadingStep02Body(fx.cfg))
+	before := fx.mem.Snapshot()
 
 	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
 
+	require.ErrorIs(t, err, scaffold.ErrUnplannedStep)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, 0, refusal.Line)
+	assert.Equal(t,
+		fx.stepPath("STEP-02.md")+
+			`: no "## Fixture Checklist" heading found; add it with the step's checklist items, tick them, and retry`,
+		err.Error())
+
+	assert.Equal(t, before, fx.mem.Snapshot())
+}
+
+func Test_finish_refuses_an_open_step_whose_checklist_holds_no_items(t *testing.T) {
+	cases := []struct {
+		name string
+		body func(config.Config) string
+	}{
+		{name: "empty section", body: zeroItemStep02Body},
+		{name: "ticked items sit only inside a fenced block", body: fencedZeroItemStep02Body},
+		{name: "CRLF line endings after the frontmatter", body: crlfZeroItemStep02Body},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fx := newFinishFixtureFS(t)
+			putStepFS(t, fx, "STEP-02.md", c.body(fx.cfg))
+			before := fx.mem.Snapshot()
+
+			_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
+
+			require.ErrorIs(t, err, scaffold.ErrUnplannedStep)
+
+			var refusal *scaffold.RefusalError
+			require.ErrorAs(t, err, &refusal)
+			assert.Equal(t, 10, refusal.Line)
+			assert.Equal(t,
+				fx.stepPath("STEP-02.md")+
+					`:10: "## Fixture Checklist" has 0 checklist items, needs at least 1; add the step's items as "- [x]" lines once done, and retry`,
+				err.Error())
+
+			assert.Equal(t, before, fx.mem.Snapshot())
+		})
+	}
+}
+
+// Runs NewFeature, NewStep and FinishFS end to end, so the refused line is
+// pinned against the scaffold's own output rather than a hand-built fixture.
+func Test_finish_refuses_a_freshly_scaffolded_step(t *testing.T) {
+	top := newFeatureRootFS(t).(*rwfs.Mem) //nolint:forcetypeassert // newFeatureRootFS always returns *rwfs.Mem
+	cfg := fixtureConfig()
+	srv := scaffold.NewServer(cfg, "")
+	createFeatureFS(t, srv, top, "widgets")
+	view := openFeatureViewFS(t, top, "widgets")
+	newStepFS(t, srv, view, cfg, "widgets")
+
+	pattern, err := stepfilePattern(cfg)
 	require.NoError(t, err)
+	handoffPattern, err := stepfileHandoffPattern(cfg, pattern)
+	require.NoError(t, err)
+
+	before := top.Snapshot()
+
+	_, err = srv.FinishFS(view, filepath.Join(testSpecsRoot, "widgets"), "widgets", "STEP-01",
+		[]byte("HANDOFF"), stateBodyEmptySections(cfg), pattern, handoffPattern)
+
+	require.ErrorIs(t, err, scaffold.ErrUnplannedStep)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, 11, refusal.Line)
+
+	assert.Equal(t, before, top.Snapshot())
+}
+
+// Green on arrival: guards the slot checkStepPlanned occupies, so it must
+// never move ahead of the argument checks.
+func Test_finish_reports_a_state_body_missing_a_heading_rather_than_the_empty_checklist(t *testing.T) {
+	fx := newFinishFixtureFS(t)
+	putStepFS(t, fx, "STEP-02.md", zeroItemStep02Body(fx.cfg))
+	missing := stateBodyMissingHeadings(fx.cfg, fx.cfg.StateHeadings.Traps)
+
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, missing)
+
+	require.ErrorIs(t, err, scaffold.ErrMissingStateHeading)
+	assert.NotErrorIs(t, err, scaffold.ErrUnplannedStep)
+}
+
+// Green on arrival: pins that checkStepPlanned never grows to cover the
+// acceptance section, which stays optional for finish.
+func Test_finish_accepts_an_open_step_whose_acceptance_section_is_empty_or_absent(t *testing.T) {
+	cases := []struct {
+		name string
+		body func(config.Config) string
+	}{
+		{name: "no acceptance heading", body: acceptanceAbsentStep02Body},
+		{name: "whitespace-only acceptance section", body: acceptanceWhitespaceStep02Body},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fx := newFinishFixtureFS(t)
+			putStepFS(t, fx, "STEP-02.md", c.body(fx.cfg))
+
+			_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
+
+			require.NoError(t, err)
+
+			got, readErr := fx.mem.ReadFile("STEP-02.md")
+			require.NoError(t, readErr)
+			assert.Contains(t, string(got), "status: done")
+		})
+	}
 }
 
 func Test_finish_ignores_an_unchecked_item_outside_the_checklist_section(t *testing.T) {

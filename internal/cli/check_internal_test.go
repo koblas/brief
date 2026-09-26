@@ -66,6 +66,63 @@ func memCheckStep(tree *memTree, featureDir, id, status string, checklistItems [
 	tree.file(filepath.Join(featureDir, id+".md"), step)
 }
 
+// memCheckStepNoHeading renders a step file for feature "demo" whose
+// checklist heading is entirely absent.
+func memCheckStepNoHeading(id, status string) string {
+	return "---\n" +
+		"id: " + id + "\n" +
+		"status: " + status + "\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# " + id + "\n\n" +
+		"## Scenario\n\nthe acceptance criteria\n\n" +
+		"## Not The Checklist\n"
+}
+
+// memCheckStepZeroItems renders a step file for feature "demo" whose
+// checklist heading holds no items.
+func memCheckStepZeroItems(id, status string) string {
+	return "---\n" +
+		"id: " + id + "\n" +
+		"status: " + status + "\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# " + id + "\n\n" +
+		"## Scenario\n\nthe acceptance criteria\n\n" +
+		"## Implementation Plan\n"
+}
+
+// Green on arrival: the leak detector for the done rows, since check skips
+// the checklist rule entirely for an open step.
+func Test_check_reports_no_row_for_a_step_with_no_checklist_items_mem(t *testing.T) {
+	cases := []struct {
+		name string
+		step string
+	}{
+		{name: "open step, no checklist heading", step: memCheckStepNoHeading("SCENARIO-01", "open")},
+		{name: "open step, zero checklist items", step: memCheckStepZeroItems("SCENARIO-01", "open")},
+		{name: "done step, no checklist heading", step: memCheckStepNoHeading("SCENARIO-01", "done")},
+		{name: "done step, zero checklist items", step: memCheckStepZeroItems("SCENARIO-01", "done")},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"))
+			featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
+			tree.
+				file(filepath.Join(featureDir, "specification.md"), memConformingSpec).
+				file(filepath.Join(featureDir, "STATE.md"), memConformingState).
+				file(filepath.Join(featureDir, "SCENARIO-01.md"), c.step)
+
+			stdout, stderr, err := runCheckMem(t, tree, []string{"check"})
+
+			require.NoError(t, err)
+			assert.Empty(t, stdout)
+			assert.Equal(t, "brief check: no findings\n", stderr)
+		})
+	}
+}
+
 // runCheckMem runs "check" (or the args given) against tree through
 // run()'s own withRootFS seam.
 func runCheckMem(t *testing.T, tree *memTree, args []string) (string, string, error) {

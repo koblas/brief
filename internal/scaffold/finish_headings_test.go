@@ -106,11 +106,15 @@ func Test_accepts_the_state_body_new_feature_writes(t *testing.T) {
 	featureRes, err := srv.NewFeature(context.Background(), "widgets")
 	require.NoError(t, err)
 
-	_, err = srv.NewStep(context.Background(), "widgets")
+	stepRes, err := srv.NewStep(context.Background(), "widgets")
 	require.NoError(t, err)
 
 	stateBody, err := os.ReadFile(filepath.Join(featureRes.Path, cfg.StateFile))
 	require.NoError(t, err)
+
+	stepBody, err := os.ReadFile(stepRes.Path)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(stepRes.Path, append(stepBody, []byte("\n- [x] done\n")...), 0o600)) //nolint:gosec // stepRes.Path is t.TempDir()-rooted, built by NewStep itself
 
 	pattern, err := stepfile.Compile(cfg.StepFilePattern)
 	require.NoError(t, err)

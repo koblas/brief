@@ -224,6 +224,41 @@ func Test_check_hook_reports_additional_context_when_the_same_feature_has_an_ope
 	assert.NotEmpty(t, stdout.String())
 }
 
+// Contract pin: an unplanned step beside the fixture's own ERROR-producing
+// step must not move the finding count.
+func Test_check_hook_counts_no_error_for_an_unplanned_step(t *testing.T) {
+	wd := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(wd, ".brief.yaml"), []byte(""), 0o600))
+
+	featureDir := filepath.Join(wd, "docs", "specifications", "alpha")
+	require.NoError(t, os.MkdirAll(featureDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "specification.md"), []byte(conformingSpec), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "STATE.md"), []byte(overCapState(overCapStateLines)), 0o600))
+	writeCheckStep(t, featureDir, "SCENARIO-01", "open", []string{"- [ ] first thing"})
+
+	noHeading := "---\n" +
+		"id: SCENARIO-02\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-02\n\n" +
+		"## Scenario\n\nthe acceptance criteria\n\n" +
+		"## Not The Checklist\n"
+	require.NoError(t, os.WriteFile(filepath.Join(featureDir, "SCENARIO-02.md"), []byte(noHeading), 0o600))
+	writeCheckStep(t, featureDir, "SCENARIO-03", "done", nil)
+
+	editedPath := filepath.Join(featureDir, "STATE.md")
+
+	var stdout, stderr bytes.Buffer
+	err := cli.Run(t.Context(), wd, []string{"check", "--hook", "claude-code"}, strings.NewReader(hookPayload(editedPath)), &stdout, &stderr)
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr.String())
+	assert.Equal(t,
+		"brief check: "+filepath.Join("docs", "specifications", "alpha")+": 1 ERROR finding; run 'brief check alpha'",
+		hookAdditionalContext(t, stdout.Bytes()))
+}
+
 // Covers every payload shape HookPath refuses in an opted-in repository:
 // exit 1, not usage-error's exit 2, since the payload is host-supplied.
 func Test_check_hook_malformed_payload_in_an_opted_in_repo_exits_1(t *testing.T) {
