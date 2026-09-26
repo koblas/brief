@@ -1,18 +1,41 @@
 ---
-description: brief's step protocol — pick up a feature's next open step with brief start, tick its checklist as items go green, close it with brief finish. Use when planning or implementing a step of a brief-tracked feature.
+description: brief's feature workflow — open a feature with brief new feature, add steps with brief new step, pick up the next open step with brief start, tick its checklist, close it with brief finish. Use when starting multi-step work, or when planning, implementing or reviewing a step of a brief-tracked feature.
 user-invocable: false
 allowed-tools:
+  - Bash(brief new feature *)
+  - Bash(brief new step *)
   - Bash(brief start *)
   - Bash(brief finish *)
-  - Bash(brief new step *)
   - Bash(brief status *)
   - Bash(brief check *)
 ---
 
-# brief step protocol
+# brief workflow
 
 A feature is a directory of markdown: a specification, ordered step files, and one
 state file. `brief status` lists every feature and its next open step.
+
+## Lifecycle
+
+1. **Open.** Multi-step work gets a feature: `brief new feature <name>` writes its
+   skeleton. Write the specification — what the feature is for and the acceptance
+   criteria that say it is done — before adding steps; brief never writes it for you.
+2. **Plan.** `brief new step <feature>` scaffolds each step in order with an
+   acceptance heading and a checklist heading; fill both. brief does not decide what
+   the steps are: have the list approved by whoever owns the feature before the first
+   `brief start`. A step with no checklist items cannot be finished.
+3. **One step at a time.** Only one step per feature is open for work: take it from
+   `brief start` through `brief finish` before starting the next.
+4. **Review before finish.** brief does not decide whether a step is reviewed. If it
+   is, review after the checklist is ticked and before `brief finish`, and send
+   findings back to whoever implements it. A finished step's handoff and state are
+   fixed — `brief finish` refuses different content for it later — so a finding after
+   finish becomes a new step.
+5. **Roles.** Where `.brief.yaml` binds `roles:`, the planner does step 2, the
+   implementer runs the step protocol below, and the reviewer reads with `brief start`
+   and `brief check` without editing.
+
+## Step protocol
 
 1. **Start.** `brief start <feature>` prints the next open step — its id, acceptance
    criteria and checklist — and the decisions it inherits from the state file. Work

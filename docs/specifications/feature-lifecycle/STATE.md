@@ -1,6 +1,6 @@
 # feature-lifecycle — current state
 
-Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
+Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
 
 ## Binding decisions
 
@@ -36,10 +36,16 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
   row, and the SCENARIO-03-analogue scenario ~line 393) that finish refuses an absent-or-
   empty checklist on an open step, and that `new step`'s scaffold carries an empty
   acceptance section as well as an empty checklist. (SCENARIO-04)
+- `.claude/skills/brief-workflow/SKILL.md`'s bytes changed in place (title, description,
+  allowed-tools order/extension, new `## Lifecycle` section) with no older-template entry:
+  `olderSkillWorkflowDigests` stays `[][32]byte{}` (Rule 8, user ruling — no install has
+  shipped these bytes). SCENARIO-06 (the CLAUDE.md snippet) follows the same rule: no
+  older-template list gains an entry there either. `SkillWorkflow()`'s render path
+  (`mustReadFile`) and `digest.go`'s live-computed `skillWorkflowDigests` are untouched —
+  only the embedded markdown file's bytes changed. (SCENARIO-05)
 
 ## Left unbuilt
 
-- `.claude/skills/brief-workflow/SKILL.md`'s Lifecycle section — SCENARIO-05.
 - The CLAUDE.md snippet's "Multi-step work gets a feature" sentence
   (`internal/platform/artifact/snippet.go`) — SCENARIO-06.
 
@@ -59,6 +65,14 @@ Scenarios complete: SCENARIO-01..04. Last updated by SCENARIO-04.
   `docs/specifications/human-output/SCENARIO-10.md`'s quoted old `new feature` success line
   both echo pre-SCENARIO-04 wording but are out of this feature's scope — left untouched.
   (SCENARIO-04)
+- Do not derive a shipped-digest `want` hash from a failing test's actual-value output —
+  hash the independently-transcribed bytes instead, in a throwaway script; that output
+  otherwise just pins whatever the render currently produces. Two spec docs
+  (`docs/specifications/agent-workflow-skill/specification.md`, this feature's own
+  `specification.md`) and `internal/cli/init_internal_test.go:710`'s inline `--print` dump
+  quote or embed the skill's bytes; the spec docs are historical prose (leave untouched),
+  the `--print` dump derives from `artifact.SkillWorkflow()` live and needs no edit.
+  (SCENARIO-05)
 
 ## Open debts
 

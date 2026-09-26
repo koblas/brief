@@ -24,11 +24,10 @@ func SkillFinish() []byte {
 }
 
 // SkillWorkflow renders ".claude/skills/brief-workflow/SKILL.md": the
-// step-protocol skill any agent — brief's own or one the repository already
-// has — preloads via its frontmatter "skills:" to learn brief start /
-// tick-by-hand / brief finish / brief new step. Unlike SkillStart and
-// SkillFinish, it is not user-invocable and carries no argument-hint: it is
-// never run as a slash command, only preloaded.
+// feature-lifecycle skill any agent — brief's own or one the repository
+// already has — preloads via its frontmatter "skills:" to learn the whole
+// open/plan/one-step-at-a-time/review loop. Unlike SkillStart and
+// SkillFinish, it is not user-invocable and carries no argument-hint.
 func SkillWorkflow() []byte {
 	return mustReadFile("skills/brief-workflow/SKILL.md")
 }
