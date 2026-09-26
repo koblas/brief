@@ -91,6 +91,15 @@ Verdict: reproduced | not reproduced (<what was tried>)
 ## Must be built
 - <the genuinely new pieces, one line each>
 
+## Callers                 (when a command, flag, output shape, exported API or on-disk format changes shape)
+- <path:line> — <caller>, from `grep -rn '<symbol>' cmd internal`
+(grep-backed, across `cmd/**` and `internal/**`; product-vision prices the change from this table)
+
+## Becomes dead if this ships
+- <symbol at path:line> — <its only callers today, and why they go away>
+(omit if nothing does; "nothing becomes dead" is a real answer — say it rather
+than leaving the section out silently)
+
 ## Open questions
 - <question — and what each answer would change about the work>
 ```

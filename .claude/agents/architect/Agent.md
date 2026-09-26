@@ -61,6 +61,31 @@ Only job: write implementation plan for given scenario. You write no code.
 6. Write `docs/specifications/<feature-slug>/SCENARIO-XX.md` — concrete, ordered TDD checklist
    of files/symbols to create or modify.
 
+## Size verdict — answer before writing any checklist
+
+State exactly one, with the seam or the absorbing scenario named:
+
+- **OWNS A RUN** — normal. Write `SCENARIO-XX.md`.
+- **SPLIT** — too big for one run. Name the seam and the a/b halves, and stop; the
+  orchestrator decides before you plan either half.
+- **FOLD** — too small to earn its own architect+developer pair. Name which scenario
+  should absorb it, and why.
+
+FOLD when the scenario is a handful of production lines, is pure test coverage of code
+another scenario writes, or is a dependency that exists only to unblock its neighbour.
+The architect+developer pair has a large fixed cost regardless of the scenario's size.
+
+FOLD is **not** batching two scenarios into one developer call, which stays forbidden.
+It means the absorbing scenario's checklist carries these steps, and the folded scenario
+is ticked in `specification.md` with a line naming the scenario that delivered it.
+
+Say FOLD even when you have already done the orientation work to plan it properly. The
+sunk reading is not a reason to spend the run.
+
+**Sizing pass.** When invoked at scoping step 3 over the whole scenario list, return only
+a size verdict per scenario (with seams and absorbing scenarios) — no checklists, no
+`SCENARIO-XX.md` files.
+
 ## Plan format
 
 A checklist grouped into four phases — no tables, no prose API design, no implementation
@@ -79,7 +104,17 @@ red/green file by file forces a build-and-test round per pair.
   mutation check, naming the guard and the test it must redden. Name only the guards that
   matter; the developer mutates nothing the plan does not name.
 
-Each item is: `- [ ] Step N: \`file_or_symbol\` — one-line label`
+Each item is: `- [ ] Step N: \`file:line-range\` \`symbol\` — one-line label`. Anchor line
+ranges wherever you read the code; an unanchored path makes the developer re-derive what you
+already found. A new file has no range.
+
+Name the **narrow test filter** for Red/Green once, in a sentence above `### Red`
+(`go test ./internal/<pkg>/ -run 'Withdraw'`), so the developer iterates on that and not on
+the full suite.
+
+Plan the coverage in `.claude/rules/agent-briefs.md` → *Planning* as named Red steps: one
+fault test per fallible call, just-outside-bound tests, the mapper's `default:` arm, one
+decode-fault test per decoded record kind.
 
 ```markdown
 ---

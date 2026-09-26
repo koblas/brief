@@ -60,13 +60,16 @@ Guard, test, or "absence" claim proven by breaking thing and seeing specific tes
 **Copy the file aside so a crash cannot leave the mutation behind:**
 
 ```bash
-cp <file> "$TMPDIR/<name>.orig"      # take a FRESH copy immediately before each mutation
+B="$TMPDIR/mutation-$(basename <file>).$$"   # unique per run; take FRESH copy before each mutation
+cp <file> "$B" && test -f "$B" || exit 1     # a shared name may be a DIRECTORY
 # apply the mutation, run the targeted test, observe RED
-cp "$TMPDIR/<name>.orig" <file>      # restore
-diff "$TMPDIR/<name>.orig" <file>    # prove byte-identical
+cp "$B" <file>                               # restore
+diff "$B" <file>                             # prove byte-identical
 ```
 
 Interrupted run can die holding gutted guard, and tree then looks merely "failing" not "deliberately broken". Copy make that recoverable.
+
+**Unique backup name, checked to be file.** Fixed path like `$TMPDIR/mutation-backup` shared by every agent in session: if earlier one left *directory* there, `cp <file> "$TMPDIR/mutation-backup"` silently copies INTO it, restore then fails with mutation still live. Only mandated `diff` reveals it.
 
 **Never use `git stash` for this.** Pipeline work runs in git worktrees, and every worktree shares one stash stack with main checkout and any other session: bare `git stash pop` can apply someone else entry. Never reuse old `$TMPDIR` copy either — stale copy silently reverts file to older contents.
 
@@ -78,6 +81,8 @@ Rules:
 - Say which mutation you ran and which test it reddened. "Mutation-verified" alone not claim anyone can check.
 - Mutation results go in the report and STATE.md, never in a test comment (`go-testing` → *Test comments*).
 - **Reviewers never mutate worktree.** Reviewers run parallel; mutation in shared tree poisons every concurrent run. Mutate `git archive <sha>` export under `$TMPDIR`. Only developer (runs alone) mutates in place.
+- **Run affected package with `-run`, not whole suite.** Mutation targets one file; full-suite run per check = most repeated waste in long scenario.
+- **Two reddened tests not two behaviours.** Pair sharing Given, When and Then is one case named twice; mutation report counting both overstates coverage. Check each cited test discriminates something others do not.
 
 ## Reviewing: scope and completeness
 
@@ -88,6 +93,27 @@ Review gate not free, and largest avoidable cost is reviewers re-reading whole p
 **Report every finding in the round you find it.** No hold MINOR back "for next pass", no open with finding you then withdraw, no re-raise finding previous round already recorded as deferred. Finding that arrives one round late costs whole extra gate: developer pass, re-gate, and every reviewer that re-reads result.
 
 **Say what you could not check.** Path you had no way to exercise — environment you cannot change, host you cannot detect — reported as unchecked, not silently passed, not guessed at. Unchecked = fact caller can act on; guess = one they cannot.
+
+## Planning: coverage the gate will demand
+
+Commonest blocking findings share one shape: fallible call in new code with no fault test, or numeric bound with no outside-the-bound test. Each costs fix pass plus re-gate for test architect could have listed up front. Every architect checklist for new or changed command, feature-package method or adapter carries, as named steps:
+
+- **One fault test per fallible call** — each `Store` call, file read/write/rename, `exec`, and parse the code makes. Include call that re-reads on resume or retry branch, not just first one.
+- **Every numeric bound tested just outside it**, in-bound case as control (line caps, count limits, depth limits).
+- **Every fallback branch of error → exit-code mapper** — the `default:` arm, not just named sentinels.
+- **One decode-fault test per decoded record kind** for adapter or parser reading files — frontmatter as well as body items. Corrupt-child-item test on a read does not cover corrupt root on same read.
+
+## Fix passes: no new behaviour
+
+Fix pass applies findings. Cheap MINOR/NIT folds = docs, renames, test additions, extractions keeping behaviour identical. **Fold adding runtime behaviour not cheap:** new branch folded in from MINOR and left untested becomes MAJOR forcing another fix pass and re-gate. New behaviour goes to STATE.md `## Open debts`, or folded with its tests planned in same brief, named per branch.
+
+**Applies to MAJOR's fix too, not only folds.** When fix for finding adds runtime behaviour (timeout, retry, fallback, new branch), fix-pass brief names, before dispatch:
+
+- **positive assertion** for each new branch — what DID happen, not only what did not — with control arm differing in one variable;
+- for every new numeric bound, **in-bound and just-outside-bound tests** ("Planning" above applies to fix passes unchanged);
+- **mutation expected to redden each test**.
+
+Test reading `ctx.Err()` from value defaulting to nil, or bound test that cannot see bound's value, passes whether or not new branch works — each such gap found at gate costs whole extra fix pass and re-gate.
 
 ## Assertions that prove nothing
 
@@ -100,6 +126,14 @@ Assertions that look like proof and are not recur in few shapes:
 - Comments overclaiming what test below them covers.
 
 When refactor removes call site, **every existing "was never called" assertion on that fake become unfalsifiable.** Repoint them at new reachable observable, or they pass with guard deleted.
+
+## Verification greps
+
+Grep is evidence only if it can see what it looks for.
+
+- **Comment sweeps must be multiline-aware.** `//` blocks wrap, so phrase splits across lines and line-based `grep` silently reports zero. Flatten continuations first (strip leading `//`) before matching. "0 hits" from line-based grep over prose = untested claim, not clean sweep.
+- **Run positive control before believing zero.** Grep for symbol you KNOW is present with same flags and scope. Control not found → sweep cannot see target, its zero means nothing.
+- State what grep would MISS, not just what it found.
 
 ## Reporting
 

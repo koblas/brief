@@ -177,7 +177,14 @@ Answer briefly and concretely:
   output formats to keep stable.
 - **What does it break?** Existing scripts, existing flag names, existing exit codes,
   existing output shape, muscle memory. A field disappearing from `--json` output is a
-  break.
+  break. Cost claims cite triage's `## Callers` table; if it is missing, ask for it rather
+  than guessing how hot a path is.
+- **What dies?** Name every command, flag, exported symbol or output field this leaves
+  with no caller. Triage's `## Becomes dead if this ships` is your input; if that section is
+  missing, ask for it. For each, rule **now**: delete it, or keep it and say what it is for.
+  A surface whose shape only makes sense to a caller that no longer exists is a standing
+  invitation to reintroduce what you just removed — delete it in the same feature, not a
+  follow-up.
 - **Prior art?** What comparable tools got right, and wrong. Don't copy their mistakes;
   don't reinvent their solved problems.
 
