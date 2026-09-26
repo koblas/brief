@@ -269,4 +269,4 @@ Scenario: SCENARIO-06 CLAUDE.md snippet names when to open a feature
 - [x] SCENARIO-03: finish refuses an unplanned open step
 - [x] SCENARIO-04: CLI copy teaches the loop
 - [x] SCENARIO-05: skill gains a Lifecycle section
-- [ ] SCENARIO-06: CLAUDE.md snippet names when to open a feature
+- [x] SCENARIO-06: CLAUDE.md snippet names when to open a feature

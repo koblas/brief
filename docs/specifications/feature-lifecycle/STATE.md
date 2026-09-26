@@ -1,6 +1,7 @@
 # feature-lifecycle — current state
 
-Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
+Scenarios complete: SCENARIO-01..06. All six scenarios in this feature's
+`## BDD Acceptance Progress` are done. Last updated by SCENARIO-06.
 
 ## Binding decisions
 
@@ -18,43 +19,35 @@ Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
   state headings; `--json` `shortfalls[]` uses the same order. (SCENARIO-02)
 - `scaffold.ErrUnplannedStep` is the one sentinel for finish's two new refusals
   (`internal/scaffold/errors.go`), fired only for an open step in `checkStepChecklist`'s
-  slot, after argument checks, before `checkStepDependencies`. Deliberately asymmetric with
-  `checkStepChecklist`'s own `ErrOpenChecklistItem`, which still fires on a done-step
-  re-finish. `checkStepPlanned` must never grow to cover the acceptance section (Rule 5:
-  it stays optional for finish). (SCENARIO-03)
+  slot, after argument checks, before `checkStepDependencies`. `checkStepPlanned` must never
+  grow to cover the acceptance section (Rule 5: it stays optional for finish). (SCENARIO-03)
 - CLI copy (Rule 7) is ruled verbatim in the spec's `## Surface & Copy` and now shipped:
-  `brief new feature`'s stderr tail is "; write its specification, then add each step with
-  'brief new step <name>'"; root `--help`'s `Long` is `rootShort + "\n\n" +
-  rootLifecycleParagraph` (new const, `internal/cli/cli.go`) — `rootShort` itself and its
-  doc comment are untouched, and `helpIndex` never emits an entry for root itself
-  (`internal/cli/help_json.go`), so this paragraph never reaches `--json`; a later change to
-  `helpIndex` that starts walking root must re-check this. `startLong`'s shortfall sentence
-  and `finishLong`'s appended refusal sentence (continuing its first paragraph, no blank
-  line before it) are both in `internal/cli/{start,finish}.go`, hand-wrapped to the file's
-  existing ~74-column prose width. (SCENARIO-04)
-- `docs/specifications/brief/specification.md` now says (R11, the `new step` command-table
-  row, and the SCENARIO-03-analogue scenario ~line 393) that finish refuses an absent-or-
-  empty checklist on an open step, and that `new step`'s scaffold carries an empty
-  acceptance section as well as an empty checklist. (SCENARIO-04)
-- `.claude/skills/brief-workflow/SKILL.md`'s bytes changed in place (title, description,
-  allowed-tools order/extension, new `## Lifecycle` section) with no older-template entry:
-  `olderSkillWorkflowDigests` stays `[][32]byte{}` (Rule 8, user ruling — no install has
-  shipped these bytes). SCENARIO-06 (the CLAUDE.md snippet) follows the same rule: no
-  older-template list gains an entry there either. `SkillWorkflow()`'s render path
-  (`mustReadFile`) and `digest.go`'s live-computed `skillWorkflowDigests` are untouched —
-  only the embedded markdown file's bytes changed. (SCENARIO-05)
+  `brief new feature`'s stderr tail, root `--help`'s appended lifecycle paragraph
+  (`rootLifecycleParagraph`, `internal/cli/cli.go`, never reaching `helpIndex`/`--json`
+  since root itself has no entry there), and `startLong`/`finishLong`'s amended sentences
+  (`internal/cli/{start,finish}.go`). (SCENARIO-04)
+- `docs/specifications/brief/specification.md` (R11, `new step` row, ~line 393 scenario)
+  now records finish's unplanned-step refusal and the scaffold's empty acceptance/checklist.
+  (SCENARIO-04)
+- Rule 8 (shipped skill + CLAUDE.md snippet change bytes in place, no older-template entry)
+  is now fully discharged: `.claude/skills/brief-workflow/SKILL.md` gained its `## Lifecycle`
+  section (SCENARIO-05, `olderSkillWorkflowDigests` stays `[][32]byte{}`), and
+  `internal/platform/artifact/snippet.go`'s `snippetTemplateSuffix` now carries the ruled
+  "Multi-step work gets a feature" sentence, inserted before "To work on a step, run";
+  `snippetTemplatePrefix`/the `{dir}` split point are unchanged, and
+  `olderSnippetTemplates` stays `[]func(dir string) []byte{}` (SCENARIO-06). Neither
+  `SkillWorkflow()`/`digest.go` nor `SnippetBlock`/`RecognizeSnippet`/`KindSnippet`'s
+  render-recognize exclusion changed shape — only fixed prose moved.
 
 ## Left unbuilt
 
-- The CLAUDE.md snippet's "Multi-step work gets a feature" sentence
-  (`internal/platform/artifact/snippet.go`) — SCENARIO-06.
+(none — this was the feature's last scenario)
 
 ## Traps
 
 - `assemble.Check` (and `--hook`) must not call `ChecklistItemCount`, and
   `conform.OpenChecklistItem` must keep treating an absent heading or zero items as "never a
-  violation" (Rule 6). Mutation-verified: making `OpenChecklistItem` flag absent/zero
-  reddens only `check`'s done rows. (SCENARIO-02, SCENARIO-03)
+  violation" (Rule 6). Mutation-verified. (SCENARIO-02, SCENARIO-03)
 - `stepfile.ParseFrontmatter`'s second return is the frontmatter-stripped body: feeding it
   to `markdown.HeadingLine` instead of the whole file gives a wrong-but-plausible-looking
   line. Mutation-verified against `checkStepPlanned`. (SCENARIO-03)
@@ -63,16 +56,20 @@ Scenarios complete: SCENARIO-01..05. Last updated by SCENARIO-05.
   hits the refusal. (SCENARIO-01, SCENARIO-03)
 - `cmd/brief/main.go`'s package doc comment and
   `docs/specifications/human-output/SCENARIO-10.md`'s quoted old `new feature` success line
-  both echo pre-SCENARIO-04 wording but are out of this feature's scope — left untouched.
+  echo pre-SCENARIO-04 wording but are out of this feature's scope — left untouched.
   (SCENARIO-04)
-- Do not derive a shipped-digest `want` hash from a failing test's actual-value output —
-  hash the independently-transcribed bytes instead, in a throwaway script; that output
-  otherwise just pins whatever the render currently produces. Two spec docs
-  (`docs/specifications/agent-workflow-skill/specification.md`, this feature's own
-  `specification.md`) and `internal/cli/init_internal_test.go:710`'s inline `--print` dump
-  quote or embed the skill's bytes; the spec docs are historical prose (leave untouched),
-  the `--print` dump derives from `artifact.SkillWorkflow()` live and needs no edit.
-  (SCENARIO-05)
+- Do not derive a shipped-digest `want` hash, or a fixed-prose test's expected bytes, from a
+  failing test's actual-value output — hash/transcribe the independently-derived bytes
+  instead. Several docs quote or embed the skill/snippet bytes as historical prose (two spec
+  docs, `internal/cli/init_internal_test.go:710`, `docs/specifications/init-doctor/
+  specification.md:79`) and are correctly left untouched; none of them, nor any consumer
+  test across `internal/setup`/`internal/doctor`/`internal/cli`/
+  `internal/platform/artifact`, hardcodes the snippet's fixed prose or a line number derived
+  from its length — all call `artifact.SnippetBlock`/`RecognizeSnippet` live.
+  (SCENARIO-05, SCENARIO-06)
+- `KindSnippet` stays excluded from `Render`/`Recognize`/`shipped_digest_test.go` — the
+  snippet's digest story is `RecognizeSnippet`'s template-replay match, not a compiled
+  sha256 list. Do not add it a row there. (SCENARIO-06)
 
 ## Open debts
 

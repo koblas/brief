@@ -20,7 +20,9 @@ const (
 	snippetTemplatePrefix = SnippetBegin + "\n" +
 		"## brief\n" +
 		"Features under `"
-	snippetTemplateSuffix = "/` are tracked by `brief`. To work on a step, run\n" +
+	snippetTemplateSuffix = "/` are tracked by `brief`. Multi-step work gets a feature: run\n" +
+		"`brief new feature <name>`, write its specification, then add each step with\n" +
+		"`brief new step <feature>`. To work on a step, run\n" +
 		"`brief start <feature>` and work from its output rather than reading the specification\n" +
 		"or earlier steps whole. Close the step with\n" +
 		"`brief finish <feature> <step> --handoff <path> --state <path>` — never write a handoff\n" +
