@@ -23,8 +23,9 @@ type Section struct {
 // Brief is everything Start assembles for one feature: the done/open
 // counts across every step file, the next open step (nil when every step
 // is done), every state-file section, and any optional convention Start
-// found missing without refusing over it. No field carries omitempty, so a
-// zero done/open count stays distinguishable from an absent one.
+// found missing or empty without refusing over it. No field carries
+// omitempty, so a zero done/open count stays distinguishable from an
+// absent one.
 type Brief struct {
 	Done       int         `json:"done"`
 	Open       int         `json:"open"`
@@ -33,12 +34,10 @@ type Brief struct {
 	Shortfalls []Shortfall `json:"shortfalls"`
 }
 
-// Shortfall names one optional convention Start found missing or empty in
-// a feature it still assembled a Brief for — an absent or whitespace-only
-// acceptance section, a checklist heading with no items, or a missing
-// state heading. Path is the file it belongs to, Detail is what is wrong,
-// and Fix is the one-line remedy. Unlike Problem, a Shortfall never stops
-// Start from returning a Brief.
+// Shortfall names one optional convention Start found missing or empty
+// (see the package doc). Path is the file it belongs to, Detail is what
+// is wrong, and Fix is the one-line remedy; unlike Problem, a Shortfall
+// never stops Start from returning a Brief.
 type Shortfall struct {
 	Path   string `json:"path"`
 	Detail string `json:"detail"`

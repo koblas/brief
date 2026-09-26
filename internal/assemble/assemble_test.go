@@ -660,8 +660,6 @@ func Test_start_reports_an_absent_acceptance_heading_as_a_shortfall(t *testing.T
 	assert.Contains(t, brief.Shortfalls[0].Detail, cfg.AcceptanceHeading)
 }
 
-// The fixture body holds spaces and a tab, not just blank lines, since a
-// blank-lines-only body already reads identically to a wholly absent one.
 func Test_start_reports_a_whitespace_only_acceptance_section_as_a_shortfall(t *testing.T) {
 	cfg := fixtureConfig()
 	files := newFixtureFiles(cfg)
@@ -714,8 +712,7 @@ func Test_start_reports_a_checklist_with_no_items_as_a_shortfall(t *testing.T) {
 		brief.Shortfalls[0].Fix)
 }
 
-// Control arm for the two shortfalls above: green on arrival, and expected
-// to go red under the Verify mutations once the guards exist.
+// Control arm for the two shortfalls above.
 func Test_start_names_nothing_for_an_acceptance_comment_or_a_single_checklist_item(t *testing.T) {
 	cfg := fixtureConfig()
 

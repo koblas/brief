@@ -214,9 +214,6 @@ func Test_start_says_nothing_about_a_present_but_empty_state_heading_mem(t *test
 	assert.Empty(t, stderr)
 }
 
-// Same three-kind fixture as the JSON and fresh-scaffold tests below: an
-// empty acceptance section, a checklist heading with no items, and one
-// missing state heading.
 func Test_start_names_an_empty_acceptance_and_an_empty_checklist_before_state_rows_mem(t *testing.T) {
 	tree := newMemStartFixture("open")
 	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")

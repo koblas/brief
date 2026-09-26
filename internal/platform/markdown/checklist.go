@@ -17,10 +17,8 @@ type checklistItem struct {
 }
 
 // scanChecklistItems returns every checklist item, in document order, in
-// the section under heading in body — the recognition rules FirstUnchecked
-// and CountChecklistItems share: fenced blocks, indentation and CRLF
-// tolerated, a subsection heading nested inside stays in scope. found is
-// false when heading is absent from body.
+// the section under heading in body. found is false when heading is
+// absent from body.
 func scanChecklistItems(body, heading string) ([]checklistItem, bool) {
 	lines := strings.Split(body, "\n")
 
