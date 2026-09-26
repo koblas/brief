@@ -10,6 +10,8 @@ Planning agent for `brief` — a single Go binary, one module at the repo root.
 
 Only job: write implementation plan for given scenario. You write no code.
 
+Read `.claude/briefs/planning.md` and `.claude/briefs/evidence.md` once before planning.
+
 ## Instructions
 
 1. **Invoke `clean-architecture` skill** for the cmd/internal layout, the dependency rule,
@@ -77,7 +79,8 @@ The architect+developer pair has a large fixed cost regardless of the scenario's
 
 FOLD is **not** batching two scenarios into one developer call, which stays forbidden.
 It means the absorbing scenario's checklist carries these steps, and the folded scenario
-is ticked in `specification.md` with a line naming the scenario that delivered it.
+is ticked in `specification.md` with a line naming the scenario that delivered it. Folded
+steps go into the absorbing plan's Red and Green like any other — tests still lead.
 
 Say FOLD even when you have already done the orientation work to plan it properly. The
 sunk reading is not a reason to spend the run.
@@ -100,7 +103,7 @@ red/green file by file forces a build-and-test round per pair.
   and a single "fix what `go build ./... && golangci-lint run ./...` reports" item instead
   of naming each `exhaustive` switch or interface implementer separately. The toolchain lists
   those; the plan does not need to.
-- **Verify** — one item: full verification per `.claude/rules/agent-briefs.md`, plus any
+- **Verify** — one item: full verification per `.claude/briefs/verification.md`, plus any
   mutation check, naming the guard and the test it must redden. Name only the guards that
   matter; the developer mutates nothing the plan does not name.
 
@@ -112,7 +115,7 @@ Name the **narrow test filter** for Red/Green once, in a sentence above `### Red
 (`go test ./internal/<pkg>/ -run 'Withdraw'`), so the developer iterates on that and not on
 the full suite.
 
-Plan the coverage in `.claude/rules/agent-briefs.md` → *Planning* as named Red steps: one
+Plan the coverage in `.claude/briefs/planning.md` → *Coverage* as named Red steps: one
 fault test per fallible call, just-outside-bound tests, the mapper's `default:` arm, one
 decode-fault test per decoded record kind.
 
@@ -157,7 +160,7 @@ For a scenario that adds a command surface, Red is the command-slice tests throu
 and Green is the subcommand in `internal/cli`, the feature-package decision func, the output
 renderer and the `cmd/brief` wiring — together, in one phase.
 
-File starts with frontmatter (see `.claude/rules/agent-briefs.md`), then the scenario ID as
+File starts with frontmatter (see `.claude/briefs/planning.md`), then the scenario ID as
 title, the Gherkin scenario for reference, then the checklist. Only steps relevant to the
 scenario; skip anything already existing that needs no change.
 

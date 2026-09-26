@@ -42,6 +42,9 @@ Conditionally, based on what the scenario plan touches:
 - `api-conventions` — the plan adds or changes an HTTP endpoint or a request/response shape.
   `brief` has no HTTP surface today, so this is usually not needed.
 
+Read your row's files in `.claude/briefs/` once (index: `.claude/rules/agent-briefs.md`) —
+`planning.md`, `verification.md`, `mutation.md`, `evidence.md`; fix mode adds `fix-pass.md`.
+
 All Go commands run from the repo root.
 
 ## Implementation mode
@@ -68,7 +71,7 @@ All Go commands run from the repo root.
      reports (missing `exhaustive` cases, new interface implementers), then the plan's
      non-TDD items: doc comments, exact-count assertion bumps. Sweep items get no red/green
      cycle of their own.
-   - **Verify** — the full suite once, per `.claude/rules/agent-briefs.md` *Verification*,
+   - **Verify** — the full suite once, per `.claude/briefs/verification.md`,
      one covered full-suite run feeding its coverage gate and `test-stats.py --base` counts.
    - Tick each phase's items `- [x]` in one edit when that phase ends, not one edit per item.
    - Mutation-verify **only the guards the plan names**. Do not add mutation checks of your own.
@@ -135,6 +138,10 @@ Findings arrive ranked `[BLOCKER|MAJOR|MINOR|NIT] <file>:<line>` with `Failure:`
 3. **MINOR is fix-if-cheap.** Apply contained edits. Say which you skip and why — never fix a
    MINOR by rewriting a file the scenario did not touch.
 4. **NIT optional.** Ignore unless one-token change.
+4a. **Red first, per finding (MANDATORY).** Every finding whose fix changes production
+   behaviour starts with a test reproducing its `Failure:`, run and seen failing at its
+   assertion, before the fix lands — `.claude/briefs/fix-pass.md` → *Red first*. Report the
+   red for each. Behaviour-neutral findings (docs, renames, extractions) are exempt.
 5. Finding whose `Failure:` you cannot reproduce is not licence to skip it — say so in your
    report, fix the code rather than the test.
 6. **Sweep the population, not the instances (MANDATORY).** A finding names the instances the
@@ -202,18 +209,18 @@ Findings arrive ranked `[BLOCKER|MAJOR|MINOR|NIT] <file>:<line>` with `Failure:`
     pass that adds a guard, an error return or a fallback without a test that reaches it hands
     the reviewer its next MAJOR, and the loop repeats every pass. Before
     reporting:
-    - Run the Verification block in `.claude/rules/agent-briefs.md` with `<start>` = the
+    - Run the Verification block in `.claude/briefs/verification.md` with `<start>` = the
       commit this fix pass started from: one covered full-suite run, then
       `uncovered-diff.py --profile` on it. Zero uncovered added lines, or a genuinely
       unreachable branch marked `// unreachable: <reason>` in the code.
-    - Mutate each guard you added, one at a time, per *Mutation verification* in
-      `.claude/rules/agent-briefs.md`, and record which test went red. A guard no mutation can
+    - Mutate each guard you added, one at a time, per
+      `.claude/briefs/mutation.md`, and record which test went red. A guard no mutation can
       redden is either dead (delete it) or untested (test it).
 12. All tests stay green (the covered full-suite run above is the evidence).
 13. Don't touch checkboxes in plan or specification files — progress recorded in implementation
    mode.
 
-Report back as: fixed (list), sweep results (searched / hits / left-with-reason),
+Report back as: fixed (list, each with the test that went red first or "behaviour-neutral"), sweep results (searched / hits / left-with-reason),
 consumer boundary verified (per finding), uncovered-diff result, mutations on added guards,
 skipped-with-reason (list), blocked (list).
 
