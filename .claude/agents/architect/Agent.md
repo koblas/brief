@@ -133,21 +133,24 @@ Then the account balance is 150
 
 ## Implementation Plan
 
+Narrow loop: `go test ./internal/account/ -run 'Withdraw|Store'`.
+
 ### Red
 - [ ] Step 1: `account_test.go` `Test_withdraw_reduces_the_balance` — Server-method test against the memory Store; fails: balance unchanged
-- [ ] Step 2: `store_contract_test.go` — exercise the new Store method against both adapters; fails: method missing on stub
+- [ ] Step 2: `store_contract_test.go:30-58` `runStoreContract` — exercise the new Store method against both adapters; fails: method missing on stub
+- [ ] Step 3: `account_test.go` `Test_withdraw_reports_a_store_write_failure` — fault test for the Store call; fails: error swallowed
 
 ### Green
-- [ ] Step 3: `store.go` — add the persistence method to the `Store` interface
-- [ ] Step 4: `memory.go`, `file_store.go` — implement it on both adapters
-- [ ] Step 5: `handler.go` `(*Server).Withdraw` — business logic + invariant
+- [ ] Step 4: `store.go:12-20` `Store` — add the persistence method to the interface
+- [ ] Step 5: `memory.go:25-40`, `file_store.go:48-90` — implement it on both adapters
+- [ ] Step 6: `handler.go:40-62` `(*Server).Withdraw` — business logic + invariant
 
 ### Sweep
-- [ ] Step 6: fix what `go build ./... && golangci-lint run ./...` reports (sweep)
-- [ ] Step 7: `doc.go` — document the new invariant (sweep)
+- [ ] Step 7: fix what `go build ./... && golangci-lint run ./...` reports (sweep)
+- [ ] Step 8: `doc.go` — document the new invariant (sweep)
 
 ### Verify
-- [ ] Step 8: full verification; mutate the invariant guard in `Withdraw` → `Test_withdraw_refuses_an_overdraft` goes red
+- [ ] Step 9: full verification; mutate the invariant guard in `Withdraw` → `Test_withdraw_refuses_an_overdraft` goes red
 ```
 
 For a scenario that adds a command surface, Red is the command-slice tests through `cli.Run`,
