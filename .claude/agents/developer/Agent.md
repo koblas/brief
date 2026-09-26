@@ -86,8 +86,8 @@ All Go commands run from the repo root.
    - Tick each phase's items `- [x]` in one edit when that phase ends, not one edit per item.
    - Mutation-verify **only the guards the plan's `Mutation checks:` line names**. Do not add
      mutation checks of your own.
-   A plan in the older Red / Green shape is executed as `test-first`: its red steps are the
-   acceptance phase plus unit tests, its green steps are Build.
+   Older plans: Red / Green shape → execute as `test-first` (red steps = acceptance plus unit
+   tests, green steps = Build); flat per-file list → group into phases yourself. Say so.
 4. All phases ticked and Verify green → continue.
 5. Mark scenario `- [x]` in `## BDD Acceptance Progress` of
    `docs/specifications/<feature-slug>/specification.md`, **appending the acceptance test**
@@ -245,7 +245,7 @@ skipped-with-reason (list), blocked (list).
 
 - Plan is grouped into Acceptance / Build / Sweep / Verify phases. Within a phase, order is
   yours. A production step sitting in the Acceptance phase is a plan defect: move it to Build
-  and say so. An older flat per-file plan → group its steps into phases yourself, and say so.
+  and say so. Older plan shapes: see end of Implementation mode step 3.
 - "Compile-fails" is a first pass only. A test counts as red once it compiles against a stub
   and fails at its own assertion (`.claude/briefs/proof.md`: a compile break is not evidence).
 - Step that cannot go green after reasonable effort → stop and report. Never bypass tests or
