@@ -27,7 +27,7 @@ func newStepFS(t *testing.T, srv *scaffold.Server, view rwfs.FS, cfg config.Conf
 	return res
 }
 
-func Test_writes_the_step_file_with_frontmatter_a_title_and_an_empty_checklist(t *testing.T) {
+func Test_writes_the_step_file_with_frontmatter_a_title_an_acceptance_heading_and_an_empty_checklist(t *testing.T) {
 	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
 	srv := scaffold.NewServer(cfg, "")
@@ -47,6 +47,8 @@ func Test_writes_the_step_file_with_frontmatter_a_title_and_an_empty_checklist(t
 		"---\n" +
 		"\n" +
 		"# STEP-01\n" +
+		"\n" +
+		cfg.AcceptanceHeading + "\n" +
 		"\n" +
 		cfg.ChecklistHeading + "\n"
 	assert.Equal(t, want, string(got))

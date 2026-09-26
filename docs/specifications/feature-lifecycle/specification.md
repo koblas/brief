@@ -264,7 +264,7 @@ Scenario: SCENARIO-06 CLAUDE.md snippet names when to open a feature
 
 ## BDD Acceptance Progress
 
-- [ ] SCENARIO-01: new step scaffolds the acceptance heading
+- [x] SCENARIO-01: new step scaffolds the acceptance heading
 - [ ] SCENARIO-02: start names an empty acceptance section and a zero-item checklist
 - [ ] SCENARIO-03: finish refuses an unplanned open step
 - [ ] SCENARIO-04: CLI copy teaches the loop

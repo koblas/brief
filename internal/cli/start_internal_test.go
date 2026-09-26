@@ -214,7 +214,11 @@ func Test_start_says_nothing_about_a_present_but_empty_convention_mem(t *testing
 	assert.Empty(t, stderr)
 }
 
-func Test_start_on_a_freshly_scaffolded_feature_names_only_the_absent_acceptance_heading_mem(t *testing.T) {
+// Pins the scaffold's default-config bytes once here; SCENARIO-02 will make
+// this same freshly-scaffolded step print a different ("is empty") shortfall,
+// so stderr is checked for absence of the missing-heading substring, not
+// checked for emptiness.
+func Test_start_on_a_freshly_scaffolded_step_reports_no_missing_acceptance_heading_shortfall_mem(t *testing.T) {
 	// One shared *rwfs.Mem across all three calls, so "start" reads what "new" wrote.
 	mem := newMemTree(memRoot).mem()
 	var discard strings.Builder
@@ -222,16 +226,63 @@ func Test_start_on_a_freshly_scaffolded_feature_names_only_the_absent_acceptance
 	require.NoError(t, run(t.Context(), memRoot, []string{"new", "feature", "demo"}, nil, &discard, &discard, noBuildInfo, withRootFS(mem)))
 	require.NoError(t, run(t.Context(), memRoot, []string{"new", "step", "demo"}, nil, &discard, &discard, noBuildInfo, withRootFS(mem)))
 
+	stepPath := filepath.Join(memRoot, "docs", "specifications", "demo", "SCENARIO-01.md")
+	got, readErr := mem.ReadFile(memKey(stepPath))
+	require.NoError(t, readErr)
+	want := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n" +
+		"\n" +
+		"# SCENARIO-01\n" +
+		"\n" +
+		"## Scenario\n" +
+		"\n" +
+		"## Implementation Plan\n"
+	assert.Equal(t, want, string(got))
+
 	var stdoutBuf, stderrBuf strings.Builder
 	err := run(t.Context(), memRoot, []string{"start", "demo"}, nil, &stdoutBuf, &stderrBuf, noBuildInfo, withRootFS(mem))
 	stdout, stderr := stdoutBuf.String(), stderrBuf.String()
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, stdout)
+	assert.NotContains(t, stderr, `no "## Scenario" heading found`)
+}
 
-	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
-	require.Len(t, lines, 1)
-	assert.Contains(t, lines[0], "## Scenario")
+// Control arm for the test above, same chain, differing only in stripping
+// the acceptance heading back out before calling start.
+func Test_start_on_a_scaffolded_step_with_its_acceptance_heading_removed_names_the_missing_heading_mem(t *testing.T) {
+	mem := newMemTree(memRoot).mem()
+	var discard strings.Builder
+
+	require.NoError(t, run(t.Context(), memRoot, []string{"new", "feature", "demo"}, nil, &discard, &discard, noBuildInfo, withRootFS(mem)))
+	require.NoError(t, run(t.Context(), memRoot, []string{"new", "step", "demo"}, nil, &discard, &discard, noBuildInfo, withRootFS(mem)))
+
+	stepPath := filepath.Join(memRoot, "docs", "specifications", "demo", "SCENARIO-01.md")
+	original, readErr := mem.ReadFile(memKey(stepPath))
+	require.NoError(t, readErr)
+	require.Contains(t, string(original), "## Scenario")
+
+	stripped := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n" +
+		"\n" +
+		"# SCENARIO-01\n" +
+		"\n" +
+		"## Implementation Plan\n"
+	require.NotEqual(t, string(original), stripped)
+	require.NoError(t, mem.WriteFile(memKey(stepPath), []byte(stripped), 0o600))
+
+	var stdoutBuf, stderrBuf strings.Builder
+	err := run(t.Context(), memRoot, []string{"start", "demo"}, nil, &stdoutBuf, &stderrBuf, noBuildInfo, withRootFS(mem))
+	stderr := stderrBuf.String()
+
+	require.NoError(t, err)
+	assert.Contains(t, stderr, `no "## Scenario" heading found`)
 }
 
 func Test_start_still_refuses_a_state_file_whose_fence_is_unterminated_mem(t *testing.T) {
