@@ -113,11 +113,11 @@ bodies, no parameter values, no assertions).
 Header lines:
 
 - `Cadence:` `test-first` or `code-first`, per `.claude/briefs/build.md` → *Build cadence*. Any
-  step on mandatory test-first set (bug fix, write-safety guard, atomic file adapter) makes
-  whole scenario `test-first`. Name which item triggered it.
+  step on the mandatory test-first set that section names makes whole scenario `test-first`. Name which item triggered it.
 - `Acceptance test:` `` `<file>` `<TestName>` `` — one test at scenario's boundary (`cli.Run`
   command slice, or `Server` method). This exact string goes on scenario's
-  `## BDD Acceptance Progress` line.
+  `## BDD Acceptance Progress` line. Plan absorbing a FOLD adds one more line per folded
+  scenario: `Acceptance test (SCENARIO-NN, folded):` `` `<file>` `<TestName>` ``.
 - `Narrow loop:` test filter developer iterates on (`go test ./internal/<pkg>/ -run 'Finish'`).
 - `Mutation checks:` which guard, which test must redden — or `none`. Developer mutates only
   what this line names.

@@ -109,7 +109,7 @@ docs/specifications/<feature-slug>/
   SCENARIO-02.md            # Created later by the architect agent
 ```
 
-Only `specification.md` and empty `METRICS.md` in this phase. Scenario plan files come from the architect agent.
+Only `specification.md` and `METRICS.md` (from the `.claude/briefs/metrics.md` template) in this phase. Scenario plan files come from the architect agent.
 
 ### Specification Template
 

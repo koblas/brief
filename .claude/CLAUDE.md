@@ -1,4 +1,4 @@
-# Clean Architecture & TDD Playbook
+# Clean Architecture & Double-Loop Playbook
 
 `brief` is **single Go binary**. One module at repo root, no frontend, no protos, no generated clients, no separate services. Anything in tree implying otherwise is bug — fix it, not work around.
 
@@ -39,7 +39,7 @@
   **For each scenario in order (top-to-bottom in `## BDD Acceptance Progress`):**
   4. Run **`architect`** to plan it (produces `SCENARIO-XX.md`, with `Cadence:`, `Acceptance test:`, `Narrow loop:`, `Mutation checks:` header lines).
   5. Record `<start>` = `git rev-parse HEAD`, then run **`developer`** to implement it.
-  5a. **Checkpoint** — spawn `test-reviewer` with `model: "sonnet"`; prompt starts with word **checkpoint** and passes range `<start>` (`git diff <start>` plus untracked files — acceptance test's file usually new), `SCENARIO-XX.md` and `specification.md`. Nothing else: (1) acceptance test named in `specification.md` exists, sits at scenario's boundary, would fail without scenario's code; (2) every test plan's Build steps name exists; (3) `.claude/briefs/build.md` → *Planning* items for this diff present; (4) diff touches nothing plan's steps do not name (scope creep). BLOCKER or MAJOR → one **`developer`** fix pass on those findings, no re-check. MINOR/NIT → STATE.md `## Open debts` for final gate. Checkpoint never replaces step 7.
+  5a. **Checkpoint** — spawn `test-reviewer` with `model: "sonnet"`; prompt starts with word **checkpoint** and passes range `<start>` (`git diff <start>` plus untracked files — acceptance test's file usually new), `SCENARIO-XX.md` and `specification.md`. Its questions live in `test-reviewer` → *Checkpoint mode*. BLOCKER or MAJOR → one **`developer`** fix pass on those findings, no re-check. MINOR/NIT → STATE.md `## Open debts` for final gate. Checkpoint never replaces step 7.
   5b. Append scenario's row to `docs/specifications/<feature-slug>/METRICS.md` (`.claude/briefs/metrics.md`).
   6. Next unchecked scenario.
 
@@ -94,7 +94,7 @@
 
 `api-reviewer` and `api-conventions` skill kept HTTP-generic against day `brief` serves HTTP. Triggers do not match CLI-only diff, so `/run-reviewers` skips them until HTTP surface exists.
 
-`.claude/` changes do not enter pipeline, so `pipeline-reviewer` runs via `/run-reviewers .claude` before such change called done, and as `retro <feature-slug>` after feature's final `product-vision` SHIP.
+New or renamed agent is not spawnable until session restart — `/run-reviewers` then reports `REVIEWER SPAWN FAILED`; restart, do not treat as PASS. `.claude/` changes do not enter pipeline, so `pipeline-reviewer` runs via `/run-reviewers .claude` before such change called done, and as `retro <feature-slug>` after feature's final `product-vision` SHIP.
 
 **Model tier rule:** opus where wrong call ships defect nobody else catches (correctness, product surface, planning); sonnet for rule-checking reviewers and implementation. Haiku only where findings are pure pattern matches, agent's share of feature tokens is material, and Sonnet-vs-Haiku run on same diff shows no quality loss — "cannot block" reviewer still feeds MINOR folds into developer fix passes, so its false positives cost developer tokens. Changing tier = frontmatter edit, needs session restart.
 
@@ -102,7 +102,7 @@ Reviewers share one severity contract: **BLOCKER** (data loss, reachable panic, 
 
 ## VERY IMPORTANT: every production change is tested — the double loop
 
-Every scenario starts with one **acceptance test** that fails before any production code exists. Inside it, **bug fixes, write-safety guards and atomic file adapters** stay strictly test-first; everything else built as **code-first small batches** (code, its tests, refactor — per batch). Nothing ships untested. One statement of this policy: `.claude/briefs/build.md` → *Build cadence*; this section only points at it. Red-green-refactor methodology, naming conventions, black-box/white-box rules, test conventions live in `tdd` + `go-testing` skills (enforced by `test-reviewer`) — invoke matching skill when writing or modifying tests.
+Every scenario starts with one failing **acceptance test**; inside it, a mandatory set stays test-first and the rest is built in code-first small batches. Nothing ships untested. The policy — including which code is on the mandatory set — lives only in `.claude/briefs/build.md` → *Build cadence*; this section only points at it. Red-green-refactor methodology, naming conventions, black-box/white-box rules, test conventions live in `tdd` + `go-testing` skills (enforced by `test-reviewer`) — invoke matching skill when writing or modifying tests.
 
 ## Code quality conventions
 

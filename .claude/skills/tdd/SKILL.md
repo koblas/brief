@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: The red-green-refactor cycle. Use for a scenario's acceptance test, and for every unit test on the mandatory test-first set (bug fixes, write-safety guards, atomic file adapters) — see .claude/briefs/build.md → Build cadence.
+description: The red-green-refactor cycle. Use for a scenario's acceptance test, and for every unit test on the mandatory test-first set named in .claude/briefs/build.md → Build cadence.
 argument-hint: <what-to-implement>
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
@@ -12,8 +12,7 @@ Implement using strict TDD: **$ARGUMENTS**
 `.claude/briefs/build.md` → *Build cadence* decides. Short form:
 
 - **Always** — scenario's one acceptance test, at its boundary, before any production code.
-- **Always** — inner-loop unit tests for bug fixes, write-safety guards, and file adapters with
-  atomicity / exclusive-create claim.
+- **Always** — inner-loop unit tests on the mandatory test-first set that section names.
 - **Otherwise** — code-first small batches: code one behaviour, test it in same batch, refactor
   while green. *Iron Law* below not apply to those unit tests; refactor step and every
   test-quality rule still do.

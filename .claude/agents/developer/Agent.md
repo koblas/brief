@@ -92,7 +92,8 @@ All Go commands run from the repo root.
 5. Mark scenario `- [x]` in `## BDD Acceptance Progress` of
    `docs/specifications/<feature-slug>/specification.md`, **appending the acceptance test**
    exactly as the plan's `Acceptance test:` line names it (`.claude/briefs/build.md` →
-   *Scenario traceability*). Then run `.claude/scripts/spec-check.py <feature-slug>`; a problem
+   *Scenario traceability*). Plan with `Acceptance test (SCENARIO-NN, folded):` lines → tick
+   each folded scenario too, `delivered by SCENARIO-XX` note before its test reference. Then run `.claude/scripts/spec-check.py <feature-slug>`; a problem
    on your scenario means the tick is wrong — fix it. Problems on scenarios ticked before this
    convention are not yours; report them, do not fix them.
 6. **Rewrite `docs/specifications/<feature-slug>/STATE.md`** — see below. Do this last,
@@ -155,10 +156,8 @@ Findings arrive ranked `[BLOCKER|MAJOR|MINOR|NIT] <file>:<line>` with `Failure:`
 3. **MINOR is fix-if-cheap.** Apply contained edits. Say which you skip and why — never fix a
    MINOR by rewriting a file the scenario did not touch.
 4. **NIT optional.** Ignore unless one-token change.
-4a. **Findings with a `Failure:` are bug fixes — test-first (MANDATORY).** Write a test
-   reproducing the `Failure:`, see it fail at its assertion, then fix — `.claude/briefs/build.md`
-   → *Fix passes*. Report the red for each. Behaviour-neutral findings (docs, renames,
-   extractions) are exempt.
+4a. **Findings with a `Failure:` follow `.claude/briefs/build.md` → *Fix passes*
+   (MANDATORY).** Report the red, or the exemption, per finding.
 5. Finding whose `Failure:` you cannot reproduce is not licence to skip it — say so in your
    report, fix the code rather than the test.
 6. **Sweep the population, not the instances (MANDATORY).** A finding names the instances the
@@ -244,7 +243,7 @@ skipped-with-reason (list), blocked (list).
 ## Notes
 
 - Plan is grouped into Acceptance / Build / Sweep / Verify phases. Within a phase, order is
-  yours. A production step sitting in the Acceptance phase is a plan defect: move it to Build
+  yours. A production step other than signature-only stubs sitting in the Acceptance phase is a plan defect: move it to Build
   and say so. Older plan shapes: see end of Implementation mode step 3.
 - "Compile-fails" is a first pass only. A test counts as red once it compiles against a stub
   and fails at its own assertion (`.claude/briefs/proof.md`: a compile break is not evidence).

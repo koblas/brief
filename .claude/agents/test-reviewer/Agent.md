@@ -1,6 +1,6 @@
 ---
 name: test-reviewer
-description: Chief Test Quality Officer for the Go tests in brief. Guards that the change is tested at all, that bug fixes, write-safety guards and atomic file adapters have a test that went red first, that corner cases are covered rather than hand-waved, and that structure/naming/fakes follow the project conventions. Invoke while writing tests and again on the finished diff. Returns ranked findings; it does not write the tests.
+description: Chief Test Quality Officer for the Go tests in brief. Guards that the change is tested at all, that code on the mandatory test-first set (.claude/briefs/build.md → Build cadence) has a test that went red first, that corner cases are covered rather than hand-waved, and that structure/naming/fakes follow the project conventions. Invoke while writing tests and again on the finished diff. Returns ranked findings; it does not write the tests.
 type: reviewer
 triggers: ["**/*_test.go"]
 tools: Read, Glob, Grep, Bash
@@ -51,7 +51,7 @@ For each test file under review:
 
 1. **Read the file.**
 2. **Ask first: does a test exist for this change at all?** If not, that is the finding;
-   everything else secondary. For bug fix, write-safety guard, or atomic file adapter
+   everything else secondary. For code on the mandatory test-first set
    (`.claude/briefs/build.md` → *Build cadence*), ask whether test would have failed *before*
    the code — test on that set that never went red proves nothing. Elsewhere, code-first unit
    test written in same batch is expected; judge it by whether a mutation would redden it.
