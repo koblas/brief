@@ -76,3 +76,8 @@ Scenarios complete: SCENARIO-01..06. All six scenarios are done; fix pass 1 (pos
   `ErrUnplannedStep` sentinel doc length (file-wide idiom in `internal/scaffold/errors.go`);
   `rootLifecycleParagraph` doc length — all raised in fix pass 1 review, judged MINOR/cosmetic,
   deferred — unowned, dies unless a later scenario reopens that surface.
+- The frontmatter line offset (`strings.Count(body[:len(body)-len(rest)], "\n")`) is computed
+  twice, in `scaffold.FinishFS` and `assemble` check's `parsedStep`, and leans on
+  `stepfile.ParseFrontmatter` returning an unmodified content suffix. `stepfile` should own it
+  (return the offset beside `rest`). Raised by arch, correctness and refactor re-gate as MINOR;
+  deferred — unowned.

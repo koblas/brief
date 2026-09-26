@@ -93,9 +93,8 @@ func crlfZeroItemStep02Body(cfg config.Config) string {
 	return frontmatter + strings.ReplaceAll(rest, "\n", "\r\n")
 }
 
-// frontmatterCommentMatchesHeadingStep02Body carries, inside its YAML
-// frontmatter, a comment line byte-identical to cfg.ChecklistHeading; the
-// real checklist below it holds one ticked item.
+// frontmatterCommentMatchesHeadingStep02Body's frontmatter carries a line
+// equal to cfg.ChecklistHeading; the real checklist holds one ticked item.
 func frontmatterCommentMatchesHeadingStep02Body(cfg config.Config) string {
 	return "---\n" +
 		"id: STEP-02\n" +
@@ -114,10 +113,8 @@ func frontmatterCommentMatchesHeadingStep02Body(cfg config.Config) string {
 		"## Fixture Handoff" + "\n"
 }
 
-// frontmatterOpenFenceStep02Body carries a "notes: |" YAML block scalar
-// whose indented "```" line looks, to a scanner naive of YAML syntax, like
-// a fence opened and never closed; the real checklist below it holds an
-// unticked second item, landing at line 15.
+// frontmatterOpenFenceStep02Body's frontmatter carries an unclosed "```" in
+// a block scalar; the real checklist's second item, at line 15, is unticked.
 func frontmatterOpenFenceStep02Body(cfg config.Config) string {
 	return "---\n" +
 		"id: STEP-02\n" +

@@ -133,10 +133,8 @@ func (s *Server) FinishFS(fsys rwfs.FS, featurePath, feature, step string, hando
 		}
 	}
 
-	// rest is a byte suffix of stepBody (stepfile.ParseFrontmatter never
-	// copies): this offset maps a line counted inside rest back to
-	// stepBody's own numbering, so a checklist heading or item never reads
-	// as sitting a few lines higher than it does in the file on disk.
+	// rest's content is a suffix of stepBody, so this maps a line counted in
+	// rest back to the file's own numbering.
 	frontmatterLines := strings.Count(string(stepBody[:len(stepBody)-len(rest)]), "\n")
 
 	if refusal := checkArgumentCap(handoff, HandoffSource, "handoff", s.cfg.HandoffCapLines); refusal != nil {
