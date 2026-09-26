@@ -120,7 +120,7 @@ func runNewFeature(ctx context.Context, wd string, rest []string, out reporter, 
 	}
 
 	fmt.Fprintln(out.stdout, displayPath(wd, res.Path))
-	fmt.Fprintf(out.stderr, "brief new feature: created %s (%s, %s); add a step with 'brief new step %s'\n",
+	fmt.Fprintf(out.stderr, "brief new feature: created %s (%s, %s); write its specification, then add each step with 'brief new step %s'\n",
 		res.Feature, displayPath(wd, res.Created[0]), displayPath(wd, res.Created[1]), res.Feature)
 
 	return nil

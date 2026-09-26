@@ -45,6 +45,12 @@ func init() {
 // root help render.
 const rootShort = "brief manages feature specifications as files in your repository."
 
+// rootLifecycleParagraph is root's second Long paragraph, naming the
+// feature lifecycle from opening a feature through its last step.
+const rootLifecycleParagraph = `A feature is a specification, ordered step files and one state file. Open one
+with 'brief new feature', write its specification, add steps with 'brief new
+step', then take each step from 'brief start' to 'brief finish'.`
+
 // resolveRoot resolves wd's configuration and the directory every path in
 // that configuration is relative to: source's directory when a config file
 // was found, wd itself otherwise. Every command that touches configuration
@@ -598,7 +604,7 @@ func newRootCommand(wd string, stdin io.Reader, out reporter, readBuildInfo func
 
 	root := &cobra.Command{
 		Use:                "brief",
-		Long:               rootShort,
+		Long:               rootShort + "\n\n" + rootLifecycleParagraph,
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
 		SilenceErrors:      true,

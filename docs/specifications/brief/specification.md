@@ -129,7 +129,8 @@ no per-step files, no carried state — is out of scope rather than degraded int
   rather than re-spliced to an identical result, so mtime is preserved. Finishing a finished
   step with **different** inputs is refused, naming the divergence: silently discarding a
   caller's handoff while reporting success is the failure R11 exists to prevent. Finishing a
-  step with open checklist items is refused, naming the first. Finishing a step with an
+  step with open checklist items is refused, naming the first. Finishing an open step whose
+  checklist heading is absent or holds no items is refused. Finishing a step with an
   unfinished dependency is refused, naming it.
 - **R12 — Writes are validated before they land, and land atomically.** An over-cap or
   incomplete body is refused and every existing file is left byte-identical. Writes go to a
@@ -216,7 +217,7 @@ no per-step files, no carried state — is out of scope rather than degraded int
 | `brief start <feature>` | Everything needed to begin the next step: id, title, acceptance criteria, checklist, inherited decisions, upstream constraints, known traps. `--json` for structured callers |
 | `brief finish <feature> <step> --handoff <path> --state <path>` | Takes the handoff body and the **complete** replacement state body as two required path flags (`-` reads stdin, permitted on at most one), validates both, writes both, reports dropped entries, marks the step done |
 | `brief new feature <name>` | Scaffolds a conforming feature: specification skeleton, empty progress list, state file. Structure only |
-| `brief new step <feature>` | Scaffolds the next step file with id, frontmatter and an empty checklist, and its progress entry. It writes no handoff file — only `finish` does |
+| `brief new step <feature>` | Scaffolds the next step file with id, frontmatter, an empty acceptance section and an empty checklist, and its progress entry. It writes no handoff file — only `finish` does |
 | `brief status` | One line per feature: name, done/open, next step, blocked count |
 | `brief next <feature>` | The next step id and counts |
 | `brief show <feature> <heading>` | One section of the specification. `--list` gives headings with byte sizes |
@@ -390,7 +391,7 @@ Feature: brief
   Scenario: SCENARIO-03 New step scaffolds the next step file and its progress entry  [orig: 03b]
     Given a conforming feature
     When I create a new step
-    Then the step file has an id, frontmatter and an empty checklist
+    Then the step file has an id, frontmatter, an empty acceptance section and an empty checklist
     And its frontmatter carries an empty depends-on key
     And no handoff file exists yet, because only finish writes one
     And a matching entry appears in the progress list

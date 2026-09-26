@@ -18,9 +18,10 @@ brief start refuses, naming the file and the fix, rather than print a
 partial brief: a missing or unreadable specification or state file, an
 unclosed fenced code block in either, a specification with no progress
 heading, or a next step whose frontmatter has no id or no checklist. A
-missing optional convention — the step's acceptance heading, or a state
-file heading — is named on stderr instead, one line each, and the brief
-still prints on stdout, still exiting 0.
+shortfall — the step's acceptance heading missing or empty, a checklist
+with no items yet, or a state file heading missing — is named on stderr
+instead, one line each, and the brief still prints on stdout, still
+exiting 0.
 brief start reads; it never writes.
 
 ` + jsonFieldsParagraph("done", "open", "step", "inherited", "shortfalls") + "\n" +

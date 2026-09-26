@@ -24,9 +24,10 @@ brief start refuses, naming the file and the fix, rather than print a
 partial brief: a missing or unreadable specification or state file, an
 unclosed fenced code block in either, a specification with no progress
 heading, or a next step whose frontmatter has no id or no checklist. A
-missing optional convention — the step's acceptance heading, or a state
-file heading — is named on stderr instead, one line each, and the brief
-still prints on stdout, still exiting 0.
+shortfall — the step's acceptance heading missing or empty, a checklist
+with no items yet, or a state file heading missing — is named on stderr
+instead, one line each, and the brief still prints on stdout, still
+exiting 0.
 brief start reads; it never writes.
 
 With --json, this command writes one JSON document on stdout: the common header
@@ -55,6 +56,10 @@ func Test_prints_start_help_as_usage_line_prose_and_flag_table(t *testing.T) {
 // rootHelp is root's exact stdout for "brief --help", "brief -h" and
 // "brief help".
 const rootHelp = `brief manages feature specifications as files in your repository.
+
+A feature is a specification, ordered step files and one state file. Open one
+with 'brief new feature', write its specification, add steps with 'brief new
+step', then take each step from 'brief start' to 'brief finish'.
 
 Usage:
   brief new feature <name>         scaffold a new feature's specification and state file
@@ -475,6 +480,8 @@ Closes step in feature: writes the body at --handoff to the step's own
 handoff file, replaces the feature's state file with the body at --state,
 and marks the step done in the progress list. "-" reads a flag's body
 from stdin; it may be given for at most one of --handoff and --state.
+brief finish refuses, changing no files, while the step's checklist
+heading is missing, has no items, or has an item not ticked.
 
 Each entry under the four state headings that is missing from the new
 body is listed on stdout as a WARN finding (rule dropped-debt under the

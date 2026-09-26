@@ -267,6 +267,6 @@ Scenario: SCENARIO-06 CLAUDE.md snippet names when to open a feature
 - [x] SCENARIO-01: new step scaffolds the acceptance heading
 - [x] SCENARIO-02: start names an empty acceptance section and a zero-item checklist
 - [x] SCENARIO-03: finish refuses an unplanned open step
-- [ ] SCENARIO-04: CLI copy teaches the loop
+- [x] SCENARIO-04: CLI copy teaches the loop
 - [ ] SCENARIO-05: skill gains a Lifecycle section
 - [ ] SCENARIO-06: CLAUDE.md snippet names when to open a feature
