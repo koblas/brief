@@ -132,30 +132,3 @@ func Test_OpenChecklistItem_omits_the_quoted_text_for_a_bare_item(t *testing.T) 
 	require.NotNil(t, v)
 	assert.Equal(t, "checklist item is not ticked", v.Problem)
 }
-
-func Test_ChecklistItemCount_returns_not_found_when_the_heading_is_absent(t *testing.T) {
-	body := "# Step\n\nno checklist heading here\n\n- [ ] stray item\n"
-
-	n, found := conform.ChecklistItemCount([]byte(body), "## Implementation Plan")
-
-	assert.False(t, found)
-	assert.Equal(t, 0, n)
-}
-
-func Test_ChecklistItemCount_returns_zero_when_the_heading_has_no_items(t *testing.T) {
-	body := "# Step\n\n## Implementation Plan\n\nnothing here yet\n"
-
-	n, found := conform.ChecklistItemCount([]byte(body), "## Implementation Plan")
-
-	assert.True(t, found)
-	assert.Equal(t, 0, n)
-}
-
-func Test_ChecklistItemCount_does_not_count_a_fenced_item(t *testing.T) {
-	body := "# Step\n\n## Implementation Plan\n\n```\n- [ ] fenced\n```\n"
-
-	n, found := conform.ChecklistItemCount([]byte(body), "## Implementation Plan")
-
-	assert.True(t, found)
-	assert.Equal(t, 0, n)
-}

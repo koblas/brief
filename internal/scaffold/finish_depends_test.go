@@ -164,6 +164,17 @@ func Test_finish_reports_an_open_checklist_item_before_an_unfinished_dependency(
 	assert.NotErrorIs(t, err, scaffold.ErrUnmetDependency)
 }
 
+func Test_finish_reports_an_unplanned_checklist_before_an_unfinished_dependency(t *testing.T) {
+	fx := newFinishFixtureFS(t)
+	reopenStep01FS(t, fx)
+	putStepFS(t, fx, "STEP-02.md", zeroItemStep02Body(fx.cfg))
+
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
+
+	require.ErrorIs(t, err, scaffold.ErrUnplannedStep)
+	assert.NotErrorIs(t, err, scaffold.ErrUnmetDependency)
+}
+
 func Test_finish_reports_an_unfinished_dependency_before_the_specification_read(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	reopenStep01FS(t, fx)

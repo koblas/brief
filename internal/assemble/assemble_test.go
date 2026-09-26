@@ -712,18 +712,37 @@ func Test_start_reports_a_checklist_with_no_items_as_a_shortfall(t *testing.T) {
 		brief.Shortfalls[0].Fix)
 }
 
-// Control arm for the two shortfalls above.
-func Test_start_names_nothing_for_an_acceptance_comment_or_a_single_checklist_item(t *testing.T) {
+// Control arm for the whitespace-only-acceptance shortfall above.
+func Test_start_names_nothing_for_an_acceptance_section_holding_only_a_comment(t *testing.T) {
+	cfg := fixtureConfig()
+	files := newFixtureFiles(cfg)
+	files["STEP-03.md"] = "---\n" +
+		"id: STEP-03\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# STEP-03 Assemble the brief\n\n" +
+		cfg.AcceptanceHeading + "\n\n<!-- filled in later -->\n\n" +
+		cfg.ChecklistHeading + "\n\n- [ ] task\n"
+
+	srv := assemble.NewServer(cfg, "")
+
+	brief, err := srv.StartFS(featureFS(files))
+
+	require.NoError(t, err)
+	assert.Empty(t, brief.Shortfalls)
+}
+
+// Control arm for the checklist-with-no-items shortfall above.
+func Test_start_names_nothing_for_a_checklist_with_at_least_one_item(t *testing.T) {
 	cfg := fixtureConfig()
 
 	cases := []struct {
-		name       string
-		acceptance string
-		checklist  string
+		name      string
+		checklist string
 	}{
-		{name: "acceptance holds only an HTML comment", acceptance: "<!-- filled in later -->", checklist: "- [ ] task"},
-		{name: "checklist holds one unticked item", acceptance: "accept", checklist: "- [ ] task"},
-		{name: "checklist holds one ticked item", acceptance: "accept", checklist: "- [x] task"},
+		{name: "one unticked item", checklist: "- [ ] task"},
+		{name: "one ticked item", checklist: "- [x] task"},
 	}
 
 	for _, c := range cases {
@@ -735,7 +754,7 @@ func Test_start_names_nothing_for_an_acceptance_comment_or_a_single_checklist_it
 				"depends-on: []\n" +
 				"---\n\n" +
 				"# STEP-03 Assemble the brief\n\n" +
-				cfg.AcceptanceHeading + "\n\n" + c.acceptance + "\n\n" +
+				cfg.AcceptanceHeading + "\n\naccept\n\n" +
 				cfg.ChecklistHeading + "\n\n" + c.checklist + "\n"
 
 			srv := assemble.NewServer(cfg, "")

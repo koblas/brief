@@ -75,8 +75,7 @@ func fencedZeroItemStep02Body(cfg config.Config) string {
 }
 
 // crlfZeroItemStep02Body is zeroItemStep02Body with every line after its
-// LF frontmatter converted to CRLF, proving the heading's line is still
-// counted from the whole file rather than shifted by the line ending.
+// LF frontmatter converted to CRLF.
 func crlfZeroItemStep02Body(cfg config.Config) string {
 	frontmatter := "---\n" +
 		"id: STEP-02\n" +
@@ -92,6 +91,51 @@ func crlfZeroItemStep02Body(cfg config.Config) string {
 		"## Fixture Handoff" + "\n"
 
 	return frontmatter + strings.ReplaceAll(rest, "\n", "\r\n")
+}
+
+// frontmatterCommentMatchesHeadingStep02Body carries, inside its YAML
+// frontmatter, a comment line byte-identical to cfg.ChecklistHeading; the
+// real checklist below it holds one ticked item.
+func frontmatterCommentMatchesHeadingStep02Body(cfg config.Config) string {
+	return "---\n" +
+		"id: STEP-02\n" +
+		"status: open\n" +
+		cfg.ChecklistHeading + "\n" +
+		"depends-on: [STEP-01]\n" +
+		"owner: planner\n" +
+		"---\n" +
+		"\n" +
+		"# STEP-02 Assemble the thing\n" +
+		"\n" +
+		cfg.ChecklistHeading + "\n" +
+		"\n" +
+		"- [x] first thing\n" +
+		"\n" +
+		"## Fixture Handoff" + "\n"
+}
+
+// frontmatterOpenFenceStep02Body carries a "notes: |" YAML block scalar
+// whose indented "```" line looks, to a scanner naive of YAML syntax, like
+// a fence opened and never closed; the real checklist below it holds an
+// unticked second item, landing at line 15.
+func frontmatterOpenFenceStep02Body(cfg config.Config) string {
+	return "---\n" +
+		"id: STEP-02\n" +
+		"status: open\n" +
+		"depends-on: [STEP-01]\n" +
+		"owner: planner\n" +
+		"notes: |\n" +
+		"  ```\n" +
+		"---\n" +
+		"\n" +
+		"# STEP-02 Assemble the thing\n" +
+		"\n" +
+		cfg.ChecklistHeading + "\n" +
+		"\n" +
+		"- [x] first thing\n" +
+		"- [ ] second thing\n" +
+		"\n" +
+		"## Fixture Handoff" + "\n"
 }
 
 // doneNoHeadingStep02Body is noHeadingStep02Body with its frontmatter
@@ -274,8 +318,6 @@ func Test_finish_refuses_a_freshly_scaffolded_step(t *testing.T) {
 	assert.Equal(t, before, top.Snapshot())
 }
 
-// Green on arrival: guards the slot checkStepPlanned occupies, so it must
-// never move ahead of the argument checks.
 func Test_finish_reports_a_state_body_missing_a_heading_rather_than_the_empty_checklist(t *testing.T) {
 	fx := newFinishFixtureFS(t)
 	putStepFS(t, fx, "STEP-02.md", zeroItemStep02Body(fx.cfg))
@@ -287,8 +329,6 @@ func Test_finish_reports_a_state_body_missing_a_heading_rather_than_the_empty_ch
 	assert.NotErrorIs(t, err, scaffold.ErrUnplannedStep)
 }
 
-// Green on arrival: pins that checkStepPlanned never grows to cover the
-// acceptance section, which stays optional for finish.
 func Test_finish_accepts_an_open_step_whose_acceptance_section_is_empty_or_absent(t *testing.T) {
 	cases := []struct {
 		name string
@@ -385,4 +425,29 @@ func Test_finish_refuses_a_bare_open_checklist_item_without_a_quoted_empty_strin
 		fx.stepPath("STEP-02.md")+
 			`:13: checklist item is not ticked; tick it with [x] once it is done, or remove it, and retry`,
 		err.Error())
+}
+
+func Test_finish_accepts_a_step_whose_frontmatter_comment_matches_the_checklist_heading(t *testing.T) {
+	fx := newFinishFixtureFS(t)
+	putStepFS(t, fx, "STEP-02.md", frontmatterCommentMatchesHeadingStep02Body(fx.cfg))
+
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
+
+	require.NoError(t, err)
+}
+
+func Test_finish_refuses_an_unticked_item_despite_an_unclosed_fence_in_frontmatter(t *testing.T) {
+	fx := newFinishFixtureFS(t)
+	putStepFS(t, fx, "STEP-02.md", frontmatterOpenFenceStep02Body(fx.cfg))
+	before := fx.mem.Snapshot()
+
+	_, err := fx.finish(t, "STEP-02", fx.newHandoff, fx.newState)
+
+	require.ErrorIs(t, err, scaffold.ErrOpenChecklistItem)
+
+	var refusal *scaffold.RefusalError
+	require.ErrorAs(t, err, &refusal)
+	assert.Equal(t, 15, refusal.Line)
+
+	assert.Equal(t, before, fx.mem.Snapshot())
 }

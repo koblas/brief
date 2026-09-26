@@ -59,9 +59,7 @@ var ErrOverCap = conform.ErrOverCap
 // ErrOpenChecklistItem is returned when Finish is asked to close a step
 // whose checklist section (cfg.ChecklistHeading) carries an item not ticked
 // with "[x]"/"[X]". It travels inside a *RefusalError naming the step file
-// and the item's line; an open step with no checklist items, or no
-// checklist heading at all, is ErrUnplannedStep instead. It is
-// conform.ErrOpenChecklistItem.
+// and the item's line. It is conform.ErrOpenChecklistItem.
 var ErrOpenChecklistItem = conform.ErrOpenChecklistItem
 
 // ErrUnplannedStep is returned when Finish is asked to close an open step

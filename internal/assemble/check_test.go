@@ -568,6 +568,34 @@ func Test_check_reports_an_unticked_checklist_item_on_a_done_step(t *testing.T) 
 	assert.Equal(t, `checklist item "second thing" is not ticked`, f.Detail)
 }
 
+// A YAML comment inside the frontmatter, byte-identical to the checklist
+// heading, must not be mistaken for the real one — control arm for the
+// finish-side regression of the same shape.
+func Test_check_reports_an_unticked_checklist_item_despite_a_frontmatter_comment_matching_the_heading(t *testing.T) {
+	cfg := fixtureConfig()
+	files := conformingFeatureFiles(cfg)
+	files["STEP-01.md"] = "---\n" +
+		"id: STEP-01\n" +
+		"status: done\n" +
+		cfg.ChecklistHeading + "\n" +
+		"depends-on: []\n" +
+		"---\n" +
+		"\n" +
+		"# STEP-01\n" +
+		"\n" +
+		cfg.ChecklistHeading + "\n" +
+		"\n" +
+		"- [x] first thing\n" +
+		"- [ ] second thing\n"
+
+	findings, err := checkFSRunner(t, cfg, featureFS(files))()
+	require.NoError(t, err)
+
+	f := onlyFinding(t, findings)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-01.md"), f.Path)
+	assert.Equal(t, `checklist item "second thing" is not ticked`, f.Detail)
+}
+
 // The same unticked item on an open step is ordinary in-progress work,
 // not a finding.
 func Test_check_reports_nothing_for_an_unticked_checklist_item_on_an_open_step(t *testing.T) {

@@ -123,7 +123,7 @@ func (s *Server) FinishFS(fsys rwfs.FS, featurePath, feature, step string, hando
 		return FinishResult{}, fmt.Errorf("scaffold: %w", peelReadErr(err))
 	}
 
-	fm, _, err := stepfile.ParseFrontmatter(stepBody)
+	fm, rest, err := stepfile.ParseFrontmatter(stepBody)
 	if err != nil {
 		return FinishResult{}, &RefusalError{
 			Path:    stepPath,
@@ -132,6 +132,12 @@ func (s *Server) FinishFS(fsys rwfs.FS, featurePath, feature, step string, hando
 			Err:     ErrMalformedFeature,
 		}
 	}
+
+	// rest is a byte suffix of stepBody (stepfile.ParseFrontmatter never
+	// copies): this offset maps a line counted inside rest back to
+	// stepBody's own numbering, so a checklist heading or item never reads
+	// as sitting a few lines higher than it does in the file on disk.
+	frontmatterLines := strings.Count(string(stepBody[:len(stepBody)-len(rest)]), "\n")
 
 	if refusal := checkArgumentCap(handoff, HandoffSource, "handoff", s.cfg.HandoffCapLines); refusal != nil {
 		return FinishResult{}, refusal
@@ -149,12 +155,12 @@ func (s *Server) FinishFS(fsys rwfs.FS, featurePath, feature, step string, hando
 		return FinishResult{}, refusal
 	}
 
-	if refusal := checkStepChecklist(stepBody, stepPath, s.cfg.ChecklistHeading); refusal != nil {
+	if refusal := checkStepChecklist(rest, stepPath, s.cfg.ChecklistHeading, frontmatterLines); refusal != nil {
 		return FinishResult{}, refusal
 	}
 
 	if !fm.Done() {
-		if refusal := checkStepPlanned(stepBody, stepPath, s.cfg.ChecklistHeading); refusal != nil {
+		if refusal := checkStepPlanned(rest, stepPath, s.cfg.ChecklistHeading, frontmatterLines); refusal != nil {
 			return FinishResult{}, refusal
 		}
 	}
@@ -307,21 +313,26 @@ func checkArgumentHeadings(body []byte, source, label string, headings config.St
 	return refusalFromViolation(source, conform.MissingHeading(body, label, headings))
 }
 
-// checkStepChecklist refuses when stepBody's checklist section (under
-// heading) holds an item not ticked with "[x]"/"[X]", naming stepPath and
-// the item's 1-based line number. stepBody must be the whole step file as
-// read from disk, since the line number is counted from its top. An open
-// step with no checklist items, or no checklist heading at all, is refused
-// separately by checkStepPlanned (ErrUnplannedStep).
-func checkStepChecklist(stepBody []byte, stepPath, heading string) *RefusalError {
-	return refusalFromViolation(stepPath, conform.OpenChecklistItem(stepBody, heading))
+// checkStepChecklist refuses when rest's checklist section (under heading)
+// holds an item not ticked with "[x]"/"[X]", naming stepPath and the
+// item's line, shifted by frontmatterLines back into the whole step
+// file's own numbering.
+func checkStepChecklist(rest []byte, stepPath, heading string, frontmatterLines int) *RefusalError {
+	v := conform.OpenChecklistItem(rest, heading)
+	if v != nil {
+		v.Line += frontmatterLines
+	}
+
+	return refusalFromViolation(stepPath, v)
 }
 
-// checkStepPlanned refuses (ErrUnplannedStep) an open step whose checklist
-// section under heading is absent or holds zero items, counting with
-// conform.ChecklistItemCount like assemble.StartFS's own shortfall.
-func checkStepPlanned(stepBody []byte, stepPath, heading string) *RefusalError {
-	count, found := conform.ChecklistItemCount(stepBody, heading)
+// checkStepPlanned refuses ErrUnplannedStep — the one place that fact is
+// decided — for an open step whose checklist section under heading is
+// absent or holds zero items in rest. A zero-item heading's line is
+// shifted by frontmatterLines back into the whole step file's own
+// numbering.
+func checkStepPlanned(rest []byte, stepPath, heading string, frontmatterLines int) *RefusalError {
+	count, found := markdown.CountChecklistItems(string(rest), heading)
 	if !found {
 		return &RefusalError{
 			Path:    stepPath,
@@ -335,11 +346,11 @@ func checkStepPlanned(stepBody []byte, stepPath, heading string) *RefusalError {
 		return nil
 	}
 
-	line, _ := markdown.HeadingLine(string(stepBody), heading)
+	line, _ := markdown.HeadingLine(string(rest), heading)
 
 	return &RefusalError{
 		Path:    stepPath,
-		Line:    line,
+		Line:    line + frontmatterLines,
 		Problem: fmt.Sprintf("%q has 0 checklist items, needs at least 1", heading),
 		Fix:     `add the step's items as "- [x]" lines once done, and retry`,
 		Err:     ErrUnplannedStep,

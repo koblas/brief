@@ -30,9 +30,8 @@ func stateSkeleton(cfg config.Config) string {
 }
 
 // stepSkeleton renders a new step file: YAML frontmatter (id, status: open,
-// an empty depends-on list), a title heading equal to id, the configured
-// acceptance and checklist headings, both empty. NewStep writes no handoff
-// file or heading; only Finish creates one, beside the step file.
+// an empty depends-on list), a title heading equal to id, and the
+// configured acceptance and checklist headings, both empty.
 func stepSkeleton(cfg config.Config, id string) string {
 	return fmt.Sprintf(
 		"---\nid: %s\nstatus: open\ndepends-on: []\n---\n\n# %s\n\n%s\n\n%s\n",

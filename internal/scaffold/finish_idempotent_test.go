@@ -207,8 +207,6 @@ func Test_re_finishing_a_done_step_whose_progress_title_contains_an_unticked_mar
 	assert.Equal(t, before, fx.mem.Snapshot(), "a re-finish with identical inputs must write nothing")
 }
 
-// Green on arrival: guards the done-status gate that keeps checkStepPlanned
-// from running on a re-finish.
 func Test_re_finishing_a_done_step_with_no_checklist_items_and_the_same_inputs_is_a_noop(t *testing.T) {
 	cases := []struct {
 		name string
@@ -232,8 +230,6 @@ func Test_re_finishing_a_done_step_with_no_checklist_items_and_the_same_inputs_i
 	}
 }
 
-// Green on arrival: guards the done-status gate that keeps checkStepPlanned
-// from running on a re-finish.
 func Test_re_finishing_a_done_step_with_no_checklist_items_and_a_different_handoff_is_refused_as_already_finished(t *testing.T) {
 	cases := []struct {
 		name string

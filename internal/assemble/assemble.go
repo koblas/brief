@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/koblas/brief/internal/platform/config"
-	"github.com/koblas/brief/internal/platform/conform"
 	"github.com/koblas/brief/internal/platform/markdown"
 	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/platform/stepfile"
@@ -194,7 +193,7 @@ func (s *Server) StartFS(fsys FeatureFS) (Brief, error) {
 			})
 		}
 
-		if n, found := conform.ChecklistItemCount(e.rest, s.cfg.ChecklistHeading); found && n == 0 {
+		if n, found := markdown.CountChecklistItems(string(e.rest), s.cfg.ChecklistHeading); found && n == 0 {
 			brief.Shortfalls = append(brief.Shortfalls, Shortfall{
 				Path:   stepPath,
 				Detail: fmt.Sprintf("%q has no checklist items", s.cfg.ChecklistHeading),

@@ -40,9 +40,9 @@ finish a step that was never planned.
   heading is absent or holds zero items. Evaluated after the done/identity handling, in the
   slot of today's unticked-item check. A done step's identical re-finish stays an idempotent
   success; a done step's divergent re-finish stays the existing divergence refusal.
-- Rule 4: `start`'s zero-item row and `finish`'s zero-item refusal count items with one shared
-  function in `conform`, recognizing items exactly as `markdown.FirstUnchecked` does (fences,
-  nesting). One decision point.
+- Rule 4: `start`'s zero-item row and `finish`'s zero-item refusal count items with
+  `markdown.CountChecklistItems`, the one counter, recognizing items exactly as
+  `markdown.FirstUnchecked` does (fences, nesting). One decision point.
 - Rule 5: The acceptance section stays optional for `finish` — empty or absent never refuses.
 - Rule 6: `brief check` (including `--hook`) reports nothing new: an open or done step with no
   checklist heading or zero items produces no row.

@@ -295,22 +295,6 @@ func Test_start_on_a_freshly_scaffolded_step_reports_no_missing_acceptance_headi
 	require.NoError(t, run(t.Context(), memRoot, []string{"new", "feature", "demo"}, nil, &discard, &discard, noBuildInfo, withRootFS(mem)))
 	require.NoError(t, run(t.Context(), memRoot, []string{"new", "step", "demo"}, nil, &discard, &discard, noBuildInfo, withRootFS(mem)))
 
-	stepPath := filepath.Join(memRoot, "docs", "specifications", "demo", "SCENARIO-01.md")
-	got, readErr := mem.ReadFile(memKey(stepPath))
-	require.NoError(t, readErr)
-	want := "---\n" +
-		"id: SCENARIO-01\n" +
-		"status: open\n" +
-		"depends-on: []\n" +
-		"---\n" +
-		"\n" +
-		"# SCENARIO-01\n" +
-		"\n" +
-		"## Scenario\n" +
-		"\n" +
-		"## Implementation Plan\n"
-	assert.Equal(t, want, string(got))
-
 	var stdoutBuf, stderrBuf strings.Builder
 	err := run(t.Context(), memRoot, []string{"start", "demo"}, nil, &stdoutBuf, &stderrBuf, noBuildInfo, withRootFS(mem))
 	stdout, stderr := stdoutBuf.String(), stderrBuf.String()
