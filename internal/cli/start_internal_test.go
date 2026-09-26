@@ -192,7 +192,7 @@ func Test_start_names_every_absent_convention_on_its_own_line_mem(t *testing.T) 
 	assert.Equal(t, wantStdout, stdout)
 }
 
-func Test_start_says_nothing_about_a_present_but_empty_convention_mem(t *testing.T) {
+func Test_start_says_nothing_about_a_present_but_empty_state_heading_mem(t *testing.T) {
 	tree := newMemStartFixture("open")
 	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
 	step := "---\n" +
@@ -201,7 +201,7 @@ func Test_start_says_nothing_about_a_present_but_empty_convention_mem(t *testing
 		"depends-on: []\n" +
 		"---\n\n" +
 		"# SCENARIO-01 Demo step\n\n" +
-		"## Scenario\n\n" +
+		"## Scenario\n\naccept\n\n" +
 		"## Implementation Plan\n\n" +
 		"- [ ] do the thing\n\n" +
 		"## Handoff\n"
@@ -214,7 +214,80 @@ func Test_start_says_nothing_about_a_present_but_empty_convention_mem(t *testing
 	assert.Empty(t, stderr)
 }
 
-func Test_start_on_a_freshly_scaffolded_feature_names_only_the_absent_acceptance_heading_mem(t *testing.T) {
+func Test_start_names_an_empty_acceptance_and_an_empty_checklist_before_state_rows_mem(t *testing.T) {
+	tree := newMemStartFixture("open")
+	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Scenario\n\n" +
+		"## Implementation Plan\n\n" +
+		"## Handoff\n"
+	tree.file(filepath.Join(featureDir, "SCENARIO-01.md"), step)
+	tree.file(filepath.Join(featureDir, "STATE.md"), "## Binding decisions\n\nsome decision\n\n"+
+		"## Left unbuilt\n\nsomething left\n\n"+
+		"## Open debts\n\na debt\n")
+
+	stdout, stderr, err := runStartMem(t, tree, []string{"start", "demo"})
+
+	require.NoError(t, err)
+	assert.NotEmpty(t, stdout)
+
+	stepPath := filepath.Join("docs", "specifications", "demo", "SCENARIO-01.md")
+	statePath := filepath.Join("docs", "specifications", "demo", "STATE.md")
+	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
+	require.Len(t, lines, 3)
+	assert.Equal(t,
+		`brief start: `+stepPath+`: "## Scenario" is empty; write the step's acceptance criteria under it`,
+		lines[0])
+	assert.Equal(t,
+		`brief start: `+stepPath+`: "## Implementation Plan" has no checklist items; `+
+			`add them as "- [ ]" lines before implementing, since brief finish refuses a step with none`,
+		lines[1])
+	assert.Equal(t,
+		`brief start: `+statePath+`: no "## Traps" heading found; add a "## Traps" heading to the state file`,
+		lines[2])
+}
+
+func Test_start_json_lists_the_empty_acceptance_and_empty_checklist_rows_in_order_mem(t *testing.T) {
+	tree := newMemStartFixture("open")
+	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Scenario\n\n" +
+		"## Implementation Plan\n\n" +
+		"## Handoff\n"
+	tree.file(filepath.Join(featureDir, "SCENARIO-01.md"), step)
+	tree.file(filepath.Join(featureDir, "STATE.md"), "## Binding decisions\n\nsome decision\n\n"+
+		"## Left unbuilt\n\nsomething left\n\n"+
+		"## Open debts\n\na debt\n")
+
+	stdout, stderr, err := runStartMem(t, tree, []string{"start", "--json", "demo"})
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+
+	var got startJSONDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+
+	require.Len(t, got.Shortfalls, 3)
+	assert.Equal(t, `"## Scenario" is empty`, got.Shortfalls[0].Detail)
+	assert.Equal(t, "write the step's acceptance criteria under it", got.Shortfalls[0].Fix)
+	assert.Equal(t, `"## Implementation Plan" has no checklist items`, got.Shortfalls[1].Detail)
+	assert.Equal(t,
+		`add them as "- [ ]" lines before implementing, since brief finish refuses a step with none`,
+		got.Shortfalls[1].Fix)
+	assert.Equal(t, `no "## Traps" heading found`, got.Shortfalls[2].Detail)
+}
+
+func Test_start_on_a_freshly_scaffolded_step_reports_no_missing_acceptance_heading_shortfall_mem(t *testing.T) {
 	// One shared *rwfs.Mem across all three calls, so "start" reads what "new" wrote.
 	mem := newMemTree(memRoot).mem()
 	var discard strings.Builder
@@ -228,10 +301,60 @@ func Test_start_on_a_freshly_scaffolded_feature_names_only_the_absent_acceptance
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, stdout)
+	assert.NotContains(t, stderr, `no "## Scenario" heading found`)
+}
+
+// Control arm for the test above, same chain, differing only in stripping
+// the acceptance heading back out before calling start.
+func Test_start_on_a_scaffolded_step_with_its_acceptance_heading_removed_names_the_missing_heading_mem(t *testing.T) {
+	mem := newMemTree(memRoot).mem()
+	var discard strings.Builder
+
+	require.NoError(t, run(t.Context(), memRoot, []string{"new", "feature", "demo"}, nil, &discard, &discard, noBuildInfo, withRootFS(mem)))
+	require.NoError(t, run(t.Context(), memRoot, []string{"new", "step", "demo"}, nil, &discard, &discard, noBuildInfo, withRootFS(mem)))
+
+	stepPath := filepath.Join(memRoot, "docs", "specifications", "demo", "SCENARIO-01.md")
+	original, readErr := mem.ReadFile(memKey(stepPath))
+	require.NoError(t, readErr)
+	require.Contains(t, string(original), "## Scenario")
+
+	stripped := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n" +
+		"\n" +
+		"# SCENARIO-01\n" +
+		"\n" +
+		"## Implementation Plan\n"
+	require.NotEqual(t, string(original), stripped)
+	require.NoError(t, mem.WriteFile(memKey(stepPath), []byte(stripped), 0o600))
+
+	var stdoutBuf, stderrBuf strings.Builder
+	err := run(t.Context(), memRoot, []string{"start", "demo"}, nil, &stdoutBuf, &stderrBuf, noBuildInfo, withRootFS(mem))
+	stderr := stderrBuf.String()
+
+	require.NoError(t, err)
+	assert.Contains(t, stderr, `no "## Scenario" heading found`)
+}
+
+func Test_start_on_a_freshly_scaffolded_step_names_the_empty_acceptance_and_the_empty_checklist_mem(t *testing.T) {
+	mem := newMemTree(memRoot).mem()
+	var discard strings.Builder
+
+	require.NoError(t, run(t.Context(), memRoot, []string{"new", "feature", "demo"}, nil, &discard, &discard, noBuildInfo, withRootFS(mem)))
+	require.NoError(t, run(t.Context(), memRoot, []string{"new", "step", "demo"}, nil, &discard, &discard, noBuildInfo, withRootFS(mem)))
+
+	var stdoutBuf, stderrBuf strings.Builder
+	err := run(t.Context(), memRoot, []string{"start", "demo"}, nil, &stdoutBuf, &stderrBuf, noBuildInfo, withRootFS(mem))
+	stderr := stderrBuf.String()
+
+	require.NoError(t, err)
 
 	lines := strings.Split(strings.TrimRight(stderr, "\n"), "\n")
-	require.Len(t, lines, 1)
-	assert.Contains(t, lines[0], "## Scenario")
+	require.Len(t, lines, 2)
+	assert.Contains(t, lines[0], `"## Scenario" is empty`)
+	assert.Contains(t, lines[1], `"## Implementation Plan" has no checklist items`)
 }
 
 func Test_start_still_refuses_a_state_file_whose_fence_is_unterminated_mem(t *testing.T) {

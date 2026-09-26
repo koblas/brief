@@ -23,7 +23,7 @@ func Test_render_matches_the_digest_every_install_already_carries(t *testing.T) 
 		{artifact.KindClaudeHooks, "f1bf824585e8783ff2edf31a0d02b81057a3384dfbb00e604b874a08b972bea4"},
 		{artifact.KindSkillStart, "78dbf86361329f31c652f66218ff1da3583a2378527bd0412430981f21dda20e"},
 		{artifact.KindSkillFinish, "c95f4760cb759eea9ab42719e786bd19750438f733d448de9ea169fbfbb60b52"},
-		{artifact.KindSkillWorkflow, "954bd6009e40482503d541b1e3f6b786412797f53790904d07ef58dfd565a125"},
+		{artifact.KindSkillWorkflow, "2b02c4755e92155b637e17a81d9a27ca526562c47066c59bb424f2b7f640de1b"},
 		{artifact.KindAgentPlanner, "635850759919c6b1d425557b7fd2658a94a51c01a3222e9ad96c786951861750"},
 		{artifact.KindAgentImplementer, "0203af01bd856716a3c63499ecc074e4a4a5b2ded90dce8f5244eb27606ee415"},
 		{artifact.KindAgentReviewer, "78e69ede6e3f19b59762fbff9a9cae530f38213fc58e9704cfa38f0c6e600364"},

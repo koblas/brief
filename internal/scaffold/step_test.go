@@ -27,7 +27,7 @@ func newStepFS(t *testing.T, srv *scaffold.Server, view rwfs.FS, cfg config.Conf
 	return res
 }
 
-func Test_writes_the_step_file_with_frontmatter_a_title_and_an_empty_checklist(t *testing.T) {
+func Test_writes_the_step_file_with_frontmatter_a_title_an_acceptance_heading_and_an_empty_checklist(t *testing.T) {
 	top := newFeatureRootFS(t)
 	cfg := fixtureConfig()
 	srv := scaffold.NewServer(cfg, "")
@@ -48,8 +48,23 @@ func Test_writes_the_step_file_with_frontmatter_a_title_and_an_empty_checklist(t
 		"\n" +
 		"# STEP-01\n" +
 		"\n" +
+		cfg.AcceptanceHeading + "\n" +
+		"\n" +
 		cfg.ChecklistHeading + "\n"
 	assert.Equal(t, want, string(got))
+}
+
+// newTickedStepFS calls newStepFS then appends one ticked checklist item
+// under its checklist heading, so a Finish call against it succeeds.
+func newTickedStepFS(t *testing.T, srv *scaffold.Server, view rwfs.FS, cfg config.Config, feature string) {
+	t.Helper()
+
+	res := newStepFS(t, srv, view, cfg, feature)
+
+	name := filepath.Base(res.Path)
+	body, err := view.ReadFile(name)
+	require.NoError(t, err)
+	require.NoError(t, view.WriteFile(name, append(body, []byte("\n- [x] done\n")...), 0o600))
 }
 
 // Non-vacuity proven by Test_the_handoff_probe_sees_a_handoff_file_after_a_finish.
@@ -59,7 +74,7 @@ func Test_writes_no_handoff_file(t *testing.T) {
 	srv := scaffold.NewServer(cfg, "")
 	createFeatureFS(t, srv, top, "widgets")
 	view := openFeatureViewFS(t, top, "widgets")
-	newStepFS(t, srv, view, cfg, "widgets")
+	newTickedStepFS(t, srv, view, cfg, "widgets")
 
 	_, statErr := view.Stat("STEP-01" + cfg.HandoffFileSuffix)
 	assert.ErrorIs(t, statErr, fs.ErrNotExist)
@@ -73,7 +88,7 @@ func Test_the_handoff_probe_sees_a_handoff_file_after_a_finish(t *testing.T) {
 	srv := scaffold.NewServer(cfg, "")
 	createFeatureFS(t, srv, top, "widgets")
 	view := openFeatureViewFS(t, top, "widgets")
-	newStepFS(t, srv, view, cfg, "widgets")
+	newTickedStepFS(t, srv, view, cfg, "widgets")
 
 	pattern, err := stepfilePattern(cfg)
 	require.NoError(t, err)

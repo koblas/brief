@@ -58,6 +58,111 @@ func newMemFinishFixture(checklistItem string) *memTree {
 	return tree
 }
 
+// noHeadingMemFinishFixture is newMemFinishFixture's tree with its
+// checklist heading renamed away, so SCENARIO-01's open step carries none.
+func noHeadingMemFinishFixture() *memTree {
+	tree := newMemTree(memRoot, filepath.Join(memRoot, "docs", "specifications"), memFinishInputDir)
+	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
+
+	step := "---\n" +
+		"id: SCENARIO-01\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# SCENARIO-01 Demo step\n\n" +
+		"## Scenario\n\n" +
+		"the acceptance criteria\n\n" +
+		"## Not The Checklist\n\n" +
+		"- [x] do the thing\n"
+	tree.file(filepath.Join(featureDir, "SCENARIO-01.md"), step)
+
+	state := "## Binding decisions\n\nsome decision\n\n" +
+		"## Left unbuilt\n\nsomething left\n\n" +
+		"## Traps\n\na trap\n\n" +
+		"## Open debts\n\na debt\n"
+	tree.file(filepath.Join(featureDir, "STATE.md"), state)
+
+	spec := "# demo\n\n## BDD Acceptance Progress\n\n- [ ] SCENARIO-01\n"
+	tree.file(filepath.Join(featureDir, "specification.md"), spec)
+
+	return tree
+}
+
+func Test_finish_refuses_an_unplanned_open_step_mem(t *testing.T) {
+	featureDir := filepath.Join(memRoot, "docs", "specifications", "demo")
+	stepPath := filepath.Join(featureDir, "SCENARIO-01.md")
+	relStepPath := filepath.Join("docs", "specifications", "demo", "SCENARIO-01.md")
+
+	cases := []struct {
+		name       string
+		tree       *memTree
+		wantStderr string
+	}{
+		{
+			name: "no checklist heading",
+			tree: noHeadingMemFinishFixture(),
+			wantStderr: fmt.Sprintf(
+				`brief finish: %s: no "## Implementation Plan" heading found; add it with the step's checklist items, tick them, and retry (no files changed)`+"\n",
+				relStepPath),
+		},
+		{
+			name: "zero checklist items",
+			tree: newMemFinishFixture(""),
+			wantStderr: fmt.Sprintf(
+				`brief finish: %s:13: "## Implementation Plan" has 0 checklist items, needs at least 1; add the step's items as "- [x]" lines once done, and retry (no files changed)`+"\n",
+				relStepPath),
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			handoffPath := memWriteInput(c.tree, "handoff.md", "NEW-HANDOFF\n")
+			statePath := memWriteInput(c.tree, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+			mem := c.tree.mem()
+			before, readErr := mem.ReadFile(memKey(stepPath))
+			require.NoError(t, readErr)
+
+			stdout, stderr, err := runFinishArgsMem(t, mem, []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath})
+
+			assert.Equal(t, 1, ExitCode(err))
+			assert.Empty(t, stdout)
+			assert.Equal(t, c.wantStderr, stderr)
+
+			got, readErr := mem.ReadFile(memKey(stepPath))
+			require.NoError(t, readErr)
+			assert.Equal(t, before, got)
+		})
+	}
+}
+
+func Test_finish_json_refuses_an_unplanned_open_step_mem(t *testing.T) {
+	cases := []struct {
+		name     string
+		tree     *memTree
+		wantLine *int
+	}{
+		{name: "no checklist heading", tree: noHeadingMemFinishFixture(), wantLine: nil},
+		{name: "zero checklist items", tree: newMemFinishFixture(""), wantLine: new(13)},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			handoffPath := memWriteInput(c.tree, "handoff.md", "NEW-HANDOFF\n")
+			statePath := memWriteInput(c.tree, "state.md", "## Binding decisions\n\n## Left unbuilt\n\n## Traps\n\n## Open debts\n")
+
+			stdout, stderr, err := runFinishArgsMem(t, c.tree.mem(), []string{"finish", "demo", "SCENARIO-01", "--handoff", handoffPath, "--state", statePath, "--json"})
+
+			require.Error(t, err)
+			assert.Equal(t, 1, ExitCode(err))
+			assert.Empty(t, stderr)
+
+			decoded := memDecodeErrorDocument(t, []byte(stdout), "finish")
+			assert.Equal(t, "refusal", decoded.Kind)
+			assert.Equal(t, c.wantLine, decoded.Line)
+		})
+	}
+}
+
 // memFinishStep names one step file newMemFinishFixtureWithSteps writes:
 // id, status ("open" or "done"), and dependsOn rendered verbatim.
 type memFinishStep struct {

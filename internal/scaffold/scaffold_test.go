@@ -20,6 +20,7 @@ func fixtureConfig() config.Config {
 	cfg.FeatureDirectory = "specs"
 	cfg.ProgressHeading = "## Progress"
 	cfg.ChecklistHeading = "## Fixture Checklist"
+	cfg.AcceptanceHeading = "## Fixture Scenario"
 	cfg.SpecificationFile = "SPEC.md"
 	cfg.StateFile = "NOTES.md"
 	cfg.StepFilePattern = "STEP-%02d.md"

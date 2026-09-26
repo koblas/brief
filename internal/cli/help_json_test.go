@@ -328,7 +328,9 @@ func Test_help_finish_json_is_the_exact_document(t *testing.T) {
 	description := "Closes step in feature: writes the body at --handoff to the step's own\n" +
 		"handoff file, replaces the feature's state file with the body at --state,\n" +
 		"and marks the step done in the progress list. \"-\" reads a flag's body\n" +
-		"from stdin; it may be given for at most one of --handoff and --state.\n\n" +
+		"from stdin; it may be given for at most one of --handoff and --state.\n" +
+		"brief finish refuses, changing no files, while the step's checklist\n" +
+		"heading is missing, has no items, or has an item not ticked.\n\n" +
 		"Each entry under the four state headings that is missing from the new\n" +
 		"body is listed on stdout as a WARN finding (rule dropped-debt under the\n" +
 		"open-debts heading, dropped-entry otherwise); its line is in the file as\n" +

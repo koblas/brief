@@ -37,7 +37,7 @@ func Test_creates_the_feature_and_prints_its_path(t *testing.T) {
 		"brief new feature: created payments ("+
 			filepath.Join("docs", "specifications", "payments", "specification.md")+", "+
 			filepath.Join("docs", "specifications", "payments", "STATE.md")+
-			"); add a step with 'brief new step payments'\n",
+			"); write its specification, then add each step with 'brief new step payments'\n",
 		stderr.String())
 	assert.Equal(t, "docs/specifications/payments\n", stdout.String())
 	assert.DirExists(t, filepath.Join(wd, "docs", "specifications"))
@@ -217,7 +217,7 @@ func Test_creates_the_feature_where_an_ancestor_config_directs(t *testing.T) {
 		"brief new feature: created payments ("+
 			filepath.Join("..", "..", "specs", "payments", "specification.md")+", "+
 			filepath.Join("..", "..", "specs", "payments", "NOTES.md")+
-			"); add a step with 'brief new step payments'\n",
+			"); write its specification, then add each step with 'brief new step payments'\n",
 		stderr.String())
 	assert.FileExists(t, filepath.Join(root, "specs", "payments", "NOTES.md"))
 }

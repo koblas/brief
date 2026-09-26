@@ -19,6 +19,23 @@ func Test_snippet_block_names_the_feature_directory(t *testing.T) {
 	assert.Contains(t, s, "`docs/specifications/`")
 }
 
+func Test_snippet_block_names_when_to_open_a_feature(t *testing.T) {
+	block := artifact.SnippetBlock("docs/specifications")
+
+	want := "<!-- brief:begin -->\n" +
+		"## brief\n" +
+		"Features under `docs/specifications/` are tracked by `brief`. Multi-step work gets a feature: run\n" +
+		"`brief new feature <name>`, write its specification, then add each step with\n" +
+		"`brief new step <feature>`. To work on a step, run\n" +
+		"`brief start <feature>` and work from its output rather than reading the specification\n" +
+		"or earlier steps whole. Close the step with\n" +
+		"`brief finish <feature> <step> --handoff <path> --state <path>` — never write a handoff\n" +
+		"or tick the progress list by hand. `brief --help` for the rest.\n" +
+		"<!-- brief:end -->"
+
+	assert.Equal(t, want, string(block))
+}
+
 func Test_snippet_block_trims_a_trailing_slash_to_one(t *testing.T) {
 	block := artifact.SnippetBlock("docs/specifications/")
 

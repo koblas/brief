@@ -659,3 +659,139 @@ func Test_start_reports_an_absent_acceptance_heading_as_a_shortfall(t *testing.T
 	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-03.md"), brief.Shortfalls[0].Path)
 	assert.Contains(t, brief.Shortfalls[0].Detail, cfg.AcceptanceHeading)
 }
+
+func Test_start_reports_a_whitespace_only_acceptance_section_as_a_shortfall(t *testing.T) {
+	cfg := fixtureConfig()
+	files := newFixtureFiles(cfg)
+	files["STEP-03.md"] = "---\n" +
+		"id: STEP-03\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# STEP-03 Assemble the brief\n\n" +
+		cfg.AcceptanceHeading + "\n\n  \n\t\n\n" +
+		cfg.ChecklistHeading + "\n\n- [ ] task\n"
+
+	srv := assemble.NewServer(cfg, "")
+
+	brief, err := srv.StartFS(featureFS(files))
+
+	require.NoError(t, err)
+	require.NotNil(t, brief.Step)
+	assert.True(t, brief.Step.Acceptance.Found)
+	require.Len(t, brief.Shortfalls, 1)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-03.md"), brief.Shortfalls[0].Path)
+	assert.Equal(t, `"`+cfg.AcceptanceHeading+`" is empty`, brief.Shortfalls[0].Detail)
+	assert.Equal(t, "write the step's acceptance criteria under it", brief.Shortfalls[0].Fix)
+}
+
+func Test_start_reports_a_checklist_with_no_items_as_a_shortfall(t *testing.T) {
+	cfg := fixtureConfig()
+	files := newFixtureFiles(cfg)
+	files["STEP-03.md"] = "---\n" +
+		"id: STEP-03\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# STEP-03 Assemble the brief\n\n" +
+		cfg.AcceptanceHeading + "\n\naccept\n\n" +
+		cfg.ChecklistHeading + "\n\n```\n- [ ] fenced, not a real item\n```\n"
+
+	srv := assemble.NewServer(cfg, "")
+
+	brief, err := srv.StartFS(featureFS(files))
+
+	require.NoError(t, err)
+	require.NotNil(t, brief.Step)
+	assert.True(t, brief.Step.Checklist.Found)
+	require.Len(t, brief.Shortfalls, 1)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-03.md"), brief.Shortfalls[0].Path)
+	assert.Equal(t, `"`+cfg.ChecklistHeading+`" has no checklist items`, brief.Shortfalls[0].Detail)
+	assert.Equal(t,
+		`add them as "- [ ]" lines before implementing, since brief finish refuses a step with none`,
+		brief.Shortfalls[0].Fix)
+}
+
+// Control arm for the whitespace-only-acceptance shortfall above.
+func Test_start_names_nothing_for_an_acceptance_section_holding_only_a_comment(t *testing.T) {
+	cfg := fixtureConfig()
+	files := newFixtureFiles(cfg)
+	files["STEP-03.md"] = "---\n" +
+		"id: STEP-03\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# STEP-03 Assemble the brief\n\n" +
+		cfg.AcceptanceHeading + "\n\n<!-- filled in later -->\n\n" +
+		cfg.ChecklistHeading + "\n\n- [ ] task\n"
+
+	srv := assemble.NewServer(cfg, "")
+
+	brief, err := srv.StartFS(featureFS(files))
+
+	require.NoError(t, err)
+	assert.Empty(t, brief.Shortfalls)
+}
+
+// Control arm for the checklist-with-no-items shortfall above.
+func Test_start_names_nothing_for_a_checklist_with_at_least_one_item(t *testing.T) {
+	cfg := fixtureConfig()
+
+	cases := []struct {
+		name      string
+		checklist string
+	}{
+		{name: "one unticked item", checklist: "- [ ] task"},
+		{name: "one ticked item", checklist: "- [x] task"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			files := newFixtureFiles(cfg)
+			files["STEP-03.md"] = "---\n" +
+				"id: STEP-03\n" +
+				"status: open\n" +
+				"depends-on: []\n" +
+				"---\n\n" +
+				"# STEP-03 Assemble the brief\n\n" +
+				cfg.AcceptanceHeading + "\n\naccept\n\n" +
+				cfg.ChecklistHeading + "\n\n" + c.checklist + "\n"
+
+			srv := assemble.NewServer(cfg, "")
+
+			brief, err := srv.StartFS(featureFS(files))
+
+			require.NoError(t, err)
+			assert.Empty(t, brief.Shortfalls)
+		})
+	}
+}
+
+func Test_start_orders_acceptance_then_checklist_then_state_shortfalls(t *testing.T) {
+	cfg := fixtureConfig()
+	files := newFixtureFiles(cfg)
+	files["STEP-03.md"] = "---\n" +
+		"id: STEP-03\n" +
+		"status: open\n" +
+		"depends-on: []\n" +
+		"---\n\n" +
+		"# STEP-03 Assemble the brief\n\n" +
+		cfg.AcceptanceHeading + "\n\n\n" +
+		cfg.ChecklistHeading + "\n\nno items here\n"
+	files[cfg.StateFile] = cfg.StateHeadings.LeftUnbuilt + "\n\nSTATE-UNBUILT-A\n\n" +
+		cfg.StateHeadings.Traps + "\n\nSTATE-TRAP-A\n\n" +
+		cfg.StateHeadings.OpenDebts + "\n\nSTATE-DEBT-A\n"
+
+	srv := assemble.NewServer(cfg, "")
+
+	brief, err := srv.StartFS(featureFS(files))
+
+	require.NoError(t, err)
+	require.Len(t, brief.Shortfalls, 3)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-03.md"), brief.Shortfalls[0].Path)
+	assert.Contains(t, brief.Shortfalls[0].Detail, cfg.AcceptanceHeading)
+	assert.Equal(t, filepath.Join(testFeaturePath, "STEP-03.md"), brief.Shortfalls[1].Path)
+	assert.Contains(t, brief.Shortfalls[1].Detail, cfg.ChecklistHeading)
+	assert.Equal(t, filepath.Join(testFeaturePath, cfg.StateFile), brief.Shortfalls[2].Path)
+	assert.Contains(t, brief.Shortfalls[2].Detail, cfg.StateHeadings.BindingDecisions)
+}

@@ -272,21 +272,45 @@ func Test_skill_files_are_user_invoked_and_scoped_to_their_command(t *testing.T)
 
 // wantSkillWorkflow is transcribed independently, never derived from artifact.SkillWorkflow().
 const wantSkillWorkflow = "---\n" +
-	"description: brief's step protocol — pick up a feature's next open step with brief start, tick its checklist as items go green, close it with " +
-	"brief finish. Use when planning or implementing a step of a brief-tracked feature.\n" +
+	"description: brief's feature workflow — open a feature with brief new feature, add steps with brief new step, pick up the next open step with " +
+	"brief start, tick its checklist, close it with brief finish. Use when starting multi-step work, or when planning, implementing or reviewing a " +
+	"step of a brief-tracked feature.\n" +
 	"user-invocable: false\n" +
 	"allowed-tools:\n" +
+	"  - Bash(brief new feature *)\n" +
+	"  - Bash(brief new step *)\n" +
 	"  - Bash(brief start *)\n" +
 	"  - Bash(brief finish *)\n" +
-	"  - Bash(brief new step *)\n" +
 	"  - Bash(brief status *)\n" +
 	"  - Bash(brief check *)\n" +
 	"---\n" +
 	"\n" +
-	"# brief step protocol\n" +
+	"# brief workflow\n" +
 	"\n" +
 	"A feature is a directory of markdown: a specification, ordered step files, and one\n" +
 	"state file. `brief status` lists every feature and its next open step.\n" +
+	"\n" +
+	"## Lifecycle\n" +
+	"\n" +
+	"1. **Open.** Multi-step work gets a feature: `brief new feature <name>` writes its\n" +
+	"   skeleton. Write the specification — what the feature is for and the acceptance\n" +
+	"   criteria that say it is done — before adding steps; brief never writes it for you.\n" +
+	"2. **Plan.** `brief new step <feature>` scaffolds each step in order with an\n" +
+	"   acceptance heading and a checklist heading; fill both. brief does not decide what\n" +
+	"   the steps are: have the list approved by whoever owns the feature before the first\n" +
+	"   `brief start`. A step with no checklist items cannot be finished.\n" +
+	"3. **One step at a time.** Only one step per feature is open for work: take it from\n" +
+	"   `brief start` through `brief finish` before starting the next.\n" +
+	"4. **Review before finish.** brief does not decide whether a step is reviewed. If it\n" +
+	"   is, review after the checklist is ticked and before `brief finish`, and send\n" +
+	"   findings back to whoever implements it. A finished step's handoff and state are\n" +
+	"   fixed — `brief finish` refuses different content for it later — so a finding after\n" +
+	"   finish becomes a new step.\n" +
+	"5. **Roles.** Where `.brief.yaml` binds `roles:`, the planner does step 2, the\n" +
+	"   implementer runs the step protocol below, and the reviewer reads with `brief start`\n" +
+	"   and `brief check` without editing.\n" +
+	"\n" +
+	"## Step protocol\n" +
 	"\n" +
 	"1. **Start.** `brief start <feature>` prints the next open step — its id, acceptance\n" +
 	"   criteria and checklist — and the decisions it inherits from the state file. Work\n" +

@@ -107,3 +107,70 @@ func Test_trims_trailing_whitespace_before_a_carriage_return(t *testing.T) {
 	assert.True(t, found)
 	assert.Equal(t, "two", text)
 }
+
+func Test_CountChecklistItems_reports_the_item_count_and_whether_the_heading_was_found(t *testing.T) {
+	cases := []struct {
+		name   string
+		body   string
+		wantN  int
+		wantOK bool
+	}{
+		{
+			name:   "the heading is absent",
+			body:   "## Some Other Heading\n\n- [ ] item\n",
+			wantN:  0,
+			wantOK: false,
+		},
+		{
+			name:   "the heading is present with no items",
+			body:   "## Implementation Plan\n\nnothing here yet\n",
+			wantN:  0,
+			wantOK: true,
+		},
+		{
+			name:   "ticked and unticked items are both counted",
+			body:   "## Implementation Plan\n\n- [x] one\n- [ ] two\n",
+			wantN:  2,
+			wantOK: true,
+		},
+		{
+			name:   "an indented item is counted",
+			body:   "## Implementation Plan\n\n    - [ ] indented\n",
+			wantN:  1,
+			wantOK: true,
+		},
+		{
+			name:   "an item inside a fence is not counted",
+			body:   "## Implementation Plan\n\n```\n- [ ] fenced\n```\n\n- [ ] real\n",
+			wantN:  1,
+			wantOK: true,
+		},
+		{
+			name:   "an item under a subheading of the section is counted",
+			body:   "## Implementation Plan\n\n### Red\n\n- [ ] one\n",
+			wantN:  1,
+			wantOK: true,
+		},
+		{
+			name:   "an item in the next same-level section is not counted",
+			body:   "## Implementation Plan\n\n- [x] one\n\n## Notes\n\n- [ ] not this section's\n",
+			wantN:  1,
+			wantOK: true,
+		},
+		{
+			name:   "CRLF item lines are counted",
+			body:   "## Implementation Plan\r\n\r\n- [ ] one\r\n- [x] two\r\n",
+			wantN:  2,
+			wantOK: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			n, ok := markdown.CountChecklistItems(c.body, "## Implementation Plan")
+
+			assert.Equal(t, c.wantOK, ok)
+			assert.Equal(t, c.wantN, n)
+		})
+	}
+}

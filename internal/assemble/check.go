@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/koblas/brief/internal/platform/conform"
 	"github.com/koblas/brief/internal/platform/stepfile"
@@ -331,14 +332,18 @@ func (s *Server) checkStateFindings(fsys FeatureFS) []Finding {
 
 // parsedStep is one step file entry found while walking a feature
 // directory for checkStepFindings, plus whichever of readErr/parseErr
-// stopped Check from reaching its frontmatter.
+// stopped Check from reaching its frontmatter. rest is the step file's
+// body after its frontmatter, and frontmatterLines maps a line counted
+// inside rest back to the whole file's own numbering — set together with
+// fm, on a successful parse.
 type parsedStep struct {
-	name     string
-	number   int
-	body     []byte
-	fm       stepfile.Frontmatter
-	readErr  error
-	parseErr error
+	name             string
+	number           int
+	rest             []byte
+	frontmatterLines int
+	fm               stepfile.Frontmatter
+	readErr          error
+	parseErr         error
 }
 
 // checkStepFindings walks every step file pattern recognizes, in ascending
@@ -374,13 +379,13 @@ func (s *Server) checkStepFindings(fsys FeatureFS, pattern stepfile.Pattern, han
 		if err != nil {
 			ps.readErr = err
 		} else {
-			ps.body = body
-
-			fm, _, err := stepfile.ParseFrontmatter(body)
+			fm, rest, err := stepfile.ParseFrontmatter(body)
 			if err != nil {
 				ps.parseErr = err
 			} else {
 				ps.fm = fm
+				ps.rest = rest
+				ps.frontmatterLines = strings.Count(string(body[:len(body)-len(rest)]), "\n")
 			}
 		}
 
@@ -439,12 +444,12 @@ func checkStepChecklistFinding(heading string, ps parsedStep, stepPath string) [
 		return nil
 	}
 
-	v := conform.OpenChecklistItem(ps.body, heading)
+	v := conform.OpenChecklistItem(ps.rest, heading)
 	if v == nil {
 		return nil
 	}
 
-	return []Finding{{Rule: RuleChecklist, Path: stepPath, Line: v.Line, Detail: v.Problem}}
+	return []Finding{{Rule: RuleChecklist, Path: stepPath, Line: v.Line + ps.frontmatterLines, Detail: v.Problem}}
 }
 
 // checkStepDependencyFindings reports every id in fm.DependsOn that is
