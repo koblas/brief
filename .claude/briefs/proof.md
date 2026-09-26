@@ -1,10 +1,10 @@
-# Mutation verification
+# Brief: proving a claim
 
-For `developer` (runs mutations) and `test-reviewer` (checks mutation claims). Other reviewers: only *Reviewers never mutate worktree* applies.
+For `developer` and test / correctness reviewers — what counts as evidence. `architect` reads it only when plan names mutation check. Read with `.claude/rules/agent-briefs.md` (core).
 
-Guard, test, or "absence" claim proven by breaking thing and seeing specific test go red — not by suite being green.
+## Mutation verification
 
-Mutation is second proof, not first. Red-first test already went red once, against missing behaviour; mutation shows it still guards finished code. Test that never went red before its production code does not become TDD by passing mutation check afterwards.
+Guard, test, or "absence" claim proven by breaking thing and seeing specific test go red — not by suite being green. For code-first test (`build.md` → *Build cadence*) this is how test shows it can fail at all.
 
 **Copy the file aside so a crash cannot leave the mutation behind:**
 
@@ -24,7 +24,7 @@ Interrupted run can die holding gutted guard, and tree then looks merely "failin
 
 Rules:
 
-- **Mutate only guards plan names.** Architect picks which guards matter; developer add no mutation checks of own. Mutation per step = how scenario double its tool calls without proving anything named ones do not.
+- **Mutate only guards plan's `Mutation checks:` line names.** Architect picks which guards matter; developer add no mutation checks of own. Mutation per step = how scenario double its tool calls without proving anything named ones do not.
 - **Verify guards INDIVIDUALLY.** Two guards that only go red when BOTH disabled mean either can be deleted silently. Disable one at a time.
 - Mutation that breaks compilation **not** evidence. If every test fails, you proved file parses, nothing more. Make mutation surgical and still-valid.
 - Say which mutation you ran and which test it reddened. "Mutation-verified" alone not claim anyone can check.
@@ -32,3 +32,16 @@ Rules:
 - **Run affected package with `-run`, not whole suite.** Mutation targets one file; full-suite run per check = most repeated waste in long scenario.
 - **Two reddened tests not two behaviours.** Pair sharing Given, When and Then is one case named twice; mutation report counting both overstates coverage. Check each cited test discriminates something others do not.
 - **Reviewers never mutate worktree.** Reviewers run parallel; mutation in shared tree poisons every concurrent run. Mutate `git archive <sha>` export under `$TMPDIR`. Only developer (runs alone) mutates in place.
+
+## Assertions that prove nothing
+
+Assertions that look like proof and are not recur in few shapes:
+
+- Asserting against constant fixture set, or value copied out of production code being tested. Pin derived by reading code pins nothing.
+- Negative assertions satisfied by nothing happening at all — dominant shape. Absence claim needs **control arm** showing thing DOES happen when guard removed, and control must differ from claim in exactly one variable.
+- Observables that cannot fire on path under test.
+- Asserting store empty without first proving it non-empty and same probe would have seen it.
+- Comments overclaiming what test below them covers.
+- On test-first set (`build.md` → *Build cadence*): test never seen red before its code. Off that set, code-first test is fine — but one no mutation can redden proves nothing.
+
+When refactor removes call site, **every existing "was never called" assertion on that fake become unfalsifiable.** Repoint them at new reachable observable, or they pass with guard deleted.

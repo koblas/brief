@@ -1,6 +1,8 @@
-# Reviewing: scope and completeness
+# Brief: reviewing
 
-For every reviewer. Also read `evidence.md`; `test-reviewer` also reads `mutation.md`.
+For every reviewer. Read with `.claude/rules/agent-briefs.md` (core).
+
+## Reviewing: scope and completeness
 
 Review gate not free, and largest avoidable cost is reviewers re-reading whole packages they already read in earlier round.
 
@@ -10,4 +12,4 @@ Review gate not free, and largest avoidable cost is reviewers re-reading whole p
 
 **Say what you could not check.** Path you had no way to exercise — environment you cannot change, host you cannot detect — reported as unchecked, not silently passed, not guessed at. Unchecked = fact caller can act on; guess = one they cannot.
 
-**Never mutate worktree.** Reviewers run parallel; mutation in shared tree poisons every concurrent run. Mutate `git archive <sha>` export under `$TMPDIR`.
+**Never mutate worktree.** Reviewers run parallel; mutation in shared tree poisons every concurrent run. Mutate `git archive <sha>` export under `$TMPDIR` (`proof.md`).
