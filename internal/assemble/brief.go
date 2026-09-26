@@ -33,10 +33,12 @@ type Brief struct {
 	Shortfalls []Shortfall `json:"shortfalls"`
 }
 
-// Shortfall names one optional convention Start found missing from a
-// feature it still assembled a Brief for. Path is the file the convention
-// belongs to, Detail is what is missing, and Fix is the one-line remedy.
-// Unlike Problem, a Shortfall never stops Start from returning a Brief.
+// Shortfall names one optional convention Start found missing or empty in
+// a feature it still assembled a Brief for — an absent or whitespace-only
+// acceptance section, a checklist heading with no items, or a missing
+// state heading. Path is the file it belongs to, Detail is what is wrong,
+// and Fix is the one-line remedy. Unlike Problem, a Shortfall never stops
+// Start from returning a Brief.
 type Shortfall struct {
 	Path   string `json:"path"`
 	Detail string `json:"detail"`

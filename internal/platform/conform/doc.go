@@ -1,8 +1,11 @@
-// Package conform holds the four body-shaped predicates that a body
-// destined for a feature's on-disk layout either conforms to or does not: a
-// body over its configured line cap, a body that opens a fenced code block
-// it never closes, a state body missing one of its required sections, and a
-// step's checklist section carrying an item not ticked.
+// Package conform holds the body-shaped predicates that a body destined
+// for a feature's on-disk layout either conforms to or does not: a body
+// over its configured line cap, a body that opens a fenced code block it
+// never closes, a state body missing one of its required sections, and a
+// step's checklist section carrying an item not ticked. It also holds
+// ChecklistItemCount, the one place a checklist section's item count is
+// computed; it returns a count rather than a Violation because callers
+// attach their own copy to the same number.
 //
 // internal/scaffold's write path (Finish) refuses on these predicates
 // before a byte reaches disk; internal/assemble's read path (Check) reports

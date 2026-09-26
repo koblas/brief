@@ -114,3 +114,11 @@ func OpenChecklistItem(body []byte, heading string) *Violation {
 		Err:     ErrOpenChecklistItem,
 	}
 }
+
+// ChecklistItemCount returns the number of checklist items — ticked or
+// not — in body's section under heading (markdown.CountChecklistItems).
+// found is false when heading is absent from body. It carries no
+// Violation: start and finish attach different copy to the same count.
+func ChecklistItemCount(body []byte, heading string) (int, bool) {
+	return markdown.CountChecklistItems(string(body), heading)
+}

@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/koblas/brief/internal/platform/config"
+	"github.com/koblas/brief/internal/platform/conform"
 	"github.com/koblas/brief/internal/platform/markdown"
 	"github.com/koblas/brief/internal/platform/rwfs"
 	"github.com/koblas/brief/internal/platform/stepfile"
@@ -73,9 +75,10 @@ type stepEntry struct {
 // step file, and every section of the feature's state file. Start returns
 // ErrNoSuchFeature when feature has no directory, and a *RefusalError
 // wrapping ErrMalformedFeature when the feature's structure is malformed
-// (see the package doc). An absent acceptance heading in the briefed step,
-// or an absent state-file heading, does not refuse: it is appended to
-// Brief.Shortfalls instead. Start reads only; it writes nothing to disk.
+// (see the package doc). An absent or empty acceptance section in the
+// briefed step, a checklist with no items, or an absent state-file
+// heading, does not refuse: each is appended to Brief.Shortfalls instead.
+// Start reads only; it writes nothing to disk.
 func (s *Server) Start(_ context.Context, feature string) (Brief, error) {
 	// feature is validated before either directory opens, so a traversal
 	// attempt ("../x"), a path-separator name, or an empty string refuses
@@ -182,6 +185,21 @@ func (s *Server) StartFS(fsys FeatureFS) (Brief, error) {
 				Path:   stepPath,
 				Detail: fmt.Sprintf("no %q heading found", s.cfg.AcceptanceHeading),
 				Fix:    fmt.Sprintf("add a %q heading to the step file", s.cfg.AcceptanceHeading),
+			})
+		} else if strings.TrimSpace(step.Acceptance.Body) == "" {
+			brief.Shortfalls = append(brief.Shortfalls, Shortfall{
+				Path:   stepPath,
+				Detail: fmt.Sprintf("%q is empty", s.cfg.AcceptanceHeading),
+				Fix:    "write the step's acceptance criteria under it",
+			})
+		}
+
+		if n, found := conform.ChecklistItemCount(e.rest, s.cfg.ChecklistHeading); found && n == 0 {
+			brief.Shortfalls = append(brief.Shortfalls, Shortfall{
+				Path:   stepPath,
+				Detail: fmt.Sprintf("%q has no checklist items", s.cfg.ChecklistHeading),
+				Fix: `add them as "- [ ]" lines before implementing, ` +
+					"since brief finish refuses a step with none",
 			})
 		}
 
